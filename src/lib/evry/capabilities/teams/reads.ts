@@ -11,6 +11,7 @@ import {
   listTeams,
   listTrainingPrograms,
 } from "@/lib/ministry-teams/service";
+import { teamRequiresBackgroundCheck } from "@/lib/ministry-teams/role-templates";
 import { listPeople } from "@/lib/people/service";
 import {
   trustedEvryApplicationSourceLink,
@@ -210,11 +211,16 @@ export async function executeTeamsRead(input: {
               label: "Assigned phone",
               value: role.assignedPerson?.phone ?? "None",
             },
-            {
-              label: "Background check",
-              value:
-                role.assignedPerson?.backgroundCheckStatus ?? "Not applicable",
-            },
+            ...(teamRequiresBackgroundCheck(team.templateKey)
+              ? [
+                  {
+                    label: "Background check",
+                    value:
+                      role.assignedPerson?.backgroundCheckStatus ??
+                      "Not applicable",
+                  },
+                ]
+              : []),
           ],
           sourceLink: trustedEvryApplicationSourceLink({
             label: "Open team",

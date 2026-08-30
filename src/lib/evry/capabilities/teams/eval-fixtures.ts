@@ -4,6 +4,7 @@ import {
   parseTeamsEffectArguments,
   type TeamsEffectOperation,
 } from "./effect-contracts";
+import { APP_TIME_ZONE } from "@/lib/datetime";
 
 const PLANT = "00000000-0000-4000-8000-000000000001";
 const ROW = "00000000-0000-4000-8000-000000000002";
@@ -63,7 +64,7 @@ export function teamsEffectEvalFixture(operation: TeamsEffectOperation) {
         operation === "createMeetingAction"
           ? {
               instantUtc: "2030-01-02T18:00:00.000Z",
-              timeZone: "America/New_York",
+              timeZone: APP_TIME_ZONE,
             }
           : null,
     },

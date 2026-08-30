@@ -638,6 +638,34 @@ export async function listCoreGroupUserIds(churchId: string) {
 }
 
 /**
+ * Resolve a known set of people to the accounts they hold in this church.
+ * Meeting creation uses this before attendance rows exist, so it cannot go
+ * through `guestListUserIdsQuery` yet. The bridge and all of its tenancy and
+ * soft-delete rules remain the same canonical predicates.
+ */
+export function personUserIdsQuery(
+  churchId: string,
+  personIds: readonly string[]
+) {
+  return db
+    .selectDistinct({ userId: users.id })
+    .from(persons)
+    .innerJoin(users, personIsUserInChurch(churchId))
+    .where(
+      and(personHoldsLoginFilter(churchId), inArray(persons.id, [...personIds]))
+    );
+}
+
+export async function listPersonUserIds(
+  churchId: string,
+  personIds: readonly string[]
+): Promise<string[]> {
+  if (personIds.length === 0) return [];
+  const rows = await personUserIdsQuery(churchId, personIds);
+  return [...new Set(rows.map((row) => row.userId))];
+}
+
+/**
  * The users on a meeting's guest list, as a query builder.
  *
  * Un-awaited for the same reason as the read above. Attendance is scoped to the

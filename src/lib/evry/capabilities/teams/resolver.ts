@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
 
 import { db } from "@/db";
-import { toCalendarDate } from "@/lib/datetime";
+import { APP_TIME_ZONE, toCalendarDate } from "@/lib/datetime";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
 import {
   TEAM_TEMPLATES,
@@ -11,7 +11,11 @@ import {
   playbookResponsibilities,
   type PredefinedTeamKey,
 } from "@/lib/ministry-teams/role-templates";
-import { planMeetingNotifications } from "@/lib/meetings/notifications";
+import {
+  coreGroupUserIdsQuery,
+  personUserIdsQuery,
+  planMeetingNotifications,
+} from "@/lib/meetings/notifications";
 import {
   defaultAgendaTemplatesForType,
   parseAgenda,
@@ -36,7 +40,6 @@ import {
   type TeamsEffectOperation,
 } from "./effect-contracts";
 import type { TeamsEvryEffectSelection } from "./selection";
-import { teamsMeetingInstant } from "./meeting-time";
 
 type Table = (typeof TEAMS_EFFECT_TABLES)[number];
 type JsonValue =
@@ -1431,20 +1434,23 @@ export async function resolveTeamsEvryEffect(input: {
   if (operation === "createMeetingAction") {
     const teamId = uuid(values.teamId);
     if (!teamId) return null;
-    const instant = teamsMeetingInstant(values.datetime, values.timezone);
     const parsed = meetingCreateSchema.safeParse({
       ...values,
-      datetime: instant,
       type: "team_meeting",
       teamId,
     });
-    if (!parsed.success || !values.timezone || !instant) return null;
-    const [team, memberships] = await Promise.all([
+    if (!parsed.success) return null;
+    const [team, memberships, corePeople] = await Promise.all([
       teamAndFields(actor, teamId),
       allRows(
         "team_memberships",
         actor.plantId,
         sql`team_id=${teamId}::uuid and status='active'`
+      ),
+      allRows(
+        "persons",
+        actor.plantId,
+        sql`deleted_at is null and status in ('core_group','launch_team','leader')`
       ),
     ]);
     if (!team) return null;
@@ -1526,14 +1532,17 @@ export async function resolveTeamsEvryEffect(input: {
         updated_at: iso(now),
       })
     );
-    const coreUsers = await queryRows(
-      sql`select distinct u.id from persons p join users u on u.id=p.user_id and u.church_id=p.church_id where p.church_id=${actor.plantId}::uuid and p.deleted_at is null and p.status in ('core_group','launch_team','leader') order by u.id`
-    );
-    const teamUsers = await queryRows(
-      sql`select distinct u.id from team_memberships tm join persons p on p.id=tm.person_id and p.church_id=tm.church_id and p.deleted_at is null join users u on u.id=p.user_id and u.church_id=p.church_id where tm.church_id=${actor.plantId}::uuid and tm.team_id=${teamId}::uuid and tm.status='active' order by u.id`
-    );
+    const [coreUsers, teamUsers] = await Promise.all([
+      coreGroupUserIdsQuery(actor.plantId),
+      personIds.length === 0
+        ? Promise.resolve([])
+        : personUserIdsQuery(actor.plantId, personIds),
+    ]);
     const reminderIds = [
-      ...new Set([...teamUsers.map(({ id }) => String(id)), actor.userId]),
+      ...new Set([
+        ...teamUsers.map(({ userId }) => String(userId)),
+        actor.userId,
+      ]),
     ].toSorted();
     const planned = planMeetingNotifications(
       {
@@ -1548,7 +1557,7 @@ export async function resolveTeamsEvryEffect(input: {
         createdBy: actor.userId,
       },
       {
-        coreGroup: coreUsers.map(({ id }) => String(id)),
+        coreGroup: coreUsers.map(({ userId }) => String(userId)),
         reminders: reminderIds,
       },
       now
@@ -1582,6 +1591,14 @@ export async function resolveTeamsEvryEffect(input: {
         (row) => ["notifications", row] as [Table, RawRow]
       ),
     ];
+    const expectedPeople = [
+      ...new Map(
+        [...people.filter(Boolean), ...corePeople].map((row) => [
+          String(row!.id),
+          row!,
+        ])
+      ).values(),
+    ];
     return finish({
       operation,
       expected: [
@@ -1592,22 +1609,23 @@ export async function resolveTeamsEvryEffect(input: {
         ...memberships.map((row) =>
           snapshot("team_memberships", String(row.id), row)
         ),
-        ...people
-          .filter(Boolean)
-          .map((row) => snapshot("persons", String(row!.id), row!)),
+        ...expectedPeople.map((row) =>
+          snapshot("persons", String(row.id), row)
+        ),
         ...rows.map(([tableName, row]) =>
           snapshot(tableName, String(row.id), null)
         ),
       ],
       sets: [
         set("team_active_memberships", sortedIds(memberships), teamId),
+        set("core_group_people", sortedIds(corePeople)),
         set(
           "core_group_users",
-          coreUsers.map(({ id }) => String(id))
+          coreUsers.map(({ userId }) => String(userId))
         ),
         set(
           "active_team_users",
-          teamUsers.map(({ id }) => String(id)),
+          teamUsers.map(({ userId }) => String(userId)),
           teamId
         ),
       ],
@@ -1636,7 +1654,7 @@ export async function resolveTeamsEvryEffect(input: {
       ],
       dateTime: {
         instantUtc: parsed.data.datetime.toISOString(),
-        timeZone: values.timezone,
+        timeZone: APP_TIME_ZONE,
       },
     });
   }
@@ -1749,24 +1767,33 @@ async function currentSetIds(
             )
           )
         : [];
-    case "core_group_users":
-      return (
-        await queryRows(
-          sql`select distinct u.id from persons p join users u on u.id=p.user_id and u.church_id=p.church_id where p.church_id=${plantId}::uuid and p.deleted_at is null and p.status in ('core_group','launch_team','leader') order by u.id`
+    case "core_group_people":
+      return sortedIds(
+        await allRows(
+          "persons",
+          plantId,
+          sql`deleted_at is null and status in ('core_group','launch_team','leader')`
         )
-      )
-        .map(({ id }) => String(id))
+      );
+    case "core_group_users":
+      return (await coreGroupUserIdsQuery(plantId))
+        .map(({ userId }) => String(userId))
         .toSorted();
-    case "active_team_users":
-      return scopeId
-        ? (
-            await queryRows(
-              sql`select distinct u.id from team_memberships tm join persons p on p.id=tm.person_id and p.church_id=tm.church_id and p.deleted_at is null join users u on u.id=p.user_id and u.church_id=p.church_id where tm.church_id=${plantId}::uuid and tm.team_id=${scopeId}::uuid and tm.status='active' order by u.id`
-            )
-          )
-            .map(({ id }) => String(id))
-            .toSorted()
-        : [];
+    case "active_team_users": {
+      if (!scopeId) return [];
+      const memberships = await allRows(
+        "team_memberships",
+        plantId,
+        sql`team_id=${scopeId}::uuid and status='active'`
+      );
+      const personIds = [
+        ...new Set(memberships.map(({ person_id }) => String(person_id))),
+      ];
+      if (personIds.length === 0) return [];
+      return (await personUserIdsQuery(plantId, personIds))
+        .map(({ userId }) => String(userId))
+        .toSorted();
+    }
     case "confirmed_owner_people":
       return (
         await queryRows(

@@ -90,8 +90,7 @@ const ROUTE_CAPABILITY = {
   "/teams": "teams.read.list",
   "/teams/[teamId]": "teams.read.detail",
   "/teams/[teamId]/meetings": "teams.read.meetings",
-  "/teams/[teamId]/responsibilities":
-    TEAMS_RESPONSIBILITY_SEED_CONTRACT.operationId,
+  "/teams/[teamId]/responsibilities": "teams.read.responsibilities",
   "/teams/[teamId]/training": "teams.read.training",
   "/teams/health": "teams.read.health",
   "/teams/org-chart": "teams.read.list",
@@ -140,7 +139,8 @@ function fieldsFor(identity: string) {
       domain: contract.domain,
       operationKind: contract.operationKind,
       applicationCapability:
-        contract.operationKind === "read"
+        contract.operationKind === "read" ||
+        identity === TEAMS_RESPONSIBILITY_SEED_CONTRACT.operationId
           ? ("read" as const)
           : ("teams.write" as const),
       confirmation:

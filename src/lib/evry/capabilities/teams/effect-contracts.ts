@@ -45,6 +45,7 @@ export const TEAMS_EFFECT_SET_KINDS = [
   "person_role_memberships",
   "active_person_team_memberships",
   "training_completion_pair",
+  "core_group_people",
   "core_group_users",
   "active_team_users",
   "confirmed_owner_people",
@@ -54,13 +55,10 @@ const setAssertionSchema = z.strictObject({
   kind: z.enum(TEAMS_EFFECT_SET_KINDS),
   scopeId: uuid.nullable(),
   otherId: uuid.nullable(),
-  ids: z
-    .array(uuid)
-    .max(2_000)
-    .superRefine((ids, context) => {
-      if (new Set(ids).size !== ids.length)
-        context.addIssue({ code: "custom", message: "Set IDs must be unique" });
-    }),
+  ids: z.array(uuid).superRefine((ids, context) => {
+    if (new Set(ids).size !== ids.length)
+      context.addIssue({ code: "custom", message: "Set IDs must be unique" });
+  }),
 });
 
 const mutationSchema = z
@@ -144,11 +142,11 @@ export type TeamsEffectOperation = (typeof TEAMS_EFFECT_OPERATIONS)[number];
 export const TEAMS_EFFECT_ARGUMENT_SHAPE = {
   operation: z.enum(TEAMS_EFFECT_OPERATIONS),
   /** All rows/absences that influenced eligibility or derived output. */
-  expected: z.array(snapshotSchema).max(2_000),
+  expected: z.array(snapshotSchema),
   /** Exact source cardinalities whose membership, not just rows, matters. */
   sets: z.array(setAssertionSchema).max(200),
   /** The exact before/after database rows disclosed at confirmation. */
-  mutations: z.array(mutationSchema).min(1).max(2_000),
+  mutations: z.array(mutationSchema).min(1),
   disclosure: disclosureSchema,
 } as const;
 
@@ -173,11 +171,14 @@ const commonSchema = z
         message: "Teams baselines must be unique by table and ID",
       });
     }
+    const expectedByKey = new Map(
+      value.expected.map((expected) => [
+        `${expected.table}:${expected.id}`,
+        expected,
+      ])
+    );
     for (const mutation of value.mutations) {
-      const expected = value.expected.find(
-        ({ table: tableName, id }) =>
-          tableName === mutation.table && id === mutation.id
-      );
+      const expected = expectedByKey.get(`${mutation.table}:${mutation.id}`);
       if (
         !expected ||
         JSON.stringify(expected.state) !== JSON.stringify(mutation.before)

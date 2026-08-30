@@ -45,22 +45,36 @@ test("generated Teams inventory is current, closed, and confirmation-complete", 
       `missing executable eval fixture for ${capability.identity}`
     );
     for (const layer of EVRY_CAPABILITY_EVAL_LAYERS) {
+      const live =
+        capability.operationKind === "effect" &&
+        (layer === "execution" ||
+          layer === "idempotency" ||
+          layer === "errors");
       assert.deepEqual(fixture.cases[layer], [
         {
           id: `${capability.identity}:${layer}`,
-          proofId: "teams-capability-contract",
-          testName: `${capability.identity}:${layer}`,
+          proofId: live ? "teams-effect-live" : "teams-capability-contract",
+          testName: live
+            ? `${capability.identity}:${layer}:live`
+            : `${capability.identity}:${layer}`,
         },
       ]);
     }
   }
 });
 
-test("the first-view responsibility seed is an effect, never smuggled through a read", () => {
+test("the responsibility route remains a Member read while first-view seeding is confirmed", () => {
   const route = generated.entries.find(
     ({ identity }) => identity === "route:/teams/[teamId]/responsibilities"
   );
-  assert.equal(route?.capabilityIdentity, "teams.responsibilities.initialize");
-  assert.equal(route?.operationKind, "effect");
-  assert.equal(route?.confirmation, "required");
+  assert.equal(route?.capabilityIdentity, "teams.read.responsibilities");
+  assert.equal(route?.operationKind, "read");
+  assert.equal(route?.applicationCapability, "read");
+  const seed = generated.entries.find(({ identity }) =>
+    identity.includes("listResponsibilities:first-view-seed")
+  );
+  assert.equal(seed?.capabilityIdentity, "teams.responsibilities.initialize");
+  assert.equal(seed?.operationKind, "effect");
+  assert.equal(seed?.applicationCapability, "read");
+  assert.equal(seed?.confirmation, "required");
 });

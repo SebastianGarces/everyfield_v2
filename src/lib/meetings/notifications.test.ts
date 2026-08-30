@@ -29,6 +29,7 @@ import {
   coreGroupUserIdsQuery,
   guestListUserIdsQuery,
   meetingNotificationFactsQuery,
+  personUserIdsQuery,
   meetingNotificationsDiffer,
   meetingReminderType,
   registerMeetingStillLivePredicates,
@@ -696,6 +697,23 @@ test("the guest-list read scopes attendance, persons and users to the church", (
     "every table in the join carries the church id"
   );
   assert.ok(params.includes(MEETING));
+});
+
+test("a known People roster crosses the canonical church-scoped email bridge", () => {
+  const personIds = [CORE_ONE, CORE_TWO];
+  const { sql, params } = personUserIdsQuery(CHURCH, personIds).toSQL();
+
+  assert.match(sql, /"users"\."church_id" = \$\d/);
+  assert.match(sql, /"persons"\."church_id" = \$\d/);
+  assert.match(sql, /lower\("users"\."email"\) = lower\("persons"\."email"\)/);
+  assert.match(sql, /"persons"\."deleted_at" is null/);
+  assert.equal(
+    params.filter((value) => value === CHURCH).length,
+    2,
+    "both sides of the bridge carry the church id"
+  );
+  assert.ok(params.includes(CORE_ONE));
+  assert.ok(params.includes(CORE_TWO));
 });
 
 test("the facts read scopes the meeting AND the team it names to the church", () => {

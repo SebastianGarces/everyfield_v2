@@ -43,6 +43,67 @@ export const continueTeamsEvryConversation: EvryCapabilityConversationContinuati
     async continue(input) {
       const selection = selectTeamsEvryRequest(input.literalUserText);
       if (!selection) return null;
+      const effectSelection =
+        selection.kind === "read_responsibilities"
+          ? {
+              kind: "effect" as const,
+              operation: "initializeResponsibilities" as const,
+              values: { teamId: selection.teamId },
+            }
+          : selection.kind === "effect"
+            ? selection
+            : null;
+      if (effectSelection) {
+        const requestKey = deriveEvryPlanRequestKey(
+          `teams-${effectSelection.operation.toLowerCase()}`,
+          [
+            input.actor.userId,
+            input.actor.plantId,
+            input.conversation.id,
+            input.userRequestKey,
+          ]
+        );
+        const recovered = await recoverTeamsEvryEffectProposal({
+          actor: input.actor,
+          expectedOperation: effectSelection.operation,
+          requestKey,
+        });
+        if (recovered) {
+          return {
+            body: "Review this exact Ministry Teams change before anything is written.",
+            artifacts: [
+              parseEvryConversationArtifactDocument(recovered.confirmation),
+            ],
+            activePlan: { mode: "set" as const, plan: recovered.plan },
+          };
+        }
+        const resolved = await resolveTeamsEvryEffect({
+          actor: input.actor,
+          selection: effectSelection,
+          now: input.now,
+        });
+        if (resolved) {
+          const proposed = await proposeTeamsEvryEffect({
+            actor: input.actor,
+            resolved,
+            requestKey,
+          });
+          if (!proposed) return null;
+          return {
+            body: "Review this exact Ministry Teams change before anything is written.",
+            artifacts: [
+              parseEvryConversationArtifactDocument(proposed.confirmation),
+            ],
+            activePlan: { mode: "set" as const, plan: proposed.plan },
+          };
+        }
+        if (selection.kind === "effect") {
+          return {
+            body: unavailable.prompt,
+            artifacts: [storedEvryClarificationArtifactDocument(unavailable)],
+          };
+        }
+      }
       if (selection.kind !== "effect") {
         const authorization = await authorizeEvryReadCapability(
           READ_IDENTITY[selection.kind]
@@ -67,51 +128,6 @@ export const continueTeamsEvryConversation: EvryCapabilityConversationContinuati
               artifacts: [storedEvryClarificationArtifactDocument(unavailable)],
             };
       }
-      const requestKey = deriveEvryPlanRequestKey(
-        `teams-${selection.operation.toLowerCase()}`,
-        [
-          input.actor.userId,
-          input.actor.plantId,
-          input.conversation.id,
-          input.userRequestKey,
-        ]
-      );
-      const recovered = await recoverTeamsEvryEffectProposal({
-        actor: input.actor,
-        expectedOperation: selection.operation,
-        requestKey,
-      });
-      if (recovered) {
-        return {
-          body: "Review this exact Ministry Teams change before anything is written.",
-          artifacts: [
-            parseEvryConversationArtifactDocument(recovered.confirmation),
-          ],
-          activePlan: { mode: "set" as const, plan: recovered.plan },
-        };
-      }
-      const resolved = await resolveTeamsEvryEffect({
-        actor: input.actor,
-        selection,
-        now: input.now,
-      });
-      if (!resolved)
-        return {
-          body: unavailable.prompt,
-          artifacts: [storedEvryClarificationArtifactDocument(unavailable)],
-        };
-      const proposed = await proposeTeamsEvryEffect({
-        actor: input.actor,
-        resolved,
-        requestKey,
-      });
-      if (!proposed) return null;
-      return {
-        body: "Review this exact Ministry Teams change before anything is written.",
-        artifacts: [
-          parseEvryConversationArtifactDocument(proposed.confirmation),
-        ],
-        activePlan: { mode: "set" as const, plan: proposed.plan },
-      };
+      return null;
     },
   };

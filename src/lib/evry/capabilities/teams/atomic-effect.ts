@@ -4,6 +4,10 @@ import { db } from "@/db";
 import { evryExecutionOutcomes } from "@/db/schema";
 import { executionStepOutcomeKey } from "@/lib/evry/audit/identity";
 import type { EvryEffectInput, EvryEffectResult } from "@/lib/evry/executor";
+import {
+  personHoldsLoginFilter,
+  personIsUserInChurch,
+} from "@/lib/people/person-user";
 
 import {
   parseTeamsEffectArguments,
@@ -15,6 +19,11 @@ interface CompletedRow extends Record<string, unknown> {
   affected_count: number;
   excluded_count: number;
 }
+
+export type TeamsEffectExecutionDeps = Readonly<{
+  findCompletedOutcome: typeof completedOutcome;
+  executeStatement: typeof executeStatement;
+}>;
 
 function exactTuple(input: EvryEffectInput, identity: string): boolean {
   const actor = input.authorization.actor;
@@ -115,7 +124,13 @@ function outcomePrelude(
         and a.plan_fingerprint = ${input.execution.fingerprint}
         and a.correlation_id = ${input.execution.correlationId}::uuid
         and s.status = 'executing'
-        and actor.seat in ('owner', 'admin')
+        and (
+          actor.seat in ('owner', 'admin')
+          or (
+            actor.seat = 'member'
+            and (select document->>'operation' from input_document) = 'initializeResponsibilities'
+          )
+        )
         and not exists (select 1 from existing)
         and not exists (
           select 1 from expected_plan e
@@ -163,8 +178,9 @@ function outcomePrelude(
             when 'person_role_memberships' then (select coalesce(jsonb_agg(id::text order by id::text), '[]'::jsonb) from team_memberships where church_id=${input.execution.plantId}::uuid and role_id=sp.scope_id and person_id=sp.other_id)
             when 'active_person_team_memberships' then (select coalesce(jsonb_agg(id::text order by id::text), '[]'::jsonb) from team_memberships where church_id=${input.execution.plantId}::uuid and person_id=sp.scope_id and team_id=sp.other_id and status='active')
             when 'training_completion_pair' then (select coalesce(jsonb_agg(id::text order by id::text), '[]'::jsonb) from training_completions where church_id=${input.execution.plantId}::uuid and person_id=sp.scope_id and training_program_id=sp.other_id)
-            when 'core_group_users' then (select coalesce(jsonb_agg(distinct u.id::text order by u.id::text), '[]'::jsonb) from persons p join users u on u.id=p.user_id and u.church_id=p.church_id where p.church_id=${input.execution.plantId}::uuid and p.deleted_at is null and p.status in ('core_group','launch_team','leader'))
-            when 'active_team_users' then (select coalesce(jsonb_agg(distinct u.id::text order by u.id::text), '[]'::jsonb) from team_memberships tm join persons p on p.id=tm.person_id and p.church_id=tm.church_id and p.deleted_at is null join users u on u.id=p.user_id and u.church_id=p.church_id where tm.church_id=${input.execution.plantId}::uuid and tm.team_id=sp.scope_id and tm.status='active')
+            when 'core_group_people' then (select coalesce(jsonb_agg(persons.id::text order by persons.id::text), '[]'::jsonb) from persons where persons.church_id=${input.execution.plantId}::uuid and persons.deleted_at is null and persons.status in ('core_group','launch_team','leader'))
+            when 'core_group_users' then (select coalesce(jsonb_agg(distinct users.id::text order by users.id::text), '[]'::jsonb) from persons join users on ${personIsUserInChurch(input.execution.plantId)} where ${personHoldsLoginFilter(input.execution.plantId)} and persons.status in ('core_group','launch_team','leader'))
+            when 'active_team_users' then (select coalesce(jsonb_agg(distinct users.id::text order by users.id::text), '[]'::jsonb) from team_memberships tm join persons on persons.id=tm.person_id and persons.church_id=tm.church_id join users on ${personIsUserInChurch(input.execution.plantId)} where tm.church_id=${input.execution.plantId}::uuid and tm.team_id=sp.scope_id and tm.status='active' and ${personHoldsLoginFilter(input.execution.plantId)})
             when 'confirmed_owner_people' then (select coalesce(jsonb_agg(p.id::text order by p.id::text), '[]'::jsonb) from persons p join users u on u.id=p.user_id and u.church_id=p.church_id join churches c on c.id=p.church_id where p.church_id=${input.execution.plantId}::uuid and p.deleted_at is null and u.seat='owner' and c.leadership_status='planter_confirmed')
           end
         )
@@ -216,10 +232,42 @@ function rowWrites(): SQL {
     updated_church as (update churches t set last_material_event_at=p.last_material_event_at, updated_at=p.updated_at from mutation_plan m, claimed, lateral jsonb_populate_record(null::churches,m.after_state) p where m.table_name='churches' and m.mode='update' and t.id=m.id returning t.id)`;
 }
 
+async function executeStatement(
+  input: EvryEffectInput,
+  args: TeamsEffectArguments
+): Promise<EvryEffectResult> {
+  const statement = db
+    .execute<CompletedRow>(
+      sql`with ${outcomePrelude(input, args)}, ${rowWrites()} select affected_count, excluded_count from existing union all select affected_count, excluded_count from claimed limit 1`
+    )
+    .getQuery();
+  const [rows] = await db.$client.transaction(
+    (transaction) => [transaction.query(statement.sql, statement.params)],
+    { isolationLevel: "Serializable" }
+  );
+  const row = rows[0] as CompletedRow | undefined;
+  return row
+    ? {
+        status: "completed",
+        affectedCount: row.affected_count,
+        excludedCount: row.excluded_count,
+      }
+    : { status: "refused", excludedCount: 1 };
+}
+
+function isSerializableRetry(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const code = Reflect.get(error, "code");
+  return code === "40001" || code === "40P01";
+}
+
 /** One PostgreSQL statement owns exact drift refusal, effect claim, and writes. */
 export async function executeTeamsEffect(
-  input: EvryEffectInput
+  input: EvryEffectInput,
+  dependencies: Partial<TeamsEffectExecutionDeps> = {}
 ): Promise<EvryEffectResult> {
+  const findCompleted = dependencies.findCompletedOutcome ?? completedOutcome;
+  const runStatement = dependencies.executeStatement ?? executeStatement;
   const operation = input.arguments.operation;
   if (
     typeof operation !== "string" ||
@@ -232,7 +280,7 @@ export async function executeTeamsEffect(
   const identity = TEAMS_EFFECT_IDENTITY_BY_OPERATION[typedOperation];
   if (!exactTuple(input, identity))
     return { status: "refused", excludedCount: 1 };
-  const previous = await completedOutcome(input);
+  const previous = await findCompleted(input);
   if (previous) return previous;
   let args: TeamsEffectArguments;
   try {
@@ -241,28 +289,30 @@ export async function executeTeamsEffect(
     return { status: "refused", excludedCount: 1 };
   }
   try {
-    const statement = db
-      .execute<CompletedRow>(
-        sql`with ${outcomePrelude(input, args)}, ${rowWrites()} select affected_count, excluded_count from existing union all select affected_count, excluded_count from claimed limit 1`
-      )
-      .getQuery();
-    const [rows] = await db.$client.transaction(
-      (transaction) => [transaction.query(statement.sql, statement.params)],
-      { isolationLevel: "Serializable" }
-    );
-    const row = rows[0] as CompletedRow | undefined;
-    return row
-      ? {
-          status: "completed",
-          affectedCount: row.affected_count,
-          excludedCount: row.excluded_count,
-        }
-      : { status: "refused", excludedCount: 1 };
+    return await runStatement(input, args);
   } catch (error) {
     if (process.env.EVRY_TEAMS_EFFECT_DEBUG === "1") {
       console.error("Teams atomic effect debug", error);
     }
-    const replay = await completedOutcome(input);
-    return replay ?? { status: "refused", excludedCount: 1 };
+    const replay = await findCompleted(input);
+    if (replay) return replay;
+    if (isSerializableRetry(error)) {
+      // The first transaction lost a real database serialization race. A new
+      // transaction can now prove one of the two closed outcomes: the keyed
+      // effect committed, or the exact baseline no longer matches.
+      try {
+        return await runStatement(input, args);
+      } catch (retryError) {
+        if (process.env.EVRY_TEAMS_EFFECT_DEBUG === "1") {
+          console.error("Teams atomic effect retry debug", retryError);
+        }
+        const retriedReplay = await findCompleted(input);
+        if (retriedReplay) return retriedReplay;
+        return { status: "retryable" };
+      }
+    }
+    // A transport, driver, or unknown database failure says nothing about the
+    // domain. Keep the step non-durable and retryable.
+    return { status: "retryable" };
   }
 }

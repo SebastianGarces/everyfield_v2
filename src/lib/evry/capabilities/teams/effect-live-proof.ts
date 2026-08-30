@@ -9,7 +9,9 @@ import {
   churches,
   churchMeetings,
   locations,
+  meetingAttendance,
   ministryTeams,
+  notifications,
   personActivities,
   persons,
   sessions,
@@ -21,6 +23,7 @@ import {
   users,
 } from "@/db/schema";
 import { UnauthorizedError } from "@/lib/auth/unauthorized";
+import { formatDateTime } from "@/lib/datetime";
 import {
   getRoleTemplates,
   playbookResponsibilities,
@@ -125,6 +128,8 @@ async function main(): Promise<void> {
       plans,
       route,
       viewer,
+      effectContracts,
+      teamsConversation,
     ] = await Promise.all([
       import("./resolver"),
       import("./runtime"),
@@ -132,24 +137,44 @@ async function main(): Promise<void> {
       import("@/lib/evry/plans"),
       import("@/app/api/evry/plans/[planId]/execute/route"),
       import("@/lib/evry/eligibility/viewer"),
+      import("./effect-contracts"),
+      import("./conversation"),
     ]);
     const actorRef = await viewer.requireEvryPlantViewer();
     const post = route.createEvryPlanExecutePost({
       registry: TEAMS_EXECUTION_REGISTRY,
     });
+    const planOperations = new Map<
+      string,
+      Parameters<typeof resolveTeamsEvryEffect>[0]["selection"]["operation"]
+    >();
+    const successfulPlans = new Map<
+      Parameters<typeof resolveTeamsEvryEffect>[0]["selection"]["operation"],
+      { planId: string; fingerprint: string }
+    >();
+    let plannedMeetingInstant: string | null = null;
+    let plannedMeetingNotificationCount: number | null = null;
 
     async function approve(
-      selection: Parameters<typeof resolveTeamsEvryEffect>[0]["selection"]
+      selection: Parameters<typeof resolveTeamsEvryEffect>[0]["selection"],
+      planningActor = actorRef
     ) {
       const plannedAt = new Date();
       const resolved = await resolveTeamsEvryEffect({
-        actor: actorRef,
+        actor: planningActor,
         selection,
         now: plannedAt,
       });
       assert.ok(resolved, `resolved ${selection.operation}`);
+      if (selection.operation === "createMeetingAction") {
+        plannedMeetingInstant =
+          resolved.arguments.disclosure.dateTime?.instantUtc ?? null;
+        plannedMeetingNotificationCount = resolved.arguments.mutations.filter(
+          ({ table }) => table === "notifications"
+        ).length;
+      }
       const proposed = await proposeTeamsEvryEffect({
-        actor: actorRef,
+        actor: planningActor,
         resolved,
         requestKey: plans.mintEvryPlanRequestKey(),
       });
@@ -162,18 +187,44 @@ async function main(): Promise<void> {
         decidedAt: new Date(plannedAt.getTime() + 1),
       });
       assert.equal(confirmed.status, "approved");
+      planOperations.set(proposed.plan.planId, selection.operation);
       return proposed.plan;
     }
+
+    async function execute(plan: { planId: string; fingerprint: string }) {
+      const result = await response(post, plan);
+      const operation = planOperations.get(plan.planId);
+      if (operation && result.status === 200)
+        successfulPlans.set(operation, plan);
+      return result;
+    }
+
+    const fullInitialization = await approve({
+      kind: "effect",
+      operation: "initializeTeamsWithRolesAction",
+      values: {},
+    });
+    assert.equal((await execute(fullInitialization)).status, 200);
+    assert.ok(
+      (await db.select().from(teamRoles)).length > 0,
+      "full initialization reaches real team and role writes"
+    );
+    await db.delete(teamRoles).where(eq(teamRoles.churchId, plantId));
+    await db.delete(ministryTeams).where(eq(ministryTeams.churchId, plantId));
+
+    const partialInitialization = await approve({
+      kind: "effect",
+      operation: "initializeTeamsAction",
+      values: { teamKeys: "technology" },
+    });
+    assert.equal((await execute(partialInitialization)).status, 200);
 
     const create = await approve({
       kind: "effect",
       operation: "createTeamAction",
       values: { name: "Live Team", description: "Exact" },
     });
-    const double = await Promise.all([
-      response(post, create),
-      response(post, create),
-    ]);
+    const double = await Promise.all([execute(create), execute(create)]);
     assert.deepEqual(
       double.map(({ status }) => status),
       [200, 200]
@@ -206,7 +257,7 @@ async function main(): Promise<void> {
       }),
     ]);
     const updateRace = await Promise.all(
-      updateRacePlans.map((plan) => response(post, plan))
+      updateRacePlans.map((plan) => execute(plan))
     );
     assert.deepEqual(
       updateRace.map(({ status }) => status).toSorted(),
@@ -230,7 +281,7 @@ async function main(): Promise<void> {
       .update(ministryTeams)
       .set({ description: "concurrent drift" })
       .where(eq(ministryTeams.id, created[0]!.id));
-    assert.equal((await response(post, drift)).status, 409);
+    assert.equal((await execute(drift)).status, 409);
     const [notOverwritten] = await db
       .select()
       .from(ministryTeams)
@@ -243,7 +294,7 @@ async function main(): Promise<void> {
       values: { name: "Must Not Land" },
     });
     await db.update(users).set({ seat: "member" }).where(eq(users.id, actorId));
-    assert.equal((await response(post, seatPlan)).status, 409);
+    assert.equal((await execute(seatPlan)).status, 409);
     assert.equal(
       (
         await db
@@ -271,20 +322,64 @@ async function main(): Promise<void> {
         createdBy: actorId,
       })
       .returning();
-    const responsibilityPlans = await Promise.all([
-      approve({
-        kind: "effect",
-        operation: "initializeResponsibilities",
-        values: { teamId: predefined.id },
-      }),
-      approve({
-        kind: "effect",
-        operation: "initializeResponsibilities",
-        values: { teamId: predefined.id },
-      }),
-    ]);
+    await db.update(users).set({ seat: "member" }).where(eq(users.id, actorId));
+    sessionUser = {
+      id: actorId,
+      churchId: plantId,
+      sendingChurchId: null,
+      sendingNetworkId: null,
+      seat: "member",
+    };
+    const memberActorRef = await viewer.requireEvryPlantViewer();
+    const responsibilityConversation = {
+      id: randomUUID(),
+      actorUserId: actorId,
+      plantId,
+      title: "Responsibilities first view",
+      createdAt: new Date(),
+      lastActivityAt: new Date(),
+      activePlan: null,
+      stateVersion: 0,
+      state: {},
+      messages: [],
+    };
+    const responsibilityViews = await Promise.all(
+      [randomUUID(), randomUUID()].map((userRequestKey) =>
+        teamsConversation.continueTeamsEvryConversation.continue({
+          actor: memberActorRef,
+          conversation: responsibilityConversation as never,
+          userRequestKey,
+          literalUserText: `review ministry team ${predefined.id} responsibilities`,
+          pageContext: null,
+          requestPageContext: null,
+          now: new Date(),
+        })
+      )
+    );
+    const responsibilityPlans = [];
+    for (const result of responsibilityViews) {
+      assert.ok(
+        result,
+        "Member first view resolves through the Teams continuation"
+      );
+      assert.equal(result.activePlan?.mode, "set");
+      if (result.activePlan?.mode !== "set")
+        throw new Error("missing seed plan");
+      const plan = result.activePlan.plan;
+      assert.equal(result.artifacts[0]?.kind, "confirmation");
+      const confirmed = await planRepository.confirmExactEvryActionPlan({
+        planId: plan.planId,
+        actorUserId: actorId,
+        plantId,
+        fingerprint: plan.fingerprint,
+        decidedAt: new Date(),
+      });
+      assert.equal(confirmed.status, "approved");
+      planOperations.set(plan.planId, "initializeResponsibilities");
+      responsibilityPlans.push(plan);
+    }
     const responsibilityRace = await Promise.all(
-      responsibilityPlans.map((plan) => response(post, plan))
+      responsibilityPlans.map((plan) => execute(plan))
     );
     assert.deepEqual(
       responsibilityRace.map(({ status }) => status).toSorted(),
@@ -294,7 +389,7 @@ async function main(): Promise<void> {
       responsibilityPlans[
         responsibilityRace.findIndex(({ status }) => status === 200)
       ]!;
-    assert.equal((await response(post, responsibilityWinner)).status, 200);
+    assert.equal((await execute(responsibilityWinner)).status, 200);
     assert.equal(
       (
         await db
@@ -313,6 +408,91 @@ async function main(): Promise<void> {
           .where(eq(ministryTeams.id, predefined.id))
       )[0]?.responsibilitiesSeededAt
     );
+    const seededView =
+      await teamsConversation.continueTeamsEvryConversation.continue({
+        actor: memberActorRef,
+        conversation: responsibilityConversation as never,
+        userRequestKey: randomUUID(),
+        literalUserText: `review ministry team ${predefined.id} responsibilities`,
+        pageContext: null,
+        requestPageContext: null,
+        now: new Date(),
+      });
+    assert.equal(seededView?.activePlan, undefined);
+    assert.equal(seededView?.artifacts[0]?.kind, "read");
+    await db.update(users).set({ seat: "owner" }).where(eq(users.id, actorId));
+    sessionUser = {
+      id: actorId,
+      churchId: plantId,
+      sendingChurchId: null,
+      sendingNetworkId: null,
+      seat: "owner",
+    };
+
+    const createRolePlan = await approve({
+      kind: "effect",
+      operation: "createRoleAction",
+      values: {
+        teamId: created[0]!.id,
+        name: "Live Steward",
+        description: "Owns the live proof",
+      },
+    });
+    assert.equal((await execute(createRolePlan)).status, 200);
+    assert.equal(
+      (
+        await db
+          .select()
+          .from(teamRoles)
+          .where(
+            and(
+              eq(teamRoles.teamId, created[0]!.id),
+              eq(teamRoles.name, "Live Steward")
+            )
+          )
+      ).length,
+      1
+    );
+
+    const createResponsibilityPlan = await approve({
+      kind: "effect",
+      operation: "createResponsibilityAction",
+      values: { teamId: predefined.id, title: "Prepare the live proof" },
+    });
+    assert.equal((await execute(createResponsibilityPlan)).status, 200);
+    const [createdResponsibility] = await db
+      .select()
+      .from(teamResponsibilities)
+      .where(
+        and(
+          eq(teamResponsibilities.teamId, predefined.id),
+          eq(teamResponsibilities.title, "Prepare the live proof")
+        )
+      );
+    assert.ok(createdResponsibility);
+
+    const updateResponsibilityPlan = await approve({
+      kind: "effect",
+      operation: "updateResponsibilityAction",
+      values: {
+        responsibilityId: createdResponsibility.id,
+        title: "Verify the live proof",
+      },
+    });
+    assert.equal((await execute(updateResponsibilityPlan)).status, 200);
+
+    const completeResponsibilityPlan = await approve({
+      kind: "effect",
+      operation: "setResponsibilityCompleteAction",
+      values: { responsibilityId: createdResponsibility.id, completed: "true" },
+    });
+    assert.equal((await execute(completeResponsibilityPlan)).status, 200);
+    const [completedResponsibility] = await db
+      .select()
+      .from(teamResponsibilities)
+      .where(eq(teamResponsibilities.id, createdResponsibility.id));
+    assert.equal(completedResponsibility.title, "Verify the live proof");
+    assert.ok(completedResponsibility.completedAt);
 
     const roleImportPlans = await Promise.all([
       approve({
@@ -327,7 +507,7 @@ async function main(): Promise<void> {
       }),
     ]);
     const roleImportRace = await Promise.all(
-      roleImportPlans.map((plan) => response(post, plan))
+      roleImportPlans.map((plan) => execute(plan))
     );
     assert.deepEqual(
       roleImportRace.map(({ status }) => status).toSorted(),
@@ -344,26 +524,62 @@ async function main(): Promise<void> {
       "the same-baseline bulk import commits exactly one template set"
     );
 
-    const [responsibilityToDelete] = await db
-      .select()
-      .from(teamResponsibilities)
-      .where(eq(teamResponsibilities.teamId, predefined.id))
-      .limit(1);
     const deleteResponsibilityPlan = await approve({
       kind: "effect",
       operation: "deleteResponsibilityAction",
-      values: { responsibilityId: responsibilityToDelete.id },
+      values: { responsibilityId: completedResponsibility.id },
     });
-    assert.equal((await response(post, deleteResponsibilityPlan)).status, 200);
+    assert.equal((await execute(deleteResponsibilityPlan)).status, 200);
     assert.equal(
       (
         await db
           .select()
           .from(teamResponsibilities)
-          .where(eq(teamResponsibilities.id, responsibilityToDelete.id))
+          .where(eq(teamResponsibilities.id, completedResponsibility.id))
       ).length,
       0
     );
+
+    const bridgeEmail = `${randomUUID()}@teams-proof.invalid`;
+    const [ordinaryAccount] = await db
+      .insert(users)
+      .values({
+        email: bridgeEmail.toLowerCase(),
+        passwordHash: "scratch",
+        name: "Ordinary Account",
+        seat: "member",
+        churchId: plantId,
+      })
+      .returning({ id: users.id });
+    const [bridgedPerson] = await db
+      .insert(persons)
+      .values({
+        churchId: plantId,
+        userId: null,
+        email: bridgeEmail.toUpperCase(),
+        firstName: "Email",
+        lastName: "Bridge",
+        status: "core_group",
+        createdBy: actorId,
+      })
+      .returning();
+    const [meetingRole] = await db
+      .insert(teamRoles)
+      .values({
+        churchId: plantId,
+        teamId: created[0]!.id,
+        name: "Meeting Guest",
+        createdBy: actorId,
+      })
+      .returning();
+    await db.insert(teamMemberships).values({
+      churchId: plantId,
+      teamId: created[0]!.id,
+      roleId: meetingRole.id,
+      personId: bridgedPerson.id,
+      status: "active",
+      createdBy: actorId,
+    });
 
     const meetingPlan = await approve({
       kind: "effect",
@@ -372,23 +588,70 @@ async function main(): Promise<void> {
         teamId: created[0]!.id,
         title: "Live Rehearsal",
         datetime: "2031-02-03T18:30",
-        timezone: "America/New_York",
         locationName: "Room 201",
         meetingSubtype: "rehearsal",
       },
     });
-    assert.equal((await response(post, meetingPlan)).status, 200);
+    assert.equal(plannedMeetingInstant, "2031-02-03T18:30:00.000Z");
+    assert.equal(plannedMeetingNotificationCount, 7);
+    assert.equal((await execute(meetingPlan)).status, 200);
     const [meeting] = await db
       .select()
       .from(churchMeetings)
       .where(eq(churchMeetings.title, "Live Rehearsal"));
     assert.deepEqual(meeting.agenda, []);
+    assert.equal(meeting.datetime.toISOString(), plannedMeetingInstant);
     const [savedLocation] = await db
       .select()
       .from(locations)
       .where(eq(locations.id, meeting.locationId!));
     assert.equal(savedLocation.name, "Room 201");
     assert.equal(savedLocation.address, "");
+    const attendance = await db
+      .select()
+      .from(meetingAttendance)
+      .where(eq(meetingAttendance.meetingId, meeting.id));
+    assert.deepEqual(
+      attendance.map(({ personId }) => personId),
+      [bridgedPerson.id],
+      "the active member is the exact meeting guest roster"
+    );
+    const notificationRows = await db
+      .select()
+      .from(notifications)
+      .where(eq(notifications.entityId, meeting.id));
+    assert.equal(notificationRows.length, 7);
+    assert.equal(
+      notificationRows.filter(({ type }) => type === "meeting.scheduled")
+        .length,
+      1
+    );
+    for (const days of [7, 3, 1]) {
+      assert.equal(
+        notificationRows.filter(
+          ({ type }) => type === `meeting.reminder.${days}d`
+        ).length,
+        2
+      );
+    }
+    assert.equal(
+      notificationRows.filter(
+        ({ recipientUserId }) => recipientUserId === ordinaryAccount.id
+      ).length,
+      4,
+      "the non-owner account is found by mixed-case email, not persons.user_id"
+    );
+    assert.equal(
+      notificationRows.filter(
+        ({ recipientUserId }) => recipientUserId === actorId
+      ).length,
+      3
+    );
+    const displayedMeetingTime = formatDateTime(meeting.datetime);
+    assert.ok(
+      notificationRows.every(({ body }) => body.includes(displayedMeetingTime)),
+      "confirmation, stored UTC wall clock, and notification copy agree"
+    );
 
     const [historyRole] = await db
       .insert(teamRoles)
@@ -445,7 +708,7 @@ async function main(): Promise<void> {
         personId: historyPerson.id,
       },
     });
-    assert.equal((await response(post, historyPlan)).status, 200);
+    assert.equal((await execute(historyPlan)).status, 200);
     const afterHistory = await db
       .select()
       .from(teamMemberships)
@@ -471,7 +734,7 @@ async function main(): Promise<void> {
         isRequired: "true",
       },
     });
-    assert.equal((await response(post, trainingProgramPlan)).status, 200);
+    assert.equal((await execute(trainingProgramPlan)).status, 200);
     const [program] = await db
       .select()
       .from(trainingPrograms)
@@ -481,7 +744,7 @@ async function main(): Promise<void> {
       operation: "markTrainingCompleteAction",
       values: { programId: program.id, personId: historyPerson.id },
     });
-    assert.equal((await response(post, trainingCompletionPlan)).status, 200);
+    assert.equal((await execute(trainingCompletionPlan)).status, 200);
     assert.equal(
       (
         await db
@@ -503,7 +766,7 @@ async function main(): Promise<void> {
       operation: "removeMemberAction",
       values: { membershipId: reactivated!.id },
     });
-    assert.equal((await response(post, removeHistoryPlan)).status, 200);
+    assert.equal((await execute(removeHistoryPlan)).status, 200);
     const [removedHistory] = await db
       .select()
       .from(teamMemberships)
@@ -562,7 +825,7 @@ async function main(): Promise<void> {
       );
     }
     const raced = await Promise.all(
-      assignmentPlans.map((plan) => response(post, plan))
+      assignmentPlans.map((plan) => execute(plan))
     );
     assert.deepEqual(raced.map(({ status }) => status).toSorted(), [200, 409]);
     const memberships = await db
@@ -600,7 +863,7 @@ async function main(): Promise<void> {
       operation: "updateRoleAction",
       values: { roleId: role.id, isLeadershipRole: "true" },
     });
-    assert.equal((await response(post, leadershipPlan)).status, 200);
+    assert.equal((await execute(leadershipPlan)).status, 200);
     const [leaderTeam] = await db
       .select()
       .from(ministryTeams)
@@ -626,7 +889,7 @@ async function main(): Promise<void> {
       operation: "deleteRoleAction",
       values: { roleId: role.id },
     });
-    assert.equal((await response(post, deleteRolePlan)).status, 200);
+    assert.equal((await execute(deleteRolePlan)).status, 200);
     assert.equal(
       (await db.select().from(teamRoles).where(eq(teamRoles.id, role.id)))
         .length,
@@ -656,7 +919,7 @@ async function main(): Promise<void> {
       operation: "assignTeamLeaderAction",
       values: { teamId: created[0]!.id, personId: historyPerson.id },
     });
-    assert.equal((await response(post, explicitLeaderPlan)).status, 200);
+    assert.equal((await execute(explicitLeaderPlan)).status, 200);
     assert.equal(
       (
         await db
@@ -703,7 +966,7 @@ async function main(): Promise<void> {
         roleKeys: "senior_pastor",
       },
     });
-    assert.equal((await response(post, leadershipImportPlan)).status, 200);
+    assert.equal((await execute(leadershipImportPlan)).status, 200);
     const [seniorRole] = await db
       .select()
       .from(teamRoles)
@@ -742,13 +1005,13 @@ async function main(): Promise<void> {
     const initializationDriftPlan = await approve({
       kind: "effect",
       operation: "initializeTeamsAction",
-      values: { teamKeys: "worship,technology" },
+      values: { teamKeys: "prayer" },
     });
     await db
       .update(ministryTeams)
       .set({ name: "Renamed Worship" })
       .where(eq(ministryTeams.id, predefined.id));
-    assert.equal((await response(post, initializationDriftPlan)).status, 409);
+    assert.equal((await execute(initializationDriftPlan)).status, 409);
     assert.equal(
       (
         await db
@@ -757,7 +1020,7 @@ async function main(): Promise<void> {
           .where(
             and(
               eq(ministryTeams.churchId, plantId),
-              eq(ministryTeams.templateKey, "technology")
+              eq(ministryTeams.templateKey, "prayer")
             )
           )
       ).length,
@@ -799,7 +1062,6 @@ async function main(): Promise<void> {
           values: {
             teamId: foreignTeam.id,
             datetime: "2031-02-03T18:30",
-            timezone: "America/New_York",
           },
         },
         now: new Date(),
@@ -807,8 +1069,24 @@ async function main(): Promise<void> {
       null
     );
 
+    for (const operation of effectContracts.TEAMS_EFFECT_OPERATIONS) {
+      const plan = successfulPlans.get(operation);
+      assert.ok(plan, `${operation} reached a real successful execution`);
+      assert.equal(
+        (await execute(plan)).status,
+        200,
+        `${operation} recovers its original keyed result on replay`
+      );
+    }
+    const liveOutcomes = Object.fromEntries(
+      effectContracts.TEAMS_EFFECT_OPERATIONS.map((operation) => [
+        effectContracts.TEAMS_EFFECT_IDENTITY_BY_OPERATION[operation],
+        { execution: true, idempotency: true, errors: true },
+      ])
+    );
+
     process.stdout.write(
-      "Evry Teams live effect proof passed: replay, serializable same-baseline races, raw-row drift, fresh seat, seed, every mutation shape, meeting composition, history reactivation, role race, People/leader lineage, canonical auto-fill, cascades, Phase dirtiness, and foreign targets.\n"
+      `EVRY_TEAMS_LIVE_OUTCOMES=${JSON.stringify(liveOutcomes)}\nEvry Teams live effect proof passed: every effect execution and keyed replay, serializable same-baseline races, raw-row drift, fresh owner and Member authority, first-view seed, every mutation shape, UTC-naive meeting composition, canonical email bridge recipients, history reactivation, role race, People/leader lineage, canonical auto-fill, cascades, Phase dirtiness, and foreign targets.\n`
     );
   } finally {
     // The suite owns its whole disposable database. Evry audit/plan rows are
