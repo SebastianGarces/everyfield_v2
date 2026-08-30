@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { z } from "zod";
 
 import type { EvryReadCapabilityAuthorization } from "@/lib/evry/eligibility/capabilities";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
@@ -21,10 +22,64 @@ import {
 } from "./compiler";
 import {
   createFixtureRecipeRegistry,
+  fixtureRecipeDefinition,
   FIXTURE_RECIPE_VALUES,
   FIXTURE_RESOLVED_PERSON_IDS,
   RECIPE_IDENTITY,
 } from "./fixtures.test-helper";
+
+test("one resolver-owned snapshot can bind nested exact step arguments", async () => {
+  const definition = fixtureRecipeDefinition();
+  const required = definition.requiredInputs as Array<Record<string, unknown>>;
+  required.push({
+    key: "resolved_invitation",
+    schema: z.strictObject({
+      meeting: z.strictObject({
+        id: z.string().uuid(),
+        startsAt: z.string().datetime({ offset: true }),
+      }),
+    }),
+  });
+  const [create] = definition.steps as Array<Record<string, unknown>>;
+  create!.arguments = {
+    meetingId: {
+      kind: "input_path",
+      inputKey: "resolved_invitation",
+      path: ["meeting", "id"],
+    },
+    startsAt: {
+      kind: "input_path",
+      inputKey: "resolved_invitation",
+      path: ["meeting", "startsAt"],
+    },
+  };
+  const registry = createFixtureRecipeRegistry(undefined, [definition]);
+  const compile = createEvryRecipeCompiler({
+    async authorizeResolver() {
+      return readAuthorization();
+    },
+  });
+  const compiled = await compile({
+    actor: ACTOR,
+    registry,
+    recipeIdentity: RECIPE_IDENTITY,
+    inputValues: {
+      ...FIXTURE_RECIPE_VALUES,
+      resolved_invitation: {
+        meeting: {
+          id: FIXTURE_RECIPE_VALUES.meeting_id,
+          startsAt: FIXTURE_RECIPE_VALUES.starts_at,
+        },
+      },
+    },
+    eligibleCapabilities: eligible(registry),
+  });
+
+  assert.deepEqual(compiled.document.steps[0]?.arguments, {
+    meetingId: FIXTURE_RECIPE_VALUES.meeting_id,
+    startsAt: FIXTURE_RECIPE_VALUES.starts_at,
+  });
+});
 
 const ACTOR = {
   userId: "40000000-0000-4000-8000-000000000001",

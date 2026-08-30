@@ -211,7 +211,21 @@ function candidateArguments(
       values[argumentKey] = binding.value;
       continue;
     }
-    const value = inputs[binding.inputKey];
+    let value = inputs[binding.inputKey];
+    if (binding.kind === "input_path") {
+      for (const part of binding.path) {
+        if (
+          !value ||
+          typeof value !== "object" ||
+          Array.isArray(value) ||
+          !Object.hasOwn(value, part)
+        ) {
+          value = undefined;
+          break;
+        }
+        value = (value as Readonly<Record<string, EvryJsonValue>>)[part];
+      }
+    }
     if (value !== undefined) values[argumentKey] = value;
   }
   return values;
