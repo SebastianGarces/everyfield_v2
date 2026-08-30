@@ -47,6 +47,7 @@ export function teamsEffectEvalFixture(operation: TeamsEffectOperation) {
     expected: [{ table, id: ROW, state: before }],
     sets: [],
     mutations: [{ table, id: ROW, mode, before, after }],
+    notificationIntents: [],
     disclosure: {
       title: `Fixture ${operation}`,
       targets: [{ label: "Fixture", value: operation, href: "/teams" }],

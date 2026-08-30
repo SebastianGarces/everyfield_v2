@@ -324,6 +324,38 @@ test("operation contracts reject a mutation from another Teams domain", () => {
   );
 });
 
+test("meeting notification intent is disclosed but raw F11 rows are outside the Teams mutation contract", () => {
+  const fixture = TEAMS_EVAL_FIXTURES.find(
+    ({ operation }) => operation === "createMeetingAction"
+  )!;
+  assert.throws(() =>
+    parseTeamsEffectArguments("createMeetingAction", {
+      ...fixture.arguments,
+      expected: [
+        ...fixture.arguments.expected,
+        {
+          table: "notifications",
+          id: "00000000-0000-4000-8000-000000000003",
+          state: null,
+        },
+      ],
+      mutations: [
+        ...fixture.arguments.mutations,
+        {
+          table: "notifications",
+          id: "00000000-0000-4000-8000-000000000003",
+          mode: "insert",
+          before: null,
+          after: {
+            id: "00000000-0000-4000-8000-000000000003",
+            church_id: ACTOR.plantId,
+          },
+        },
+      ],
+    })
+  );
+});
+
 test("unknown execution failures stay retryable while proved races and replays close", async () => {
   const fixture = TEAMS_EVAL_FIXTURES.find(
     ({ operation }) => operation === "createTeamAction"
@@ -370,6 +402,48 @@ test("unknown execution failures stay retryable while proved races and replays c
   assert.equal(attempts, 2);
 });
 
+test("a completed meeting effect runs notification sync outside the durable statement on first execution and claim recovery", async () => {
+  const fixture = TEAMS_EVAL_FIXTURES.find(
+    ({ operation }) => operation === "createMeetingAction"
+  )!;
+  const input = effectInput(fixture.identity, fixture.arguments, ACTOR.plantId);
+  const syncCalls: string[] = [];
+  const synchronize = async (churchId: string, meetingId: string) => {
+    syncCalls.push(`${churchId}:${meetingId}`);
+    throw new Error("best-effort F11 outage");
+  };
+  const completed = {
+    status: "completed" as const,
+    affectedCount: 1,
+    excludedCount: 0,
+  };
+
+  assert.deepEqual(
+    await executeTeamsEffect(input, {
+      findCompletedOutcome: async () => null,
+      executeStatement: async () => completed,
+      syncMeetingNotifications: synchronize,
+    }),
+    completed,
+    "a notification transport failure cannot change the committed meeting result"
+  );
+  assert.deepEqual(
+    await executeTeamsEffect(input, {
+      findCompletedOutcome: async () => completed,
+      executeStatement: async () => {
+        throw new Error("the durable statement must not repeat");
+      },
+      syncMeetingNotifications: synchronize,
+    }),
+    completed,
+    "claim recovery converges only the best-effort notification side"
+  );
+  assert.deepEqual(syncCalls, [
+    `${ACTOR.plantId}:00000000-0000-4000-8000-000000000002`,
+    `${ACTOR.plantId}:00000000-0000-4000-8000-000000000002`,
+  ]);
+});
+
 test("a legal roster above two thousand rows compiles with bounded browser disclosure", () => {
   const rows = Array.from({ length: 2_001 }, (_, index) => {
     const id = `00000000-0000-4000-8000-${(index + 10).toString(16).padStart(12, "0")}`;
@@ -390,6 +464,7 @@ test("a legal roster above two thousand rows compiles with bounded browser discl
     expected: rows.map(({ table, id }) => ({ table, id, state: null })),
     sets: [],
     mutations: rows,
+    notificationIntents: [],
     disclosure: {
       title: "Initialize every legal team row",
       targets: [{ label: "Plant", value: "Exact plant", href: "/teams" }],

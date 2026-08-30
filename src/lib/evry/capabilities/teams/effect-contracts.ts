@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { MEETING_NOTIFICATION_TYPES } from "@/lib/meetings/notifications";
+
 import {
   TEAMS_ACTION_CONTRACTS,
   TEAMS_RESPONSIBILITY_SEED_CONTRACT,
@@ -17,7 +19,6 @@ export const TEAMS_EFFECT_TABLES = [
   "locations",
   "church_meetings",
   "meeting_attendance",
-  "notifications",
   "persons",
   "person_activities",
 ] as const;
@@ -96,6 +97,17 @@ const mutationSchema = z
     }
   });
 
+const notificationIntentSchema = z.strictObject({
+  recipientUserId: uuid,
+  type: z
+    .string()
+    .refine(
+      (value) => MEETING_NOTIFICATION_TYPES.includes(value),
+      "Unknown meeting notification type"
+    ),
+  scheduledFor: z.string().datetime(),
+});
+
 const disclosureSchema = z.strictObject({
   title: z.string().trim().min(1).max(500),
   targets: z
@@ -147,6 +159,12 @@ export const TEAMS_EFFECT_ARGUMENT_SHAPE = {
   sets: z.array(setAssertionSchema).max(200),
   /** The exact before/after database rows disclosed at confirmation. */
   mutations: z.array(mutationSchema).min(1),
+  /**
+   * Best-effort F11 work disclosed by the plan but never materialized as raw
+   * database mutations. Execution re-reads the meeting and audience after the
+   * durable effect, then crosses the canonical recipient gate and dedupe seam.
+   */
+  notificationIntents: z.array(notificationIntentSchema),
   disclosure: disclosureSchema,
 } as const;
 
@@ -257,7 +275,6 @@ const commonSchema = z
           "locations:insert",
           "church_meetings:insert",
           "meeting_attendance:insert",
-          "notifications:insert",
         ]),
         createTrainingProgramAction: new Set(["training_programs:insert"]),
         markTrainingCompleteAction: new Set(["training_completions:insert"]),
@@ -303,6 +320,39 @@ const commonSchema = z
         code: "custom",
         message: "Teams operation is missing its primary mutation",
       });
+    }
+    if (
+      operation !== "createMeetingAction" &&
+      value.notificationIntents.length > 0
+    ) {
+      context.addIssue({
+        code: "custom",
+        message:
+          "Only meeting creation may disclose meeting notification intents",
+      });
+    }
+    if (operation === "createMeetingAction") {
+      const meetingIds = value.mutations.flatMap((mutation) =>
+        mutation.table === "church_meetings" && mutation.mode === "insert"
+          ? [mutation.id]
+          : []
+      );
+      if (meetingIds.length !== 1) {
+        context.addIssue({
+          code: "custom",
+          message: "Meeting creation must bind exactly one meeting row",
+        });
+      }
+      const intentKeys = value.notificationIntents.map(
+        ({ recipientUserId, type, scheduledFor }) =>
+          `${recipientUserId}:${type}:${scheduledFor}`
+      );
+      if (new Set(intentKeys).size !== intentKeys.length) {
+        context.addIssue({
+          code: "custom",
+          message: "Meeting notification intents must be unique",
+        });
+      }
     }
   });
 
