@@ -47,6 +47,12 @@ function runSuites(suites: readonly string[]): number {
   // `--import` (not `--require`): node:test propagates it to the per-file child
   // processes, so the endpoint switch and the DATABASE_URL rewrite land before
   // any suite imports `@/db`.
+  //
+  // GitHub and the production runtime use UTC. Declare that same clock for the
+  // children instead of inheriting a laptop's local zone: PostgreSQL columns
+  // modelled as `timestamp without time zone` otherwise round-trip through the
+  // Neon driver with a local offset, so expiry and compare-and-set predicates
+  // can disagree with the value the preceding read returned.
   const result = spawnSync(
     process.execPath,
     [
@@ -57,7 +63,11 @@ function runSuites(suites: readonly string[]): number {
       "--test",
       ...suites,
     ],
-    { cwd: REPO_ROOT, stdio: "inherit" }
+    {
+      cwd: REPO_ROOT,
+      env: { ...process.env, TZ: "UTC" },
+      stdio: "inherit",
+    }
   );
 
   if (result.error) throw result.error;
