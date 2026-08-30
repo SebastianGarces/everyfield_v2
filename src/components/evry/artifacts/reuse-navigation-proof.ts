@@ -116,6 +116,20 @@ mock.module("next/link", { defaultExport: MockLink });
 mock.module("@/components/header/header-context", {
   namedExports: { useHeader: () => ({ breadcrumbs: [] }) },
 });
+mock.module("@/components/feedback/feedback-button", {
+  namedExports: { FeedbackButton: () => null },
+});
+mock.module("@/components/header/mobile-sidebar-trigger", {
+  namedExports: { MobileSidebarTrigger: () => null },
+});
+mock.module("@/components/logo", {
+  namedExports: {
+    Mark: (props: Record<string, unknown>) => createElement("svg", props),
+  },
+});
+mock.module("@/components/nav-user", {
+  namedExports: { NavUser: () => null },
+});
 
 function memoryStorage(): Storage {
   const values = new Map<string, string>();
@@ -266,7 +280,9 @@ test("reuse owns delayed workspace navigation and ignores completion after depar
     }
   );
   const { EvryShell, useEvryShell } = await import("../evry-shell");
-  const { EvryLink } = await import("../navigation-intent");
+  const { AuthenticatedLink } =
+    await import("@/components/authenticated-navigation");
+  const { GlobalAppBar } = await import("@/components/header/global-app-bar");
   const { useRouter } = await import("next/navigation");
   function MountedWorkspace() {
     const current = useEvryShell();
@@ -289,7 +305,7 @@ test("reuse owns delayed workspace navigation and ignores completion after depar
         "data-start": current.startRecipeReuse,
       }),
       createElement(
-        EvryLink,
+        AuthenticatedLink,
         {
           id: "control-disabled-link",
           href: "/evry?new=1",
@@ -300,12 +316,12 @@ test("reuse owns delayed workspace navigation and ignores completion after depar
         "New"
       ),
       createElement(
-        EvryLink,
+        AuthenticatedLink,
         { id: "control-modified-link", href: "/dashboard" },
         "Modified"
       ),
       createElement(
-        EvryLink,
+        AuthenticatedLink,
         {
           id: "control-new-context-link",
           href: "/dashboard",
@@ -314,12 +330,12 @@ test("reuse owns delayed workspace navigation and ignores completion after depar
         "New context"
       ),
       createElement(
-        EvryLink,
+        AuthenticatedLink,
         { id: "control-hash-link", href: "#receipt" },
         "Receipt"
       ),
       createElement(
-        EvryLink,
+        AuthenticatedLink,
         {
           id: "control-download-link",
           href: "/download",
@@ -340,7 +356,7 @@ test("reuse owns delayed workspace navigation and ignores completion after depar
         createElement("button", { type: "submit" })
       ),
       createElement(
-        EvryLink,
+        AuthenticatedLink,
         {
           id: "control-prevented-navigation",
           href: "/dashboard",
@@ -349,16 +365,26 @@ test("reuse owns delayed workspace navigation and ignores completion after depar
         },
         "Prevented navigation"
       ),
-      createElement(
-        EvryLink,
-        { id: "control-proceeding-link", href: "/dashboard" },
-        "Dashboard"
-      ),
       createElement("button", {
         id: "control-programmatic-current",
         onClick: () =>
           navigation.push(`/evry?conversation=${SOURCE_ID}#receipt`),
       })
+    );
+  }
+  function ShellChildren() {
+    return createElement(
+      "main",
+      null,
+      createElement(GlobalAppBar, {
+        shell: { label: "Church Planting", homeHref: "/dashboard" },
+        user: {
+          name: "Planter",
+          email: "planter@example.test",
+          initials: "P",
+        },
+      }),
+      createElement(MountedWorkspace)
     );
   }
   let renderer: ReactTestRenderer | null = null;
@@ -367,7 +393,7 @@ test("reuse owns delayed workspace navigation and ignores completion after depar
       createElement(EvryShell, {
         enabled: true,
         eligibleSuggestions: [],
-        children: createElement(MountedWorkspace),
+        children: createElement(ShellChildren),
       })
     );
   });
@@ -474,8 +500,13 @@ test("reuse owns delayed workspace navigation and ignores completion after depar
       "product onNavigate revokes reuse before Next direct dispatch"
     );
   };
+  const globalAppBrand = mounted.root
+    .findAllByProps({
+      "aria-label": "EveryField — Church Planting home",
+    })
+    .at(-1)!;
   await act(async () => {
-    control("proceeding-link").props.onClick(clickEvent());
+    globalAppBrand.props.onClick(clickEvent());
   });
   beforeDirectLinkDispatch = null;
   assert.equal(
@@ -528,7 +559,7 @@ test("reuse owns delayed workspace navigation and ignores completion after depar
       createElement(EvryShell, {
         enabled: true,
         eligibleSuggestions: [],
-        children: createElement(MountedWorkspace),
+        children: createElement(ShellChildren),
       })
     );
   });

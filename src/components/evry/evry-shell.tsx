@@ -18,6 +18,7 @@ import {
 } from "react";
 
 import { useHeader } from "@/components/header/header-context";
+import { AuthenticatedNavigationIntentProvider } from "@/components/authenticated-navigation";
 
 import type { PublicEvryConversation } from "./client-contract";
 import {
@@ -74,7 +75,6 @@ import {
   type EvryRunRecoveryMarker,
 } from "./streaming/run-recovery";
 import { requestEvryRecipeReuse } from "./artifacts/reuse-request";
-import { EvryNavigationIntentProvider } from "./navigation-intent";
 
 const EvryPanel = dynamic(() =>
   import("./evry-panel").then((module) => module.EvryPanel)
@@ -1462,10 +1462,10 @@ export function EvryShell({
   return (
     <EvryShellContext.Provider value={value}>
       <AppRouterContext.Provider value={navigationRouter}>
-        <EvryNavigationIntentProvider value={fenceRecipeReuseForHref}>
+        <AuthenticatedNavigationIntentProvider value={fenceRecipeReuseForHref}>
           {children}
           {enabled && hasOpenedPanel ? <EvryPanel /> : null}
-        </EvryNavigationIntentProvider>
+        </AuthenticatedNavigationIntentProvider>
       </AppRouterContext.Provider>
     </EvryShellContext.Provider>
   );

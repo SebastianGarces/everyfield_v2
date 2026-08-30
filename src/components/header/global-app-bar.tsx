@@ -1,8 +1,8 @@
 "use client";
 
-import Link from "next/link";
 import type { ReactNode } from "react";
 
+import { AuthenticatedLink } from "@/components/authenticated-navigation";
 import { FeedbackButton } from "@/components/feedback/feedback-button";
 import { Mark } from "@/components/logo";
 import { NavUser } from "@/components/nav-user";
@@ -40,14 +40,14 @@ export function GlobalAppBar({ shell, user, children }: GlobalAppBarProps) {
         className="flex min-w-0 items-center gap-1 md:w-64 md:shrink-0"
       >
         <MobileSidebarTrigger />
-        <Link
+        <AuthenticatedLink
           href={shell.homeHref}
           aria-label={`EveryField — ${shell.label} home`}
           className="focus-visible:ring-app-bar-foreground/80 flex min-w-0 cursor-pointer items-center gap-2 rounded-sm px-1.5 py-1 text-sm font-medium whitespace-nowrap focus-visible:ring-2 focus-visible:outline-none"
         >
           <Mark className="text-app-bar-logo w-6 shrink-0" />
           <span className="truncate">{shell.label}</span>
-        </Link>
+        </AuthenticatedLink>
       </div>
 
       <div className="flex shrink-0 items-center gap-0.5 sm:gap-1">
