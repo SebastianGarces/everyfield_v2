@@ -72,6 +72,7 @@ export const LIVE_SUITES = [
   "src/lib/invitations/seat-invitations-live.test.ts",
   "src/lib/launch/readiness-converge-live.test.ts",
   "src/lib/people/person-link-live.test.ts",
+  "src/lib/evry/capabilities/plant-intelligence/effect-live.test.ts",
   "src/lib/phase-engine/transitions/declaration-race.test.ts",
   "src/lib/seats/seat-removal-live.test.ts",
   "src/lib/tasks/follow-up-race.test.ts",

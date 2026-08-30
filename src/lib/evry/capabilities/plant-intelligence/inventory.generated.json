@@ -1,0 +1,493 @@
+{
+  "schemaVersion": 1,
+  "generatedBy": "pnpm evry:plant-intelligence-inventory",
+  "authoritativeSources": {
+    "actions": "src/lib/auth/capability-map.ts",
+    "route": "src/app/(dashboard)/phase/page.tsx",
+    "rscOperations": "AST-discovered awaited imports and concrete tables in the /phase RSC graph"
+  },
+  "capabilities": [
+    {
+      "identity": "plant-intelligence.assessments.acknowledge",
+      "surfaceIdentities": [
+        "rsc-operation:src/app/(dashboard)/phase/page.tsx → markAssessmentSeenByPlanter"
+      ],
+      "parityCapability": "plant-intelligence",
+      "domain": "assessments",
+      "operationKind": "effect",
+      "applicationCapability": "phase.declare",
+      "confirmation": "required",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "plant-intelligence.assessments.read",
+      "surfaceIdentities": [
+        "route:/phase",
+        "rsc-operation:src/app/(dashboard)/phase/page.tsx → getLatestAssessment",
+        "rsc-operation:src/components/phase-engine/insight-card.tsx → getPublishedArticleRefs"
+      ],
+      "parityCapability": "plant-intelligence",
+      "domain": "assessments",
+      "operationKind": "read",
+      "applicationCapability": "phase.declare",
+      "confirmation": "not_required",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "plant-intelligence.attestations.read",
+      "surfaceIdentities": [
+        "rsc-operation:src/app/(dashboard)/phase/page.tsx → listManualSignals"
+      ],
+      "parityCapability": "plant-intelligence",
+      "domain": "attestations",
+      "operationKind": "read",
+      "applicationCapability": "phase.declare",
+      "confirmation": "not_required",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "plant-intelligence.attestations.set",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/phase/signals-actions.ts → setManualSignalAction"
+      ],
+      "parityCapability": "plant-intelligence",
+      "domain": "attestations",
+      "operationKind": "effect",
+      "applicationCapability": "phase.signal",
+      "confirmation": "required",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "plant-intelligence.checkins.read",
+      "surfaceIdentities": [
+        "rsc-operation:src/app/(dashboard)/phase/page.tsx → listRecentCheckins"
+      ],
+      "parityCapability": "plant-intelligence",
+      "domain": "signals",
+      "operationKind": "read",
+      "applicationCapability": "phase.declare",
+      "confirmation": "not_required",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "plant-intelligence.checkins.save",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/phase/checkin-actions.ts → saveCheckinAction"
+      ],
+      "parityCapability": "plant-intelligence",
+      "domain": "signals",
+      "operationKind": "effect",
+      "applicationCapability": "phase.signal",
+      "confirmation": "required",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "plant-intelligence.declarations.read",
+      "surfaceIdentities": [
+        "rsc-operation:src/app/(dashboard)/phase/page.tsx → db.from(churches)"
+      ],
+      "parityCapability": "plant-intelligence",
+      "domain": "declarations",
+      "operationKind": "read",
+      "applicationCapability": "phase.declare",
+      "confirmation": "not_required",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "plant-intelligence.declarations.transition",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/phase/actions.ts → transitionPhaseAction"
+      ],
+      "parityCapability": "plant-intelligence",
+      "domain": "declarations",
+      "operationKind": "effect",
+      "applicationCapability": "phase.declare",
+      "confirmation": "required",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "plant-intelligence.feedback.read",
+      "surfaceIdentities": [
+        "rsc-operation:src/app/(dashboard)/phase/page.tsx → db.from(insightFeedback)"
+      ],
+      "parityCapability": "plant-intelligence",
+      "domain": "feedback",
+      "operationKind": "read",
+      "applicationCapability": "phase.declare",
+      "confirmation": "not_required",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "plant-intelligence.feedback.submit",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/phase/feedback-actions.ts → submitInsightFeedbackAction"
+      ],
+      "parityCapability": "plant-intelligence",
+      "domain": "feedback",
+      "operationKind": "effect",
+      "applicationCapability": "self.write",
+      "confirmation": "required",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "plant-intelligence.signals.read",
+      "surfaceIdentities": [
+        "rsc-operation:src/app/(dashboard)/phase/page.tsx → getMilestoneTimeline",
+        "rsc-operation:src/app/(dashboard)/phase/page.tsx → getPhaseReadiness",
+        "rsc-operation:src/app/(dashboard)/phase/page.tsx → getPlantTrends"
+      ],
+      "parityCapability": "plant-intelligence",
+      "domain": "signals",
+      "operationKind": "read",
+      "applicationCapability": "phase.declare",
+      "confirmation": "not_required",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    }
+  ],
+  "entries": [
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/phase/actions.ts → transitionPhaseAction",
+      "source": "src/app/(dashboard)/phase/actions.ts",
+      "exportName": "transitionPhaseAction",
+      "capabilityIdentity": "plant-intelligence.declarations.transition",
+      "domain": "declarations",
+      "operationKind": "effect",
+      "applicationCapability": "phase.declare",
+      "confirmation": "required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/phase/checkin-actions.ts → saveCheckinAction",
+      "source": "src/app/(dashboard)/phase/checkin-actions.ts",
+      "exportName": "saveCheckinAction",
+      "capabilityIdentity": "plant-intelligence.checkins.save",
+      "domain": "signals",
+      "operationKind": "effect",
+      "applicationCapability": "phase.signal",
+      "confirmation": "required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/phase/feedback-actions.ts → submitInsightFeedbackAction",
+      "source": "src/app/(dashboard)/phase/feedback-actions.ts",
+      "exportName": "submitInsightFeedbackAction",
+      "capabilityIdentity": "plant-intelligence.feedback.submit",
+      "domain": "feedback",
+      "operationKind": "effect",
+      "applicationCapability": "self.write",
+      "confirmation": "required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/phase/signals-actions.ts → setManualSignalAction",
+      "source": "src/app/(dashboard)/phase/signals-actions.ts",
+      "exportName": "setManualSignalAction",
+      "capabilityIdentity": "plant-intelligence.attestations.set",
+      "domain": "attestations",
+      "operationKind": "effect",
+      "applicationCapability": "phase.signal",
+      "confirmation": "required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/phase",
+      "source": "src/app/(dashboard)/phase/page.tsx",
+      "exportName": null,
+      "capabilityIdentity": "plant-intelligence.assessments.read",
+      "domain": "assessments",
+      "operationKind": "read",
+      "applicationCapability": "phase.declare",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc-operation:src/app/(dashboard)/phase/page.tsx → and",
+      "source": "src/app/(dashboard)/phase/page.tsx",
+      "exportName": "and",
+      "capabilityIdentity": null,
+      "domain": "boundary",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": { "state": "excluded", "reason": "query_builder" }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc-operation:src/app/(dashboard)/phase/page.tsx → db.from(churches)",
+      "source": "src/app/(dashboard)/phase/page.tsx",
+      "exportName": "db.from(churches)",
+      "capabilityIdentity": "plant-intelligence.declarations.read",
+      "domain": "declarations",
+      "operationKind": "read",
+      "applicationCapability": "phase.declare",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc-operation:src/app/(dashboard)/phase/page.tsx → db.from(insightFeedback)",
+      "source": "src/app/(dashboard)/phase/page.tsx",
+      "exportName": "db.from(insightFeedback)",
+      "capabilityIdentity": "plant-intelligence.feedback.read",
+      "domain": "feedback",
+      "operationKind": "read",
+      "applicationCapability": "phase.declare",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc-operation:src/app/(dashboard)/phase/page.tsx → db.select",
+      "source": "src/app/(dashboard)/phase/page.tsx",
+      "exportName": "db.select",
+      "capabilityIdentity": null,
+      "domain": "boundary",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": { "state": "excluded", "reason": "query_builder" }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc-operation:src/app/(dashboard)/phase/page.tsx → eq",
+      "source": "src/app/(dashboard)/phase/page.tsx",
+      "exportName": "eq",
+      "capabilityIdentity": null,
+      "domain": "boundary",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": { "state": "excluded", "reason": "query_builder" }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc-operation:src/app/(dashboard)/phase/page.tsx → getLatestAssessment",
+      "source": "src/app/(dashboard)/phase/page.tsx",
+      "exportName": "getLatestAssessment",
+      "capabilityIdentity": "plant-intelligence.assessments.read",
+      "domain": "assessments",
+      "operationKind": "read",
+      "applicationCapability": "phase.declare",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc-operation:src/app/(dashboard)/phase/page.tsx → getMilestoneTimeline",
+      "source": "src/app/(dashboard)/phase/page.tsx",
+      "exportName": "getMilestoneTimeline",
+      "capabilityIdentity": "plant-intelligence.signals.read",
+      "domain": "signals",
+      "operationKind": "read",
+      "applicationCapability": "phase.declare",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc-operation:src/app/(dashboard)/phase/page.tsx → getPhaseReadiness",
+      "source": "src/app/(dashboard)/phase/page.tsx",
+      "exportName": "getPhaseReadiness",
+      "capabilityIdentity": "plant-intelligence.signals.read",
+      "domain": "signals",
+      "operationKind": "read",
+      "applicationCapability": "phase.declare",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc-operation:src/app/(dashboard)/phase/page.tsx → getPlantTrends",
+      "source": "src/app/(dashboard)/phase/page.tsx",
+      "exportName": "getPlantTrends",
+      "capabilityIdentity": "plant-intelligence.signals.read",
+      "domain": "signals",
+      "operationKind": "read",
+      "applicationCapability": "phase.declare",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc-operation:src/app/(dashboard)/phase/page.tsx → inArray",
+      "source": "src/app/(dashboard)/phase/page.tsx",
+      "exportName": "inArray",
+      "capabilityIdentity": null,
+      "domain": "boundary",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": { "state": "excluded", "reason": "query_builder" }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc-operation:src/app/(dashboard)/phase/page.tsx → listManualSignals",
+      "source": "src/app/(dashboard)/phase/page.tsx",
+      "exportName": "listManualSignals",
+      "capabilityIdentity": "plant-intelligence.attestations.read",
+      "domain": "attestations",
+      "operationKind": "read",
+      "applicationCapability": "phase.declare",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc-operation:src/app/(dashboard)/phase/page.tsx → listRecentCheckins",
+      "source": "src/app/(dashboard)/phase/page.tsx",
+      "exportName": "listRecentCheckins",
+      "capabilityIdentity": "plant-intelligence.checkins.read",
+      "domain": "signals",
+      "operationKind": "read",
+      "applicationCapability": "phase.declare",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc-operation:src/app/(dashboard)/phase/page.tsx → markAssessmentSeenByPlanter",
+      "source": "src/app/(dashboard)/phase/page.tsx",
+      "exportName": "markAssessmentSeenByPlanter",
+      "capabilityIdentity": "plant-intelligence.assessments.acknowledge",
+      "domain": "assessments",
+      "operationKind": "effect",
+      "applicationCapability": "phase.declare",
+      "confirmation": "required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc-operation:src/app/(dashboard)/phase/page.tsx → verifySession",
+      "source": "src/app/(dashboard)/phase/page.tsx",
+      "exportName": "verifySession",
+      "capabilityIdentity": null,
+      "domain": "boundary",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "authentication_boundary"
+      }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc-operation:src/components/phase-engine/insight-card.tsx → getCurrentSession",
+      "source": "src/components/phase-engine/insight-card.tsx",
+      "exportName": "getCurrentSession",
+      "capabilityIdentity": null,
+      "domain": "boundary",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "authentication_boundary"
+      }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc-operation:src/components/phase-engine/insight-card.tsx → getPublishedArticleRefs",
+      "source": "src/components/phase-engine/insight-card.tsx",
+      "exportName": "getPublishedArticleRefs",
+      "capabilityIdentity": "plant-intelligence.assessments.read",
+      "domain": "assessments",
+      "operationKind": "read",
+      "applicationCapability": "phase.declare",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    }
+  ],
+  "summary": {
+    "actions": 4,
+    "routes": 1,
+    "rscOperations": 16,
+    "exclusions": 6,
+    "readCapabilities": 6,
+    "effectCapabilities": 5,
+    "unclassified": 0
+  }
+}

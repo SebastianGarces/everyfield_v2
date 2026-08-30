@@ -253,8 +253,7 @@ test("§4 `deferred` is in the vocabulary, and the CHECK is the vocabulary", () 
 
 // EVERY module in `src/` that filters on the column, enumerated so a NEW reader
 // fails this test until somebody has answered the question for it, rather than
-// joining the codebase with an unexamined `!= 'complete'`. Four filters across
-// two modules today:
+// joining the codebase with an unexamined `!= 'complete'`.
 //
 //   queries.ts — `getLatestAssessment`, `getLatestCompleteSnapshot` and
 //                `selectPlantsForAssessment`. The third is why a deferred plant
@@ -262,12 +261,18 @@ test("§4 `deferred` is in the vocabulary, and the CHECK is the vocabulary", () 
 //                latest-per-church map, so the plant still looks
 //                never-assessed and `filterDirtyOrStale` includes it.
 //   trends.ts  — `readSnapshotHistory`, the four trend series.
+//   Plant Intelligence reads/effects/page-context — only complete assessments
+//                are eligible for retrieval, acknowledgement, feedback, and
+//                source-context handoff.
 //
 // The WRITER (`generate-assessment.ts`) sets the column through a
 // `.set({ status })` key, but it also NAMES it once — the `status = 'pending'`
 // compare-and-set that stops a completed run being demoted — so it is in the
 // scan and gets its own expectation below rather than the readers' one.
 const STATUS_READERS = [
+  "src/lib/evry/capabilities/plant-intelligence/effects.ts",
+  "src/lib/evry/capabilities/plant-intelligence/reads.ts",
+  "src/lib/evry/resolvers/page-context.ts",
   "src/lib/phase-engine/assessment/queries.ts",
   "src/lib/phase-engine/signals/trends.ts",
 ];
