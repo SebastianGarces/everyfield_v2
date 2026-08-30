@@ -552,8 +552,19 @@ export function createCommunicationEvryMessageExecutions(
           communicationId: parsed.data.communicationId,
           audience: parsed.data.audience,
         });
+        const currentNonOpeners =
+          frozenState === "started"
+            ? new Set(
+                (
+                  await getNonOpenerSummary(
+                    input.authorization.actor.plantId,
+                    parsed.data.source.id
+                  )
+                ).personIds
+              )
+            : null;
         if (
-          frozenState !== "started" &&
+          !currentNonOpeners &&
           !(await resendAudienceIsCurrent({
             actor: input.authorization.actor,
             source: parsed.data.source,
@@ -568,7 +579,8 @@ export function createCommunicationEvryMessageExecutions(
           identity: COMMUNICATION_RESEND_NON_OPENERS_IDENTITY,
           communicationId: parsed.data.communicationId,
           audience: parsed.data.audience,
-          eligiblePersonIds: new Set(parsed.data.nonOpenerPersonIds),
+          eligiblePersonIds:
+            currentNonOpeners ?? new Set(parsed.data.nonOpenerPersonIds),
           mailer: dependencies.mailer,
         });
       } catch {

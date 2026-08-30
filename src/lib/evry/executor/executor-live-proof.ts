@@ -554,7 +554,7 @@ async function main(): Promise<void> {
   const communicationPeople = await db
     .insert(persons)
     .values(
-      ["First", "Second"].map((firstName) => ({
+      ["First", "Second", "Third"].map((firstName) => ({
         churchId: sessionUser!.churchId!,
         firstName,
         lastName: "Authority recovery",
@@ -562,8 +562,8 @@ async function main(): Promise<void> {
         createdBy: sessionUser!.id,
       }))
     )
-    .returning({ id: persons.id });
-  assert.equal(communicationPeople.length, 2);
+    .returning({ id: persons.id, email: persons.email });
+  assert.equal(communicationPeople.length, 3);
   const communicationAudience =
     await communicationSend.resolveEvryCommunicationAudience({
       churchId: sessionUser.churchId,
@@ -632,6 +632,15 @@ async function main(): Promise<void> {
     "authority loss must not turn a prepared batch into a durable refusal"
   );
 
+  const driftedUnsentPerson = communicationPeople.find(
+    ({ email }) => email !== communicationProviderCalls[0]
+  );
+  assert.ok(driftedUnsentPerson);
+  await db
+    .update(persons)
+    .set({ email: `drifted-${randomUUID()}@scratch.invalid` })
+    .where(eq(persons.id, driftedUnsentPerson.id));
+
   const untilExpired = communicationPlan.expiresAt.getTime() - Date.now();
   if (untilExpired >= 0) {
     await new Promise((resolve) => setTimeout(resolve, untilExpired + 100));
@@ -654,15 +663,18 @@ async function main(): Promise<void> {
     )
       .map(({ status }) => status)
       .toSorted(),
-    ["sent", "sent"]
+    ["failed", "sent", "sent"]
   );
-  assert.equal(
+  assert.deepEqual(
     await db
-      .select({ id: evryExecutionEffectClaims.id })
+      .select({
+        affectedCount: evryExecutionEffectClaims.affectedCount,
+        excludedCount: evryExecutionEffectClaims.excludedCount,
+      })
       .from(evryExecutionEffectClaims)
       .where(eq(evryExecutionEffectClaims.planId, communicationPlan.id))
-      .then((rows) => rows.length),
-    1
+      .then((rows) => rows),
+    [{ affectedCount: 2, excludedCount: 1 }]
   );
   assert.equal((await response(post, communicationPlan)).status, 200);
   assert.equal(communicationProviderCalls.length, 2);
@@ -748,12 +760,34 @@ async function main(): Promise<void> {
         status: "pending" as const,
       }))
     ),
-    db
-      .update(users)
-      .set({ seat: "member" })
-      .where(eq(users.id, sessionUser.id)),
   ]);
+  const markerRaceSuffix = randomUUID().replaceAll("-", "");
+  const markerRaceFunction = `evry_marker_race_${markerRaceSuffix}`;
+  const markerRaceTrigger = `evry_marker_race_trigger_${markerRaceSuffix}`;
+  await db.execute(
+    sql.raw(`
+      create function ${markerRaceFunction}() returns trigger
+      language plpgsql as $marker_race$
+      begin
+        update users set seat = 'member'
+        where id = '${sessionUser.id}'::uuid;
+        return null;
+      end
+      $marker_race$
+    `)
+  );
+  await db.execute(
+    sql.raw(`
+      create trigger ${markerRaceTrigger}
+      before update on communication_recipients
+      for each statement execute function ${markerRaceFunction}()
+    `)
+  );
   const stagedUnauthorized = await response(post, stagedGroupPlan);
+  await db.execute(
+    sql.raw(`drop trigger ${markerRaceTrigger} on communication_recipients`)
+  );
+  await db.execute(sql.raw(`drop function ${markerRaceFunction}()`));
   assert.equal(stagedUnauthorized.status, 503);
   assert.equal(stagedUnauthorized.body.status, "retryable");
   assert.equal(communicationProviderCalls.length, 2);

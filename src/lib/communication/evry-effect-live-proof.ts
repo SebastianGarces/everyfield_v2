@@ -36,6 +36,7 @@ import { mintEvryPlanRequestKey } from "@/lib/evry/plans";
 import { recordAddressSuppression } from "@/lib/notifications/channels/suppression";
 
 import {
+  EVRY_COMMUNICATION_LOCAL_PREFIX,
   EVRY_COMMUNICATION_PERMANENT_PREFIX,
   type EvryCommunicationMailer,
   resolveEvryCommunicationAudience,
@@ -1034,7 +1035,7 @@ async function main(): Promise<void> {
   assert.equal(skipped?.externalId, null);
   assert.match(
     skipped?.errorMessage ?? "",
-    new RegExp(`^${EVRY_COMMUNICATION_PERMANENT_PREFIX}`)
+    new RegExp(`^${EVRY_COMMUNICATION_LOCAL_PREFIX}`)
   );
 
   const groupEmail = `${randomUUID()}@scratch.invalid`;

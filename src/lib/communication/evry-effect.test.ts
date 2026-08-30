@@ -26,8 +26,19 @@ test("Communication effects require one current admin-plus plant tenancy", () =>
   );
   assert.ok(
     send.match(/actorStillHoldsCommunicationSend\(input\.effect\.execution\)/g)
-      ?.length === 4,
-    "reconciliation, preparation, token rendering, and provider dispatch stay authority-gated"
+      ?.length === 3,
+    "reconciliation, preparation, and per-recipient rendering stay authority-gated"
+  );
+  assert.equal(
+    send.match(/currentCommunicationSendAuthority\(input\.effect\.execution\)/g)
+      ?.length,
+    1,
+    "local exclusions atomically require exact authority"
+  );
+  assert.match(
+    send,
+    /with eligible_actor as materialized[\s\S]*for update[\s\S]*update communication_recipients recipient[\s\S]*returning recipient\.id/,
+    "provider marker acquisition locks exact authority and requires the dispatchable row"
   );
   assert.match(
     send,
