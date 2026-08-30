@@ -39,6 +39,7 @@ import type { TaskEffectExport } from "./effect-contracts";
 import type { ResolvedTaskEffect } from "./resolver";
 import type { TaskEvryEffectSelection } from "./selection";
 import type { EvryReadRegistration } from "@/lib/evry/reads/contract";
+import type { TaskReadBoundaryName } from "./reads";
 
 const SESSION_ID = "7".repeat(64);
 const NOW = new Date("2026-08-29T12:00:00.000Z");
@@ -2089,7 +2090,41 @@ async function runReads(input: {
   foreignUserId: string;
   localTransitionId: string;
   foreignTransitionId: string;
+  withFailure: <Result>(
+    boundary: TaskReadBoundaryName,
+    run: () => Promise<Result>
+  ) => Promise<Result>;
 }) {
+  const backingReaders: Readonly<
+    Record<string, readonly TaskReadBoundaryName[]>
+  > = {
+    "tasks.list": ["readTaskListPage"],
+    "tasks.counts": ["getTaskCounts"],
+    "tasks.follow-up-ownership": [
+      "listFollowUpAssignees",
+      "listFollowUpContacts",
+      "listOpenFollowUpTasks",
+    ],
+    "tasks.detail": ["getTask", "listSubtasks", "listTaskPrerequisites"],
+    "tasks.detail.checklist": ["getTask", "listSubtasks"],
+    "tasks.detail.prerequisites": ["getTask", "listTaskPrerequisites"],
+    "tasks.phase-template-prompt": ["readPhaseTemplatePrompt"],
+    "tasks.planning-options": [
+      "getTask",
+      "plantAssigneeOptions",
+      "listPrerequisiteCandidates",
+    ],
+    "tasks.planning-options.assignees": [
+      "getTask",
+      "plantAssigneeOptions",
+      "listFollowUpAssignees",
+    ],
+    "tasks.planning-options.prerequisites": [
+      "getTask",
+      "listPrerequisiteCandidates",
+    ],
+    "tasks.templates": ["readPlantPhase"],
+  };
   for (const registration of input.registrations) {
     const invocation = {
       literalUserText: "Task read proof",
@@ -2107,28 +2142,85 @@ async function runReads(input: {
     assert.deepEqual(replay, first);
     console.log(`PASS ${registration.capabilityIdentity}:idempotency`);
 
-    assert.equal(
-      await registration.execute(invocation, { ...args, genericUrl: "/admin" }),
-      null
-    );
+    const readers = backingReaders[registration.id];
+    assert.ok(readers, `Missing backing-reader proof for ${registration.id}`);
+    for (const reader of readers) {
+      await assert.rejects(
+        () =>
+          input.withFailure(reader, async () => {
+            await registration.execute(invocation, args);
+          }),
+        new RegExp(`Forced Task read boundary failure: ${reader}`)
+      );
+    }
     console.log(`PASS ${registration.capabilityIdentity}:errors`);
 
-    const foreignAttempt =
-      registration.capabilityIdentity === READ_IDENTITIES.detail ||
-      registration.capabilityIdentity === READ_IDENTITIES.planning
-        ? await registration.execute(invocation, {
-            ...args,
-            taskId: input.foreignTaskId,
-          })
-        : first;
-    assert.ok(foreignAttempt);
+    const hostileArgs = (() => {
+      switch (registration.id) {
+        case "tasks.list":
+          return { ...args, cursor: input.foreignTaskId };
+        case "tasks.counts":
+          return { ...args, category: ["follow_up"] };
+        case "tasks.follow-up-ownership":
+          return {
+            section: "open_tasks",
+            cursor: input.foreignTaskId,
+          };
+        case "tasks.detail":
+        case "tasks.detail.checklist":
+        case "tasks.detail.prerequisites":
+        case "tasks.planning-options":
+          return { ...args, taskId: input.foreignTaskId };
+        case "tasks.planning-options.assignees":
+          return {
+            taskId: null,
+            search: "",
+            cursor: input.foreignUserId,
+          };
+        case "tasks.planning-options.prerequisites":
+          return {
+            taskId: null,
+            search: "",
+            cursor: input.foreignTaskId,
+          };
+        case "tasks.phase-template-prompt":
+        case "tasks.templates":
+          return args;
+        default:
+          throw new Error(
+            `Missing hostile Task read input: ${registration.id}`
+          );
+      }
+    })();
+    const foreignAttempt = await registration.execute(invocation, hostileArgs);
+    assert.ok(foreignAttempt?.kind === "read");
+    if (
+      registration.id === "tasks.list" ||
+      registration.id === "tasks.follow-up-ownership" ||
+      registration.id === "tasks.planning-options.assignees" ||
+      registration.id === "tasks.planning-options.prerequisites"
+    ) {
+      assert.equal(foreignAttempt.items.length, 0);
+      assert.equal(foreignAttempt.counts.excluded, 1);
+    }
+    if (
+      registration.id === "tasks.detail" ||
+      registration.id === "tasks.detail.checklist" ||
+      registration.id === "tasks.detail.prerequisites" ||
+      registration.id === "tasks.planning-options"
+    ) {
+      assert.equal(foreignAttempt.title, "Task unavailable");
+      assert.equal(foreignAttempt.items.length, 0);
+    }
     const serialized = JSON.stringify(foreignAttempt);
     if (registration.capabilityIdentity === READ_IDENTITIES.phasePrompt) {
       assert.match(serialized, new RegExp(input.localTransitionId));
     }
     assert.doesNotMatch(serialized, new RegExp(input.foreignTransitionId));
     assert.doesNotMatch(serialized, new RegExp(input.foreignTaskTitle));
-    assert.doesNotMatch(serialized, new RegExp(input.foreignUserId));
+    if (registration.id !== "tasks.planning-options.assignees") {
+      assert.doesNotMatch(serialized, new RegExp(input.foreignUserId));
+    }
     console.log(`PASS ${registration.capabilityIdentity}:tenancy`);
   }
 }
@@ -2194,9 +2286,11 @@ async function runListCursorProof(input: {
       .at(-1)
       ?.filters.find(({ label }) => label === "Next page cursor")?.value;
     if (!nextCursor || nextCursor === "End of results") break;
+    const nextCommand = filterValue(pages.at(-1)!, "Next page command");
+    assert.ok(nextCommand && nextCommand !== "End of results");
     const next = await input.continueRead({
       eligibleCapabilities: input.eligibleCapabilities,
-      literalUserText: `Load more all tasks after ${nextCursor}`,
+      literalUserText: nextCommand,
       pageContext: null,
     });
     assert.ok(next?.kind === "read");
@@ -2214,6 +2308,121 @@ async function runListCursorProof(input: {
   assert.equal(new Set(observedIds).size, observedIds.length);
   assert.ok(seeded.every(({ id }) => observedIds.includes(id)));
   console.log("PASS tasks.read.list:cursor-pagination");
+}
+
+async function runExactListCursorAvailabilityProof(input: {
+  actor: EvryPlantActor;
+  registration: EvryReadRegistration;
+  foreignTaskId: string;
+}) {
+  const [completed, wrongCategory, valid] = await Promise.all([
+    seedTask({
+      plantId: input.actor.plantId,
+      actorId: input.actor.userId,
+      status: "complete",
+      category: "general",
+    }),
+    seedTask({
+      plantId: input.actor.plantId,
+      actorId: input.actor.userId,
+      category: "follow_up",
+    }),
+    seedTask({
+      plantId: input.actor.plantId,
+      actorId: input.actor.userId,
+      category: "general",
+    }),
+  ]);
+  const invocation = {
+    literalUserText: "Task exact cursor proof",
+    pageContext: null,
+  } as const;
+  const unavailableCases = [
+    {
+      label: "foreign",
+      cursor: input.foreignTaskId,
+      showCompleted: true,
+      category: [] as string[],
+    },
+    {
+      label: "missing",
+      cursor: randomUUID(),
+      showCompleted: true,
+      category: [] as string[],
+    },
+    {
+      label: "completed-hidden",
+      cursor: completed.id,
+      showCompleted: false,
+      category: [] as string[],
+    },
+    {
+      label: "wrong-category",
+      cursor: wrongCategory.id,
+      showCompleted: true,
+      category: ["general"],
+    },
+  ];
+  for (const fixture of unavailableCases) {
+    const artifact = await input.registration.execute(invocation, {
+      view: "all",
+      showCompleted: fixture.showCompleted,
+      status: [],
+      priority: [],
+      category: fixture.category,
+      cursor: fixture.cursor,
+    });
+    assert.ok(artifact?.kind === "read", fixture.label);
+    assert.equal(artifact.title, "Task list cursor unavailable", fixture.label);
+    assert.deepEqual(artifact.items, [], fixture.label);
+    assert.equal(artifact.counts.excluded, 1, fixture.label);
+  }
+  const available = await input.registration.execute(invocation, {
+    view: "all",
+    showCompleted: true,
+    status: [],
+    priority: [],
+    category: ["general"],
+    cursor: valid.id,
+  });
+  assert.ok(available?.kind === "read");
+  assert.equal(available.title, "Tasks");
+  await db
+    .delete(tasks)
+    .where(inArray(tasks.id, [completed.id, wrongCategory.id, valid.id]));
+  console.log("PASS tasks.read.list:exact-filter-cursor-availability");
+}
+
+async function runClosedTaskFilterProof(input: {
+  continueRead: EvryReadContinuation;
+  eligibleCapabilities: readonly EvryCapabilityRegistration[];
+}) {
+  const list = await input.continueRead({
+    eligibleCapabilities: input.eligibleCapabilities,
+    literalUserText:
+      "Show tasks: view=all; completed=true; status=in_progress,blocked; priority=urgent,high; category=follow_up,launch_prep",
+    pageContext: null,
+  });
+  assert.ok(list?.kind === "read");
+  assert.equal(filterValue(list, "View"), "all");
+  assert.equal(filterValue(list, "Completed"), "Included");
+  assert.equal(filterValue(list, "Statuses"), "in_progress, blocked");
+  assert.equal(filterValue(list, "Priorities"), "urgent, high");
+  assert.equal(filterValue(list, "Categories"), "follow_up, launch_prep");
+
+  const counts = await input.continueRead({
+    eligibleCapabilities: input.eligibleCapabilities,
+    literalUserText:
+      "Show task counts: view=all; status=in_progress,blocked; priority=urgent,high; category=follow_up,launch_prep",
+    pageContext: null,
+  });
+  assert.ok(counts?.kind === "read");
+  assert.equal(filterValue(counts, "View"), "all");
+  assert.equal(filterValue(counts, "Statuses"), "in_progress, blocked");
+  assert.equal(filterValue(counts, "Priorities"), "urgent, high");
+  assert.equal(filterValue(counts, "Categories"), "follow_up, launch_prep");
+  console.log("PASS tasks.read.list:closed-filter-tuple");
+  console.log("PASS tasks.read.counts:closed-filter-tuple");
 }
 
 function filterValue(
@@ -2514,6 +2723,7 @@ async function main() {
       createdById: seeded.foreignUserId,
       assignedToId: seeded.foreignUserId,
       title: foreignTaskTitle,
+      category: "follow_up",
     })
     .returning({ id: tasks.id });
   const [foreignPerson] = await db
@@ -2579,6 +2789,7 @@ async function main() {
     foreignUserId: seeded.foreignUserId,
     localTransitionId: localTransition.id,
     foreignTransitionId: foreignTransition.id,
+    withFailure: reads.withTaskReadProofFailure,
   });
   await runUncoveredFollowUpContactProof({
     actor,
@@ -2589,6 +2800,15 @@ async function main() {
     continueRead: reads.continueTaskEvryRead,
     eligibleCapabilities: eligibility.eligibleEvryCapabilitiesFor(actor),
     registration: reads.TASK_LIST_READ,
+  });
+  await runExactListCursorAvailabilityProof({
+    actor,
+    registration: reads.TASK_LIST_READ,
+    foreignTaskId: foreignTask!.id,
+  });
+  await runClosedTaskFilterProof({
+    continueRead: reads.continueTaskEvryRead,
+    eligibleCapabilities: eligibility.eligibleEvryCapabilitiesFor(actor),
   });
   await runRelatedReadCursorProof({
     actor,
