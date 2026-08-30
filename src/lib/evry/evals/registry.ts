@@ -4,6 +4,7 @@ import {
   SEND_MESSAGE_IDENTITY,
 } from "@/lib/evry/recipes/fixtures.test-helper";
 import communicationInventory from "@/lib/evry/capabilities/communication/inventory.generated.json";
+import { MEETINGS_CAPABILITY_EVAL_FIXTURES } from "@/lib/evry/capabilities/meetings/eval-fixtures";
 
 import {
   defineEvryCapabilityEvalFixture,
@@ -65,6 +66,12 @@ export const EVRY_EVAL_PROOFS: readonly EvryEvalProof[] = Object.freeze([
     safetyGates: [],
   },
   {
+    id: "meetings-capability-contract",
+    testFile: "src/lib/evry/capabilities/meetings/effect-contracts.test.ts",
+    lane: "deterministic",
+    safetyGates: [],
+  },
+  {
     id: "communication-effect-live",
     testFile: "src/lib/communication/evry-effect-live.test.ts",
     lane: "live_database",
@@ -75,6 +82,24 @@ export const EVRY_EVAL_PROOFS: readonly EvryEvalProof[] = Object.freeze([
     testFile: "src/lib/people/evry-effect-live.test.ts",
     lane: "live_database",
     safetyGates: ["cross_tenant_access"],
+  },
+  {
+    id: "meetings-selection",
+    testFile: "src/lib/evry/capabilities/meetings/selection.test.ts",
+    lane: "deterministic",
+    safetyGates: [],
+  },
+  {
+    id: "meetings-read-live",
+    testFile: "src/lib/evry/capabilities/meetings/read-live.test.ts",
+    lane: "live_database",
+    safetyGates: ["cross_tenant_access"],
+  },
+  {
+    id: "meetings-effect-live",
+    testFile: "src/lib/evry/capabilities/meetings/effect-live.test.ts",
+    lane: "live_database",
+    safetyGates: ["cross_tenant_access", "unconfirmed_effect"],
   },
   {
     id: "candidate-plan-probe-contract",
@@ -234,12 +259,16 @@ export const EVRY_CAPABILITY_EVAL_FIXTURES = Object.freeze([
       (identity) =>
         !communicationInventory.capabilities.some(
           (capability) => capability.identity === identity
+        ) &&
+        !MEETINGS_CAPABILITY_EVAL_FIXTURES.some(
+          (fixture) => fixture.capabilityIdentity === identity
         )
     )
     .map(capabilityFixture),
   ...communicationInventory.capabilities.map(({ identity, operationKind }) =>
     communicationCapabilityFixture(identity, operationKind)
   ),
+  ...MEETINGS_CAPABILITY_EVAL_FIXTURES,
   ...PEOPLE_CAPABILITY_EVAL_FIXTURES,
 ]);
 
