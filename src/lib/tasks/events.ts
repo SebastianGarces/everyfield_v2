@@ -15,6 +15,7 @@ import { meetingFinalizationTaskAssigneeId } from "@/lib/meetings/finalization";
 import { addCalendarDays } from "@/lib/datetime";
 
 import { syncTaskNotificationsFor } from "./notifications";
+import { exactTaskAssigneeJoin } from "./assignees";
 
 // ============================================================================
 // Event Types
@@ -307,7 +308,7 @@ export async function handleMeetingAttendanceFinalized(
   const planter = await db
     .select({ id: users.id })
     .from(users)
-    .where(and(eq(users.churchId, churchId), eq(users.seat, "owner")))
+    .where(and(exactTaskAssigneeJoin(churchId), eq(users.seat, "owner")))
     .limit(1);
   const planterId = meetingFinalizationTaskAssigneeId({
     meetingType,

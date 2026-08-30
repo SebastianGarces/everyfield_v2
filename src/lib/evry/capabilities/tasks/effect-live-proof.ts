@@ -694,6 +694,91 @@ async function runEffect(input: {
   console.log(`PASS ${execution.capabilityIdentity}:idempotency`);
 }
 
+async function runDualTenancyAssigneeRefusal(input: {
+  actor: EvryPlantActor;
+  memberId: string;
+  resolve: typeof import("./resolver").resolveTaskEvryEffect;
+  mintRequestKey: () => EvryPlanRequestKey;
+  authorize: typeof import("@/lib/evry/eligibility/capabilities").authorizeEvryEffectCapability;
+  effectKey: typeof import("@/lib/evry/audit/identity").executionEffectKey;
+  execute: typeof import("./atomic-effect").executeTaskEffect;
+}) {
+  const person = await seedContact(input.actor.plantId, input.actor.userId);
+  const resolved = await input.resolve({
+    actor: input.actor,
+    selection: {
+      kind: "effect",
+      exportName: "createAndAssignFollowUpAction",
+      values: {
+        personId: person.id,
+        personName: "Dual tenancy target",
+        assigneeId: input.memberId,
+      },
+    },
+    pageContext: null,
+    requestKey: input.mintRequestKey(),
+    now: NOW,
+  });
+  assert.ok(resolved);
+  const execution = await seedExecution({ actor: input.actor, resolved });
+  const authorization = await input.authorize(execution.capabilityIdentity);
+  assert.ok(authorization);
+  const effectKey = input.effectKey(
+    execution.planId,
+    execution.fingerprint,
+    execution.stepId
+  );
+  const [competingTenancy] = await db
+    .insert(sendingChurches)
+    .values({ name: `${SCRATCH} target competing tenancy` })
+    .returning({ id: sendingChurches.id });
+  assert.ok(competingTenancy);
+
+  await db
+    .update(users)
+    .set({ sendingChurchId: competingTenancy.id })
+    .where(eq(users.id, input.memberId));
+  try {
+    assert.deepEqual(
+      await input.execute({
+        authorization,
+        execution,
+        effectKey,
+        arguments: resolved.arguments,
+      }),
+      { status: "refused", excludedCount: 1 }
+    );
+  } finally {
+    await db
+      .update(users)
+      .set({ sendingChurchId: null })
+      .where(eq(users.id, input.memberId));
+  }
+
+  const plannedIds = resolved.arguments.taskWrites.map(({ taskId }) => taskId);
+  assert.equal(
+    (
+      await db
+        .select({ id: tasks.id })
+        .from(tasks)
+        .where(inArray(tasks.id, plannedIds))
+    ).length,
+    0,
+    "a dual-tenancy assignee target reached the Task table"
+  );
+  assert.equal(
+    (
+      await db
+        .select({ id: evryExecutionOutcomes.id })
+        .from(evryExecutionOutcomes)
+        .where(eq(evryExecutionOutcomes.effectKey, effectKey))
+    ).length,
+    0,
+    "a refused dual-tenancy target claimed a durable outcome"
+  );
+  console.log("PASS tasks:dual-tenancy-assignee-atomic-refusal");
+}
+
 function foreignSelection(input: {
   exportName: TaskEffectExport;
   foreignTaskId: string;
@@ -2714,6 +2799,17 @@ async function main() {
   );
   assert.ok(initial);
   const actor = initial.actor;
+
+  await runDualTenancyAssigneeRefusal({
+    actor,
+    memberId: seeded.memberId,
+    resolve: resolver.resolveTaskEvryEffect,
+    mintRequestKey: plans.mintEvryPlanRequestKey,
+    authorize: eligibility.authorizeEvryEffectCapability,
+    effectKey: audit.executionEffectKey,
+    execute: atomic.executeTaskEffect,
+  });
+  if (process.env.TASK_DUAL_ASSIGNEE_ONLY === "1") return;
 
   const foreignTaskTitle = `Foreign task ${randomUUID()}`;
   const [foreignTask] = await db

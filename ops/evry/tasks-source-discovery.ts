@@ -36,13 +36,18 @@ export const TASKS_DISCOVERED_READ_EXCLUSIONS = Object.freeze([
   ),
   ...TASK_PAGE_SOURCES.filter(
     (source) => source.includes("/[id]/") || source.includes("/new/")
-  ).map((source) =>
+  ).flatMap((source) => [
     sharedBoundaryExclusion(
       source,
       "eq",
       "Drizzle query construction helper, not a data operation."
-    )
-  ),
+    ),
+    sharedBoundaryExclusion(
+      source,
+      "exactTaskAssigneeJoin",
+      "Task tenancy query construction helper, not a data operation."
+    ),
+  ]),
   sharedBoundaryExclusion(
     "src/app/(dashboard)/tasks/page.tsx",
     "taskListScope",
