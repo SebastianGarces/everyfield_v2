@@ -58,6 +58,18 @@ export const PEOPLE_EFFECT_LIVE_SUITE =
 export const TASK_EFFECT_LIVE_SUITE =
   "src/lib/evry/capabilities/tasks/effect-live.test.ts" as const;
 
+export const NESTED_PROOF_LIVE_SUITES = [
+  PEOPLE_EFFECT_LIVE_SUITE,
+  "src/lib/communication/evry-effect-live.test.ts",
+  "src/lib/evry/conversations/conversations-live.test.ts",
+  "src/lib/evry/capabilities/meetings/effect-live.test.ts",
+  "src/lib/evry/capabilities/meetings/read-live.test.ts",
+  TASK_EFFECT_LIVE_SUITE,
+  "src/lib/evry/executor/executor-live.test.ts",
+  "src/lib/evry/capabilities/launch/effect-live.test.ts",
+  "src/lib/evry/recipes/recipe-live.test.ts",
+] as const;
+
 export const LIVE_SUITES = [
   "src/db/seat-owner-uniqueness.test.ts",
   "src/lib/auth/access.test.ts",
@@ -91,15 +103,13 @@ export const LIVE_SUITES = [
 ] as const;
 
 /**
- * The People and Task proofs each own a second child process and exercise an
- * entire capability pack in one fixture lifecycle. Give each one its own
- * phase so neither competes with sibling suites for the two-core CI runner or
- * the proxy's 20-connection pool.
+ * These wrappers each synchronously own a second proof process. Running the
+ * wrappers together multiplies the hosted runner's process count and makes
+ * their bounded deadlock timeouts measure sibling contention instead of the
+ * proof they guard. Give every nested proof its own phase; ordinary suites
+ * still share the final parallel phase.
  */
-export const DEDICATED_LIVE_SUITES = [
-  PEOPLE_EFFECT_LIVE_SUITE,
-  TASK_EFFECT_LIVE_SUITE,
-] as const;
+export const DEDICATED_LIVE_SUITES = NESTED_PROOF_LIVE_SUITES;
 
 const dedicatedLiveSuites = new Set<string>(DEDICATED_LIVE_SUITES);
 

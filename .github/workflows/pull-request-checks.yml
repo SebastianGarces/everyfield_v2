@@ -299,10 +299,11 @@ jobs:
       # one of those databases answers, because an unreachable one would make
       # the suites SKIP and the job go green having asserted nothing.
       #
-      # The monolithic People and Task capability proofs each run in their own
-      # phase before the smaller suites run in parallel. Their databases were
-      # already separate; this also separates their demand on the proxy's
-      # 20-connection pool and the two-core hosted runner.
+      # Every suite that synchronously owns a nested proof process runs in its
+      # own phase before the ordinary suites run in parallel. Their databases
+      # were already separate; this also prevents nested proof timeouts from
+      # measuring demand from sibling processes on the two-core hosted runner
+      # and the proxy's 20-connection pool.
       - name: Run the live suites
         run: LIVE_DB_TESTS=1 pnpm test:live
         env:
