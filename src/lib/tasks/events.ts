@@ -34,6 +34,8 @@ export interface TaskCompletedEvent {
   relatedId: string | null;
   completedById: string;
   timestamp: Date;
+  /** Stable approved effect identity when completion came through Evry. */
+  occurrenceKey?: string;
 }
 
 // ============================================================================
@@ -49,18 +51,24 @@ export async function emitTaskCompleted(
   category: string | null,
   relatedType: string | null,
   relatedId: string | null,
-  completedById: string
+  completedById: string,
+  timestamp: Date = new Date(),
+  occurrenceKey?: string
 ): Promise<void> {
-  await eventBus.emit<TaskCompletedEvent>({
-    type: "task.completed",
-    taskId,
-    churchId,
-    category,
-    relatedType,
-    relatedId,
-    completedById,
-    timestamp: new Date(),
-  });
+  await eventBus.emit<TaskCompletedEvent>(
+    {
+      type: "task.completed",
+      taskId,
+      churchId,
+      category,
+      relatedType,
+      relatedId,
+      completedById,
+      timestamp,
+      ...(occurrenceKey ? { occurrenceKey } : {}),
+    },
+    { strict: occurrenceKey !== undefined }
+  );
 }
 
 // ============================================================================

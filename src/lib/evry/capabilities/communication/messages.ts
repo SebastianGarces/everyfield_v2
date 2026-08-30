@@ -37,6 +37,7 @@ import {
   defineEvryExecutionCapability,
   type EvryEffectInput,
 } from "@/lib/evry/executor";
+import { findExactEvryDatabaseEffectClaim } from "@/lib/evry/executor/database-effect";
 import {
   parseEvryActionPlanCandidate,
   type EvryActionStep,
@@ -473,6 +474,7 @@ export function createCommunicationEvryMessageExecutions(
 ) {
   const send = defineEvryExecutionCapability({
     planCapability: COMMUNICATION_MESSAGE_SEND_PLAN,
+    reconcileClaimed: findExactEvryDatabaseEffectClaim,
     async executeIfCurrent(input) {
       const parsed = sendArgumentsSchema.safeParse(input.arguments);
       if (
@@ -506,6 +508,7 @@ export function createCommunicationEvryMessageExecutions(
 
   const resend = defineEvryExecutionCapability({
     planCapability: COMMUNICATION_RESEND_NON_OPENERS_PLAN,
+    reconcileClaimed: findExactEvryDatabaseEffectClaim,
     async executeIfCurrent(input) {
       const parsed = resendArgumentsSchema.safeParse(input.arguments);
       if (

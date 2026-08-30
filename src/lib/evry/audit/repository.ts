@@ -7,6 +7,7 @@ import {
   evryActionPlans,
   evryActionPlanStates,
   evryExecutionAttempts,
+  evryExecutionEffectClaims,
   evryExecutionOutcomes,
   evryProductAuditEvents,
 } from "@/db/schema";
@@ -62,6 +63,13 @@ export type EvryAuditProjection = Readonly<{
   }>[];
   attempts: readonly Readonly<{
     startedAt: string;
+    claims: readonly Readonly<{
+      stepId: string;
+      capabilityIdentity: string;
+      affectedCount: number;
+      excludedCount: number;
+      claimedAt: string;
+    }>[];
     outcomes: readonly Readonly<{
       subject: typeof evryExecutionOutcomes.$inferSelect.subject;
       stepId: string | null;
@@ -105,7 +113,28 @@ export async function findOwnEvryAuditProjection(input: {
 
   if (!exact) return null;
 
-  const [events, attempts, outcomes] = await db.batch([
+  const [claims, events, attempts, outcomes] = await db.batch([
+    db
+      .select({
+        attemptId: evryExecutionEffectClaims.attemptId,
+        stepId: evryExecutionEffectClaims.stepId,
+        capabilityIdentity: evryExecutionEffectClaims.capabilityIdentity,
+        affectedCount: evryExecutionEffectClaims.affectedCount,
+        excludedCount: evryExecutionEffectClaims.excludedCount,
+        claimedAt: evryExecutionEffectClaims.claimedAt,
+      })
+      .from(evryExecutionEffectClaims)
+      .where(
+        and(
+          eq(evryExecutionEffectClaims.planId, exact.planId),
+          eq(evryExecutionEffectClaims.actorUserId, input.actorUserId),
+          eq(evryExecutionEffectClaims.churchId, input.plantId)
+        )
+      )
+      .orderBy(
+        asc(evryExecutionEffectClaims.claimedAt),
+        asc(evryExecutionEffectClaims.id)
+      ),
     db
       .select({
         type: evryProductAuditEvents.eventType,
@@ -186,6 +215,17 @@ export async function findOwnEvryAuditProjection(input: {
     attempts: attempts.map((attempt) =>
       Object.freeze({
         startedAt: attempt.startedAt.toISOString(),
+        claims: claims
+          .filter((claim) => claim.attemptId === attempt.id)
+          .map((claim) =>
+            Object.freeze({
+              stepId: claim.stepId,
+              capabilityIdentity: claim.capabilityIdentity,
+              affectedCount: claim.affectedCount,
+              excludedCount: claim.excludedCount,
+              claimedAt: claim.claimedAt.toISOString(),
+            })
+          ),
         outcomes: outcomes
           .filter((outcome) => outcome.attemptId === attempt.id)
           .map((outcome) =>

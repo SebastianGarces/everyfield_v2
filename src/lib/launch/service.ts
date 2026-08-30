@@ -156,6 +156,10 @@ type SetLaunchDateStatementInput = Readonly<{
   postpone: boolean;
   note: string | null;
   expected?: SetLaunchDateOptions["expected"];
+  /** Frozen reviewed write instant for Evry; owner callers use transaction time. */
+  changedAt?: Date;
+  /** Frozen id for a reviewed create; owner callers use the table default. */
+  launchId?: string;
   /** Trusted outer write gate used by the Evry exact-effect transaction. */
   writeEligibility?: SQL;
 }>;
@@ -189,12 +193,18 @@ export function setLaunchDateEffectMutation(
       where church_id = ${input.churchId}
       for update
     ), inserted as (
-      insert into launches (church_id, target_date, status)
-      select ${input.churchId}, ${input.targetDate}, ${nextStatus}
+      insert into launches (id, church_id, target_date, status, updated_at)
+      select coalesce(${input.launchId ?? null}::uuid, gen_random_uuid()),
+             ${input.churchId}, ${input.targetDate}, ${nextStatus},
+             ${input.changedAt ?? sql`transaction_timestamp()`}
       where not exists (select 1 from current)
         and ${input.expected === undefined || input.expected === null}
         and ${input.writeEligibility ?? sql`true`}
-      on conflict (church_id) do nothing
+      -- A reviewed create freezes its id. Two separately confirmed plans may
+      -- therefore race with the same frozen id as well as the same church.
+      -- Either uniqueness boundary elects one writer; the losing plan returns
+      -- no written row and is resolved as stale/refused by the caller.
+      on conflict do nothing
       returning
         id,
         null::date as previous_target_date,
@@ -206,7 +216,7 @@ export function setLaunchDateEffectMutation(
       update launches l
       set target_date = ${input.targetDate},
           status = ${nextStatus},
-          updated_at = now()
+          updated_at = ${input.changedAt ?? sql`transaction_timestamp()`}
       from current c
       where l.id = c.id
         ${

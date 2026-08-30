@@ -68,6 +68,40 @@ function argumentsFor(identity: string): Record<string, unknown> {
       targetDate: "2030-09-15",
       postpone: true,
       note: "Weather",
+      consequences: {
+        launchId: ID,
+        changedAt: AT,
+        plantName: "Dayspring",
+        readiness: [
+          {
+            milestoneId: RELATED_ID,
+            templateKey: "launch-team",
+            area: "launch_team",
+            title: "Launch team ready",
+            description: "The exact reviewed readiness milestone.",
+            sortOrder: 1,
+            tasks: [
+              {
+                taskId: "00000000-0000-4000-8000-000000000004",
+                title: "Confirm volunteer roles",
+                description: "The exact reviewed readiness task.",
+              },
+            ],
+          },
+        ],
+        notifications: [
+          {
+            recipientUserId: "00000000-0000-4000-8000-000000000005",
+            category: "milestones",
+            type: "oversight.milestone.launch_date_changed",
+            title: "Launch date changed",
+            body: "Dayspring is aiming to launch on 2030-09-15.",
+            dedupeKey: "launch-date:2030-09-15:fixture",
+            scheduledFor: AT,
+          },
+        ],
+        notificationExclusions: [{ reason: "oversight_privacy", count: 1 }],
+      },
     };
   }
   if (
@@ -92,17 +126,25 @@ function argumentsFor(identity: string): Record<string, unknown> {
         id: ID,
         milestoneId: RELATED_ID,
         title: "Confirm volunteer roles",
+        description: "Confirm every reviewed role.",
         status: "not_started",
+        priority: "medium",
         assignedToId: null,
         dueDate: "2030-09-07",
         dueTime: null,
         category: "launch_prep",
         relatedType: null,
         relatedId: null,
+        parentTaskId: null,
         isRecurring: false,
+        recurrenceRule: null,
+        completionEvent: null,
+        createdById: "00000000-0000-4000-8000-000000000006",
+        createdAt: AT,
         updatedAt: AT,
       },
       complete: true,
+      completion: { completedAt: AT, recurrence: null },
     };
   }
   return {
@@ -264,7 +306,9 @@ for (const capability of inventory.capabilities) {
             capability.identity === "launch.read.journal"
               ? selection.input
               : {},
-            capability.identity === "launch.read.journal" ? { limit: 100 } : {}
+            capability.identity === "launch.read.journal"
+              ? { limit: 100, cursor: null }
+              : {}
           );
         }
         if (layer === "confirmation") {
@@ -302,10 +346,12 @@ for (const capability of inventory.capabilities) {
       }
       if (layer === "ui_artifact" && capability.operationKind === "effect") {
         const confirmation = trustedConfirmation(capability.identity);
-        assert.equal(confirmation.steps[0]?.resolvedTargets.length, 1);
+        assert.ok((confirmation.steps[0]?.resolvedTargets.length ?? 0) >= 1);
         assert.equal(
-          confirmation.steps[0]?.resolvedTargets[0]?.sourceLink?.href,
-          "/launch"
+          confirmation.steps[0]?.resolvedTargets.every(
+            ({ sourceLink }) => sourceLink?.href === "/launch"
+          ),
+          true
         );
       }
       if (layer === "errors")

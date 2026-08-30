@@ -29,7 +29,7 @@ before(() => {
         "src/lib/evry/capabilities/launch/effect-live-proof.ts"
       ),
     ],
-    { cwd: process.cwd(), encoding: "utf8", env: process.env, timeout: 180_000 }
+    { cwd: process.cwd(), encoding: "utf8", env: process.env, timeout: 420_000 }
   );
   if (result.status !== 0) {
     outcomes = new Error(

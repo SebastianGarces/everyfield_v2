@@ -3,6 +3,10 @@ import { withSentryConfig } from "@sentry/nextjs";
 
 const nextConfig: NextConfig = {
   /* config options here */
+  // The neon driver owns process-wide transport configuration. Keeping one
+  // server instance lets isolated live proofs replace only its HTTP endpoint
+  // without adding a production database seam to `src/db`.
+  serverExternalPackages: ["@neondatabase/serverless"],
   experimental: {
     // A profile photo is a server-action payload — a person's (P-024a) and an
     // account's own picture (#617) alike — and the default cap on one is 1MB:
