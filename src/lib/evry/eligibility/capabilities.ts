@@ -4,6 +4,8 @@ import peopleInventory from "@/lib/evry/capabilities/people/inventory.generated.
 import meetingsInventory from "@/lib/evry/capabilities/meetings/inventory.generated.json";
 import { MEETINGS_OPERATION_REGISTRATIONS } from "@/lib/evry/capabilities/meetings/registrations";
 import parityInventory from "@/lib/evry/capabilities/inventory.generated.json";
+import { TASK_AUTHORITATIVE_SURFACES } from "@/lib/evry/capabilities/tasks/catalog";
+import { TASK_CAPABILITY_REGISTRATIONS } from "@/lib/evry/capabilities/tasks/registrations";
 import {
   ALL_CAPABILITIES,
   holdsSeatFor,
@@ -145,26 +147,7 @@ function generatedLaunchRegistrations(): EvryCapabilityRegistration[] {
 }
 
 /** Explicit shared proof registrations, replaced in place by owning packs. */
-const REFERENCE_REGISTRATIONS = [
-  defineEvryCapabilityRegistration({
-    identity: "tasks.list",
-    surfaceIdentities: [
-      "action:src/app/(dashboard)/tasks/actions.ts → loadMoreTasksAction",
-    ],
-    parityCapability: "tasks",
-    operationKind: "read",
-    applicationCapability: "read",
-  }),
-  defineEvryCapabilityRegistration({
-    identity: "tasks.complete",
-    surfaceIdentities: [
-      "action:src/app/(dashboard)/tasks/actions.ts → completeTaskAction",
-    ],
-    parityCapability: "tasks",
-    operationKind: "effect",
-    applicationCapability: "tasks.own",
-  }),
-] as const;
+const REFERENCE_REGISTRATIONS: readonly EvryCapabilityRegistration[] = [];
 
 function generatedPeopleSurfaces(): EvryAuthoritativeCapabilitySurface[] {
   return peopleInventory.entries.flatMap((entry) => {
@@ -289,6 +272,7 @@ const REGISTRY = createEvryCapabilityRegistry({
     ...generatedCommunicationRegistrations(),
     ...generatedLaunchRegistrations(),
     ...MEETINGS_OPERATION_REGISTRATIONS,
+    ...TASK_CAPABILITY_REGISTRATIONS,
     ...REFERENCE_REGISTRATIONS,
   ],
   authoritativeSurfaces: [
@@ -296,6 +280,7 @@ const REGISTRY = createEvryCapabilityRegistry({
     ...generatedCommunicationSurfaces(),
     ...generatedLaunchSurfaces(),
     ...generatedMeetingsSurfaces(),
+    ...TASK_AUTHORITATIVE_SURFACES,
     ...referenceSurfaces(),
   ],
 });
@@ -318,8 +303,8 @@ export const EVRY_PEOPLE_READ_PROBE_IDENTITY =
 export const EVRY_PEOPLE_WRITE_PROBE_IDENTITY =
   "people.crm.people.update-person";
 
-export const EVRY_TASKS_READ_PROBE_IDENTITY = "tasks.list";
-export const EVRY_TASKS_COMPLETE_PROBE_IDENTITY = "tasks.complete";
+export const EVRY_TASKS_READ_PROBE_IDENTITY = "tasks.read.list";
+export const EVRY_TASKS_COMPLETE_PROBE_IDENTITY = "tasks.lifecycle.complete";
 export const EVRY_LAUNCH_SCHEDULE_PROBE_IDENTITY = "launch.schedule";
 
 type EvryPlantSeat = Readonly<Pick<EvryPlantActor, "plantId" | "seat">>;

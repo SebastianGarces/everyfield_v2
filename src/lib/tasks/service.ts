@@ -23,11 +23,14 @@ import {
   isNull,
   lte,
   ne,
+  not,
+  notExists,
   or,
   sql,
   type SQL,
 } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
+import { z } from "zod";
 // Task descriptions are rich text (T-021), sharing COM-017's editor and its
 // sanitiser. `descriptions.ts` owns both halves of that — the write gate and
 // the list surfaces' readable preview — and its header states the rules.
@@ -53,7 +56,18 @@ import {
 import { toCalendarDate } from "@/lib/datetime";
 import { blockedTaskIdsAmong } from "./dependencies";
 import { assertMayOwnFollowUp } from "./follow-up-ownership";
+import {
+  assertExactTaskAssignee,
+  exactTaskAssigneeJoin,
+  taskAssigneeIsAvailable,
+  TASK_ASSIGNEE_ERROR,
+} from "./assignees";
 import { mayActOnTaskRow } from "./own-duty";
+import { taskStructureLockStatement } from "./structure-lock";
+import {
+  insertExactTenantTasks,
+  type ExactTenantTaskInsertOptions,
+} from "./write-boundary";
 import {
   nextRecurrenceDueDate,
   parseRecurrenceRule,
@@ -89,6 +103,8 @@ export interface ListTasksOptions {
   sortBy?: TaskSortBy;
   sortDir?: "asc" | "desc";
 }
+
+const TASK_LIST_CURSOR_SCHEMA = z.string().uuid();
 
 /** The orders `/tasks` can be read in. */
 export type TaskSortBy =
@@ -174,6 +190,8 @@ export type TaskListRow = WithDescriptionPreview<TaskWithAssignee> & {
 /** `ListTasksResult` over the row type above. */
 export interface TaskListResult extends Omit<ListTasksResult, "tasks"> {
   tasks: TaskListRow[];
+  /** False when the requested cursor is not a row in this exact result set. */
+  cursorAvailable: boolean;
 }
 
 // ============================================================================
@@ -205,7 +223,10 @@ const taskWithAssigneeColumns = {
   priority: tasks.priority,
   dueDate: tasks.dueDate,
   dueTime: tasks.dueTime,
-  assignedToId: tasks.assignedToId,
+  // A malformed/foreign assignee is absent everywhere outside the owning
+  // table. In particular, own-duty checks must never see the raw FK and mistake
+  // it for the current viewer merely because the UUIDs match.
+  assignedToId: users.id,
   category: tasks.category,
   relatedType: tasks.relatedType,
   relatedId: tasks.relatedId,
@@ -223,6 +244,30 @@ const taskWithAssigneeColumns = {
   assigneeEmail: users.email,
 } satisfies Record<keyof TaskWithAssignee, unknown>;
 
+/** Used only to classify a failed atomic write without exposing the raw FK. */
+async function taskHasUnavailableAssignee(
+  churchId: string,
+  taskId: string
+): Promise<boolean> {
+  const [row] = await db
+    .select({ assignedToId: tasks.assignedToId, exactAssigneeId: users.id })
+    .from(tasks)
+    .leftJoin(
+      users,
+      and(eq(tasks.assignedToId, users.id), exactTaskAssigneeJoin(churchId))
+    )
+    .where(
+      and(
+        eq(tasks.churchId, churchId),
+        eq(tasks.id, taskId),
+        isNull(tasks.deletedAt)
+      )
+    )
+    .limit(1);
+
+  return Boolean(row?.assignedToId && !row.exactAssigneeId);
+}
+
 /**
  * Get a single task by ID with assignee info.
  * Returns null if not found or soft-deleted.
@@ -238,7 +283,10 @@ export async function getTask(
   const result = await db
     .select(taskWithAssigneeColumns)
     .from(tasks)
-    .leftJoin(users, eq(tasks.assignedToId, users.id))
+    .leftJoin(
+      users,
+      and(eq(tasks.assignedToId, users.id), exactTaskAssigneeJoin(churchId))
+    )
     .where(
       and(
         eq(tasks.churchId, churchId),
@@ -397,17 +445,19 @@ export async function listTasks(
 ): Promise<TaskListResult> {
   const { cursor, limit = 50, sortBy = "due_date", sortDir = "asc" } = options;
 
+  // UUID-typed Postgres parameters reject malformed strings. This untrusted
+  // value comes from both the page URL and the load-more action, so refuse it
+  // before the first query and keep the result distinguishable from page one.
+  if (
+    cursor !== undefined &&
+    !TASK_LIST_CURSOR_SCHEMA.safeParse(cursor).success
+  ) {
+    return { tasks: [], total: 0, nextCursor: null, cursorAvailable: false };
+  }
+
   const safeLimit = Math.min(Math.max(1, limit), 100);
 
   const baseConditions = taskListConditions(churchId, options);
-
-  // Get total count
-  const [countResult] = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(tasks)
-    .where(and(...baseConditions));
-
-  const total = countResult?.count ?? 0;
 
   // THE SORT KEY AND THE CURSOR ARE THE SAME EXPRESSION, from one entry in
   // TASK_SORT_KEYS. The id is the tie-break, in the SAME direction as the key,
@@ -416,30 +466,45 @@ export async function listTasks(
   const orderFn = sortDir === "desc" ? desc : asc;
 
   // Cursor-based pagination. The cursor is a task id; its position is the
-  // (key, id) pair, looked up church-scoped so a cursor cannot be aimed across
-  // tenants.
+  // (key, id) pair. The lookup uses the list's EXACT predicates: a foreign,
+  // missing, completed-hidden, or otherwise filtered-out row is not a position
+  // in this result set and must not silently restart it from page one.
   const queryConditions = [...baseConditions];
   if (cursor) {
     const cursorTask = await db
       .select({ sortValue: sortKey.sql })
       .from(tasks)
-      .where(and(eq(tasks.id, cursor), eq(tasks.churchId, churchId)))
+      .where(and(eq(tasks.id, cursor), ...baseConditions))
       .limit(1);
 
-    if (cursorTask[0]) {
-      queryConditions.push(
-        sortDir === "desc"
-          ? sql`(${sortKey.sql}, ${tasks.id}) < (${cursorTask[0].sortValue}, ${cursor})`
-          : sql`(${sortKey.sql}, ${tasks.id}) > (${cursorTask[0].sortValue}, ${cursor})`
-      );
+    if (!cursorTask[0]) {
+      return { tasks: [], total: 0, nextCursor: null, cursorAvailable: false };
     }
+    queryConditions.push(
+      sortDir === "desc"
+        ? sql`(${sortKey.sql}, ${tasks.id}) < (${cursorTask[0].sortValue}, ${cursor})`
+        : sql`(${sortKey.sql}, ${tasks.id}) > (${cursorTask[0].sortValue}, ${cursor})`
+    );
   }
+
+  // Count only after a supplied cursor proves it belongs to this exact result
+  // set. An unavailable cursor returns one neutral shape without doing a
+  // broader census first.
+  const [countResult] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(tasks)
+    .where(and(...baseConditions));
+
+  const total = countResult?.count ?? 0;
 
   // Fetch tasks with assignee info
   const result = await db
     .select(taskWithAssigneeColumns)
     .from(tasks)
-    .leftJoin(users, eq(tasks.assignedToId, users.id))
+    .leftJoin(
+      users,
+      and(eq(tasks.assignedToId, users.id), exactTaskAssigneeJoin(churchId))
+    )
     .where(and(...queryConditions))
     .orderBy(orderFn(sortKey.sql), orderFn(tasks.id))
     .limit(safeLimit + 1);
@@ -464,6 +529,7 @@ export async function listTasks(
     })),
     total,
     nextCursor,
+    cursorAvailable: true,
   };
 }
 
@@ -723,7 +789,10 @@ export async function listSubtasks(
   const result = await db
     .select(taskWithAssigneeColumns)
     .from(tasks)
-    .leftJoin(users, eq(tasks.assignedToId, users.id))
+    .leftJoin(
+      users,
+      and(eq(tasks.assignedToId, users.id), exactTaskAssigneeJoin(churchId))
+    )
     .where(
       and(
         eq(tasks.churchId, churchId),
@@ -787,7 +856,8 @@ export async function createTask(
   churchId: string,
   userId: string,
   data: TaskCreateInput,
-  recurrence?: TaskRecurrencePatch
+  recurrence?: TaskRecurrencePatch,
+  options: Pick<ExactTenantTaskInsertOptions, "beforeInsert"> = {}
 ): Promise<Task> {
   const parentTaskId = data.parentTaskId || null;
 
@@ -804,6 +874,7 @@ export async function createTask(
   // #470 D2 — only a committed member owns a follow-up. Checked on the RESOLVED
   // assignee, so a subtask inheriting its parent's owner is checked too, and
   // before the insert, so a refusal is a refusal rather than a row to undo.
+  await assertExactTaskAssignee(churchId, assignedToId);
   await assertMayOwnFollowUp(churchId, data.category, assignedToId);
 
   const values: NewTask = applyRecurrence(
@@ -828,7 +899,13 @@ export async function createTask(
     recurrence
   );
 
-  const [task] = await db.insert(tasks).values(values).returning();
+  const write = await insertExactTenantTasks([values], {
+    ...options,
+    authorityUserId: userId,
+  });
+  if (!write.authorized) throw new Error(TASK_ASSIGNEE_ERROR);
+  const [task] = write.inserted;
+  if (!task) throw new Error("Task insert did not land");
 
   // The row exists before anything is announced about it (T-018). A task with
   // no assignee or no due date enqueues nothing — the plan says so, not this
@@ -865,10 +942,13 @@ export async function updateTask(
   // (#470 D2). Both halves can arrive alone: assigning an ineligible member to
   // a follow-up, and re-categorising an already-assigned task INTO follow-up,
   // are the same violation and an undefined field means "keep what is stored".
+  const resultingAssigneeId =
+    data.assignedToId !== undefined ? data.assignedToId : existing.assignedToId;
+  await assertExactTaskAssignee(churchId, resultingAssigneeId);
   await assertMayOwnFollowUp(
     churchId,
     data.category !== undefined ? data.category : existing.category,
-    data.assignedToId !== undefined ? data.assignedToId : existing.assignedToId
+    resultingAssigneeId
   );
 
   // Editing the schedule of an instance that is already mid-chain must not
@@ -913,20 +993,32 @@ export async function updateTask(
   if (data.parentTaskId !== undefined)
     updateData.parentTaskId = data.parentTaskId ?? null;
 
-  const [updated] = await db
-    .update(tasks)
-    .set(updateData)
-    .where(
-      and(
-        eq(tasks.churchId, churchId),
-        eq(tasks.id, taskId),
-        isNull(tasks.deletedAt)
+  const [, [updated]] = await db.batch([
+    taskStructureLockStatement(churchId),
+    db
+      .update(tasks)
+      .set(updateData)
+      .where(
+        and(
+          eq(tasks.churchId, churchId),
+          eq(tasks.id, taskId),
+          isNull(tasks.deletedAt),
+          taskAssigneeIsAvailable(churchId, tasks.assignedToId),
+          // Protect the RESULTING assignment too. The earlier assertion gives
+          // callers a useful refusal; this correlated condition closes the
+          // window where that user changes tenancy before the UPDATE lands.
+          taskAssigneeIsAvailable(churchId, sql`${resultingAssigneeId}::uuid`)
+        )
       )
-    )
-    .returning();
+      .returning(),
+  ]);
 
   if (!updated) {
-    throw new Error("Failed to update task");
+    throw new Error(
+      (await taskHasUnavailableAssignee(churchId, taskId))
+        ? TASK_ASSIGNEE_ERROR
+        : "Failed to update task"
+    );
   }
 
   // An edit may have moved the due date, changed the assignee, or closed the
@@ -1018,13 +1110,25 @@ export function planRecurrenceChildren(
 export interface RecurrenceDeps {
   /** Ids of open instances already in this series. */
   findOpenInSeries(churchId: string, seriesId: string): Promise<string[]>;
-  insertSuccessor(values: NewTask): Promise<Task | null>;
+  insertSuccessor(
+    values: NewTask,
+    options: Pick<
+      ExactTenantTaskInsertOptions,
+      "authorityUserId" | "beforeInsert"
+    >
+  ): Promise<Task | null>;
   /** The completed instance's checklist, in checklist order. */
   listChildren(
     churchId: string,
     parentTaskId: string
   ): Promise<RecurrenceChild[]>;
-  insertChildren(values: NewTask[]): Promise<void>;
+  insertChildren(
+    values: NewTask[],
+    options: Pick<
+      ExactTenantTaskInsertOptions,
+      "authorityUserId" | "beforeInsert"
+    >
+  ): Promise<void>;
 }
 
 export const defaultRecurrenceDeps: RecurrenceDeps = {
@@ -1046,9 +1150,13 @@ export const defaultRecurrenceDeps: RecurrenceDeps = {
     return open.map((row) => row.id);
   },
 
-  async insertSuccessor(values) {
-    const [next] = await db.insert(tasks).values(values).returning();
-    return next ?? null;
+  async insertSuccessor(values, options) {
+    await assertExactTaskAssignee(values.churchId, values.assignedToId);
+    const write = await insertExactTenantTasks([values], options);
+    if (!write.authorized) throw new Error(TASK_ASSIGNEE_ERROR);
+    const [next] = write.inserted;
+    if (!next) throw new Error("Recurring task insert did not land");
+    return next;
   },
 
   async listChildren(churchId, parentTaskId) {
@@ -1074,9 +1182,22 @@ export const defaultRecurrenceDeps: RecurrenceDeps = {
       .orderBy(asc(tasks.createdAt), asc(tasks.id));
   },
 
-  async insertChildren(values) {
+  async insertChildren(values, options) {
     if (values.length === 0) return;
-    await db.insert(tasks).values(values);
+    for (const assigneeId of new Set(
+      values
+        .map(({ assignedToId }) => assignedToId)
+        .filter((id): id is string => typeof id === "string")
+    )) {
+      await assertExactTaskAssignee(values[0]!.churchId, assigneeId);
+    }
+    const write = await insertExactTenantTasks(values, options);
+    if (!write.authorized) {
+      throw new Error(TASK_ASSIGNEE_ERROR);
+    }
+    if (write.inserted.length !== values.length) {
+      throw new Error("Recurring checklist insert did not land every row");
+    }
   },
 };
 
@@ -1103,7 +1224,12 @@ export const defaultRecurrenceDeps: RecurrenceDeps = {
 export async function createNextRecurrence(
   completed: Task,
   completedOn: string,
-  deps: RecurrenceDeps = defaultRecurrenceDeps
+  deps: RecurrenceDeps = defaultRecurrenceDeps,
+  options: {
+    /** Test seams: production never supplies these. */
+    beforeSuccessorInsert?: () => Promise<void>;
+    beforeChildrenInsert?: () => Promise<void>;
+  } = {}
 ): Promise<Task | null> {
   if (!completed.isRecurring) return null;
 
@@ -1120,6 +1246,7 @@ export async function createNextRecurrence(
   if (!nextDueDate) return null;
 
   const seriesId = seriesIdOf(completed);
+  const authorityUserId = completed.completedById ?? completed.createdById;
 
   // ONE open instance at a time. The chain shape already guarantees this (an
   // instance is minted only by completing its predecessor), so this is the
@@ -1128,26 +1255,29 @@ export async function createNextRecurrence(
   const open = await deps.findOpenInSeries(completed.churchId, seriesId);
   if (open.length > 0) return null;
 
-  const next = await deps.insertSuccessor({
-    churchId: completed.churchId,
-    title: completed.title,
-    description: completed.description,
-    status: "not_started",
-    // Carried forward so the next occurrence is the same piece of work:
-    // whoever owns it, how urgent it is, what it is about, and what it hangs
-    // off. Only the schedule moves.
-    priority: completed.priority,
-    dueDate: nextDueDate,
-    dueTime: completed.dueTime,
-    assignedToId: completed.assignedToId,
-    category: completed.category,
-    relatedType: completed.relatedType,
-    relatedId: completed.relatedId,
-    parentTaskId: completed.parentTaskId,
-    isRecurring: true,
-    recurrenceRule: { ...rule, seriesId },
-    createdById: completed.createdById,
-  });
+  const next = await deps.insertSuccessor(
+    {
+      churchId: completed.churchId,
+      title: completed.title,
+      description: completed.description,
+      status: "not_started",
+      // Carried forward so the next occurrence is the same piece of work:
+      // whoever owns it, how urgent it is, what it is about, and what it hangs
+      // off. Only the schedule moves.
+      priority: completed.priority,
+      dueDate: nextDueDate,
+      dueTime: completed.dueTime,
+      assignedToId: completed.assignedToId,
+      category: completed.category,
+      relatedType: completed.relatedType,
+      relatedId: completed.relatedId,
+      parentTaskId: completed.parentTaskId,
+      isRecurring: true,
+      recurrenceRule: { ...rule, seriesId },
+      createdById: completed.createdById,
+    },
+    { authorityUserId, beforeInsert: options.beforeSuccessorInsert }
+  );
 
   if (!next) return null;
 
@@ -1159,7 +1289,8 @@ export async function createNextRecurrence(
     const children = await deps.listChildren(completed.churchId, completed.id);
     if (children.length > 0) {
       await deps.insertChildren(
-        planRecurrenceChildren(children, next, new Date())
+        planRecurrenceChildren(children, next, new Date()),
+        { authorityUserId, beforeInsert: options.beforeChildrenInsert }
       );
     }
   } catch (error) {
@@ -1761,6 +1892,7 @@ export async function completeTask(
         eq(tasks.churchId, churchId),
         eq(tasks.id, taskId),
         isNull(tasks.deletedAt),
+        taskAssigneeIsAvailable(churchId, tasks.assignedToId),
         ne(tasks.status, "complete")
       )
     )
@@ -1768,7 +1900,11 @@ export async function completeTask(
 
   if (!completed) {
     // The CAS lost: somebody else completed it between the read and the write.
-    throw new Error("Task is already complete");
+    throw new Error(
+      (await taskHasUnavailableAssignee(churchId, taskId))
+        ? TASK_ASSIGNEE_ERROR
+        : "Task is already complete"
+    );
   }
 
   const nextInstance = await reconcileCompletedTaskAfterWrite(
@@ -1810,13 +1946,18 @@ export async function reopenTask(
       and(
         eq(tasks.churchId, churchId),
         eq(tasks.id, taskId),
-        isNull(tasks.deletedAt)
+        isNull(tasks.deletedAt),
+        taskAssigneeIsAvailable(churchId, tasks.assignedToId)
       )
     )
     .returning();
 
   if (!reopened) {
-    throw new Error("Failed to reopen task");
+    throw new Error(
+      (await taskHasUnavailableAssignee(churchId, taskId))
+        ? TASK_ASSIGNEE_ERROR
+        : "Failed to reopen task"
+    );
   }
 
   // Reopen is a re-enqueue, and it works because cancelling RELEASED the dedupe
@@ -1859,18 +2000,41 @@ export async function deleteTask(
   }
 
   const now = new Date();
-
-  const deleted = await db
-    .update(tasks)
-    .set({ deletedAt: now, updatedAt: now })
+  const deleteFamily = alias(tasks, "delete_family");
+  const malformedFamilyMember = db
+    .select({ id: deleteFamily.id })
+    .from(deleteFamily)
     .where(
       and(
-        eq(tasks.churchId, churchId),
-        or(eq(tasks.id, taskId), eq(tasks.parentTaskId, taskId)),
-        isNull(tasks.deletedAt)
+        eq(deleteFamily.churchId, churchId),
+        or(eq(deleteFamily.id, taskId), eq(deleteFamily.parentTaskId, taskId)),
+        isNull(deleteFamily.deletedAt),
+        not(taskAssigneeIsAvailable(churchId, deleteFamily.assignedToId))
       )
-    )
-    .returning({ id: tasks.id });
+    );
+
+  const [, deleted] = await db.batch([
+    taskStructureLockStatement(churchId),
+    db
+      .update(tasks)
+      .set({ deletedAt: now, updatedAt: now })
+      .where(
+        and(
+          eq(tasks.churchId, churchId),
+          or(eq(tasks.id, taskId), eq(tasks.parentTaskId, taskId)),
+          isNull(tasks.deletedAt),
+          notExists(malformedFamilyMember)
+        )
+      )
+      .returning({ id: tasks.id }),
+  ]);
+
+  if (
+    deleted.length === 0 &&
+    (await malformedFamilyMember.limit(1)).length > 0
+  ) {
+    throw new Error(TASK_ASSIGNEE_ERROR);
+  }
 
   // Every row the statement actually touched — the parent AND its checklist
   // items, which are tasks with due dates of their own. The ids come from the
@@ -2101,14 +2265,19 @@ export const defaultBulkTaskDeps: BulkTaskDeps = {
         category: tasks.category,
         relatedType: tasks.relatedType,
         relatedId: tasks.relatedId,
-        assignedToId: tasks.assignedToId,
+        assignedToId: users.id,
       })
       .from(tasks)
+      .leftJoin(
+        users,
+        and(eq(tasks.assignedToId, users.id), exactTaskAssigneeJoin(churchId))
+      )
       .where(
         and(
           eq(tasks.churchId, churchId),
           inArray(tasks.id, taskIds),
-          isNull(tasks.deletedAt)
+          isNull(tasks.deletedAt),
+          taskAssigneeIsAvailable(churchId, tasks.assignedToId)
         )
       );
   },
@@ -2129,6 +2298,7 @@ export const defaultBulkTaskDeps: BulkTaskDeps = {
           eq(tasks.churchId, churchId),
           inArray(tasks.id, taskIds),
           isNull(tasks.deletedAt),
+          taskAssigneeIsAvailable(churchId, tasks.assignedToId),
           ne(tasks.status, "complete")
         )
       )
@@ -2146,6 +2316,7 @@ export const defaultBulkTaskDeps: BulkTaskDeps = {
           eq(tasks.churchId, churchId),
           inArray(tasks.id, taskIds),
           isNull(tasks.deletedAt),
+          taskAssigneeIsAvailable(churchId, tasks.assignedToId),
           // Mirrors the planner's rejectCompleted guard. Belt and braces: if a
           // task is completed between the load and this write, it is reported
           // as a failure rather than quietly given a new due date.
@@ -2182,7 +2353,8 @@ export const defaultBulkTaskDeps: BulkTaskDeps = {
           eq(tasks.churchId, churchId),
           inArray(tasks.id, taskIds),
           eq(tasks.isRecurring, true),
-          isNull(tasks.deletedAt)
+          isNull(tasks.deletedAt),
+          taskAssigneeIsAvailable(churchId, tasks.assignedToId)
         )
       );
 

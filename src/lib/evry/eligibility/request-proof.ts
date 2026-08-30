@@ -228,7 +228,7 @@ async function main(): Promise<void> {
       allowed: { owner: true, admin: false, member: false },
     },
     {
-      identity: "tasks.complete",
+      identity: "tasks.lifecycle.complete",
       allowed: { owner: true, admin: true, member: true },
     },
   ] as const;

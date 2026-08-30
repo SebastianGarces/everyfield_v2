@@ -9,7 +9,7 @@ import { holdsSeatFor } from "@/lib/auth/seat-rules";
 import { verifySession } from "@/lib/auth/session";
 import { listPrerequisiteCandidates } from "@/lib/tasks/dependencies";
 import { listFollowUpAssignees } from "@/lib/tasks/follow-up-ownership";
-import { eq } from "drizzle-orm";
+import { exactTaskAssigneeJoin } from "@/lib/tasks/assignees";
 
 export const dynamic = "force-dynamic";
 
@@ -39,7 +39,7 @@ export default async function NewTaskPage() {
           email: users.email,
         })
         .from(users)
-        .where(eq(users.churchId, user.churchId)),
+        .where(exactTaskAssigneeJoin(user.churchId)),
       listFollowUpAssignees(user.churchId),
       listPrerequisiteCandidates(user.churchId),
     ]);

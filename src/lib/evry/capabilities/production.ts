@@ -73,6 +73,12 @@ import {
   TAXONOMY_REVIEWS,
   taxonomyTargetIsCurrent,
 } from "./people/taxonomies";
+import { continueTaskEvryConversation } from "./tasks/conversation";
+import { TASK_ARTIFACT_REVIEWS } from "./tasks/review";
+import {
+  TASK_EXECUTION_CAPABILITIES,
+  taskEvryPlanTargetIsCurrent,
+} from "./tasks/runtime";
 
 const PRODUCTION_PEOPLE_EFFECT_EXECUTIONS = Object.freeze([
   PEOPLE_EVRY_ADD_NOTE_EXECUTION,
@@ -95,6 +101,7 @@ export const PRODUCTION_EVRY_ARTIFACT_REVIEWS = Object.freeze([
   ...HOUSEHOLD_REVIEWS,
   ...MILESTONE_REVIEWS,
   ...PEOPLE_FILE_REVIEWS,
+  ...TASK_ARTIFACT_REVIEWS,
 ]);
 
 export const PRODUCTION_EVRY_CAPABILITY_CONTINUATIONS = Object.freeze([
@@ -108,6 +115,7 @@ export const PRODUCTION_EVRY_CAPABILITY_CONTINUATIONS = Object.freeze([
   continuePeopleTaxonomyConversation,
   continuePeopleHouseholdConversation,
   continuePeopleMilestoneConversation,
+  continueTaskEvryConversation,
 ]);
 
 const COMMUNICATION_EFFECT_IDENTITIES = new Set(
@@ -123,6 +131,11 @@ const MEETINGS_EFFECT_IDENTITIES = new Set(
 const LAUNCH_EFFECT_IDENTITIES = new Set(
   LAUNCH_EVRY_EXECUTIONS.map(({ planCapability }) => planCapability.identity)
 );
+const TASK_EFFECT_IDENTITIES = new Set(
+  TASK_EXECUTION_CAPABILITIES.map(
+    ({ planCapability }) => planCapability.identity
+  )
+);
 
 /** The one production composition seam capability packs extend. */
 export const PRODUCTION_EVRY_EXECUTION_REGISTRY =
@@ -131,6 +144,7 @@ export const PRODUCTION_EVRY_EXECUTION_REGISTRY =
     ...MEETINGS_EXECUTION_CAPABILITIES,
     ...LAUNCH_EVRY_EXECUTIONS,
     ...PRODUCTION_PEOPLE_EFFECT_EXECUTIONS,
+    ...TASK_EXECUTION_CAPABILITIES,
   ]);
 export const PRODUCTION_EVRY_PLAN_REGISTRY =
   PRODUCTION_EVRY_EXECUTION_REGISTRY.planRegistry;
@@ -234,6 +248,9 @@ export async function productionEvryPlanTargetIsCurrent(
   }
   if (FILE_IDENTITY_SET.has(identity)) return peopleFileTargetIsCurrent(input);
   if (!hasPersistedPlanContext(input)) return false;
+  if (TASK_EFFECT_IDENTITIES.has(identity)) {
+    return taskEvryPlanTargetIsCurrent(input);
+  }
   if (LAUNCH_EFFECT_IDENTITIES.has(identity)) {
     return launchEvryPlanTargetIsCurrent(input);
   }
