@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { isUniqueViolation } from "@/db/errors";
 import { isUnauthorized } from "@/lib/auth/unauthorized";
-import { EVRY_PEOPLE_ATTACHMENT_REFERENCE_MAX_LENGTH } from "@/lib/evry/capabilities/people/attachment-contract";
+import { EVRY_PEOPLE_ATTACHMENT_TRANSPORT_REFERENCE_MAX_LENGTH } from "@/lib/evry/capabilities/people/attachment-contract";
 import {
   openEvryPeopleAttachmentReference,
   removeEvryPeopleAttachment,
@@ -34,11 +34,11 @@ import { publicEvryConversation } from "../../../conversations/shared";
 export const dynamic = "force-dynamic";
 const PRIVATE_HEADERS = { "cache-control": "private, no-store" } as const;
 export const EVRY_PEOPLE_PLAN_MAX_BYTES =
-  EVRY_PEOPLE_ATTACHMENT_REFERENCE_MAX_LENGTH + 64 * 1024;
+  EVRY_PEOPLE_ATTACHMENT_TRANSPORT_REFERENCE_MAX_LENGTH + 64 * 1024;
 const attachmentReference = z
   .string()
   .min(1)
-  .max(EVRY_PEOPLE_ATTACHMENT_REFERENCE_MAX_LENGTH);
+  .max(EVRY_PEOPLE_ATTACHMENT_TRANSPORT_REFERENCE_MAX_LENGTH);
 const bodySchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("person_photo"),

@@ -36,6 +36,7 @@ import {
   evryPeopleFilePlanBody,
   pendingPeopleFileSubmissionFor,
   preparedEvryPeopleFileFromStage,
+  preparedEvryPeopleUploadFromResponse,
   type PendingPeopleFileSubmission,
   type PreparedEvryPeopleFile,
 } from "./people-file-state";
@@ -886,13 +887,76 @@ export function EvryShell({
       try {
         let prepared = input.kind === "people_csv" ? input.prepared : null;
         if (!prepared) {
-          const form = new FormData();
-          form.set("kind", input.kind);
-          form.set("file", input.file);
-          if ("personId" in input) form.set("personId", input.personId);
+          const fileBytes = await input.file.arrayBuffer();
+          const digest = Array.from(
+            new Uint8Array(await crypto.subtle.digest("SHA-256", fileBytes)),
+            (byte) => byte.toString(16).padStart(2, "0")
+          ).join("");
+          const prepareResponse = await fetch("/api/evry/people/attachments", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              action: "prepare",
+              kind: input.kind,
+              personId: "personId" in input ? input.personId : null,
+              name: input.file.name,
+              type: input.file.type,
+              size: input.file.size,
+              digest,
+            }),
+          });
+          const upload: unknown = await prepareResponse.json();
+          const manifest = preparedEvryPeopleUploadFromResponse(upload);
+          if (!prepareResponse.ok || !manifest) {
+            const reason =
+              typeof upload === "object" &&
+              upload !== null &&
+              "reason" in upload &&
+              typeof upload.reason === "string"
+                ? upload.reason
+                : null;
+            throw new Error(
+              reason === "unsupported_file_type"
+                ? "Choose a PDF, JPEG, or PNG file."
+                : reason === "file_too_large"
+                  ? "Choose a file that is 10 MB or smaller."
+                  : "Unable to prepare this file."
+            );
+          }
+          for (let index = 0; index < manifest.chunkCount; index += 1) {
+            const form = new FormData();
+            form.set("action", "chunk");
+            form.set("kind", input.kind);
+            form.set("reference", manifest.reference);
+            form.set("index", String(index));
+            form.set(
+              "chunk",
+              new File(
+                [
+                  input.file.slice(
+                    index * manifest.chunkBytes,
+                    (index + 1) * manifest.chunkBytes
+                  ),
+                ],
+                `${input.file.name}.part`,
+                { type: "application/octet-stream" }
+              )
+            );
+            const chunkResponse = await fetch("/api/evry/people/attachments", {
+              method: "POST",
+              body: form,
+            });
+            if (!chunkResponse.ok)
+              throw new Error("Unable to prepare this file.");
+          }
           const stagedResponse = await fetch("/api/evry/people/attachments", {
             method: "POST",
-            body: form,
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              action: "finalize",
+              kind: input.kind,
+              reference: manifest.reference,
+            }),
           });
           const staged: unknown = await stagedResponse.json();
           prepared = preparedEvryPeopleFileFromStage(staged);

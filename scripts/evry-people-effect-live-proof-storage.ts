@@ -70,9 +70,11 @@ export function createEvryPeopleEffectProofStorage(): EvryPeopleEffectProofStora
     },
     assertCleaned() {
       const stores = operations.filter(({ kind }) => kind === "store");
-      const staged = operations.filter(
-        ({ kind, key }) =>
-          kind !== "list_keys" && key.startsWith("evry-inputs/")
+      const stagedStores = stores.filter(({ key }) =>
+        key.startsWith("evry-inputs/")
+      );
+      const stagedReads = operations.filter(
+        ({ kind, key }) => kind === "read" && key.startsWith("evry-inputs/")
       );
       const final = stores.filter(({ key }) => key.startsWith("people/"));
       const removed = new Set(
@@ -84,10 +86,11 @@ export function createEvryPeopleEffectProofStorage(): EvryPeopleEffectProofStora
           .map(({ key }) => key)
       );
 
-      assert.equal(
-        staged.length,
-        0,
-        "preview must not persist or read an evry-inputs object"
+      assert.ok(stagedStores.length > 0, "proof never staged a bounded input");
+      assert.ok(stagedReads.length > 0, "proof never verified a staged input");
+      assert.ok(
+        stagedStores.every(({ key }) => removed.has(key)),
+        "proof leaked an expiring staged input"
       );
       assert.equal(final.length, 1, "proof must store one final person photo");
       assert.ok(removed.has(final[0]!.key), "final photo was never removed");

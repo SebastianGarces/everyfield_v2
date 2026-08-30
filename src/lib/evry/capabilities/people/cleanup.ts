@@ -82,7 +82,7 @@ function cleanupTargetForStep(input: {
 }
 
 /**
- * Remove legacy staged People inputs only after the exact plan reaches a terminal or
+ * Remove staged People inputs only after the exact plan reaches a terminal or
  * unusable state. The exact actor/plant/fingerprint lookup and signed reference
  * check make caller-selected plan bytes unable to target another object.
  */
