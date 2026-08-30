@@ -205,6 +205,7 @@ function newMessage(input: {
   author: "user" | "assistant";
   body: string;
   pageContext: EvryStoredConversationMessage["pageContext"];
+  requestPageContext?: EvryStoredConversationMessage["requestPageContext"];
   replayReference?: EvryStoredConversationMessage["replayReference"];
   relevanceKeys: EvryStoredConversationMessage["relevanceKeys"];
   deliveryStatus: "complete" | "interrupted";
@@ -218,6 +219,7 @@ function newMessage(input: {
     author: input.author,
     body: input.body,
     pageContext: input.pageContext,
+    requestPageContext: input.requestPageContext,
     replayReference: input.replayReference ?? null,
     relevanceKeys: input.relevanceKeys,
     deliveryStatus: input.deliveryStatus,
@@ -255,6 +257,7 @@ const store = {
       author: "user",
       body: input.body,
       pageContext: input.pageContext,
+      requestPageContext: input.requestPageContext,
       relevanceKeys: [],
       deliveryStatus: "complete",
       artifacts: [],
@@ -306,6 +309,7 @@ const store = {
       author: input.author,
       body: input.body,
       pageContext: input.pageContext,
+      requestPageContext: input.requestPageContext,
       replayReference: input.replayReference,
       relevanceKeys: input.relevanceKeys,
       deliveryStatus: input.deliveryStatus,
@@ -698,7 +702,7 @@ async function main(): Promise<void> {
     "Keep working on this request."
   );
   assert.equal(forgedContextMessage.pageContext, null);
-  assert.deepEqual(events.slice(0, 4), ["auth", "body", "context", "find"]);
+  assert.deepEqual(events.slice(0, 4), ["auth", "body", "find", "context"]);
 
   const appendRetryKey = randomUUID();
   const appendRetryBody = "Keep the scoped task in this request.";
@@ -762,10 +766,10 @@ async function main(): Promise<void> {
   );
   assert.equal(continuationStream[1]?.requestId, appendRetryKey);
 
-  pageContextRecordState = "renamed";
+  pageContextRecordState = "missing";
   sessions = [user()];
   events.length = 0;
-  const replayedAppendAfterRename = await response(
+  const replayedAppendAfterDelete = await response(
     await messagePost(
       request(
         `http://localhost/api/evry/conversations/${CONVERSATION_ID}/messages`,
@@ -778,25 +782,38 @@ async function main(): Promise<void> {
       { params: Promise.resolve({ conversationId: CONVERSATION_ID }) }
     )
   );
-  assert.equal(replayedAppendAfterRename.status, 200);
+  assert.equal(replayedAppendAfterDelete.status, 200);
   assert.equal(
-    replayedAppendAfterRename.body.conversation.messages.length,
+    replayedAppendAfterDelete.body.conversation.messages.length,
     messageCountAfterFirstAppend
   );
   assert.equal(
     messageWithBody(
-      replayedAppendAfterRename.body.conversation.messages,
+      replayedAppendAfterDelete.body.conversation.messages,
       appendRetryBody
     ).pageContext?.label,
     "Scoped task"
   );
-  assert.deepEqual(events.slice(0, 5), [
-    "auth",
-    "body",
-    "context",
-    "find",
-    "find",
-  ]);
+  assert.deepEqual(events, ["auth", "body", "find", "find"]);
+
+  sessions = [user()];
+  events.length = 0;
+  const changedAppendContext = await response(
+    await messagePost(
+      request(
+        `http://localhost/api/evry/conversations/${CONVERSATION_ID}/messages`,
+        {
+          requestKey: appendRetryKey,
+          message: appendRetryBody,
+          pageContext: { kind: "task", recordId: "foreign-task" },
+        }
+      ),
+      { params: Promise.resolve({ conversationId: CONVERSATION_ID }) }
+    )
+  );
+  assert.equal(changedAppendContext.status, 409);
+  assert.deepEqual(changedAppendContext.body, { status: "stale" });
+  assert.deepEqual(events, ["auth", "body", "find"]);
   pageContextRecordState = "available";
 
   const permissionLost = planResume.createEvryConversationPlanResumeRevalidator(

@@ -37,6 +37,7 @@ function message(input: {
   body: string;
   createdAt: Date;
   pageContext?: EvryStoredConversationMessage["pageContext"];
+  requestPageContext?: EvryStoredConversationMessage["requestPageContext"];
   relevanceKeys?: EvryStoredConversationMessage["relevanceKeys"];
   replayReference?: EvryStoredConversationMessage["replayReference"];
   artifacts?: EvryStoredConversationMessage["artifacts"];
@@ -46,6 +47,7 @@ function message(input: {
     id: input.id as never,
     requestKey: input.requestKey as never,
     pageContext: input.pageContext ?? null,
+    requestPageContext: input.requestPageContext,
     replayReference: input.replayReference ?? null,
     relevanceKeys: input.relevanceKeys ?? [],
     deliveryStatus: "complete",
@@ -83,6 +85,8 @@ function memoryStore(loss: {
             author: "user",
             body: input.body,
             createdAt: input.createdAt,
+            pageContext: input.pageContext,
+            requestPageContext: input.requestPageContext,
             replayReference: null,
           }),
         ],
@@ -107,6 +111,7 @@ function memoryStore(loss: {
         body: input.body,
         createdAt: input.createdAt,
         pageContext: input.pageContext,
+        requestPageContext: input.requestPageContext,
         relevanceKeys: input.relevanceKeys,
         replayReference: input.replayReference,
         artifacts: input.artifacts.map((document, ordinal) => ({
@@ -247,7 +252,7 @@ test("create replay recovers the committed capability result before source work"
   );
 });
 
-test("continue replay survives bounded-reference pruning with zero rerun work", async () => {
+test("continue replay uses immutable wire context after record deletion with zero rerun work", async () => {
   const loss = { throwAfterFirstResultCommit: true };
   const store = memoryStore(loss);
   await store.create({
@@ -271,8 +276,15 @@ test("continue replay survives bounded-reference pruning with zero rerun work", 
     conversationId: CONVERSATION_ID,
     requestKey: CONTINUE_REQUEST,
     message: "List people",
-    pageContext: null,
-    requestPageContext: null,
+    pageContext: {
+      kind: "task" as const,
+      recordId: "90000000-0000-4000-8000-000000000001",
+      label: "Original task",
+    },
+    requestPageContext: {
+      kind: "task" as const,
+      recordId: "90000000-0000-4000-8000-000000000001",
+    },
     now: NOW,
     store,
     continueCapabilityConversation,
@@ -300,7 +312,10 @@ test("continue replay survives bounded-reference pruning with zero rerun work", 
     false
   );
   calls.source = "Changed People result";
-  const replay = await continueEvryConversation(input);
+  const replay = await continueEvryConversation({
+    ...input,
+    pageContext: null,
+  });
 
   assert.ok(replay);
   assert.equal(
@@ -322,6 +337,27 @@ test("continue replay survives bounded-reference pruning with zero rerun work", 
     assert.equal(replay.reference.reference.entityType, "person");
     assert.equal(replay.reference.reference.entityId, "person-99");
   }
+
+  await assert.rejects(
+    continueEvryConversation({
+      ...input,
+      pageContext: null,
+      requestPageContext: {
+        kind: "task",
+        recordId: "90000000-0000-4000-8000-000000000002",
+      },
+    }),
+    /request key was already used/
+  );
+  assert.deepEqual(
+    {
+      matches: calls.matches,
+      reads: calls.reads,
+      references: calls.references,
+      messages: store.current()?.messages.length,
+    },
+    { matches: 1, reads: 1, references: 1, messages: 3 }
+  );
 });
 
 test("missing or malformed replay metadata fails before any replay work", async () => {

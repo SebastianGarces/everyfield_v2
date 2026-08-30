@@ -78,6 +78,8 @@ export type EvryStoredConversationMessage = Readonly<{
   author: EvryConversationAuthor;
   body: string;
   pageContext: EvryResolvedPageContext | null;
+  /** Exact label-free context submitted with the request; absent on legacy rows. */
+  requestPageContext?: EvryPageContext | null;
   replayReference?: EvryConversationReplayReference | null;
   relevanceKeys: readonly EvryConversationRelevanceKey[];
   deliveryStatus: EvryConversationDeliveryStatus;
@@ -167,28 +169,36 @@ const storedMessageContextSchema = z
   .object({
     schemaVersion: z.literal(1),
     pageContext: evryStoredPageContextSchema.nullable(),
+    requestPageContext: evryPageContextSchema.nullable().optional(),
     replayReference: evryConversationReplayReferenceSchema.nullable(),
   })
   .strict();
 
 function storedMessageContext(input: {
   pageContext: EvryResolvedPageContext | null;
+  requestPageContext: EvryPageContext | null;
   replayReference: EvryConversationReplayReference | null;
 }): z.infer<typeof storedMessageContextSchema> {
   return storedMessageContextSchema.parse({
     schemaVersion: 1,
     pageContext: input.pageContext,
+    requestPageContext: input.requestPageContext,
     replayReference: input.replayReference,
   });
 }
 
 function parseStoredMessageContext(input: unknown): {
   pageContext: EvryResolvedPageContext | null;
+  requestPageContext?: EvryPageContext | null;
   replayReference: EvryConversationReplayReference | null;
 } {
   const envelope = storedMessageContextSchema.safeParse(input);
   if (envelope.success) return envelope.data;
-  return { pageContext: parsePageContext(input), replayReference: null };
+  return {
+    pageContext: parsePageContext(input),
+    requestPageContext: undefined,
+    replayReference: null,
+  };
 }
 
 function labelFreePageContext(
@@ -295,6 +305,7 @@ function parseMessageRow(input: {
     author: author.data,
     body: body.data,
     pageContext: storedContext.pageContext,
+    requestPageContext: storedContext.requestPageContext,
     replayReference: storedContext.replayReference,
     relevanceKeys: relevanceKeys.data,
     deliveryStatus: delivery.data,
@@ -518,6 +529,7 @@ export async function createEvryConversationRecord(input: {
     fingerprintEvryConversationMessageRequest(fingerprintInput);
   const messageContext = storedMessageContext({
     pageContext,
+    requestPageContext,
     replayReference: null,
   });
   const conversationId = evryConversationIdSchema.parse(randomUUID());
@@ -703,6 +715,7 @@ export async function appendEvryConversationRecord(input: {
     });
   const messageContext = storedMessageContext({
     pageContext,
+    requestPageContext,
     replayReference,
   });
   const messageId = evryConversationMessageIdSchema.parse(input.messageId);
