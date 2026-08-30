@@ -16,6 +16,14 @@ test("Teams atomic effects claim a nonterminal relation before domain writes", (
   assert.doesNotMatch(atomic, /insert into evry_execution_outcomes/);
 });
 
+test("Teams atomic effects fail closed when the actor names two tenancies", () => {
+  const atomic = source("src/lib/evry/capabilities/teams/atomic-effect.ts");
+  assert.match(
+    atomic,
+    /join users actor[\s\S]*actor\.church_id = a\.church_id[\s\S]*actor\.sending_church_id is null[\s\S]*actor\.sending_network_id is null[\s\S]*actor\.seat/
+  );
+});
+
 test("0070 binds effect claims to an exact plan step and makes them append-only", () => {
   const migration = source("src/db/migrations/0070_woozy_sharon_ventura.sql");
   assert.match(
