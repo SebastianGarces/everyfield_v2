@@ -1,4 +1,5 @@
 import { and, eq, sql, type SQL } from "drizzle-orm";
+import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { db } from "@/db";
@@ -30,10 +31,7 @@ import {
   defineEvryExecutionCapability,
   type EvryEffectInput,
 } from "@/lib/evry/executor";
-import {
-  claimEvryDatabaseEffect,
-  claimEvryDatabaseEffectDecision,
-} from "@/lib/evry/executor/database-effect";
+import { claimEvryDatabaseEffectDecision } from "@/lib/evry/executor/database-effect";
 import {
   parseEvryActionPlanCandidate,
   type EvryPlanRequestKey,
@@ -60,6 +58,16 @@ const attestationValue = z.union([
   z.number(),
   z.string().max(1000),
 ]);
+
+export type PlantIntelligenceRefresh = (
+  paths: readonly string[]
+) => void | Promise<void>;
+
+const productionPlantIntelligenceRefresh: PlantIntelligenceRefresh = (
+  paths
+) => {
+  for (const path of paths) revalidatePath(path);
+};
 
 const churchBaselineSchema = z.strictObject({
   currentPhase: z.number().int().min(0).max(6),
@@ -384,8 +392,6 @@ export async function resolvePlantIntelligenceEffectArguments(
           )
         )
         .limit(1);
-      if (row && JSON.stringify(row.value) === JSON.stringify(selection.value))
-        return null;
       return attestationArgumentsSchema.parse({
         signalKey: selection.signalKey,
         expected: signalSnapshot(row),
@@ -429,8 +435,6 @@ export async function resolvePlantIntelligenceEffectArguments(
           )
         )
         .limit(1);
-      if (existing?.rating === selection.rating && existing.comment === comment)
-        return null;
       return feedbackArgumentsSchema.parse({
         insight: target,
         expected: feedbackSnapshot(existing),
@@ -451,19 +455,14 @@ export async function resolvePlantIntelligenceEffectArguments(
         )
         .limit(1);
       const target = {
-        ...selection,
         weekStart,
         expected: checkinSnapshot(existing),
+        spiritually: selection.spiritually,
+        marriageFamily: selection.marriageFamily,
+        financially: selection.financially,
+        pace: selection.pace,
+        note: selection.note,
       };
-      if (
-        existing &&
-        existing.spiritually === selection.spiritually &&
-        existing.marriageFamily === selection.marriageFamily &&
-        existing.financially === selection.financially &&
-        existing.pace === selection.pace &&
-        existing.note === selection.note
-      )
-        return null;
       return checkinArgumentsSchema.parse(target);
     }
   }
@@ -617,7 +616,19 @@ async function checkinIsCurrent(plantId: string, value: unknown) {
   );
 }
 
-async function executeTransition(input: EvryEffectInput) {
+async function refreshClaimed(
+  claim: Awaited<ReturnType<typeof claimEvryDatabaseEffectDecision>>,
+  refresh: PlantIntelligenceRefresh,
+  paths: readonly string[]
+) {
+  if (claim.disposition === "claimed") await refresh(paths);
+  return claim.result;
+}
+
+async function executeTransition(
+  input: EvryEffectInput,
+  refresh: PlantIntelligenceRefresh
+) {
   const parsed = transitionArgumentsSchema.safeParse(input.arguments);
   if (!parsed.success) return { status: "refused" as const, excludedCount: 1 };
   const args = parsed.data;
@@ -627,25 +638,25 @@ async function executeTransition(input: EvryEffectInput) {
     mutationCtes: async () => {
       const factSnapshot = await buildFactSnapshot(input.execution.plantId);
       return sql`
-        transitioned as (
+        moved as (
+          update churches c set current_phase = ${args.toPhase}
+          from eligible e
+          join users u on u.id = e.actor_user_id
+            and u.church_id = e.church_id and u.seat = 'owner'
+          where c.id = e.church_id
+            and c.current_phase = ${args.expected.currentPhase}
+          returning c.id, u.id as initiated_by_id
+        ), transitioned as (
           insert into phase_transitions (
             church_id, from_phase, to_phase, initiated_by_id, reason, kind,
             fact_snapshot, rubric_version
           )
-          select c.id, c.current_phase, ${args.toPhase}, u.id, ${args.reason},
+          select m.id, ${args.expected.currentPhase}, ${args.toPhase},
+                 m.initiated_by_id, ${args.reason},
                  'transition', ${JSON.stringify(factSnapshot)}::jsonb,
                  ${ACTIVE_RUBRIC.version}
-          from eligible e
-          join users u on u.id = e.actor_user_id
-            and u.church_id = e.church_id and u.seat = 'owner'
-          join churches c on c.id = e.church_id
-            and c.current_phase = ${args.expected.currentPhase}
+          from moved m
           returning id
-        ), moved as (
-          update churches c set current_phase = ${args.toPhase}
-          from transitioned t
-          where c.id = ${input.execution.plantId}::uuid
-          returning c.id
         )`;
     },
     mutation: sql`
@@ -658,7 +669,7 @@ async function executeTransition(input: EvryEffectInput) {
         ["owner"]
       )) && transitionIsCurrent(input.execution.plantId, args),
   });
-  if (claim.result.status === "completed") {
+  if (claim.disposition === "claimed") {
     await emitPhaseChanged({
       churchId: input.execution.plantId,
       fromPhase: args.expected.currentPhase,
@@ -667,14 +678,17 @@ async function executeTransition(input: EvryEffectInput) {
       rubricVersion: ACTIVE_RUBRIC.version,
     });
   }
-  return claim.result;
+  return refreshClaimed(claim, refresh, ["/phase", "/dashboard"]);
 }
 
-async function executeAcknowledge(input: EvryEffectInput) {
+async function executeAcknowledge(
+  input: EvryEffectInput,
+  refresh: PlantIntelligenceRefresh
+) {
   const parsed = acknowledgeArgumentsSchema.safeParse(input.arguments);
   if (!parsed.success) return { status: "refused" as const, excludedCount: 1 };
   const expected = parsed.data.expected;
-  return claimEvryDatabaseEffect({
+  const claim = await claimEvryDatabaseEffectDecision({
     execution: input.execution,
     effectKey: input.effectKey,
     mutationCtes: sql`
@@ -700,15 +714,19 @@ async function executeAcknowledge(input: EvryEffectInput) {
         ["owner"]
       )) && acknowledgeIsCurrent(input.execution.plantId, expected),
   });
+  return refreshClaimed(claim, refresh, ["/phase"]);
 }
 
-async function executeAttestation(input: EvryEffectInput) {
+async function executeAttestation(
+  input: EvryEffectInput,
+  refresh: PlantIntelligenceRefresh
+) {
   const parsed = attestationArgumentsSchema.safeParse(input.arguments);
   if (!parsed.success) return { status: "refused" as const, excludedCount: 1 };
   const args = parsed.data;
   const scope = sql`current.church_id = ${input.execution.plantId}::uuid
     and current.signal_key = ${args.signalKey}`;
-  return claimEvryDatabaseEffect({
+  const claim = await claimEvryDatabaseEffectDecision({
     execution: input.execution,
     effectKey: input.effectKey,
     mutationCtes: sql`
@@ -754,16 +772,20 @@ async function executeAttestation(input: EvryEffectInput) {
         ["owner", "admin"]
       )) && attestationIsCurrent(input.execution.plantId, args),
   });
+  return refreshClaimed(claim, refresh, ["/phase"]);
 }
 
-async function executeFeedback(input: EvryEffectInput) {
+async function executeFeedback(
+  input: EvryEffectInput,
+  refresh: PlantIntelligenceRefresh
+) {
   const parsed = feedbackArgumentsSchema.safeParse(input.arguments);
   if (!parsed.success) return { status: "refused" as const, excludedCount: 1 };
   const args = parsed.data;
   const scope = sql`current.church_id = ${input.execution.plantId}::uuid
     and current.user_id = ${input.execution.actorUserId}::uuid
     and current.insight_id = ${args.insight.id}::uuid`;
-  return claimEvryDatabaseEffect({
+  const claim = await claimEvryDatabaseEffectDecision({
     execution: input.execution,
     effectKey: input.effectKey,
     mutationCtes: sql`
@@ -814,16 +836,20 @@ async function executeFeedback(input: EvryEffectInput) {
         args
       ),
   });
+  return refreshClaimed(claim, refresh, ["/phase"]);
 }
 
-async function executeCheckin(input: EvryEffectInput) {
+async function executeCheckin(
+  input: EvryEffectInput,
+  refresh: PlantIntelligenceRefresh
+) {
   const parsed = checkinArgumentsSchema.safeParse(input.arguments);
   if (!parsed.success || parsed.data.weekStart !== weekStartOf(new Date()))
     return { status: "refused" as const, excludedCount: 1 };
   const args = parsed.data;
   const scope = sql`current.church_id = ${input.execution.plantId}::uuid
     and current.week_start = ${args.weekStart}::timestamp`;
-  return claimEvryDatabaseEffect({
+  const claim = await claimEvryDatabaseEffectDecision({
     execution: input.execution,
     effectKey: input.effectKey,
     mutationCtes: sql`
@@ -864,26 +890,41 @@ async function executeCheckin(input: EvryEffectInput) {
         ["owner", "admin"]
       )) && checkinIsCurrent(input.execution.plantId, args),
   });
+  return refreshClaimed(claim, refresh, ["/phase"]);
 }
 
-const EXECUTE_BY_IDENTITY = {
-  [PLANT_INTELLIGENCE_EFFECT_IDENTITIES.transitionPhase]: executeTransition,
-  [PLANT_INTELLIGENCE_EFFECT_IDENTITIES.acknowledgeAssessment]:
-    executeAcknowledge,
-  [PLANT_INTELLIGENCE_EFFECT_IDENTITIES.setAttestation]: executeAttestation,
-  [PLANT_INTELLIGENCE_EFFECT_IDENTITIES.submitFeedback]: executeFeedback,
-  [PLANT_INTELLIGENCE_EFFECT_IDENTITIES.saveCheckin]: executeCheckin,
-} as const;
+export function createPlantIntelligenceExecutions(
+  refresh: PlantIntelligenceRefresh = productionPlantIntelligenceRefresh
+) {
+  const executeByIdentity = {
+    [PLANT_INTELLIGENCE_EFFECT_IDENTITIES.transitionPhase]: (input) =>
+      executeTransition(input, refresh),
+    [PLANT_INTELLIGENCE_EFFECT_IDENTITIES.acknowledgeAssessment]: (input) =>
+      executeAcknowledge(input, refresh),
+    [PLANT_INTELLIGENCE_EFFECT_IDENTITIES.setAttestation]: (input) =>
+      executeAttestation(input, refresh),
+    [PLANT_INTELLIGENCE_EFFECT_IDENTITIES.submitFeedback]: (input) =>
+      executeFeedback(input, refresh),
+    [PLANT_INTELLIGENCE_EFFECT_IDENTITIES.saveCheckin]: (input) =>
+      executeCheckin(input, refresh),
+  } satisfies Record<
+    keyof typeof PLAN_BY_IDENTITY,
+    (input: EvryEffectInput) => Promise<unknown>
+  >;
 
-export const PLANT_INTELLIGENCE_EXECUTIONS = Object.freeze(
-  Object.entries(PLAN_BY_IDENTITY).map(([identity, planCapability]) =>
-    defineEvryExecutionCapability({
-      planCapability,
-      executeIfCurrent:
-        EXECUTE_BY_IDENTITY[identity as keyof typeof EXECUTE_BY_IDENTITY],
-    })
-  )
-);
+  return Object.freeze(
+    Object.entries(PLAN_BY_IDENTITY).map(([identity, planCapability]) =>
+      defineEvryExecutionCapability({
+        planCapability,
+        executeIfCurrent:
+          executeByIdentity[identity as keyof typeof executeByIdentity],
+      })
+    )
+  );
+}
+
+export const PLANT_INTELLIGENCE_EXECUTIONS =
+  createPlantIntelligenceExecutions();
 
 export const PLANT_INTELLIGENCE_EXECUTION_REGISTRY =
   createEvryExecutionCapabilityRegistry(PLANT_INTELLIGENCE_EXECUTIONS);

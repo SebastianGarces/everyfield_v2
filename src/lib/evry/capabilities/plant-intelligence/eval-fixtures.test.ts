@@ -251,11 +251,7 @@ function deterministicProof(identity: string, layer: string) {
 
 for (const capability of inventory.capabilities) {
   for (const layer of EVRY_CAPABILITY_EVAL_LAYERS) {
-    if (
-      capability.operationKind === "effect" &&
-      ["execution", "idempotency", "errors"].includes(layer)
-    )
-      continue;
+    if (["execution", "idempotency", "errors"].includes(layer)) continue;
     test(`${capability.identity}:${layer}`, () =>
       deterministicProof(capability.identity, layer));
   }

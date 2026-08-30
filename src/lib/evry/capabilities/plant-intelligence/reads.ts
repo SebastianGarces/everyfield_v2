@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { and, asc, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 
@@ -27,6 +29,7 @@ import { getMilestoneTimeline } from "@/lib/phase-engine/signals/milestones";
 import { getPlantTrends } from "@/lib/phase-engine/signals/trends";
 import { getPhaseReadiness } from "@/lib/phase-engine/transitions";
 import { getPublishedArticleRefs } from "@/lib/wiki/get-articles";
+import { wikiHref } from "@/lib/wiki/href";
 
 import { PLANT_INTELLIGENCE_READ_IDENTITIES } from "./catalog";
 
@@ -41,6 +44,7 @@ const cursorSchema = z.strictObject({
   kind: z.enum(["assessment", "declarations", "feedback", "signals"]),
   recordId: z.string().uuid(),
   offset: z.number().int().nonnegative(),
+  sourceFingerprint: z.string().regex(/^[0-9a-f]{64}$/),
 });
 type Cursor = z.infer<typeof cursorSchema>;
 
@@ -56,6 +60,34 @@ function decodeCursor(value: string): Cursor | null {
   } catch {
     return null;
   }
+}
+
+function sourceFingerprint(value: unknown): string {
+  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
+function cursorMatches(
+  cursor: Cursor | null,
+  kind: Cursor["kind"],
+  recordId: string,
+  fingerprint: string
+) {
+  return (
+    cursor === null ||
+    (cursor.kind === kind &&
+      cursor.recordId === recordId &&
+      cursor.sourceFingerprint === fingerprint)
+  );
+}
+
+function changedPageArtifact(title: string, reason: string) {
+  return buildEvryReadArtifact({
+    title,
+    filters: [{ label: "Plant", value: "Current plant" }],
+    exclusions: [{ reason, count: 1 }],
+    items: [],
+    sourceLinks: [phaseLink],
+  });
 }
 
 /** Split display storage without tearing UTF-16 surrogate pairs. */
@@ -131,7 +163,7 @@ async function scopedAssessment(plantId: string, assessmentId: string | null) {
 export async function readPlantIntelligenceAssessmentForPlant(input: {
   plantId: string;
   assessmentId: string | null;
-  offset: number;
+  cursor: Cursor | null;
 }) {
   const resolved = await scopedAssessment(input.plantId, input.assessmentId);
   if (!resolved) {
@@ -193,7 +225,7 @@ export async function readPlantIntelligenceAssessmentForPlant(input: {
               facts: [{ label: "Article slug", value: slug }],
               sourceLink: trustedEvryApplicationSourceLink({
                 label: article.title,
-                href: `/wiki/${slug}`,
+                href: wikiHref(slug),
               }),
             },
           ]
@@ -233,17 +265,29 @@ export async function readPlantIntelligenceAssessmentForPlant(input: {
     ];
   });
   const allItems = [assessmentItem, ...insightItems];
-  const visible = allItems.slice(input.offset, input.offset + PAGE_SIZE);
-  const remaining = Math.max(
-    0,
-    allItems.length - input.offset - visible.length
-  );
+  const fingerprint = sourceFingerprint(allItems);
+  if (
+    !cursorMatches(
+      input.cursor,
+      "assessment",
+      resolved.assessment.id,
+      fingerprint
+    )
+  )
+    return changedPageArtifact(
+      "Stored Plant Intelligence assessment",
+      "The stored assessment changed; start again"
+    );
+  const offset = input.cursor?.offset ?? 0;
+  const visible = allItems.slice(offset, offset + PAGE_SIZE);
+  const remaining = Math.max(0, allItems.length - offset - visible.length);
   const next =
     remaining > 0
       ? {
           kind: "assessment" as const,
           recordId: resolved.assessment.id,
-          offset: input.offset + visible.length,
+          offset: offset + visible.length,
+          sourceFingerprint: fingerprint,
         }
       : null;
   return buildEvryReadArtifact({
@@ -364,15 +408,6 @@ export async function readPlantIntelligenceFeedbackForPlant(input: {
   userId: string;
   cursor: Cursor | null;
 }) {
-  if (input.cursor && input.cursor.recordId !== input.userId) {
-    return buildEvryReadArtifact({
-      title: "Your stored Plant Intelligence feedback",
-      filters: [{ label: "Plant", value: "Current plant" }],
-      exclusions: [{ reason: "Feedback cursor unavailable", count: 1 }],
-      items: [],
-      sourceLinks: [phaseLink],
-    });
-  }
   const rows = await db
     .select({
       id: insightFeedback.id,
@@ -428,6 +463,12 @@ export async function readPlantIntelligenceFeedbackForPlant(input: {
       })),
     ];
   });
+  const fingerprint = sourceFingerprint(flattened);
+  if (!cursorMatches(input.cursor, "feedback", input.userId, fingerprint))
+    return changedPageArtifact(
+      "Your stored Plant Intelligence feedback",
+      "The stored feedback changed; start again"
+    );
   const offset = input.cursor?.offset ?? 0;
   const visible = flattened.slice(offset, offset + PAGE_SIZE);
   const remaining = Math.max(0, flattened.length - offset - visible.length);
@@ -437,6 +478,7 @@ export async function readPlantIntelligenceFeedbackForPlant(input: {
           kind: "feedback" as const,
           recordId: input.userId,
           offset: offset + visible.length,
+          sourceFingerprint: fingerprint,
         }
       : null;
   return buildEvryReadArtifact({
@@ -477,17 +519,6 @@ export async function readPlantIntelligenceDeclarationsForPlant(input: {
     .from(phaseTransitions)
     .where(eq(phaseTransitions.churchId, input.plantId))
     .orderBy(desc(phaseTransitions.createdAt), desc(phaseTransitions.id));
-  if (input.cursor && input.cursor.recordId !== rows[0]?.id) {
-    return buildEvryReadArtifact({
-      title: "Stored Plant Intelligence phase history",
-      filters: [{ label: "Plant", value: "Current plant" }],
-      exclusions: [
-        { reason: "The stored phase history changed; start again", count: 1 },
-      ],
-      items: [],
-      sourceLinks: [phaseLink],
-    });
-  }
   const flattened = rows.flatMap((row) => {
     const reason = plantIntelligenceDisplayChunks(row.reason);
     return [
@@ -513,16 +544,26 @@ export async function readPlantIntelligenceDeclarationsForPlant(input: {
       })),
     ];
   });
+  const recordId = rows[0]?.id ?? "00000000-0000-0000-0000-000000000000";
+  const fingerprint = sourceFingerprint({
+    currentPhase: church?.currentPhase ?? null,
+    items: flattened,
+  });
+  if (!cursorMatches(input.cursor, "declarations", recordId, fingerprint))
+    return changedPageArtifact(
+      "Stored Plant Intelligence phase history",
+      "The stored phase history changed; start again"
+    );
   const offset = input.cursor?.offset ?? 0;
   const visible = flattened.slice(offset, offset + PAGE_SIZE);
   const remaining = Math.max(0, flattened.length - offset - visible.length);
-  const recordId = rows[0]?.id ?? crypto.randomUUID();
   const next =
     remaining > 0
       ? {
           kind: "declarations" as const,
           recordId,
           offset: offset + visible.length,
+          sourceFingerprint: fingerprint,
         }
       : null;
   return buildEvryReadArtifact({
@@ -558,21 +599,6 @@ export async function readPlantIntelligenceSignalsForPlant(input: {
   cursor: Cursor | null;
 }) {
   const latest = await getLatestAssessment(input.plantId);
-  if (
-    input.cursor &&
-    input.cursor.recordId !==
-      (latest?.assessment.id ?? "00000000-0000-0000-0000-000000000000")
-  ) {
-    return buildEvryReadArtifact({
-      title: "Stored and deterministic Plant Intelligence signals",
-      filters: [{ label: "Plant", value: "Current plant" }],
-      exclusions: [
-        { reason: "The stored signal page changed; start again", count: 1 },
-      ],
-      items: [],
-      sourceLinks: [phaseLink],
-    });
-  }
   const [readiness, trends, timeline] = await Promise.all([
     getPhaseReadiness(input.plantId),
     getPlantTrends(input.plantId, latest, "planter"),
@@ -701,6 +727,14 @@ export async function readPlantIntelligenceSignalsForPlant(input: {
       ];
     }),
   ];
+  const recordId =
+    latest?.assessment.id ?? "00000000-0000-0000-0000-000000000000";
+  const fingerprint = sourceFingerprint(allItems);
+  if (!cursorMatches(input.cursor, "signals", recordId, fingerprint))
+    return changedPageArtifact(
+      "Stored and deterministic Plant Intelligence signals",
+      "The stored signal page changed; start again"
+    );
   const offset = input.cursor?.offset ?? 0;
   const visible = allItems.slice(offset, offset + PAGE_SIZE);
   const remaining = Math.max(0, allItems.length - offset - visible.length);
@@ -708,9 +742,9 @@ export async function readPlantIntelligenceSignalsForPlant(input: {
     remaining > 0
       ? {
           kind: "signals" as const,
-          recordId:
-            latest?.assessment.id ?? "00000000-0000-0000-0000-000000000000",
+          recordId,
           offset: offset + visible.length,
+          sourceFingerprint: fingerprint,
         }
       : null;
   return buildEvryReadArtifact({
@@ -740,7 +774,7 @@ export async function readPlantIntelligenceSignalsForPlant(input: {
 
 const assessmentInput = {
   assessmentId: z.string().uuid().nullable(),
-  offset: z.number().int().nonnegative(),
+  cursor: cursorSchema.nullable(),
 };
 
 export const PLANT_INTELLIGENCE_READ_REGISTRATIONS = Object.freeze([
@@ -818,7 +852,7 @@ export function selectPlantIntelligenceEvryRead(
     return cursor?.kind === "assessment"
       ? {
           readId: "plant-intelligence.assessment",
-          input: { assessmentId: cursor.recordId, offset: cursor.offset },
+          input: { assessmentId: cursor.recordId, cursor },
         }
       : null;
   }
@@ -829,7 +863,7 @@ export function selectPlantIntelligenceEvryRead(
     if (id && !z.string().uuid().safeParse(id).success) return null;
     return {
       readId: "plant-intelligence.assessment",
-      input: { assessmentId: id, offset: 0 },
+      input: { assessmentId: id, cursor: null },
     };
   }
   if (
@@ -838,7 +872,7 @@ export function selectPlantIntelligenceEvryRead(
   )
     return {
       readId: "plant-intelligence.assessment",
-      input: { assessmentId: pageContext.recordId, offset: 0 },
+      input: { assessmentId: pageContext.recordId, cursor: null },
     };
   const historyCursor =
     /^show plant intelligence phase history cursor ([A-Za-z0-9_-]+)$/i.exec(

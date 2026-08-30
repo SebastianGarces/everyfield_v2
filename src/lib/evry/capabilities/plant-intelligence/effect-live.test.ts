@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { before, test } from "node:test";
 
-import { PLANT_INTELLIGENCE_EFFECT_IDENTITIES } from "./catalog";
+import inventory from "./inventory.generated.json";
 
 const LIVE_DB = process.env.LIVE_DB_TESTS === "1";
 const LIVE_LAYERS = ["execution", "idempotency", "errors"] as const;
@@ -47,7 +47,7 @@ before(() => {
   outcomes = new Set(parsed);
 });
 
-for (const identity of Object.values(PLANT_INTELLIGENCE_EFFECT_IDENTITIES)) {
+for (const { identity } of inventory.capabilities) {
   for (const layer of LIVE_LAYERS) {
     test(
       `${identity}:${layer}:live`,
