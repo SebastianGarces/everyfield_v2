@@ -55,6 +55,9 @@ import { fileURLToPath } from "node:url";
 export const PEOPLE_EFFECT_LIVE_SUITE =
   "src/lib/people/evry-effect-live.test.ts" as const;
 
+export const TASK_EFFECT_LIVE_SUITE =
+  "src/lib/evry/capabilities/tasks/effect-live.test.ts" as const;
+
 export const LIVE_SUITES = [
   "src/db/seat-owner-uniqueness.test.ts",
   "src/lib/auth/access.test.ts",
@@ -66,7 +69,7 @@ export const LIVE_SUITES = [
   "src/lib/evry/conversations/conversations-live.test.ts",
   "src/lib/evry/capabilities/meetings/effect-live.test.ts",
   "src/lib/evry/capabilities/meetings/read-live.test.ts",
-  "src/lib/evry/capabilities/tasks/effect-live.test.ts",
+  TASK_EFFECT_LIVE_SUITE,
   "src/lib/evry/executor/executor-live.test.ts",
   "src/lib/evry/recipes/recipe-live.test.ts",
   "src/lib/evry/runs/runs-live.test.ts",
@@ -87,11 +90,15 @@ export const LIVE_SUITES = [
 ] as const;
 
 /**
- * The People proof owns a second child process and exercises every registered
- * People capability in one fixture lifecycle. Run it without sibling suites
- * competing for the two-core CI runner and the shared Neon proxy.
+ * The People and Task proofs each own a second child process and exercise an
+ * entire capability pack in one fixture lifecycle. Give each one its own
+ * phase so neither competes with sibling suites for the two-core CI runner or
+ * the proxy's 20-connection pool.
  */
-export const DEDICATED_LIVE_SUITES = [PEOPLE_EFFECT_LIVE_SUITE] as const;
+export const DEDICATED_LIVE_SUITES = [
+  PEOPLE_EFFECT_LIVE_SUITE,
+  TASK_EFFECT_LIVE_SUITE,
+] as const;
 
 const dedicatedLiveSuites = new Set<string>(DEDICATED_LIVE_SUITES);
 
@@ -101,7 +108,7 @@ export const PARALLEL_LIVE_SUITES = LIVE_SUITES.filter(
 
 /** Ordered, fail-fast phases for the live lane. */
 export const LIVE_SUITE_PHASES = [
-  DEDICATED_LIVE_SUITES,
+  ...DEDICATED_LIVE_SUITES.map((suite) => [suite] as const),
   PARALLEL_LIVE_SUITES,
 ] as const;
 

@@ -12,6 +12,7 @@ import {
   PARALLEL_LIVE_SUITES,
   PEOPLE_EFFECT_LIVE_SUITE,
   suiteForPath,
+  TASK_EFFECT_LIVE_SUITE,
 } from "../../scripts/live-db-names";
 import { preflight } from "../../scripts/live-db-preflight";
 
@@ -219,19 +220,33 @@ test("every live suite derives its own database, and no two collide", () => {
   );
 });
 
-test("the monolithic People proof owns the first phase without dropping a live suite", () => {
-  assert.deepEqual(DEDICATED_LIVE_SUITES, [PEOPLE_EFFECT_LIVE_SUITE]);
-  assert.equal(PARALLEL_LIVE_SUITES.includes(PEOPLE_EFFECT_LIVE_SUITE), false);
+test("each monolithic capability proof owns a phase without dropping a live suite", () => {
+  assert.deepEqual(DEDICATED_LIVE_SUITES, [
+    PEOPLE_EFFECT_LIVE_SUITE,
+    TASK_EFFECT_LIVE_SUITE,
+  ]);
+  for (const suite of DEDICATED_LIVE_SUITES) {
+    assert.equal(PARALLEL_LIVE_SUITES.includes(suite), false);
+  }
 
   const phased = LIVE_SUITE_PHASES.flat();
   assert.deepEqual(phased.toSorted(), [...LIVE_SUITES].toSorted());
   assert.equal(new Set(phased).size, LIVE_SUITES.length);
+  assert.deepEqual(
+    LIVE_SUITE_PHASES.slice(0, DEDICATED_LIVE_SUITES.length),
+    DEDICATED_LIVE_SUITES.map((suite) => [suite])
+  );
 
   const runner = readFileSync(
     path.join(process.cwd(), "scripts", "live-db-run.ts"),
     "utf8"
   );
   assert.match(runner, /for \(const suites of LIVE_SUITE_PHASES\)/);
+  assert.match(
+    runner,
+    /env: \{ \.\.\.process\.env, TZ: "UTC" \}/,
+    "live children must use the same UTC timestamp contract as CI and production"
+  );
 });
 
 test("the preload repoints exactly the listed suites, from any working directory", () => {
