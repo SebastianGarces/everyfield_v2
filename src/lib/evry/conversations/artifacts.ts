@@ -30,6 +30,7 @@ import { evrySettingsSectionIdSchema } from "@/lib/evry/policy/schema";
 
 import {
   EvryConversationStorageError,
+  EVRY_READ_ITEM_MAX_FACTS,
   evryConversationResultCodeFor,
   evryConversationPlanIdentitySchema,
   storedEvryArtifactFactSchema,
@@ -54,7 +55,7 @@ const readItemSchema = z
   .object({
     id: z.string().min(1).max(160),
     label: labelSchema,
-    facts: z.array(storedEvryArtifactFactSchema).max(12),
+    facts: z.array(storedEvryArtifactFactSchema).max(EVRY_READ_ITEM_MAX_FACTS),
     sourceLink: storedEvrySourceLinkSchema,
   })
   .strict()

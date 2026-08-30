@@ -19,6 +19,7 @@ import type { Database } from "@/db";
 import { churchMeetings, meetingAttendance } from "@/db/schema/meetings";
 import { persons } from "@/db/schema/people";
 import type { AttendanceType } from "@/db/schema/meetings";
+import type { PersonStatus } from "@/db/schema/people";
 
 /**
  * NO `isRecruitedContact()` HERE, and that is the decision rather than an
@@ -33,6 +34,16 @@ import type { AttendanceType } from "@/db/schema/meetings";
  * other direction.
  */
 const CORE_GROUP_STATUSES = ["core_group", "launch_team", "leader"] as const;
+
+export function attendanceTypeFromDerivationFacts(input: {
+  personStatus: PersonStatus;
+  hasPriorAttendance: boolean;
+}): AttendanceType {
+  if ((CORE_GROUP_STATUSES as readonly string[]).includes(input.personStatus)) {
+    return "core_group";
+  }
+  return input.hasPriorAttendance ? "returning" : "first_time";
+}
 
 /**
  * Derive the attendance type for a person at a meeting.
@@ -57,7 +68,10 @@ export async function deriveAttendanceType(
 
   if (
     person &&
-    (CORE_GROUP_STATUSES as readonly string[]).includes(person.status)
+    attendanceTypeFromDerivationFacts({
+      personStatus: person.status,
+      hasPriorAttendance: false,
+    }) === "core_group"
   ) {
     return "core_group";
   }
@@ -80,10 +94,8 @@ export async function deriveAttendanceType(
     )
     .limit(1);
 
-  if (prior) {
-    return "returning";
-  }
-
-  // Rule 3: otherwise this is their first time.
-  return "first_time";
+  return attendanceTypeFromDerivationFacts({
+    personStatus: person?.status ?? "prospect",
+    hasPriorAttendance: Boolean(prior),
+  });
 }
