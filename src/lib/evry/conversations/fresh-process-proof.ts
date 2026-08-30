@@ -300,7 +300,10 @@ async function createProof(): Promise<void> {
     activePlan: { mode: "set", plan },
     now: new Date(START.valueOf() + 3_000),
   });
-  assert.equal(appended.messages.length, 4);
+  assert.equal(appended.messages.length, 5);
+  assert.equal(appended.messages[1]?.artifacts[0]?.kind, "boundary");
+  assert.equal(appended.messages[2]?.artifacts[0]?.kind, "clarification");
+  assert.equal(appended.messages[4]?.artifacts[0]?.kind, "confirmation");
   assert.equal(
     appended.state.explicitChoices[0]?.selectedEntityId,
     secondPersonId
@@ -353,7 +356,7 @@ async function resumeProof(): Promise<void> {
   assert.equal(reopened.cacheControl, "private, no-store");
   assert.equal(reopened.body.status, "available");
   assert.equal(reopened.body.conversation.messages[0].body, LITERAL);
-  assert.equal(reopened.body.conversation.messages.length, 4);
+  assert.equal(reopened.body.conversation.messages.length, 5);
   assert.equal(reopened.body.conversation.activePlan.status, "expired");
   assert.equal(reopened.body.conversation.activePlan.confirmable, false);
   assert.equal(
@@ -387,8 +390,12 @@ async function resumeProof(): Promise<void> {
     entityId: secondPersonId,
   });
   assert.equal(
-    continued.body.conversation.messages.at(-1).body,
+    continued.body.conversation.messages.at(-2).body,
     "Add her to it."
+  );
+  assert.equal(
+    continued.body.conversation.messages.at(-1).artifacts[0].artifact.kind,
+    "boundary"
   );
   process.stdout.write("Evry fresh-process resume proof passed\n");
 }
@@ -409,12 +416,16 @@ async function changedStateRetryProof(): Promise<void> {
       { params: Promise.resolve({ conversationId }) }
     )
   );
-  assert.deepEqual(retried, {
-    status: 409,
-    cacheControl: "private, no-store",
-    body: { status: "stale" },
+  assert.equal(retried.status, 200);
+  assert.equal(retried.cacheControl, "private, no-store");
+  assert.equal(retried.body.status, "continued");
+  assert.deepEqual(retried.body.reference, {
+    status: "resolved",
+    entityType: "person",
+    entityId: secondPersonId,
   });
-  process.stdout.write("Evry changed-state replay proof passed\n");
+  assert.equal(retried.body.conversation.messages.length, 7);
+  process.stdout.write("Evry changed-state replay recovery proof passed\n");
 }
 
 void (
