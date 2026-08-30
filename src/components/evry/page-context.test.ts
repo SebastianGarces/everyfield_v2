@@ -40,11 +40,16 @@ test("record pages produce a visible label and a strict minimal wire hint", () =
   }
 });
 
-test("launch uses a server-resolved current hint and list/create routes carry none", () => {
+test("singleton records use server-resolved current hints and list/create routes carry none", () => {
   assert.deepEqual(visibleEvryPageContextFor("/launch", []), {
     key: "launch:current",
     label: "Launch",
     wire: { kind: "launch", recordId: "current" },
+  });
+  assert.deepEqual(visibleEvryPageContextFor("/phase", []), {
+    key: "plant_intelligence:current",
+    label: "Plant Intelligence",
+    wire: { kind: "plant_intelligence", recordId: "current" },
   });
 
   for (const pathname of [
