@@ -1,4 +1,4 @@
-import { and, eq, sql, type SQL } from "drizzle-orm";
+import { and, eq, isNull, sql, type SQL } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
@@ -485,6 +485,18 @@ function baselinePredicate(
       )`;
 }
 
+function exactPlantActorSeat(
+  allowed: readonly ("owner" | "admin" | "member")[]
+): SQL {
+  return sql`u.church_id = e.church_id
+    and u.sending_church_id is null
+    and u.sending_network_id is null
+    and u.seat in (${sql.join(
+      allowed.map((seat) => sql`${seat}`),
+      sql`, `
+    )})`;
+}
+
 async function seatIsCurrent(
   plantId: string,
   actorUserId: string,
@@ -493,9 +505,18 @@ async function seatIsCurrent(
   const [actor] = await db
     .select({ seat: users.seat })
     .from(users)
-    .where(and(eq(users.id, actorUserId), eq(users.churchId, plantId)))
+    .where(
+      and(
+        eq(users.id, actorUserId),
+        eq(users.churchId, plantId),
+        isNull(users.sendingChurchId),
+        isNull(users.sendingNetworkId)
+      )
+    )
     .limit(1);
-  return actor?.seat !== null && allowed.includes(actor!.seat);
+  return (
+    actor !== undefined && actor.seat !== null && allowed.includes(actor.seat)
+  );
 }
 
 async function transitionIsCurrent(plantId: string, value: unknown) {
@@ -642,7 +663,7 @@ async function executeTransition(
           update churches c set current_phase = ${args.toPhase}
           from eligible e
           join users u on u.id = e.actor_user_id
-            and u.church_id = e.church_id and u.seat = 'owner'
+            and ${exactPlantActorSeat(["owner"])}
           where c.id = e.church_id
             and c.current_phase = ${args.expected.currentPhase}
           returning c.id, u.id as initiated_by_id
@@ -697,7 +718,7 @@ async function executeAcknowledge(
         set planter_seen_at = transaction_timestamp()
         from eligible e
         join users u on u.id = e.actor_user_id
-          and u.church_id = e.church_id and u.seat = 'owner'
+          and ${exactPlantActorSeat(["owner"])}
         where a.id = ${expected.id}::uuid
           and a.church_id = e.church_id
           and a.status = 'complete'
@@ -740,7 +761,7 @@ async function executeAttestation(
                transaction_timestamp()
         from eligible e
         join users u on u.id = e.actor_user_id
-          and u.church_id = e.church_id and u.seat in ('owner', 'admin')
+          and ${exactPlantActorSeat(["owner", "admin"])}
         where ${baselinePredicate("plant_signals", args.expected, scope)}
         on conflict (church_id, signal_key) do update
         set value = excluded.value,
@@ -799,7 +820,7 @@ async function executeFeedback(
                transaction_timestamp(), transaction_timestamp()
         from eligible e
         join users u on u.id = e.actor_user_id
-          and u.church_id = e.church_id and u.seat is not null
+          and ${exactPlantActorSeat(["owner", "admin", "member"])}
         join plant_insights i on i.id = ${args.insight.id}::uuid
           and i.church_id = e.church_id and i.audience = 'planter'
           and i.assessment_id = ${args.insight.assessmentId}::uuid
@@ -863,7 +884,7 @@ async function executeCheckin(
                ${args.note}, u.id, transaction_timestamp(), transaction_timestamp()
         from eligible e
         join users u on u.id = e.actor_user_id
-          and u.church_id = e.church_id and u.seat in ('owner', 'admin')
+          and ${exactPlantActorSeat(["owner", "admin"])}
         where ${baselinePredicate("planter_checkins", args.expected, scope)}
         on conflict (church_id, week_start) do update
         set spiritually = excluded.spiritually,

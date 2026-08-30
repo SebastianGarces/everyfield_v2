@@ -6,7 +6,7 @@ import { before, test } from "node:test";
 import inventory from "./inventory.generated.json";
 
 const LIVE_DB = process.env.LIVE_DB_TESTS === "1";
-const LIVE_LAYERS = ["execution", "idempotency", "errors"] as const;
+const LIVE_LAYERS = ["tenancy", "execution", "idempotency", "errors"] as const;
 let outcomes: ReadonlySet<string> | null = null;
 
 before(() => {
