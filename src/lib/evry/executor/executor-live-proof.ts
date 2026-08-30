@@ -21,6 +21,11 @@ import {
   users,
 } from "@/db/schema";
 import { UnauthorizedError } from "@/lib/auth/unauthorized";
+import {
+  EXECUTOR_LIVE_PROOF_PHASES,
+  executorLiveProofPhaseMarker,
+  parseExecutorLiveProofPhase,
+} from "./executor-live-runner";
 import { countEvryExecutionAttempts } from "./repository";
 import type { EvryEffectInput, EvryEffectResult } from "./registry";
 
@@ -34,7 +39,12 @@ type SessionUser = Readonly<{
 
 const EFFECT_IDENTITY = "people.crm.people.update-person";
 const SCRATCH = "__evry executor live proof__";
-const FIXTURE_SESSION_ID = "e".repeat(64);
+const PROOF_PHASE = parseExecutorLiveProofPhase(process.argv[2]);
+// The wrapper runs phase children sequentially against its one suite database.
+// Keep their auth rows disjoint while preserving the production 64-char ID.
+const FIXTURE_SESSION_ID = `${"e".repeat(63)}${
+  EXECUTOR_LIVE_PROOF_PHASES.indexOf(PROOF_PHASE) + 1
+}`;
 let sessionUser: SessionUser | null = null;
 let alternatePlantId: string | null = null;
 
@@ -174,13 +184,13 @@ async function executeFixtureEffect(
 
 async function setupDomain(): Promise<void> {
   await db.execute(sql`
-    create table evry_executor_live_targets (
+    create table if not exists evry_executor_live_targets (
       id uuid primary key,
       version integer not null check (version >= 0)
     )
   `);
   await db.execute(sql`
-    create table evry_executor_live_effects (
+    create table if not exists evry_executor_live_effects (
       effect_key varchar(64) primary key,
       target_id uuid not null references evry_executor_live_targets(id),
       affected_count integer not null,
@@ -365,6 +375,9 @@ async function domainEffectCount(targetId: string): Promise<number> {
 }
 
 async function main(): Promise<void> {
+  process.stdout.write(
+    `${executorLiveProofPhaseMarker(PROOF_PHASE, "started")}\n`
+  );
   await setupDomain();
   sessionUser = await seedActor();
   const [alternatePlant] = await db
@@ -471,301 +484,320 @@ async function main(): Promise<void> {
     });
   }
 
-  const [completedTarget] = await seedTargets(1);
-  const completedPlan = await seedApprovedPlan(
-    modules,
-    document([
-      {
-        id: "attempt",
-        targetId: completedTarget,
-        behavior: "complete",
-        dependsOn: [],
-      },
-    ])
-  );
-  const doubleClick = await Promise.all([
-    response(post, completedPlan),
-    response(post, completedPlan),
-  ]);
-  assert.deepEqual(
-    doubleClick.map(({ status }) => status),
-    [200, 200]
-  );
-  assert.deepEqual(
-    doubleClick.map(({ body }) => body.status),
-    ["completed", "completed"]
-  );
-  let evidence = await counts(completedPlan.id);
-  assert.equal(evidence.attempts, 1);
-  assert.ok(sessionUser.churchId);
-  assert.equal(
-    await countEvryExecutionAttempts({
-      planId: completedPlan.id,
-      actorUserId: sessionUser.id,
-      plantId: sessionUser.churchId,
-      fingerprint: completedPlan.fingerprint,
-    }),
-    1
-  );
-  assert.equal(evidence.effects, 1);
-  assert.equal(evidence.state, "completed");
-  assert.deepEqual(
-    evidence.outcomes
-      .map(({ subject, stepId, resultCode }) => [subject, stepId, resultCode])
-      .sort(),
-    [
-      ["attempt", null, "execution_completed"],
-      ["step", "attempt", "effect_completed"],
-    ].sort()
-  );
-  assert.equal((await response(post, completedPlan)).body.status, "completed");
-  assert.equal(adapterCalls.get(completedTarget), 2);
-
-  const [crashTarget] = await seedTargets(1);
-  throwAfterCommit.add(crashTarget);
-  const crashPlan = await seedApprovedPlan(
-    modules,
-    document([
-      {
-        id: "crash",
-        targetId: crashTarget,
-        behavior: "throw_after_commit",
-        dependsOn: [],
-      },
-    ])
-  );
-  assert.equal((await response(post, crashPlan)).status, 503);
-  evidence = await counts(crashPlan.id);
-  assert.equal(evidence.effects, 0);
-  assert.equal(evidence.outcomes.length, 0);
-  assert.equal(evidence.state, "executing");
-  assert.equal(await domainEffectCount(crashTarget), 1);
-  await db.execute(
-    sql`update evry_executor_live_targets set version = 2 where id = ${crashTarget}::uuid`
-  );
-  assert.equal((await response(post, crashPlan)).status, 200);
-  evidence = await counts(crashPlan.id);
-  assert.equal(evidence.effects, 1);
-  assert.equal(evidence.outcomes.length, 2);
-  assert.equal(await domainEffectCount(crashTarget), 1);
-  assert.equal(adapterCalls.get(crashTarget), 2);
-
-  assert.ok(sessionUser.churchId);
-  const communicationPeople = await db
-    .insert(persons)
-    .values(
-      ["First", "Second", "Third"].map((firstName) => ({
-        churchId: sessionUser!.churchId!,
-        firstName,
-        lastName: "Authority recovery",
-        email: `${firstName.toLowerCase()}-${randomUUID()}@scratch.invalid`,
-        createdBy: sessionUser!.id,
-      }))
-    )
-    .returning({ id: persons.id, email: persons.email });
-  assert.equal(communicationPeople.length, 3);
-  const communicationAudience =
-    await communicationSend.resolveEvryCommunicationAudience({
-      churchId: sessionUser.churchId,
-      recipientIds: communicationPeople.map(({ id }) => id),
-      subject: "Executor authority recovery",
-      body: "Finish the exact approved batch",
-    });
-  assert.ok(communicationAudience);
-  const communicationId = randomUUID();
-  const communicationDocument = plans.parseEvryActionPlanCandidate({
-    candidate: {
-      steps: [
+  if (PROOF_PHASE === "replay") {
+    const [completedTarget] = await seedTargets(1);
+    const completedPlan = await seedApprovedPlan(
+      modules,
+      document([
         {
-          id: "send-authority-recovery",
-          capabilityIdentity:
-            communicationMessages.COMMUNICATION_MESSAGE_SEND_IDENTITY,
-          arguments: {
-            communicationId,
-            recipientSource: {
-              kind: "people",
-              recipientIds: communicationPeople.map(({ id }) => id),
-            },
-            audience: communicationAudience,
-          },
+          id: "attempt",
+          targetId: completedTarget,
+          behavior: "complete",
           dependsOn: [],
         },
-      ],
-    },
-    registry: registry.planRegistry,
-    eligibleCapabilities: [
-      {
-        identity: communicationMessages.COMMUNICATION_MESSAGE_SEND_IDENTITY,
-      },
-    ],
-  });
-  const communicationPlan = await seedApprovedPlan(
-    modules,
-    communicationDocument,
-    14 * 60 * 1_000 + 30_000
-  );
+      ])
+    );
+    const doubleClick = await Promise.all([
+      response(post, completedPlan),
+      response(post, completedPlan),
+    ]);
+    assert.deepEqual(
+      doubleClick.map(({ status }) => status),
+      [200, 200]
+    );
+    assert.deepEqual(
+      doubleClick.map(({ body }) => body.status),
+      ["completed", "completed"]
+    );
+    let evidence = await counts(completedPlan.id);
+    assert.equal(evidence.attempts, 1);
+    assert.ok(sessionUser.churchId);
+    assert.equal(
+      await countEvryExecutionAttempts({
+        planId: completedPlan.id,
+        actorUserId: sessionUser.id,
+        plantId: sessionUser.churchId,
+        fingerprint: completedPlan.fingerprint,
+      }),
+      1
+    );
+    assert.equal(evidence.effects, 1);
+    assert.equal(evidence.state, "completed");
+    assert.deepEqual(
+      evidence.outcomes
+        .map(({ subject, stepId, resultCode }) => [subject, stepId, resultCode])
+        .sort(),
+      [
+        ["attempt", null, "execution_completed"],
+        ["step", "attempt", "effect_completed"],
+      ].sort()
+    );
+    assert.equal(
+      (await response(post, completedPlan)).body.status,
+      "completed"
+    );
+    assert.equal(adapterCalls.get(completedTarget), 2);
 
-  const interruptedCommunication = await response(post, communicationPlan);
-  assert.equal(interruptedCommunication.status, 503);
-  assert.equal(interruptedCommunication.body.status, "retryable");
-  assert.equal(communicationProviderCalls.length, 1);
-
-  const unauthorizedReplay = await response(post, communicationPlan);
-  assert.equal(unauthorizedReplay.status, 503);
-  assert.equal(unauthorizedReplay.body.status, "retryable");
-  assert.equal(communicationProviderCalls.length, 1);
-  assert.equal(
-    await db
-      .select({ id: evryExecutionEffectClaims.id })
-      .from(evryExecutionEffectClaims)
-      .where(eq(evryExecutionEffectClaims.planId, communicationPlan.id))
-      .then((rows) => rows.length),
-    0
-  );
-  assert.equal(
-    await db
-      .select({ id: evryExecutionOutcomes.id })
-      .from(evryExecutionOutcomes)
-      .where(eq(evryExecutionOutcomes.planId, communicationPlan.id))
-      .then((rows) => rows.length),
-    0,
-    "authority loss must not turn a prepared batch into a durable refusal"
-  );
-
-  const driftedUnsentPerson = communicationPeople.find(
-    ({ email }) => email !== communicationProviderCalls[0]
-  );
-  assert.ok(driftedUnsentPerson);
-  await db
-    .update(persons)
-    .set({ email: `drifted-${randomUUID()}@scratch.invalid` })
-    .where(eq(persons.id, driftedUnsentPerson.id));
-
-  const untilExpired = communicationPlan.expiresAt.getTime() - Date.now();
-  if (untilExpired >= 0) {
-    await new Promise((resolve) => setTimeout(resolve, untilExpired + 100));
+    const [crashTarget] = await seedTargets(1);
+    throwAfterCommit.add(crashTarget);
+    const crashPlan = await seedApprovedPlan(
+      modules,
+      document([
+        {
+          id: "crash",
+          targetId: crashTarget,
+          behavior: "throw_after_commit",
+          dependsOn: [],
+        },
+      ])
+    );
+    assert.equal((await response(post, crashPlan)).status, 503);
+    evidence = await counts(crashPlan.id);
+    assert.equal(evidence.effects, 0);
+    assert.equal(evidence.outcomes.length, 0);
+    assert.equal(evidence.state, "executing");
+    assert.equal(await domainEffectCount(crashTarget), 1);
+    await db.execute(
+      sql`update evry_executor_live_targets set version = 2 where id = ${crashTarget}::uuid`
+    );
+    assert.equal((await response(post, crashPlan)).status, 200);
+    evidence = await counts(crashPlan.id);
+    assert.equal(evidence.effects, 1);
+    assert.equal(evidence.outcomes.length, 2);
+    assert.equal(await domainEffectCount(crashTarget), 1);
+    assert.equal(adapterCalls.get(crashTarget), 2);
+    process.stdout.write(
+      `${executorLiveProofPhaseMarker(PROOF_PHASE, "passed")}\n`
+    );
+    return;
   }
-  await db
-    .update(users)
-    .set({ seat: "owner" })
-    .where(eq(users.id, sessionUser.id));
-  const recoveredCommunication = await response(post, communicationPlan);
-  assert.equal(recoveredCommunication.status, 200);
-  assert.equal(recoveredCommunication.body.status, "completed");
-  assert.equal(communicationProviderCalls.length, 2);
-  assert.equal(new Set(communicationProviderCalls).size, 2);
-  assert.deepEqual(
-    (
-      await db
-        .select({ status: communicationRecipients.status })
-        .from(communicationRecipients)
-        .where(eq(communicationRecipients.communicationId, communicationId))
-    )
-      .map(({ status }) => status)
-      .toSorted(),
-    ["failed", "sent", "sent"]
-  );
-  assert.deepEqual(
-    await db
-      .select({
-        affectedCount: evryExecutionEffectClaims.affectedCount,
-        excludedCount: evryExecutionEffectClaims.excludedCount,
-      })
-      .from(evryExecutionEffectClaims)
-      .where(eq(evryExecutionEffectClaims.planId, communicationPlan.id))
-      .then((rows) => rows),
-    [{ affectedCount: 2, excludedCount: 1 }]
-  );
-  assert.equal((await response(post, communicationPlan)).status, 200);
-  assert.equal(communicationProviderCalls.length, 2);
 
-  const stagedGroupPeople = await db
-    .insert(persons)
-    .values(
-      ["Staged first", "Staged second"].map((firstName) => ({
-        churchId: sessionUser!.churchId!,
-        firstName,
-        lastName: "Source recovery",
-        email: `${firstName.replace(" ", "-").toLowerCase()}-${randomUUID()}@scratch.invalid`,
-        status: "core_group" as const,
-        createdBy: sessionUser!.id,
-      }))
-    )
-    .returning({ id: persons.id });
-  assert.equal(stagedGroupPeople.length, 2);
-  const stagedGroupAudience =
-    await communicationSend.resolveEvryCommunicationAudience({
-      churchId: sessionUser.churchId,
-      recipientIds: stagedGroupPeople.map(({ id }) => id),
-      subject: "Prepared source recovery",
-      body: "Do not send after the group changes",
-    });
-  assert.ok(stagedGroupAudience);
-  const stagedGroupCommunicationId = randomUUID();
-  const stagedGroupStepId = "send-prepared-group";
-  const stagedGroupDocument = plans.parseEvryActionPlanCandidate({
-    candidate: {
-      steps: [
-        {
-          id: stagedGroupStepId,
-          capabilityIdentity:
-            communicationMessages.COMMUNICATION_MESSAGE_SEND_IDENTITY,
-          arguments: {
-            communicationId: stagedGroupCommunicationId,
-            recipientSource: { kind: "group", selector: "core_group" },
-            audience: stagedGroupAudience,
+  if (PROOF_PHASE === "communication") {
+    assert.ok(sessionUser.churchId);
+    const communicationPeople = await db
+      .insert(persons)
+      .values(
+        ["First", "Second", "Third"].map((firstName) => ({
+          churchId: sessionUser!.churchId!,
+          firstName,
+          lastName: "Authority recovery",
+          email: `${firstName.toLowerCase()}-${randomUUID()}@scratch.invalid`,
+          createdBy: sessionUser!.id,
+        }))
+      )
+      .returning({ id: persons.id, email: persons.email });
+    assert.equal(communicationPeople.length, 3);
+    const communicationAudience =
+      await communicationSend.resolveEvryCommunicationAudience({
+        churchId: sessionUser.churchId,
+        recipientIds: communicationPeople.map(({ id }) => id),
+        subject: "Executor authority recovery",
+        body: "Finish the exact approved batch",
+      });
+    assert.ok(communicationAudience);
+    const communicationId = randomUUID();
+    const communicationDocument = plans.parseEvryActionPlanCandidate({
+      candidate: {
+        steps: [
+          {
+            id: "send-authority-recovery",
+            capabilityIdentity:
+              communicationMessages.COMMUNICATION_MESSAGE_SEND_IDENTITY,
+            arguments: {
+              communicationId,
+              recipientSource: {
+                kind: "people",
+                recipientIds: communicationPeople.map(({ id }) => id),
+              },
+              audience: communicationAudience,
+            },
+            dependsOn: [],
           },
-          dependsOn: [],
+        ],
+      },
+      registry: registry.planRegistry,
+      eligibleCapabilities: [
+        {
+          identity: communicationMessages.COMMUNICATION_MESSAGE_SEND_IDENTITY,
         },
       ],
-    },
-    registry: registry.planRegistry,
-    eligibleCapabilities: [
-      {
-        identity: communicationMessages.COMMUNICATION_MESSAGE_SEND_IDENTITY,
+    });
+    const communicationPlan = await seedApprovedPlan(
+      modules,
+      communicationDocument,
+      14 * 60 * 1_000 + 30_000
+    );
+
+    const interruptedCommunication = await response(post, communicationPlan);
+    assert.equal(interruptedCommunication.status, 503);
+    assert.equal(interruptedCommunication.body.status, "retryable");
+    assert.equal(communicationProviderCalls.length, 1);
+
+    const unauthorizedReplay = await response(post, communicationPlan);
+    assert.equal(unauthorizedReplay.status, 503);
+    assert.equal(unauthorizedReplay.body.status, "retryable");
+    assert.equal(communicationProviderCalls.length, 1);
+    assert.equal(
+      await db
+        .select({ id: evryExecutionEffectClaims.id })
+        .from(evryExecutionEffectClaims)
+        .where(eq(evryExecutionEffectClaims.planId, communicationPlan.id))
+        .then((rows) => rows.length),
+      0
+    );
+    assert.equal(
+      await db
+        .select({ id: evryExecutionOutcomes.id })
+        .from(evryExecutionOutcomes)
+        .where(eq(evryExecutionOutcomes.planId, communicationPlan.id))
+        .then((rows) => rows.length),
+      0,
+      "authority loss must not turn a prepared batch into a durable refusal"
+    );
+
+    const driftedUnsentPerson = communicationPeople.find(
+      ({ email }) => email !== communicationProviderCalls[0]
+    );
+    assert.ok(driftedUnsentPerson);
+    await db
+      .update(persons)
+      .set({ email: `drifted-${randomUUID()}@scratch.invalid` })
+      .where(eq(persons.id, driftedUnsentPerson.id));
+
+    process.stdout.write(
+      "EVRY_EXECUTOR_LIVE_PHASE=communication:expiry-wait\n"
+    );
+    const untilExpired = communicationPlan.expiresAt.getTime() - Date.now();
+    if (untilExpired >= 0) {
+      await new Promise((resolve) => setTimeout(resolve, untilExpired + 100));
+    }
+    process.stdout.write(
+      "EVRY_EXECUTOR_LIVE_PHASE=communication:expiry-crossed\n"
+    );
+    await db
+      .update(users)
+      .set({ seat: "owner" })
+      .where(eq(users.id, sessionUser.id));
+    const recoveredCommunication = await response(post, communicationPlan);
+    assert.equal(recoveredCommunication.status, 200);
+    assert.equal(recoveredCommunication.body.status, "completed");
+    assert.equal(communicationProviderCalls.length, 2);
+    assert.equal(new Set(communicationProviderCalls).size, 2);
+    assert.deepEqual(
+      (
+        await db
+          .select({ status: communicationRecipients.status })
+          .from(communicationRecipients)
+          .where(eq(communicationRecipients.communicationId, communicationId))
+      )
+        .map(({ status }) => status)
+        .toSorted(),
+      ["failed", "sent", "sent"]
+    );
+    assert.deepEqual(
+      await db
+        .select({
+          affectedCount: evryExecutionEffectClaims.affectedCount,
+          excludedCount: evryExecutionEffectClaims.excludedCount,
+        })
+        .from(evryExecutionEffectClaims)
+        .where(eq(evryExecutionEffectClaims.planId, communicationPlan.id))
+        .then((rows) => rows),
+      [{ affectedCount: 2, excludedCount: 1 }]
+    );
+    assert.equal((await response(post, communicationPlan)).status, 200);
+    assert.equal(communicationProviderCalls.length, 2);
+
+    const stagedGroupPeople = await db
+      .insert(persons)
+      .values(
+        ["Staged first", "Staged second"].map((firstName) => ({
+          churchId: sessionUser!.churchId!,
+          firstName,
+          lastName: "Source recovery",
+          email: `${firstName.replace(" ", "-").toLowerCase()}-${randomUUID()}@scratch.invalid`,
+          status: "core_group" as const,
+          createdBy: sessionUser!.id,
+        }))
+      )
+      .returning({ id: persons.id });
+    assert.equal(stagedGroupPeople.length, 2);
+    const stagedGroupAudience =
+      await communicationSend.resolveEvryCommunicationAudience({
+        churchId: sessionUser.churchId,
+        recipientIds: stagedGroupPeople.map(({ id }) => id),
+        subject: "Prepared source recovery",
+        body: "Do not send after the group changes",
+      });
+    assert.ok(stagedGroupAudience);
+    const stagedGroupCommunicationId = randomUUID();
+    const stagedGroupStepId = "send-prepared-group";
+    const stagedGroupDocument = plans.parseEvryActionPlanCandidate({
+      candidate: {
+        steps: [
+          {
+            id: stagedGroupStepId,
+            capabilityIdentity:
+              communicationMessages.COMMUNICATION_MESSAGE_SEND_IDENTITY,
+            arguments: {
+              communicationId: stagedGroupCommunicationId,
+              recipientSource: { kind: "group", selector: "core_group" },
+              audience: stagedGroupAudience,
+            },
+            dependsOn: [],
+          },
+        ],
       },
-    ],
-  });
-  const stagedGroupPlan = await seedApprovedPlan(modules, stagedGroupDocument);
-  const stagedGroupEffectKey = auditIdentity.executionEffectKey(
-    stagedGroupPlan.id,
-    stagedGroupPlan.fingerprint,
-    stagedGroupStepId
-  );
-  await db.batch([
-    db.insert(communications).values({
-      id: stagedGroupCommunicationId,
-      churchId: sessionUser.churchId,
-      subject: stagedGroupAudience.subject,
-      body: stagedGroupAudience.body,
-      bodyHtml: stagedGroupAudience.bodyHtml,
-      channel: stagedGroupAudience.channel,
-      templateId: stagedGroupAudience.templateId,
-      meetingId: stagedGroupAudience.meetingId,
-      status: "sending",
-      recipientCount: stagedGroupAudience.recipients.length,
-      createdById: sessionUser.id,
-    }),
-    db.insert(communicationRecipients).values(
-      stagedGroupAudience.recipients.map((recipient) => ({
-        id: communicationEffect.communicationEvryEffectUuid(
-          stagedGroupEffectKey,
-          `recipient:${recipient.personId}`
-        ),
-        churchId: sessionUser!.churchId!,
-        communicationId: stagedGroupCommunicationId,
-        personId: recipient.personId,
-        email: recipient.email,
-        channel: "email" as const,
-        status: "pending" as const,
-      }))
-    ),
-  ]);
-  const markerRaceSuffix = randomUUID().replaceAll("-", "");
-  const markerRaceFunction = `evry_marker_race_${markerRaceSuffix}`;
-  const markerRaceTrigger = `evry_marker_race_trigger_${markerRaceSuffix}`;
-  await db.execute(
-    sql.raw(`
+      registry: registry.planRegistry,
+      eligibleCapabilities: [
+        {
+          identity: communicationMessages.COMMUNICATION_MESSAGE_SEND_IDENTITY,
+        },
+      ],
+    });
+    const stagedGroupPlan = await seedApprovedPlan(
+      modules,
+      stagedGroupDocument
+    );
+    const stagedGroupEffectKey = auditIdentity.executionEffectKey(
+      stagedGroupPlan.id,
+      stagedGroupPlan.fingerprint,
+      stagedGroupStepId
+    );
+    await db.batch([
+      db.insert(communications).values({
+        id: stagedGroupCommunicationId,
+        churchId: sessionUser.churchId,
+        subject: stagedGroupAudience.subject,
+        body: stagedGroupAudience.body,
+        bodyHtml: stagedGroupAudience.bodyHtml,
+        channel: stagedGroupAudience.channel,
+        templateId: stagedGroupAudience.templateId,
+        meetingId: stagedGroupAudience.meetingId,
+        status: "sending",
+        recipientCount: stagedGroupAudience.recipients.length,
+        createdById: sessionUser.id,
+      }),
+      db.insert(communicationRecipients).values(
+        stagedGroupAudience.recipients.map((recipient) => ({
+          id: communicationEffect.communicationEvryEffectUuid(
+            stagedGroupEffectKey,
+            `recipient:${recipient.personId}`
+          ),
+          churchId: sessionUser!.churchId!,
+          communicationId: stagedGroupCommunicationId,
+          personId: recipient.personId,
+          email: recipient.email,
+          channel: "email" as const,
+          status: "pending" as const,
+        }))
+      ),
+    ]);
+    const markerRaceSuffix = randomUUID().replaceAll("-", "");
+    const markerRaceFunction = `evry_marker_race_${markerRaceSuffix}`;
+    const markerRaceTrigger = `evry_marker_race_trigger_${markerRaceSuffix}`;
+    await db.execute(
+      sql.raw(`
       create function ${markerRaceFunction}() returns trigger
       language plpgsql as $marker_race$
       begin
@@ -775,238 +807,254 @@ async function main(): Promise<void> {
       end
       $marker_race$
     `)
-  );
-  await db.execute(
-    sql.raw(`
+    );
+    await db.execute(
+      sql.raw(`
       create trigger ${markerRaceTrigger}
       before update on communication_recipients
       for each statement execute function ${markerRaceFunction}()
     `)
-  );
-  const stagedUnauthorized = await response(post, stagedGroupPlan);
-  await db.execute(
-    sql.raw(`drop trigger ${markerRaceTrigger} on communication_recipients`)
-  );
-  await db.execute(sql.raw(`drop function ${markerRaceFunction}()`));
-  assert.equal(stagedUnauthorized.status, 503);
-  assert.equal(stagedUnauthorized.body.status, "retryable");
-  assert.equal(communicationProviderCalls.length, 2);
-
-  await db.batch([
-    db
-      .update(persons)
-      .set({ status: "prospect" })
-      .where(eq(persons.id, stagedGroupPeople[0]!.id)),
-    db.update(users).set({ seat: "owner" }).where(eq(users.id, sessionUser.id)),
-  ]);
-  const stalePreparedGroup = await response(post, stagedGroupPlan);
-  assert.equal(stalePreparedGroup.status, 409);
-  assert.equal(communicationProviderCalls.length, 2);
-  assert.deepEqual(
-    (
-      await db
-        .select({ status: communicationRecipients.status })
-        .from(communicationRecipients)
-        .where(
-          eq(
-            communicationRecipients.communicationId,
-            stagedGroupCommunicationId
-          )
-        )
-    ).map(({ status }) => status),
-    ["pending", "pending"]
-  );
-
-  assert.ok(sessionUser.churchId);
-  const originalPlantId = sessionUser.churchId;
-  for (const authorityChange of [
-    "logout_actor",
-    "drop_actor_seat",
-    "move_actor_plant",
-    "remove_actor_plant",
-  ] as const) {
-    const [firstTarget, refusedTarget] = await seedTargets(2);
-    const changedAuthorityPlan = await seedApprovedPlan(
-      modules,
-      document([
-        {
-          id: `${authorityChange}_first`,
-          targetId: firstTarget,
-          behavior: authorityChange,
-          dependsOn: [],
-        },
-        {
-          id: `${authorityChange}_second`,
-          targetId: refusedTarget,
-          behavior: "complete",
-          dependsOn: [`${authorityChange}_first`],
-        },
-      ])
     );
+    const stagedUnauthorized = await response(post, stagedGroupPlan);
+    await db.execute(
+      sql.raw(`drop trigger ${markerRaceTrigger} on communication_recipients`)
+    );
+    await db.execute(sql.raw(`drop function ${markerRaceFunction}()`));
+    assert.equal(stagedUnauthorized.status, 503);
+    assert.equal(stagedUnauthorized.body.status, "retryable");
+    assert.equal(communicationProviderCalls.length, 2);
 
-    const changedAuthority = await response(post, changedAuthorityPlan);
-    assert.equal(changedAuthority.status, 409);
+    await db.batch([
+      db
+        .update(persons)
+        .set({ status: "prospect" })
+        .where(eq(persons.id, stagedGroupPeople[0]!.id)),
+      db
+        .update(users)
+        .set({ seat: "owner" })
+        .where(eq(users.id, sessionUser.id)),
+    ]);
+    const stalePreparedGroup = await response(post, stagedGroupPlan);
+    assert.equal(stalePreparedGroup.status, 409);
+    assert.equal(communicationProviderCalls.length, 2);
     assert.deepEqual(
-      z
-        .object({ steps: z.array(z.object({ status: z.string() })) })
-        .parse(changedAuthority.body)
-        .steps.map(({ status }) => status),
-      ["completed", "refused"]
+      (
+        await db
+          .select({ status: communicationRecipients.status })
+          .from(communicationRecipients)
+          .where(
+            eq(
+              communicationRecipients.communicationId,
+              stagedGroupCommunicationId
+            )
+          )
+      ).map(({ status }) => status),
+      ["pending", "pending"]
     );
-    evidence = await counts(changedAuthorityPlan.id);
-    assert.equal(evidence.state, "partially_failed");
-    assert.equal(evidence.attempts, 1);
-    assert.equal(evidence.outcomes.length, 3);
-    assert.equal(evidence.effects, 1);
-    assert.equal(await domainEffectCount(firstTarget), 1);
-    assert.equal(await domainEffectCount(refusedTarget), 0);
-    assert.equal(adapterCalls.has(refusedTarget), false);
-
-    await db
-      .update(users)
-      .set({ churchId: originalPlantId, seat: "owner" })
-      .where(eq(users.id, sessionUser.id));
-    await db
-      .insert(sessions)
-      .values({
-        id: FIXTURE_SESSION_ID,
-        userId: sessionUser.id,
-        expiresAt: new Date(Date.now() + 60 * 60 * 1_000),
-      })
-      .onConflictDoNothing();
+    process.stdout.write(
+      `${executorLiveProofPhaseMarker(PROOF_PHASE, "passed")}\n`
+    );
+    return;
   }
 
-  const [firstTarget, failedTarget, skippedTarget] = await seedTargets(3);
-  const partialPlan = await seedApprovedPlan(
-    modules,
-    document([
-      {
-        id: "first",
-        targetId: firstTarget,
-        behavior: "complete",
-        dependsOn: [],
-      },
-      {
-        id: "middle",
-        targetId: failedTarget,
-        behavior: "fail",
-        dependsOn: [],
-      },
-      {
-        id: "last",
-        targetId: skippedTarget,
-        behavior: "complete",
-        dependsOn: ["middle", "first"],
-      },
-    ])
-  );
-  const partial = await response(post, partialPlan);
-  assert.equal(partial.status, 409);
-  const partialBody = z
-    .object({ steps: z.array(z.object({ status: z.string() })) })
-    .parse(partial.body);
-  assert.deepEqual(
-    partialBody.steps.map(({ status }) => status),
-    ["completed", "failed", "skipped"]
-  );
-  evidence = await counts(partialPlan.id);
-  assert.equal(evidence.state, "partially_failed");
-  assert.equal(evidence.outcomes.length, 4);
-  assert.equal(evidence.effects, 1);
-  assert.equal(adapterCalls.has(skippedTarget), false);
+  if (PROOF_PHASE === "authority") {
+    let evidence: Awaited<ReturnType<typeof counts>>;
+    assert.ok(sessionUser.churchId);
+    const originalPlantId = sessionUser.churchId;
+    for (const authorityChange of [
+      "logout_actor",
+      "drop_actor_seat",
+      "move_actor_plant",
+      "remove_actor_plant",
+    ] as const) {
+      const [firstTarget, refusedTarget] = await seedTargets(2);
+      const changedAuthorityPlan = await seedApprovedPlan(
+        modules,
+        document([
+          {
+            id: `${authorityChange}_first`,
+            targetId: firstTarget,
+            behavior: authorityChange,
+            dependsOn: [],
+          },
+          {
+            id: `${authorityChange}_second`,
+            targetId: refusedTarget,
+            behavior: "complete",
+            dependsOn: [`${authorityChange}_first`],
+          },
+        ])
+      );
 
-  for (const lifecycle of ["cancel", "supersede"] as const) {
-    const [targetId] = await seedTargets(1);
-    const plan = await seedApprovedPlan(
+      const changedAuthority = await response(post, changedAuthorityPlan);
+      assert.equal(changedAuthority.status, 409);
+      assert.deepEqual(
+        z
+          .object({ steps: z.array(z.object({ status: z.string() })) })
+          .parse(changedAuthority.body)
+          .steps.map(({ status }) => status),
+        ["completed", "refused"]
+      );
+      evidence = await counts(changedAuthorityPlan.id);
+      assert.equal(evidence.state, "partially_failed");
+      assert.equal(evidence.attempts, 1);
+      assert.equal(evidence.outcomes.length, 3);
+      assert.equal(evidence.effects, 1);
+      assert.equal(await domainEffectCount(firstTarget), 1);
+      assert.equal(await domainEffectCount(refusedTarget), 0);
+      assert.equal(adapterCalls.has(refusedTarget), false);
+
+      await db
+        .update(users)
+        .set({ churchId: originalPlantId, seat: "owner" })
+        .where(eq(users.id, sessionUser.id));
+      await db
+        .insert(sessions)
+        .values({
+          id: FIXTURE_SESSION_ID,
+          userId: sessionUser.id,
+          expiresAt: new Date(Date.now() + 60 * 60 * 1_000),
+        })
+        .onConflictDoNothing();
+    }
+
+    const [firstTarget, failedTarget, skippedTarget] = await seedTargets(3);
+    const partialPlan = await seedApprovedPlan(
       modules,
       document([
         {
-          id: lifecycle,
-          targetId,
+          id: "first",
+          targetId: firstTarget,
           behavior: "complete",
           dependsOn: [],
         },
+        {
+          id: "middle",
+          targetId: failedTarget,
+          behavior: "fail",
+          dependsOn: [],
+        },
+        {
+          id: "last",
+          targetId: skippedTarget,
+          behavior: "complete",
+          dependsOn: ["middle", "first"],
+        },
       ])
     );
-    const lifecyclePromise: Promise<unknown> =
-      lifecycle === "cancel"
-        ? planRepository.cancelExactEvryActionPlan({
-            planId: plan.id,
-            actorUserId: sessionUser.id,
-            plantId: sessionUser.churchId!,
-            fingerprint: plan.fingerprint,
-            cancelledAt: new Date(),
-          })
-        : planRepository.reviseExactEvryActionPlan({
-            oldPlanId: plan.id,
-            oldFingerprint: plan.fingerprint,
-            actorUserId: sessionUser.id,
-            plantId: sessionUser.churchId!,
-            requestKey: plans.mintEvryPlanRequestKey(),
-            replacementDocument: document([
-              {
-                id: "replacement",
-                targetId,
-                behavior: "complete",
-                dependsOn: [],
-              },
-            ]),
-          });
-    const [executionResult, lifecycleResult]: [
-      { status: number; body: Record<string, unknown> },
-      unknown,
-    ] = await Promise.all([response(post, plan), lifecyclePromise]);
-    evidence = await counts(plan.id);
-    const lifecycleWon =
-      lifecycle === "cancel"
-        ? lifecycleResult === true
-        : typeof lifecycleResult === "object" &&
-          lifecycleResult !== null &&
-          "status" in lifecycleResult &&
-          lifecycleResult.status === "revised";
-    if (lifecycleWon) {
-      assert.equal(executionResult.status, 404);
-      assert.equal(evidence.attempts, 0);
-      assert.equal(evidence.outcomes.length, 0);
-      assert.equal(evidence.effects, 0);
-    } else {
-      assert.equal(executionResult.status, 200);
-      assert.equal(evidence.attempts, 1);
-      assert.equal(evidence.effects, 1);
+    const partial = await response(post, partialPlan);
+    assert.equal(partial.status, 409);
+    const partialBody = z
+      .object({ steps: z.array(z.object({ status: z.string() })) })
+      .parse(partial.body);
+    assert.deepEqual(
+      partialBody.steps.map(({ status }) => status),
+      ["completed", "failed", "skipped"]
+    );
+    evidence = await counts(partialPlan.id);
+    assert.equal(evidence.state, "partially_failed");
+    assert.equal(evidence.outcomes.length, 4);
+    assert.equal(evidence.effects, 1);
+    assert.equal(adapterCalls.has(skippedTarget), false);
+
+    for (const lifecycle of ["cancel", "supersede"] as const) {
+      const [targetId] = await seedTargets(1);
+      const plan = await seedApprovedPlan(
+        modules,
+        document([
+          {
+            id: lifecycle,
+            targetId,
+            behavior: "complete",
+            dependsOn: [],
+          },
+        ])
+      );
+      const lifecyclePromise: Promise<unknown> =
+        lifecycle === "cancel"
+          ? planRepository.cancelExactEvryActionPlan({
+              planId: plan.id,
+              actorUserId: sessionUser.id,
+              plantId: sessionUser.churchId!,
+              fingerprint: plan.fingerprint,
+              cancelledAt: new Date(),
+            })
+          : planRepository.reviseExactEvryActionPlan({
+              oldPlanId: plan.id,
+              oldFingerprint: plan.fingerprint,
+              actorUserId: sessionUser.id,
+              plantId: sessionUser.churchId!,
+              requestKey: plans.mintEvryPlanRequestKey(),
+              replacementDocument: document([
+                {
+                  id: "replacement",
+                  targetId,
+                  behavior: "complete",
+                  dependsOn: [],
+                },
+              ]),
+            });
+      const [executionResult, lifecycleResult]: [
+        { status: number; body: Record<string, unknown> },
+        unknown,
+      ] = await Promise.all([response(post, plan), lifecyclePromise]);
+      evidence = await counts(plan.id);
+      const lifecycleWon =
+        lifecycle === "cancel"
+          ? lifecycleResult === true
+          : typeof lifecycleResult === "object" &&
+            lifecycleResult !== null &&
+            "status" in lifecycleResult &&
+            lifecycleResult.status === "revised";
+      if (lifecycleWon) {
+        assert.equal(executionResult.status, 404);
+        assert.equal(evidence.attempts, 0);
+        assert.equal(evidence.outcomes.length, 0);
+        assert.equal(evidence.effects, 0);
+      } else {
+        assert.equal(executionResult.status, 200);
+        assert.equal(evidence.attempts, 1);
+        assert.equal(evidence.effects, 1);
+      }
     }
+
+    const [expiredTarget] = await seedTargets(1);
+    const expiredPlan = await seedApprovedPlan(
+      modules,
+      document([
+        {
+          id: "expired",
+          targetId: expiredTarget,
+          behavior: "complete",
+          dependsOn: [],
+        },
+      ]),
+      16 * 60 * 1_000
+    );
+    const expired = await response(post, expiredPlan);
+    assert.equal(expired.status, 409);
+    assert.equal(expired.body.status, "expired");
+    evidence = await counts(expiredPlan.id);
+    assert.equal(evidence.state, "expired");
+    assert.equal(evidence.attempts, 0);
+    const [expiryAudit] = await db
+      .select({ id: evryProductAuditEvents.id })
+      .from(evryProductAuditEvents)
+      .where(
+        and(
+          eq(evryProductAuditEvents.planId, expiredPlan.id),
+          eq(evryProductAuditEvents.eventType, "plan_expired")
+        )
+      );
+    assert.ok(expiryAudit);
+
+    process.stdout.write(
+      `${executorLiveProofPhaseMarker(PROOF_PHASE, "passed")}\n`
+    );
+    return;
   }
 
-  const [expiredTarget] = await seedTargets(1);
-  const expiredPlan = await seedApprovedPlan(
-    modules,
-    document([
-      {
-        id: "expired",
-        targetId: expiredTarget,
-        behavior: "complete",
-        dependsOn: [],
-      },
-    ]),
-    16 * 60 * 1_000
-  );
-  const expired = await response(post, expiredPlan);
-  assert.equal(expired.status, 409);
-  assert.equal(expired.body.status, "expired");
-  evidence = await counts(expiredPlan.id);
-  assert.equal(evidence.state, "expired");
-  assert.equal(evidence.attempts, 0);
-  const [expiryAudit] = await db
-    .select({ id: evryProductAuditEvents.id })
-    .from(evryProductAuditEvents)
-    .where(
-      and(
-        eq(evryProductAuditEvents.planId, expiredPlan.id),
-        eq(evryProductAuditEvents.eventType, "plan_expired")
-      )
-    );
-  assert.ok(expiryAudit);
-
-  process.stdout.write("Evry executor live request proof passed\n");
+  throw new Error(`Unhandled Executor live proof phase: ${PROOF_PHASE}`);
 }
 
 void main().catch((error: unknown) => {
