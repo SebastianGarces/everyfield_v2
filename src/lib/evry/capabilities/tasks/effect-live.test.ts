@@ -46,6 +46,10 @@ run("Task effect live proof refuses cross-plant resolution", () => {
   assert.match(output, /PASS tasks:cross-plant-neutral-resolution/);
 });
 
+run("Task atomic effects refuse a dual-tenancy assignee target", () => {
+  assert.match(output, /PASS tasks:dual-tenancy-assignee-atomic-refusal/);
+});
+
 run("Task effects refuse one of two concurrently confirmed stale plans", () => {
   assert.match(output, /PASS tasks:competing-confirmed-plans/);
 });

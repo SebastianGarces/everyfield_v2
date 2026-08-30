@@ -560,9 +560,9 @@
     },
     {
       "kind": "rsc_read",
-      "identity": "read-operation:src/app/(dashboard)/tasks/[id]/page.tsx → eq",
+      "identity": "read-operation:src/app/(dashboard)/tasks/[id]/page.tsx → exactTaskAssigneeJoin",
       "source": "src/app/(dashboard)/tasks/[id]/page.tsx",
-      "exportName": "eq",
+      "exportName": "exactTaskAssigneeJoin",
       "capabilityIdentity": null,
       "domain": "boundary",
       "operationKind": "excluded",
@@ -664,9 +664,9 @@
     },
     {
       "kind": "rsc_read",
-      "identity": "read-operation:src/app/(dashboard)/tasks/new/page.tsx → eq",
+      "identity": "read-operation:src/app/(dashboard)/tasks/new/page.tsx → exactTaskAssigneeJoin",
       "source": "src/app/(dashboard)/tasks/new/page.tsx",
-      "exportName": "eq",
+      "exportName": "exactTaskAssigneeJoin",
       "capabilityIdentity": null,
       "domain": "boundary",
       "operationKind": "excluded",

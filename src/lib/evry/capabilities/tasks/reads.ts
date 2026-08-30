@@ -33,6 +33,7 @@ import { readTaskListPage, taskListScope } from "@/lib/tasks/list-page";
 import { TASK_STANDARD_LIST_VIEWS } from "@/lib/tasks/list-params";
 import { readPhaseTemplatePrompt } from "@/lib/tasks/phase-prompt";
 import { getTask, getTaskCounts, listSubtasks } from "@/lib/tasks/service";
+import { exactTaskAssigneeJoin } from "@/lib/tasks/assignees";
 import { TASK_TEMPLATES, taskTemplateSize } from "@/lib/tasks/templates";
 
 export const TASK_READ_IDENTITIES = {
@@ -56,7 +57,7 @@ async function plantAssigneeOptions(plantId: string) {
   return db
     .select({ id: users.id, name: users.name, email: users.email })
     .from(users)
-    .where(eq(users.churchId, plantId));
+    .where(exactTaskAssigneeJoin(plantId));
 }
 
 async function readPlantPhase(plantId: string) {

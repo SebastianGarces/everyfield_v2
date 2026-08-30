@@ -4,11 +4,29 @@ import { after, test, type TestContext } from "node:test";
 import { and, eq, isNull, like, sql } from "drizzle-orm";
 
 import { db } from "@/db";
-import { churchMeetings, churches, persons, tasks, users } from "@/db/schema";
+import {
+  churchMeetings,
+  churches,
+  persons,
+  sendingChurches,
+  tasks,
+  users,
+} from "@/db/schema";
 
 import type { FinalizedAttendee } from "@/lib/meetings/events";
 
 import { followUpDueDate, handleMeetingAttendanceFinalized } from "./events";
+import { createTask, getTask, listTasks, updateTask } from "./service";
+import {
+  listFollowUpAssignees,
+  listFollowUpTaskIdsOwnedBy,
+  listOpenFollowUpTasks,
+  mayOwnFollowUp,
+  planFollowUpHandoff,
+} from "./follow-up-ownership";
+import { isExactTaskAssignee, TASK_ASSIGNEE_ERROR } from "./assignees";
+import { taskNotificationFactsQuery } from "./notifications";
+import { readTaskListPage } from "./list-page";
 
 // ----------------------------------------------------------------------------
 // #521 — THE TWO RESIDUALS #323 DEFERRED, ASSERTED AGAINST A REAL POSTGRES.
@@ -183,6 +201,9 @@ async function sweep(): Promise<void> {
     await db.delete(users).where(eq(users.churchId, church.id));
     await db.delete(churches).where(eq(churches.id, church.id));
   }
+  await db
+    .delete(sendingChurches)
+    .where(like(sendingChurches.name, SCRATCH_NAME));
 }
 
 after(async () => {
@@ -438,6 +459,148 @@ test(
         1,
         "the whole generation was aborted by the stolen slot, which is how a meeting finalized with no tasks at all"
       );
+    } finally {
+      await sweep();
+    }
+  }
+);
+
+test(
+  "a dual-tenancy assignee is unavailable to reads and every service write",
+  { skip },
+  async (t: TestContext) => {
+    if (!(await databaseReachable())) return t.skip(UNREACHABLE);
+
+    await sweep();
+    const fixture = await seed();
+    try {
+      const [sendingChurch] = await db
+        .insert(sendingChurches)
+        .values({ name: SCRATCH_NAME })
+        .returning({ id: sendingChurches.id });
+      const [dual] = await db
+        .insert(users)
+        .values({
+          email: `${crypto.randomUUID()}@scratch.invalid`,
+          passwordHash: "scratch",
+          name: "Unavailable dual tenancy assignee",
+          seat: "member",
+          churchId: fixture.churchId,
+          sendingChurchId: sendingChurch.id,
+        })
+        .returning({ id: users.id });
+      const [dualPerson] = await db
+        .insert(persons)
+        .values({
+          churchId: fixture.churchId,
+          firstName: "Unavailable",
+          lastName: "Assignee",
+          status: "core_group",
+          userId: dual.id,
+          createdBy: fixture.planterId,
+        })
+        .returning({ id: persons.id });
+
+      assert.equal(await isExactTaskAssignee(fixture.churchId, dual.id), false);
+      assert.equal(await mayOwnFollowUp(fixture.churchId, dual.id), false);
+      assert.equal(
+        await planFollowUpHandoff(fixture.churchId, dualPerson.id),
+        null
+      );
+      assert.equal(
+        (await listFollowUpAssignees(fixture.churchId)).some(
+          ({ id }) => id === dual.id
+        ),
+        false
+      );
+
+      await assert.rejects(
+        createTask(fixture.churchId, fixture.planterId, {
+          title: "Must not land",
+          status: "not_started",
+          priority: "medium",
+          assignedToId: dual.id,
+          category: "general",
+        }),
+        { message: TASK_ASSIGNEE_ERROR }
+      );
+
+      const [legacy] = await db
+        .insert(tasks)
+        .values({
+          churchId: fixture.churchId,
+          title: "Legacy malformed assignment",
+          createdById: fixture.planterId,
+          assignedToId: dual.id,
+          category: "follow_up",
+        })
+        .returning({ id: tasks.id });
+
+      const detail = await getTask(fixture.churchId, legacy.id);
+      assert.equal(detail?.assignedToId, dual.id);
+      assert.equal(detail?.assigneeName, null);
+      assert.equal(detail?.assigneeEmail, null);
+      const listed = await listTasks(fixture.churchId, {
+        includeCompleted: true,
+      });
+      const listRow = listed.tasks.find(({ id }) => id === legacy.id);
+      assert.equal(listRow?.assigneeName, null);
+      assert.equal(listRow?.assigneeEmail, null);
+      const ownership = (await listOpenFollowUpTasks(fixture.churchId)).find(
+        ({ taskId }) => taskId === legacy.id
+      );
+      assert.equal(ownership?.ownerName, null);
+      assert.equal(ownership?.ownerEmail, null);
+      assert.equal(ownership?.assignedToId, null);
+      assert.equal(ownership?.ownerIsCommitted, false);
+      assert.deepEqual(
+        await listFollowUpTaskIdsOwnedBy(fixture.churchId, dual.id),
+        []
+      );
+      const [notificationFacts] = await taskNotificationFactsQuery(
+        fixture.churchId,
+        [legacy.id]
+      );
+      assert.equal(notificationFacts?.assignedToId, null);
+
+      await assert.rejects(
+        updateTask(fixture.churchId, legacy.id, { title: "Still refused" }),
+        { message: TASK_ASSIGNEE_ERROR }
+      );
+      assert.equal(
+        (
+          await db
+            .select({ title: tasks.title })
+            .from(tasks)
+            .where(eq(tasks.id, legacy.id))
+        )[0]?.title,
+        "Legacy malformed assignment"
+      );
+
+      const malformedDirect = await listTasks(fixture.churchId, {
+        cursor: "not-a-uuid",
+      });
+      assert.deepEqual(malformedDirect, {
+        tasks: [],
+        total: 0,
+        nextCursor: null,
+        cursorAvailable: false,
+      });
+      const malformedUrl = await readTaskListPage(
+        fixture.churchId,
+        fixture.planterId,
+        { cursor: "not-a-uuid" }
+      );
+      assert.equal(malformedUrl.cursorAvailable, false);
+      assert.deepEqual(malformedUrl.tasks, []);
+      const malformedAction = await readTaskListPage(
+        fixture.churchId,
+        fixture.planterId,
+        {},
+        "not-a-uuid"
+      );
+      assert.equal(malformedAction.cursorAvailable, false);
+      assert.deepEqual(malformedAction.tasks, []);
     } finally {
       await sweep();
     }

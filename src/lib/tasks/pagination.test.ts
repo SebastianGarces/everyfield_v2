@@ -8,7 +8,8 @@ import { PgDialect } from "drizzle-orm/pg-core";
 import { keysetPage, orderByKeyset } from "@/lib/testing/keyset";
 import { sourceReader, stripComments } from "@/lib/testing/source-span";
 
-import { TASK_SORT_KEYS, type TaskSortableRow } from "./service";
+import { listTasks, TASK_SORT_KEYS, type TaskSortableRow } from "./service";
+import { readTaskListPage } from "./list-page";
 
 // ----------------------------------------------------------------------------
 // "LOAD MORE" ON /tasks CANNOT SKIP OR REPEAT A ROW (#320, P-006a).
@@ -183,5 +184,64 @@ test("listTasks accepts a cursor only inside the exact filtered result", () => {
     listTasks,
     /cursorAvailable: false/,
     "an unavailable cursor must not fall through to the first page"
+  );
+});
+
+test("a malformed direct-service cursor is unavailable before any database query", async () => {
+  // Both UUIDs are deliberately malformed. If listTasks reaches Postgres,
+  // either typed parameter is rejected; returning here proves the boundary ran
+  // first and did not silently reinterpret the request as page one.
+  assert.deepEqual(
+    await listTasks("not-a-plant-uuid", { cursor: "not-a-task-uuid" }),
+    {
+      tasks: [],
+      total: 0,
+      nextCursor: null,
+      cursorAvailable: false,
+    }
+  );
+});
+
+test("malformed URL and load-more cursors share the neutral unavailable page", async () => {
+  const expected = {
+    tasks: [],
+    total: 0,
+    nextCursor: null,
+    cursorAvailable: false,
+    personNotes: {},
+  };
+
+  // `/tasks?cursor=…` supplies the cursor in params.
+  assert.deepEqual(
+    await readTaskListPage("not-a-plant-uuid", "not-a-user-uuid", {
+      cursor: "not-a-task-uuid",
+    }),
+    expected
+  );
+  // `loadMoreTasksAction` supplies the fourth argument to this same reader.
+  assert.deepEqual(
+    await readTaskListPage(
+      "not-a-plant-uuid",
+      "not-a-user-uuid",
+      {},
+      "not-a-task-uuid"
+    ),
+    expected
+  );
+
+  const actionSource = stripComments(
+    readFileSync(
+      path.join(process.cwd(), "src/app/(dashboard)/tasks/actions.ts"),
+      "utf8"
+    )
+  );
+  const loadMore = sourceReader(
+    actionSource,
+    "tasks/actions.ts (stripped)"
+  ).after("export async function loadMoreTasksAction(");
+  assert.match(
+    loadMore,
+    /readTaskListPage\(user\.churchId, user\.id, params, cursor\)/,
+    "the direct action must keep using the reader whose malformed-cursor behavior was exercised above"
   );
 });

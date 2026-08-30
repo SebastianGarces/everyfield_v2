@@ -1,7 +1,7 @@
 import { and, eq, inArray, isNull } from "drizzle-orm";
 
 import { db } from "@/db";
-import { tasks, type TaskStatus } from "@/db/schema";
+import { tasks, users, type TaskStatus } from "@/db/schema";
 import { MS_PER_DAY, formatDayLong } from "@/lib/datetime";
 import type { NotificationCategory } from "@/lib/notifications/categories";
 import {
@@ -21,6 +21,7 @@ import {
   type NotificationSyncDeps,
   type NotificationSyncReport,
 } from "@/lib/notifications/sync";
+import { exactTaskAssigneeJoin } from "./assignees";
 
 // ============================================================================
 // T-018 — task due / overdue notifications, on the shared F11 queue.
@@ -542,10 +543,14 @@ export function taskNotificationFactsQuery(
       status: tasks.status,
       dueDate: tasks.dueDate,
       dueTime: tasks.dueTime,
-      assignedToId: tasks.assignedToId,
+      assignedToId: users.id,
       deletedAt: tasks.deletedAt,
     })
     .from(tasks)
+    .leftJoin(
+      users,
+      and(eq(users.id, tasks.assignedToId), exactTaskAssigneeJoin(churchId))
+    )
     .where(
       and(
         eq(tasks.churchId, churchId),

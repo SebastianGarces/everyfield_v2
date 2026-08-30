@@ -256,6 +256,8 @@ function taskStateCurrent(
           select 1 from users assignee
           where assignee.id = (p.after_state->>'assignedToId')::uuid
             and assignee.church_id = ${execution.plantId}::uuid
+            and assignee.sending_church_id is null
+            and assignee.sending_network_id is null
             and assignee.seat is not null
         )
     )
@@ -270,6 +272,8 @@ function taskStateCurrent(
             and person.deleted_at is null
           where assignee.id = (p.after_state->>'assignedToId')::uuid
             and assignee.church_id = ${execution.plantId}::uuid
+            and assignee.sending_church_id is null
+            and assignee.sending_network_id is null
             and person.status in ('core_group', 'launch_team', 'leader')
         )
     )
