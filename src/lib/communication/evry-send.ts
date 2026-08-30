@@ -87,22 +87,29 @@ function personLabel(person: { firstName: string; lastName: string }) {
   );
 }
 
-function dispatchableRecipient() {
-  return or(
-    eq(communicationRecipients.status, "pending"),
-    and(
-      eq(communicationRecipients.status, "failed"),
-      or(
-        like(
-          communicationRecipients.errorMessage,
-          `${EVRY_COMMUNICATION_TRANSIENT_PREFIX}%`
-        ),
-        like(
-          communicationRecipients.errorMessage,
-          `${EVRY_COMMUNICATION_ATTEMPTED_PREFIX}%`
-        )
+function providerAttemptUncertainRecipient() {
+  return and(
+    or(
+      eq(communicationRecipients.status, "pending"),
+      eq(communicationRecipients.status, "failed")
+    ),
+    or(
+      like(
+        communicationRecipients.errorMessage,
+        `${EVRY_COMMUNICATION_ATTEMPTED_PREFIX}%`
+      ),
+      like(
+        communicationRecipients.errorMessage,
+        `${EVRY_COMMUNICATION_TRANSIENT_PREFIX}%`
       )
     )
+  );
+}
+
+function locallyExcludableRecipient() {
+  return and(
+    eq(communicationRecipients.status, "pending"),
+    sql`${communicationRecipients.errorMessage} is null`
   );
 }
 
@@ -153,6 +160,45 @@ async function acquireCommunicationProviderAttempt(input: {
     returning recipient.id
   `);
   return result.rows[0]?.id === input.recipientId;
+}
+
+async function exactStoredCommunicationRecipient(input: {
+  churchId: string;
+  communicationId: string;
+  recipientId: string;
+}) {
+  const [row] = await db
+    .select({
+      status: communicationRecipients.status,
+      errorMessage: communicationRecipients.errorMessage,
+    })
+    .from(communicationRecipients)
+    .where(
+      and(
+        eq(communicationRecipients.id, input.recipientId),
+        eq(communicationRecipients.churchId, input.churchId),
+        eq(communicationRecipients.communicationId, input.communicationId)
+      )
+    )
+    .limit(1);
+  return row ?? null;
+}
+
+function storedRecipientOutcome(
+  row: Awaited<ReturnType<typeof exactStoredCommunicationRecipient>>
+) {
+  if (!row) return "retryable" as const;
+  if (["sent", "delivered", "opened", "clicked"].includes(row.status)) {
+    return "affected" as const;
+  }
+  if (
+    row.status === "bounced" ||
+    row.errorMessage?.startsWith(EVRY_COMMUNICATION_PERMANENT_PREFIX) ||
+    row.errorMessage?.startsWith(EVRY_COMMUNICATION_LOCAL_PREFIX)
+  ) {
+    return "excluded" as const;
+  }
+  return "retryable" as const;
 }
 
 /**
@@ -742,6 +788,20 @@ export async function sendFrozenEvryCommunication(input: {
   );
   let retryable = false;
   let permanentProviderFailures = 0;
+  function countTerminalStoredOutcome(
+    outcome: ReturnType<typeof storedRecipientOutcome>
+  ) {
+    if (outcome === "affected") {
+      affectedCount += 1;
+      return true;
+    }
+    if (outcome === "excluded") {
+      permanentProviderFailures += 1;
+      excludedCount += 1;
+      return true;
+    }
+    return false;
+  }
   const mailer = input.mailer ?? productionMailer;
   for (const recipient of input.audience.recipients) {
     const row = byPerson.get(recipient.personId);
@@ -759,6 +819,10 @@ export async function sendFrozenEvryCommunication(input: {
       excludedCount += 1;
       continue;
     }
+    const providerAttemptIsUncertain = [
+      EVRY_COMMUNICATION_ATTEMPTED_PREFIX,
+      EVRY_COMMUNICATION_TRANSIENT_PREFIX,
+    ].some((prefix) => row.errorMessage?.startsWith(prefix));
     // A complaint or hard-bounce webhook can arrive after the whole-audience
     // stale-plan gate above. Recheck this exact address after composition and
     // immediately before the provider boundary so a later recipient is never
@@ -768,12 +832,13 @@ export async function sendFrozenEvryCommunication(input: {
       return { status: "retryable" };
     }
     if (
-      (input.eligiblePersonIds &&
+      !providerAttemptIsUncertain &&
+      ((input.eligiblePersonIds &&
         !input.eligiblePersonIds.has(recipient.personId)) ||
-      !(await recipientIsStillDispatchable({
-        churchId: actor.plantId,
-        recipient,
-      }))
+        !(await recipientIsStillDispatchable({
+          churchId: actor.plantId,
+          recipient,
+        })))
     ) {
       const [excluded] = await db
         .update(communicationRecipients)
@@ -784,14 +849,26 @@ export async function sendFrozenEvryCommunication(input: {
         .where(
           and(
             eq(communicationRecipients.id, row.id),
-            dispatchableRecipient(),
+            locallyExcludableRecipient(),
             currentCommunicationSendAuthority(input.effect.execution)
           )
         )
         .returning({ id: communicationRecipients.id });
-      if (!excluded) return { status: "retryable" };
-      permanentProviderFailures += 1;
-      excludedCount += 1;
+      if (excluded) {
+        permanentProviderFailures += 1;
+        excludedCount += 1;
+        continue;
+      }
+      const outcome = storedRecipientOutcome(
+        await exactStoredCommunicationRecipient({
+          churchId: actor.plantId,
+          communicationId: input.communicationId,
+          recipientId: row.id,
+        })
+      );
+      if (!countTerminalStoredOutcome(outcome)) {
+        return { status: "retryable" };
+      }
       continue;
     }
     const outbound = await renderedOutbound({
@@ -806,7 +883,17 @@ export async function sendFrozenEvryCommunication(input: {
         recipientId: row.id,
       }))
     ) {
-      return { status: "retryable" };
+      const outcome = storedRecipientOutcome(
+        await exactStoredCommunicationRecipient({
+          churchId: actor.plantId,
+          communicationId: input.communicationId,
+          recipientId: row.id,
+        })
+      );
+      if (!countTerminalStoredOutcome(outcome)) {
+        return { status: "retryable" };
+      }
+      continue;
     }
     const result = await mailer.send({
       to: recipient.email,
@@ -816,7 +903,7 @@ export async function sendFrozenEvryCommunication(input: {
       idempotencyKey: `evry-${input.effect.effectKey}-${row.id}`,
     });
     if (result.status === "accepted") {
-      await db
+      const [sent] = await db
         .update(communicationRecipients)
         .set({
           status: "sent",
@@ -824,32 +911,83 @@ export async function sendFrozenEvryCommunication(input: {
           errorMessage: null,
         })
         .where(
-          and(eq(communicationRecipients.id, row.id), dispatchableRecipient())
+          and(
+            eq(communicationRecipients.id, row.id),
+            providerAttemptUncertainRecipient()
+          )
+        )
+        .returning({ id: communicationRecipients.id });
+      if (sent) {
+        affectedCount += 1;
+      } else {
+        const outcome = storedRecipientOutcome(
+          await exactStoredCommunicationRecipient({
+            churchId: actor.plantId,
+            communicationId: input.communicationId,
+            recipientId: row.id,
+          })
         );
-      affectedCount += 1;
+        if (!countTerminalStoredOutcome(outcome)) {
+          return { status: "retryable" };
+        }
+      }
     } else if (result.status === "retryable") {
-      await db
+      const [attemptRecorded] = await db
         .update(communicationRecipients)
         .set({
           status: "failed",
-          errorMessage: `${EVRY_COMMUNICATION_TRANSIENT_PREFIX}${result.reason}`,
+          errorMessage: `${EVRY_COMMUNICATION_ATTEMPTED_PREFIX}${result.reason}`,
         })
         .where(
-          and(eq(communicationRecipients.id, row.id), dispatchableRecipient())
+          and(
+            eq(communicationRecipients.id, row.id),
+            providerAttemptUncertainRecipient()
+          )
+        )
+        .returning({ id: communicationRecipients.id });
+      if (attemptRecorded) {
+        retryable = true;
+      } else {
+        const outcome = storedRecipientOutcome(
+          await exactStoredCommunicationRecipient({
+            churchId: actor.plantId,
+            communicationId: input.communicationId,
+            recipientId: row.id,
+          })
         );
-      retryable = true;
+        if (!countTerminalStoredOutcome(outcome)) {
+          retryable = true;
+        }
+      }
     } else {
-      await db
+      const [permanentlyFailed] = await db
         .update(communicationRecipients)
         .set({
           status: "failed",
           errorMessage: `${EVRY_COMMUNICATION_PERMANENT_PREFIX}${result.reason}`,
         })
         .where(
-          and(eq(communicationRecipients.id, row.id), dispatchableRecipient())
+          and(
+            eq(communicationRecipients.id, row.id),
+            providerAttemptUncertainRecipient()
+          )
+        )
+        .returning({ id: communicationRecipients.id });
+      if (permanentlyFailed) {
+        permanentProviderFailures += 1;
+        excludedCount += 1;
+      } else {
+        const outcome = storedRecipientOutcome(
+          await exactStoredCommunicationRecipient({
+            churchId: actor.plantId,
+            communicationId: input.communicationId,
+            recipientId: row.id,
+          })
         );
-      permanentProviderFailures += 1;
-      excludedCount += 1;
+        if (!countTerminalStoredOutcome(outcome)) {
+          return { status: "retryable" };
+        }
+      }
     }
   }
   if (retryable) return { status: "retryable" };
