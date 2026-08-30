@@ -190,6 +190,8 @@ async function createHarness(input: {
         status: input.status,
         affectedCount: input.affectedCount,
         excludedCount: input.excludedCount,
+        effectKey: input.effectKey,
+        dependencyOutput: input.dependencyOutput ?? null,
       });
       durable.set(input.stepId, outcome);
       return outcome;

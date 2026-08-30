@@ -1,6 +1,20 @@
 import { createEvryArtifactReviewRegistry } from "@/lib/evry/artifacts/trusted-plan-review";
 import type { EvryConversationPlanTargetValidator } from "@/lib/evry/conversations/plan-resume";
-import { createEvryExecutionCapabilityRegistry } from "@/lib/evry/executor";
+import {
+  createEvryExecutionCapabilityRegistry,
+  executeEvryActionPlan,
+  executeEvryRecipePlan,
+} from "@/lib/evry/executor";
+import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
+import { findExactEvryActionPlan } from "@/lib/evry/plans/repository";
+import { continueMeetingInvitationConversation } from "@/lib/evry/recipes/meeting-invitation-conversation";
+import {
+  MEETING_INVITATION_ARTIFACT_REVIEW,
+  MEETING_INVITATION_RECIPE_IDENTITY,
+  MEETING_INVITATION_RECIPE_REGISTRY,
+  meetingInvitationPlanTargetsAreCurrent,
+} from "@/lib/evry/recipes/meeting-invitation";
+import type { EvryRecipeRegistry } from "@/lib/evry/recipes/schema";
 
 import { continueCommunicationEvryConversation } from "./communication/conversation";
 import {
@@ -91,7 +105,14 @@ const PRODUCTION_PEOPLE_EFFECT_EXECUTIONS = Object.freeze([
   ...PEOPLE_FILE_EXECUTIONS,
 ]);
 
+function recipeIdentityForDocument(document: unknown): unknown {
+  return document && typeof document === "object" && "recipe" in document
+    ? (document.recipe as { identity?: unknown } | undefined)?.identity
+    : null;
+}
+
 export const PRODUCTION_EVRY_ARTIFACT_REVIEWS = Object.freeze([
+  MEETING_INVITATION_ARTIFACT_REVIEW,
   ...COMMUNICATION_EVRY_REVIEWS,
   ...MEETINGS_ARTIFACT_REVIEWS,
   ...LAUNCH_EVRY_REVIEWS,
@@ -105,6 +126,7 @@ export const PRODUCTION_EVRY_ARTIFACT_REVIEWS = Object.freeze([
 ]);
 
 export const PRODUCTION_EVRY_CAPABILITY_CONTINUATIONS = Object.freeze([
+  continueMeetingInvitationConversation,
   continueCommunicationEvryConversation,
   continueMeetingsEvryConversation,
   continueLaunchEvryConversation,
@@ -173,6 +195,51 @@ export const continueProductionEvryCapabilityConversation =
     PRODUCTION_EVRY_CAPABILITY_CONTINUATIONS
   );
 
+type ProductionDispatcherDependencies = Readonly<{
+  findPlan: typeof findExactEvryActionPlan;
+  executeGeneric: typeof executeEvryActionPlan;
+  executeRecipe: typeof executeEvryRecipePlan;
+  meetingInvitationRegistry: EvryRecipeRegistry;
+}>;
+
+/** Build a closed dispatcher; its returned production boundary accepts no registry. */
+export function createProductionEvryActionPlanDispatcher(
+  dependencies: ProductionDispatcherDependencies = {
+    findPlan: findExactEvryActionPlan,
+    executeGeneric: executeEvryActionPlan,
+    executeRecipe: executeEvryRecipePlan,
+    meetingInvitationRegistry: MEETING_INVITATION_RECIPE_REGISTRY,
+  }
+) {
+  return async function dispatchProductionEvryActionPlan(input: {
+    actor: EvryPlantActor;
+    planId: string;
+    fingerprint: string;
+  }) {
+    const stored = await dependencies.findPlan({
+      planId: input.planId,
+      actorUserId: input.actor.userId,
+      plantId: input.actor.plantId,
+      fingerprint: input.fingerprint,
+    });
+    const recipeIdentity = recipeIdentityForDocument(stored?.document);
+    if (recipeIdentity === MEETING_INVITATION_RECIPE_IDENTITY) {
+      return dependencies.executeRecipe({
+        ...input,
+        recipeRegistry: dependencies.meetingInvitationRegistry,
+      });
+    }
+    return dependencies.executeGeneric({
+      ...input,
+      registry: PRODUCTION_EVRY_EXECUTION_REGISTRY,
+    });
+  };
+}
+
+/** Production admits the installed recipe and no caller-selected registry. */
+export const executeProductionEvryActionPlan =
+  createProductionEvryActionPlanDispatcher();
+
 type ProductionTargetValidatorDependencies = Readonly<{
   communication: EvryConversationPlanTargetValidator;
   meetings: EvryConversationPlanTargetValidator;
@@ -232,6 +299,13 @@ function hasPersistedPlanContext(
 export async function productionEvryPlanTargetIsCurrent(
   input: PeopleTargetValidationInput
 ): Promise<boolean> {
+  if (
+    hasPersistedPlanContext(input) &&
+    recipeIdentityForDocument(input.plan.document) ===
+      MEETING_INVITATION_RECIPE_IDENTITY
+  ) {
+    return meetingInvitationPlanTargetsAreCurrent(input);
+  }
   const identity = input.step.capabilityIdentity;
   if (NOTE_IDENTITIES.has(identity)) {
     return peopleEvryPlanTargetIsCurrent(input);

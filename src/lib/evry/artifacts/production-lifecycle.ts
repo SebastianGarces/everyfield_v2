@@ -8,6 +8,7 @@ import {
   PRODUCTION_EVRY_EXECUTION_REGISTRY,
   PRODUCTION_EVRY_PLAN_REGISTRY,
   PRODUCTION_EVRY_REVIEW_REGISTRY,
+  executeProductionEvryActionPlan,
 } from "@/lib/evry/capabilities/production";
 import { cleanupEvryPeoplePlanAttachments } from "@/lib/evry/capabilities/people/cleanup";
 import { revalidateProductionEvryConversationPlan } from "@/lib/evry/conversations/plan-resume";
@@ -16,7 +17,6 @@ import {
   resumeEvryConversation,
 } from "@/lib/evry/conversations/service";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
-import { executeEvryActionPlan } from "@/lib/evry/executor";
 import { confirmEvryActionPlan } from "@/lib/evry/plans";
 import { cancelExactEvryActionPlan } from "@/lib/evry/plans/repository";
 
@@ -33,7 +33,7 @@ export const runEvryProductionArtifactLifecycle = createEvryArtifactLifecycle({
   resume: resumeEvryConversation,
   append: appendTrustedEvryConversationMessage,
   confirm: confirmEvryActionPlan,
-  execute: executeEvryActionPlan,
+  execute: executeProductionEvryActionPlan,
   cancel: cancelExactEvryActionPlan,
   cleanupPlanResources: cleanupEvryPeoplePlanAttachments,
   reviewPlan: (input) =>

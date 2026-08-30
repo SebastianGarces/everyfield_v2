@@ -9,6 +9,7 @@ import {
   LIVE_SUITE_PHASES,
   liveSuiteDatabases,
   LIVE_SUITES,
+  NESTED_PROOF_LIVE_SUITES,
   PARALLEL_LIVE_SUITES,
   PEOPLE_EFFECT_LIVE_SUITE,
   suiteForPath,
@@ -220,11 +221,28 @@ test("every live suite derives its own database, and no two collide", () => {
   );
 });
 
-test("each monolithic capability proof owns a phase without dropping a live suite", () => {
-  assert.deepEqual(DEDICATED_LIVE_SUITES, [
+test("each nested proof wrapper owns a phase without dropping a live suite", () => {
+  assert.deepEqual(NESTED_PROOF_LIVE_SUITES, [
     PEOPLE_EFFECT_LIVE_SUITE,
+    "src/lib/communication/evry-effect-live.test.ts",
+    "src/lib/evry/conversations/conversations-live.test.ts",
+    "src/lib/evry/capabilities/meetings/effect-live.test.ts",
+    "src/lib/evry/capabilities/meetings/read-live.test.ts",
     TASK_EFFECT_LIVE_SUITE,
+    "src/lib/evry/executor/executor-live.test.ts",
+    "src/lib/evry/capabilities/launch/effect-live.test.ts",
+    "src/lib/evry/recipes/recipe-live.test.ts",
   ]);
+  assert.deepEqual(
+    [...NESTED_PROOF_LIVE_SUITES].toSorted(),
+    LIVE_SUITES.filter((suite) =>
+      /\bspawnSync\s*\(/.test(
+        readFileSync(path.join(process.cwd(), suite), "utf8")
+      )
+    ).toSorted(),
+    "every live wrapper that synchronously owns a child proof must own a phase"
+  );
+  assert.deepEqual(DEDICATED_LIVE_SUITES, NESTED_PROOF_LIVE_SUITES);
   for (const suite of DEDICATED_LIVE_SUITES) {
     assert.equal(PARALLEL_LIVE_SUITES.includes(suite), false);
   }

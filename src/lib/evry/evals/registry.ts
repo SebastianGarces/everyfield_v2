@@ -3,6 +3,7 @@ import {
   CREATE_MEETING_IDENTITY,
   SEND_MESSAGE_IDENTITY,
 } from "@/lib/evry/recipes/fixtures.test-helper";
+import { MEETING_INVITATION_RECIPE_IDENTITY } from "@/lib/evry/recipes/meeting-invitation";
 import communicationInventory from "@/lib/evry/capabilities/communication/inventory.generated.json";
 import launchInventory from "@/lib/evry/capabilities/launch/inventory.generated.json";
 import { MEETINGS_CAPABILITY_EVAL_FIXTURES } from "@/lib/evry/capabilities/meetings/eval-fixtures";
@@ -24,8 +25,6 @@ import {
   assertPeopleCapabilityEvalRegistryComplete,
   PEOPLE_CAPABILITY_EVAL_FIXTURES,
 } from "./people-capabilities";
-
-const MEETING_INVITATION_RECIPE_IDENTITY = "fixture:meeting.invitation";
 
 export const EVRY_EVAL_PROOFS: readonly EvryEvalProof[] = Object.freeze([
   ...TASK_EVAL_PROOFS,
@@ -177,12 +176,6 @@ export const EVRY_EVAL_PROOFS: readonly EvryEvalProof[] = Object.freeze([
     id: "recipe-end-to-end",
     testFile: "src/lib/evry/recipes/recipe-live.test.ts",
     lane: "live_database",
-    safetyGates: [],
-  },
-  {
-    id: "recipe-partial-failure",
-    testFile: "src/lib/evry/recipes/runner.test.ts",
-    lane: "deterministic",
     safetyGates: [],
   },
 ]);
@@ -345,12 +338,14 @@ export const EVRY_RECIPE_EVAL_FIXTURES: readonly EvryRecipeEvalFixture[] =
           {
             id: `${MEETING_INVITATION_RECIPE_IDENTITY}:end_to_end`,
             proofId: "recipe-end-to-end",
+            testName: `${MEETING_INVITATION_RECIPE_IDENTITY}:end_to_end`,
           },
         ],
         partial_failure: [
           {
             id: `${MEETING_INVITATION_RECIPE_IDENTITY}:partial_failure`,
-            proofId: "recipe-partial-failure",
+            proofId: "recipe-end-to-end",
+            testName: `${MEETING_INVITATION_RECIPE_IDENTITY}:partial_failure`,
           },
         ],
       },

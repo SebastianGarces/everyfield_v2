@@ -136,7 +136,7 @@ const meetingNotificationTargetSchema = z.strictObject({
   scheduledFor: timestamp,
   expectedAbsent: z.literal(true),
 });
-const meetingNotificationTargetsSchema = z
+export const meetingNotificationTargetsSchema = z
   .array(meetingNotificationTargetSchema)
   .superRefine((targets, context) => {
     const ids = targets.map(({ notificationId }) => notificationId);
@@ -179,7 +179,7 @@ const pendingNotificationsSchema = z
     }
   });
 
-const activeMeetingNotificationSchema = z.strictObject({
+export const activeMeetingNotificationSchema = z.strictObject({
   notificationId: uuid,
   recipientUserId: uuid,
   type: z.string().trim().min(1).max(64),
@@ -189,7 +189,7 @@ const activeMeetingNotificationSchema = z.strictObject({
   status: z.enum(notificationStatuses).refine((value) => value !== "cancelled"),
   expectedUpdatedAt: timestamp,
 });
-const notificationPlanBaselineSchema = z.strictObject({
+export const notificationPlanBaselineSchema = z.strictObject({
   coreGroupUserIds: uuidSet,
   reminderUserIds: uuidSet,
   activeNotifications: z.array(activeMeetingNotificationSchema),

@@ -1,4 +1,5 @@
 import { and, asc, eq, inArray, isNull, lt, ne, sql } from "drizzle-orm";
+import { z } from "zod";
 
 import { db } from "@/db";
 import {
@@ -48,6 +49,7 @@ import {
   type StoredEvryActionPlan,
 } from "@/lib/evry/plans/repository";
 import { defineEvryPlanCapability } from "@/lib/evry/plans/registry";
+import { defineEvryPlanCapabilitySchema } from "@/lib/evry/plans/registry";
 import { attendanceTypeFromDerivationFacts } from "@/lib/meetings/attendance-type";
 import { meetingFinalizationTaskAssigneeId } from "@/lib/meetings/finalization";
 
@@ -58,6 +60,10 @@ import {
 import { MEETINGS_EFFECT_ARGUMENT_SCHEMAS } from "./effect-contracts";
 import type { MeetingsEffectArguments } from "./effect-contracts";
 import { executeMeetingsEffect } from "./atomic-effect";
+import {
+  MEETING_CREATE_DEPENDENCY_OUTPUT_SCHEMA,
+  MEETING_GUEST_BATCH_ARGUMENT_SCHEMA,
+} from "./dependency-output";
 import { MEETINGS_REVIEW_REGISTRY } from "./review";
 import type { ResolvedMeetingsEffect } from "./resolver";
 
@@ -147,11 +153,20 @@ const PLAN_BY_EXPORT = Object.fromEntries(
     const name = exportName as MeetingsActionExport;
     return [
       name,
-      defineEvryPlanCapability({
-        identity: contract.operationId,
-        effectClass: "database_write",
-        arguments: MEETINGS_EFFECT_ARGUMENT_SCHEMAS[name].shape,
-      }),
+      name === "addToGuestListAction"
+        ? defineEvryPlanCapabilitySchema({
+            identity: contract.operationId,
+            effectClass: "database_write",
+            argumentsSchema: z.union([
+              MEETINGS_EFFECT_ARGUMENT_SCHEMAS.addToGuestListAction,
+              MEETING_GUEST_BATCH_ARGUMENT_SCHEMA,
+            ]),
+          })
+        : defineEvryPlanCapability({
+            identity: contract.operationId,
+            effectClass: "database_write",
+            arguments: MEETINGS_EFFECT_ARGUMENT_SCHEMAS[name].shape,
+          }),
     ];
   })
 ) as Record<MeetingsActionExport, ReturnType<typeof defineEvryPlanCapability>>;
@@ -164,6 +179,9 @@ export const MEETINGS_EXECUTION_CAPABILITIES = Object.freeze(
   (Object.keys(PLAN_BY_EXPORT) as MeetingsActionExport[]).map((exportName) =>
     defineEvryExecutionCapability({
       planCapability: PLAN_BY_EXPORT[exportName],
+      ...(exportName === "createMeetingAction"
+        ? { dependencyOutputSchema: MEETING_CREATE_DEPENDENCY_OUTPUT_SCHEMA }
+        : {}),
       executeIfCurrent: executeMeetingsEffect,
     })
   )
@@ -478,6 +496,8 @@ async function notificationBaselineIsCurrent(input: {
     select distinct u.id::text as id
     from persons p
     join users u on u.church_id = ${plantId}::uuid
+      and u.sending_church_id is null
+      and u.sending_network_id is null
       and lower(u.email) = lower(p.email)
     where p.church_id = ${plantId}::uuid
       and p.deleted_at is null and p.email is not null
@@ -516,6 +536,8 @@ async function notificationBaselineIsCurrent(input: {
         select distinct u.id::text
         from persons p
         join users u on u.church_id = ${plantId}::uuid
+          and u.sending_church_id is null
+          and u.sending_network_id is null
           and lower(u.email) = lower(p.email)
         where p.church_id = ${plantId}::uuid
           and p.id in (
@@ -536,6 +558,8 @@ async function notificationBaselineIsCurrent(input: {
           from meeting_attendance a
           join persons p on p.id = a.person_id and p.church_id = a.church_id
           join users u on u.church_id = a.church_id
+            and u.sending_church_id is null
+            and u.sending_network_id is null
             and lower(u.email) = lower(p.email)
           where a.meeting_id = ${input.meetingId}::uuid
             and a.church_id = ${plantId}::uuid
@@ -546,6 +570,8 @@ async function notificationBaselineIsCurrent(input: {
           select u.id
           from persons p
           join users u on u.church_id = p.church_id
+            and u.sending_church_id is null
+            and u.sending_network_id is null
             and lower(u.email) = lower(p.email)
           where p.id = ${addPerson ? personId : null}::uuid
             and p.church_id = ${plantId}::uuid
@@ -553,6 +579,8 @@ async function notificationBaselineIsCurrent(input: {
           union
           select u.id from users u
           where u.church_id = ${plantId}::uuid
+            and u.sending_church_id is null
+            and u.sending_network_id is null
             and ${quickAdd ? email : null}::text is not null
             and lower(u.email) = lower(${quickAdd ? email : null}::text)
         ) actual
@@ -605,13 +633,153 @@ async function notificationBaselineIsCurrent(input: {
   );
 }
 
+async function guestBatchPlanTargetIsCurrent(input: {
+  actor: EvryPlantActor;
+  plan: { document: unknown };
+  step: EvryActionStep;
+  batch: z.infer<typeof MEETING_GUEST_BATCH_ARGUMENT_SCHEMA>;
+}): Promise<boolean> {
+  const planShape = z
+    .object({
+      steps: z.array(
+        z.object({
+          id: z.string(),
+          capabilityIdentity: z.string(),
+          arguments: z.record(z.string(), z.unknown()),
+        })
+      ),
+    })
+    .safeParse(input.plan.document);
+  if (!planShape.success) return false;
+  const predecessor = planShape.data.steps.find(
+    ({ id }) => id === input.batch.dependencyStepId
+  );
+  if (
+    !input.step.dependsOn.includes(input.batch.dependencyStepId) ||
+    predecessor?.capabilityIdentity !== "meetings.create" ||
+    predecessor.arguments.meetingId !== input.batch.meetingId
+  ) {
+    return false;
+  }
+
+  const people = await db
+    .select({
+      id: persons.id,
+      updatedAt: persons.updatedAt,
+    })
+    .from(persons)
+    .where(
+      and(
+        eq(persons.churchId, input.actor.plantId),
+        inArray(
+          persons.id,
+          input.batch.targets.map(({ personId }) => personId)
+        ),
+        isNull(persons.deletedAt)
+      )
+    );
+  const expectedPeople = input.batch.targets
+    .map(({ personId, expectedPersonUpdatedAt }) =>
+      JSON.stringify({ personId, expectedPersonUpdatedAt })
+    )
+    .toSorted();
+  const currentPeople = people
+    .map(({ id, updatedAt }) =>
+      JSON.stringify({
+        personId: id,
+        expectedPersonUpdatedAt: updatedAt.toISOString(),
+      })
+    )
+    .toSorted();
+  if (JSON.stringify(currentPeople) !== JSON.stringify(expectedPeople)) {
+    return false;
+  }
+
+  const [existingMeeting, existingAttendance, coreRows, reminderRows] =
+    await Promise.all([
+      db
+        .select({ id: churchMeetings.id })
+        .from(churchMeetings)
+        .where(eq(churchMeetings.id, input.batch.meetingId))
+        .limit(1),
+      db
+        .select({ id: meetingAttendance.id })
+        .from(meetingAttendance)
+        .where(
+          sql`${meetingAttendance.id} in (
+              select (x->>'attendanceId')::uuid
+              from jsonb_array_elements(${JSON.stringify(input.batch.targets)}::jsonb) x
+            ) or (
+              ${meetingAttendance.meetingId} = ${input.batch.meetingId}::uuid
+              and ${meetingAttendance.personId} in (
+                select (x->>'personId')::uuid
+                from jsonb_array_elements(${JSON.stringify(input.batch.targets)}::jsonb) x
+              )
+            )`
+        ),
+      db.execute<{ id: string }>(sql`
+        select distinct u.id::text as id
+        from persons p join users u
+          on u.church_id = ${input.actor.plantId}::uuid
+         and u.sending_church_id is null
+         and u.sending_network_id is null
+         and lower(u.email) = lower(p.email)
+        where p.church_id = ${input.actor.plantId}::uuid
+          and p.deleted_at is null and p.email is not null
+          and p.status in ('core_group', 'launch_team', 'leader')
+        order by id
+      `),
+      db.execute<{ id: string }>(sql`
+        select ${input.actor.userId}::uuid::text as id
+        union select distinct u.id::text
+        from persons p join users u
+          on u.church_id = ${input.actor.plantId}::uuid
+         and u.sending_church_id is null
+         and u.sending_network_id is null
+         and lower(u.email) = lower(p.email)
+        where p.church_id = ${input.actor.plantId}::uuid
+          and p.id in (
+            select (x->>'personId')::uuid
+            from jsonb_array_elements(${JSON.stringify(input.batch.targets)}::jsonb) x
+          )
+          and p.deleted_at is null and p.email is not null
+        order by id
+      `),
+    ]);
+  return (
+    existingMeeting.length === 0 &&
+    existingAttendance.length === 0 &&
+    sameStrings(
+      coreRows.rows.map(({ id }) => id),
+      input.batch.expectedCoreGroupUserIds
+    ) &&
+    sameStrings(
+      reminderRows.rows.map(({ id }) => id),
+      input.batch.expectedReminderUserIds
+    ) &&
+    (await notificationTargetsRemainAbsent({
+      plantId: input.actor.plantId,
+      targets: input.batch.notificationTargets,
+      cancelling: [],
+    }))
+  );
+}
+
 /** Read-only stale-confirmation gate; execution repeats the complete predicate. */
 export async function meetingsPlanTargetIsCurrent(input: {
   actor: EvryPlantActor;
+  plan: { document: unknown };
   step: EvryActionStep;
 }): Promise<boolean> {
   const exportName = EXPORT_BY_IDENTITY.get(input.step.capabilityIdentity);
   if (!exportName) return false;
+  const guestBatch =
+    exportName === "addToGuestListAction"
+      ? MEETING_GUEST_BATCH_ARGUMENT_SCHEMA.safeParse(input.step.arguments)
+      : null;
+  if (guestBatch?.success) {
+    return guestBatchPlanTargetIsCurrent({ ...input, batch: guestBatch.data });
+  }
   const parsed = MEETINGS_EFFECT_ARGUMENT_SCHEMAS[exportName].safeParse(
     input.step.arguments
   );

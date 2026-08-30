@@ -97,6 +97,8 @@ type HarnessOptions = Readonly<{
   claimDuringAuthorizationRefusal?: boolean;
   reconcileThrows?: boolean;
   resumeStartedEffectForStep?: string;
+  dependencyOutputs?: boolean;
+  requireExactDependencyForStep?: string;
 }>;
 
 function createHarness(options: HarnessOptions = {}) {
@@ -116,6 +118,7 @@ function createHarness(options: HarnessOptions = {}) {
   let starts = 0;
   let finishes = 0;
   const checks: string[] = [];
+  const seenDependencyOutputs = new Map<string, readonly unknown[]>();
   let nowTick = 0;
   let clockOffsetMs = 0;
   let targetCurrent = options.stale !== "target";
@@ -124,6 +127,14 @@ function createHarness(options: HarnessOptions = {}) {
   const registry = createEvryExecutionCapabilityRegistry([
     defineEvryExecutionCapability({
       planCapability,
+      ...(options.dependencyOutputs
+        ? {
+            dependencyOutputSchema: z.strictObject({
+              targetId: z.string(),
+              expectedVersion: z.number().int().nonnegative(),
+            }),
+          }
+        : {}),
       async reconcileClaimed(input) {
         checks.push("claim");
         lastEffectKey = input.effectKey;
@@ -140,17 +151,39 @@ function createHarness(options: HarnessOptions = {}) {
       },
       async executeIfCurrent(input) {
         const targetId = String(input.arguments.targetId);
+        seenDependencyOutputs.set(targetId, input.dependencyOutputs ?? []);
         checks.push(`target:${targetId}`);
         const existing = effectClaims.get(input.effectKey);
         if (existing) return existing;
         if (!targetCurrent) return { status: "refused", excludedCount: 1 };
         const call = (effectCalls.get(targetId) ?? 0) + 1;
         effectCalls.set(targetId, call);
-        const result = options.effectResultForStep?.(targetId, call) ?? {
+        let result = options.effectResultForStep?.(targetId, call) ?? {
           status: "completed",
           affectedCount: 1,
           excludedCount: 0,
         };
+        if (options.requireExactDependencyForStep === targetId) {
+          const [dependency] = input.dependencyOutputs ?? [];
+          const value = dependency?.value as
+            | { targetId?: unknown; expectedVersion?: unknown }
+            | undefined;
+          if (
+            dependency?.stepId !== "step-1" ||
+            dependency.capabilityIdentity !==
+              EVRY_PEOPLE_WRITE_PROBE_IDENTITY ||
+            value?.targetId !== "target-1" ||
+            value.expectedVersion !== 1
+          ) {
+            return { status: "refused", excludedCount: 1 };
+          }
+        }
+        if (result.status === "completed" && options.dependencyOutputs) {
+          result = {
+            ...result,
+            dependencyOutput: { targetId, expectedVersion: 1 },
+          };
+        }
         if (result.status === "completed") {
           effectClaims.set(input.effectKey, result);
           if (options.throwAfterCommitStep === targetId && call === 1) {
@@ -282,6 +315,8 @@ function createHarness(options: HarnessOptions = {}) {
         status: input.status,
         affectedCount: input.affectedCount,
         excludedCount: input.excludedCount,
+        effectKey: input.effectKey,
+        dependencyOutput: input.dependencyOutput ?? null,
       };
       durable.set(input.stepId, outcome);
       return outcome;
@@ -308,6 +343,10 @@ function createHarness(options: HarnessOptions = {}) {
     durable,
     effectCalls,
     checks,
+    seenDependencyOutputs,
+    replaceDurable(stepId: string, outcome: EvryDurableStepOutcome) {
+      durable.set(stepId, outcome);
+    },
     staleTarget() {
       targetCurrent = false;
     },
@@ -410,6 +449,60 @@ test("retryable middle work leaves its attempt open and resumes only uncompleted
   assert.equal(harness.effectCalls.get("target-3"), 1);
   assert.equal(harness.durable.size, 3);
   assert.equal(harness.stats().finishes, 1);
+});
+
+test("dependency outputs reach only exact direct successors", async (t) => {
+  await t.test("forwards an exact schema-checked output", async () => {
+    const harness = createHarness({
+      stepCount: 2,
+      dependencyOutputs: true,
+      requireExactDependencyForStep: "target-2",
+    });
+    const result = await harness.execute(harness.input);
+    assert.equal(result.status, "completed");
+    assert.equal(harness.seenDependencyOutputs.get("target-1")?.length, 0);
+    assert.equal(harness.seenDependencyOutputs.get("target-2")?.length, 1);
+  });
+
+  for (const corruption of ["foreign-key", "missing", "mismatched"] as const) {
+    await t.test(`refuses ${corruption} predecessor output`, async () => {
+      let retry = true;
+      const harness = createHarness({
+        stepCount: 2,
+        dependencyOutputs: true,
+        requireExactDependencyForStep: "target-2",
+        effectResultForStep(step) {
+          if (step === "target-2" && retry) {
+            retry = false;
+            return { status: "retryable" };
+          }
+          return { status: "completed", affectedCount: 1, excludedCount: 0 };
+        },
+      });
+      assert.equal((await harness.execute(harness.input)).status, "retryable");
+      const predecessor = harness.durable.get("step-1");
+      assert.ok(predecessor);
+      harness.replaceDurable("step-1", {
+        ...predecessor,
+        ...(corruption === "foreign-key"
+          ? { effectKey: "0".repeat(64) as EvryAuditKey }
+          : {}),
+        ...(corruption === "missing" ? { dependencyOutput: null } : {}),
+        ...(corruption === "mismatched"
+          ? {
+              dependencyOutput: {
+                targetId: "foreign-target",
+                expectedVersion: 1,
+              },
+            }
+          : {}),
+      });
+
+      const result = await harness.execute(harness.input);
+      assert.equal(result.status, "partially_failed");
+      assert.equal(result.steps[1]?.status, "refused");
+    });
+  }
 });
 
 test("an open attempt crossing expiry closes from per-step revalidation", async () => {
