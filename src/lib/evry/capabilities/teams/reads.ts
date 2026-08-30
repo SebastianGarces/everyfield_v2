@@ -14,7 +14,7 @@ import {
   listTrainingPrograms,
 } from "@/lib/ministry-teams/service";
 import { teamRequiresBackgroundCheck } from "@/lib/ministry-teams/role-templates";
-import { listPeople } from "@/lib/people/service";
+import { getPerson, listPeople } from "@/lib/people/service";
 import {
   trustedEvryApplicationSourceLink,
   type EvryReadArtifact,
@@ -295,6 +295,13 @@ export async function executeTeamsRead(input: {
         }),
       ],
     });
+  }
+  if (
+    request.kind === "read_person_assignments" ||
+    request.kind === "read_person_training"
+  ) {
+    const person = await getPerson(plantId, request.personId);
+    if (!person) return null;
   }
   if (request.kind === "read_person_assignments") {
     const rows = await getPersonTeams(plantId, request.personId);
