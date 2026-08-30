@@ -2,6 +2,10 @@ import communicationInventory from "@/lib/evry/capabilities/communication/invent
 import peopleInventory from "@/lib/evry/capabilities/people/inventory.generated.json";
 import parityInventory from "@/lib/evry/capabilities/inventory.generated.json";
 import {
+  PLANT_INTELLIGENCE_AUTHORITATIVE_SURFACES,
+  PLANT_INTELLIGENCE_CAPABILITIES,
+} from "@/lib/evry/capabilities/plant-intelligence/catalog";
+import {
   ALL_CAPABILITIES,
   holdsSeatFor,
   type Capability,
@@ -116,6 +120,18 @@ function generatedCommunicationRegistrations(): EvryCapabilityRegistration[] {
       applicationCapability: capability.applicationCapability,
     });
   });
+}
+
+function generatedPlantIntelligenceRegistrations(): EvryCapabilityRegistration[] {
+  return PLANT_INTELLIGENCE_CAPABILITIES.map((capability) =>
+    defineEvryCapabilityRegistration({
+      identity: capability.identity,
+      surfaceIdentities: capability.surfaceIdentities,
+      parityCapability: capability.parityCapability,
+      operationKind: capability.operationKind,
+      applicationCapability: capability.applicationCapability,
+    })
+  );
 }
 
 /** Explicit shared proof registrations, replaced in place by owning packs. */
@@ -242,11 +258,13 @@ const REGISTRY = createEvryCapabilityRegistry({
   registrations: [
     ...generatedPeopleRegistrations(),
     ...generatedCommunicationRegistrations(),
+    ...generatedPlantIntelligenceRegistrations(),
     ...REFERENCE_REGISTRATIONS,
   ],
   authoritativeSurfaces: [
     ...generatedPeopleSurfaces(),
     ...generatedCommunicationSurfaces(),
+    ...PLANT_INTELLIGENCE_AUTHORITATIVE_SURFACES,
     ...referenceSurfaces(),
   ],
 });

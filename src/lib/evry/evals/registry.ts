@@ -4,6 +4,7 @@ import {
   SEND_MESSAGE_IDENTITY,
 } from "@/lib/evry/recipes/fixtures.test-helper";
 import communicationInventory from "@/lib/evry/capabilities/communication/inventory.generated.json";
+import { PLANT_INTELLIGENCE_EVAL_FIXTURES } from "@/lib/evry/capabilities/plant-intelligence/eval-fixtures";
 
 import {
   defineEvryCapabilityEvalFixture,
@@ -59,6 +60,24 @@ export const EVRY_EVAL_PROOFS: readonly EvryEvalProof[] = Object.freeze([
     testFile: "src/lib/communication/evry-effect-live.test.ts",
     lane: "live_database",
     safetyGates: [],
+  },
+  {
+    id: "plant-intelligence-capability-contract",
+    testFile:
+      "src/lib/evry/capabilities/plant-intelligence/eval-fixtures.test.ts",
+    lane: "deterministic",
+    safetyGates: ["prohibited_tool_access"],
+  },
+  {
+    id: "plant-intelligence-effect-live",
+    testFile:
+      "src/lib/evry/capabilities/plant-intelligence/effect-live.test.ts",
+    lane: "live_database",
+    safetyGates: [
+      "unconfirmed_effect",
+      "plan_approval_mismatch",
+      "cross_tenant_access",
+    ],
   },
   {
     id: "candidate-plan-probe-contract",
@@ -224,6 +243,7 @@ export const EVRY_CAPABILITY_EVAL_FIXTURES = Object.freeze([
   ...communicationInventory.capabilities.map(({ identity, operationKind }) =>
     communicationCapabilityFixture(identity, operationKind)
   ),
+  ...PLANT_INTELLIGENCE_EVAL_FIXTURES,
 ]);
 
 export const EVRY_RECIPE_EVAL_FIXTURES: readonly EvryRecipeEvalFixture[] =

@@ -15,6 +15,7 @@ export const EVRY_PAGE_CONTEXT_KINDS = [
   "team",
   "task",
   "launch",
+  "plant_intelligence",
 ] as const;
 
 /** Page context names a record hint. Plant and permission are not wire fields. */
@@ -62,6 +63,7 @@ const LEGACY_PAGE_CONTEXT_LABELS = {
   team: "Team record",
   task: "Task record",
   launch: "Launch record",
+  plant_intelligence: "Plant Intelligence assessment",
 } as const satisfies Record<(typeof EVRY_PAGE_CONTEXT_KINDS)[number], string>;
 
 /**
