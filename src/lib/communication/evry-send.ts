@@ -33,6 +33,7 @@ import {
   renderSubject,
 } from "./merge";
 import {
+  actorStillHoldsCommunicationSend,
   claimEvryCommunicationDatabaseEffect,
   communicationEvryEffectUuid,
 } from "./evry-effect";
@@ -490,6 +491,9 @@ export async function sendFrozenEvryCommunication(input: {
   ) {
     return { status: "refused", excludedCount: 1 };
   }
+  if (!(await actorStillHoldsCommunicationSend(input.effect.execution))) {
+    return { status: "refused", excludedCount: 1 };
+  }
   // This gate deliberately precedes the communication row, recipient rows,
   // RSVP tokens, and provider calls. A stale confirmation must leave no trace.
   const [[church], current] = await Promise.all([
@@ -555,17 +559,14 @@ export async function sendFrozenEvryCommunication(input: {
       excludedCount += 1;
       continue;
     }
-    const outbound = await renderedOutbound({
-      churchName: church.name,
-      churchId: actor.plantId,
-      meetingId: input.audience.meetingId,
-      recipient,
-    });
     // A complaint or hard-bounce webhook can arrive after the whole-audience
     // stale-plan gate above. Recheck this exact address after composition and
     // immediately before the provider boundary so a later recipient is never
     // mailed from a now-stale batch. The terminal row makes the skip visible
     // and prevents a retry from attempting it again.
+    if (!(await actorStillHoldsCommunicationSend(input.effect.execution))) {
+      return { status: "refused", excludedCount: 1 };
+    }
     if (
       !(await recipientIsStillDispatchable({
         churchId: actor.plantId,
@@ -584,6 +585,15 @@ export async function sendFrozenEvryCommunication(input: {
       permanentProviderFailures += 1;
       excludedCount += 1;
       continue;
+    }
+    const outbound = await renderedOutbound({
+      churchName: church.name,
+      churchId: actor.plantId,
+      meetingId: input.audience.meetingId,
+      recipient,
+    });
+    if (!(await actorStillHoldsCommunicationSend(input.effect.execution))) {
+      return { status: "refused", excludedCount: 1 };
     }
     const result = await mailer.send({
       to: recipient.email,
