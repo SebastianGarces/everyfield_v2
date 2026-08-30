@@ -63,6 +63,11 @@ const disclosureValueSchema = z.discriminatedUnion("kind", [
     absentValue: z.string().min(1).max(1_000).optional(),
   }),
   z.strictObject({
+    kind: z.literal("argument_summary"),
+    argumentKey: argumentKeySchema,
+    absentValue: z.string().min(1).max(1_000).optional(),
+  }),
+  z.strictObject({
     kind: z.literal("literal"),
     value: z.string().min(1).max(4_000),
   }),
@@ -448,12 +453,12 @@ function validateDefinition(input: {
       }
     }
     const disclosedArguments = step.disclosure.items.flatMap((item) =>
-      item.value.kind === "argument" ? [item.value.argumentKey] : []
+      item.value.kind === "literal" ? [] : [item.value.argumentKey]
     );
     unique(disclosedArguments, `disclosed argument on ${step.id}`);
     for (const item of step.disclosure.items) {
       if (
-        item.value.kind === "argument" &&
+        item.value.kind !== "literal" &&
         !Object.hasOwn(step.arguments, item.value.argumentKey)
       ) {
         throw new EvryRecipeRegistrationError(

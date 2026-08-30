@@ -14,6 +14,7 @@ import {
   MEETING_INVITATION_RECIPE_REGISTRY,
   meetingInvitationPlanTargetsAreCurrent,
 } from "@/lib/evry/recipes/meeting-invitation";
+import type { EvryRecipeRegistry } from "@/lib/evry/recipes/schema";
 
 import { continueCommunicationEvryConversation } from "./communication/conversation";
 import {
@@ -194,30 +195,50 @@ export const continueProductionEvryCapabilityConversation =
     PRODUCTION_EVRY_CAPABILITY_CONTINUATIONS
   );
 
-/** Closed dispatch that admits the one installed recipe and no caller registry. */
-export async function executeProductionEvryActionPlan(input: {
-  actor: EvryPlantActor;
-  planId: string;
-  fingerprint: string;
-}) {
-  const stored = await findExactEvryActionPlan({
-    planId: input.planId,
-    actorUserId: input.actor.userId,
-    plantId: input.actor.plantId,
-    fingerprint: input.fingerprint,
-  });
-  const recipeIdentity = recipeIdentityForDocument(stored?.document);
-  if (recipeIdentity === MEETING_INVITATION_RECIPE_IDENTITY) {
-    return executeEvryRecipePlan({
-      ...input,
-      recipeRegistry: MEETING_INVITATION_RECIPE_REGISTRY,
-    });
+type ProductionDispatcherDependencies = Readonly<{
+  findPlan: typeof findExactEvryActionPlan;
+  executeGeneric: typeof executeEvryActionPlan;
+  executeRecipe: typeof executeEvryRecipePlan;
+  meetingInvitationRegistry: EvryRecipeRegistry;
+}>;
+
+/** Build a closed dispatcher; its returned production boundary accepts no registry. */
+export function createProductionEvryActionPlanDispatcher(
+  dependencies: ProductionDispatcherDependencies = {
+    findPlan: findExactEvryActionPlan,
+    executeGeneric: executeEvryActionPlan,
+    executeRecipe: executeEvryRecipePlan,
+    meetingInvitationRegistry: MEETING_INVITATION_RECIPE_REGISTRY,
   }
-  return executeEvryActionPlan({
-    ...input,
-    registry: PRODUCTION_EVRY_EXECUTION_REGISTRY,
-  });
+) {
+  return async function dispatchProductionEvryActionPlan(input: {
+    actor: EvryPlantActor;
+    planId: string;
+    fingerprint: string;
+  }) {
+    const stored = await dependencies.findPlan({
+      planId: input.planId,
+      actorUserId: input.actor.userId,
+      plantId: input.actor.plantId,
+      fingerprint: input.fingerprint,
+    });
+    const recipeIdentity = recipeIdentityForDocument(stored?.document);
+    if (recipeIdentity === MEETING_INVITATION_RECIPE_IDENTITY) {
+      return dependencies.executeRecipe({
+        ...input,
+        recipeRegistry: dependencies.meetingInvitationRegistry,
+      });
+    }
+    return dependencies.executeGeneric({
+      ...input,
+      registry: PRODUCTION_EVRY_EXECUTION_REGISTRY,
+    });
+  };
 }
+
+/** Production admits the installed recipe and no caller-selected registry. */
+export const executeProductionEvryActionPlan =
+  createProductionEvryActionPlanDispatcher();
 
 type ProductionTargetValidatorDependencies = Readonly<{
   communication: EvryConversationPlanTargetValidator;

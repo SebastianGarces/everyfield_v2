@@ -9,7 +9,11 @@ import {
   meetingAttendance,
   persons,
 } from "@/db/schema";
-import { toCalendarDate, utcOffsetForZonedTime } from "@/lib/datetime";
+import {
+  instantsAtZonedTime,
+  toCalendarDate,
+  utcOffsetForZonedTime,
+} from "@/lib/datetime";
 import {
   resolveEvryCommunicationAudience,
   type EvryPlannedCommunicationMeeting,
@@ -87,6 +91,7 @@ export type MeetingInvitationReferenceRequest = Readonly<{
   sourceText: string;
   durationMinutes?: number;
   locationId?: string;
+  locationQuery?: string;
   subject: string;
   body: string;
 }>;
@@ -168,6 +173,7 @@ const meetingInvitationRequestSchema = z.strictObject({
   sourceText: z.string().trim().min(1).max(4_000),
   durationMinutes: z.number().int().min(1).max(1_440).optional(),
   locationId: z.string().uuid().optional(),
+  locationQuery: z.string().trim().min(1).max(500).optional(),
   subject: z.string().trim().min(1).max(998),
   body: z.string().trim().min(1).max(200_000),
 });
@@ -332,7 +338,7 @@ function inputBindings(
 function disclosureItems(keys: readonly string[]) {
   return keys.map((key) => ({
     label: key,
-    value: { kind: "argument" as const, argumentKey: key },
+    value: { kind: "argument_summary" as const, argumentKey: key },
   }));
 }
 
@@ -541,22 +547,29 @@ function persistedTargets(step: EvryActionStep) {
 function persistedMeetingDateTime(
   meeting: z.infer<typeof MEETINGS_EFFECT_ARGUMENT_SCHEMAS.createMeetingAction>
 ) {
-  const instant = new Date(meeting.datetime);
-  const calendarDate = toCalendarDate(instant, meeting.timezone);
+  const pinnedWallClock = new Date(meeting.datetime);
+  if (Number.isNaN(pinnedWallClock.getTime())) {
+    throw new Error("Meeting invitation start time is invalid");
+  }
+  const calendarDate = pinnedWallClock.toISOString().slice(0, 10);
+  const hour = pinnedWallClock.getUTCHours();
+  const minute = pinnedWallClock.getUTCMinutes();
+  const candidates = instantsAtZonedTime(
+    calendarDate,
+    hour,
+    minute,
+    meeting.timezone
+  );
+  if (candidates.length !== 1) {
+    throw new Error("Meeting invitation start time is invalid");
+  }
+  const instant = candidates[0];
   const localTime = localTimeAt(instant, meeting.timezone);
-  const match = /^(\d{1,2}):(\d{2}) (AM|PM)$/.exec(localTime);
-  if (!match) throw new Error("Meeting invitation start time is invalid");
-  const hour = (Number(match[1]) % 12) + (match[3] === "PM" ? 12 : 0);
   const startsAt: EvryConfirmationDateTimeDocument = {
     calendarDate,
     localTime,
     timeZone: meeting.timezone,
-    utcOffset: utcOffsetForZonedTime(
-      calendarDate,
-      hour,
-      Number(match[2]),
-      instant
-    ),
+    utcOffset: utcOffsetForZonedTime(calendarDate, hour, minute, instant),
     instantUtc: instant.toISOString(),
     interpretation: {
       basis: "explicit-calendar-date",
@@ -639,12 +652,16 @@ export function buildMeetingInvitationConfirmation(input: {
         ],
         exclusions: exclusionCounts(guests.exclusions),
         dateTime: null,
-        contentPreviews: guests.notificationTargets.map(
-          (notification, index) => ({
+        contentPreviews: [
+          ...guests.targets.map((target, index) => ({
+            label: `Guest ${index + 1}`,
+            content: JSON.stringify(target),
+          })),
+          ...guests.notificationTargets.map((notification, index) => ({
             label: `Guest notification ${index + 1}`,
             content: JSON.stringify(notification),
-          })
-        ),
+          })),
+        ],
         beforeAfter: [],
       },
       {
@@ -663,6 +680,14 @@ export function buildMeetingInvitationConfirmation(input: {
         dateTime: null,
         contentPreviews: communication.audience.recipients.flatMap(
           (recipient) => [
+            {
+              label: `${recipient.label} recipient`,
+              content: JSON.stringify({
+                personId: recipient.personId,
+                label: recipient.label,
+                email: recipient.email,
+              }),
+            },
             {
               label: `${recipient.label} subject`,
               content: recipient.subject,
@@ -818,13 +843,29 @@ function churchAddress(facts: MeetingInvitationReferenceFacts) {
 
 function resolveLocation(
   facts: MeetingInvitationReferenceFacts,
-  requestedId: string | undefined
+  requestedId: string | undefined,
+  requestedQuery: string | undefined
 ): MeetingInvitationLocation | MeetingInvitationReferenceResolution {
+  if (requestedId && requestedQuery) return { kind: "unavailable" };
   if (requestedId) {
     return (
       facts.locations.find(({ id }) => id === requestedId) ?? {
         kind: "unavailable" as const,
       }
+    );
+  }
+
+  if (requestedQuery) {
+    const query = requestedQuery.normalize("NFKC").trim().toLowerCase();
+    const matches = facts.locations.filter(
+      ({ name, address }) =>
+        name.normalize("NFKC").trim().toLowerCase() === query ||
+        address.normalize("NFKC").trim().toLowerCase() === query
+    );
+    if (matches.length === 1) return matches[0]!;
+    return missing(
+      "meeting_location",
+      "Reply with one exact location name or address from Meetings."
     );
   }
 
@@ -843,6 +884,12 @@ function resolveLocation(
     );
   }
   if (facts.locations.length === 1) return facts.locations[0]!;
+  if (facts.locations.length > 8) {
+    return missing(
+      "meeting_location",
+      "There are more than eight active locations. Reply with one exact location name or address from Meetings."
+    );
+  }
 
   return Object.freeze({
     kind: "clarification" as const,
@@ -971,7 +1018,11 @@ export function createMeetingInvitationReferenceResolver(
     if (!facts || facts.church.id !== input.actor.plantId) {
       return { kind: "unavailable" };
     }
-    const location = resolveLocation(facts, input.request.locationId);
+    const location = resolveLocation(
+      facts,
+      input.request.locationId,
+      input.request.locationQuery
+    );
     if ("kind" in location) return location;
     const audience = resolveAudience(facts);
     if (audience.guests.length === 0) return { kind: "unavailable" };
