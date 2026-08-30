@@ -3,6 +3,10 @@
 import dynamic from "next/dynamic";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
+  AppRouterContext,
+  type AppRouterInstance,
+} from "next/dist/shared/lib/app-router-context.shared-runtime";
+import {
   createContext,
   useCallback,
   useContext,
@@ -177,6 +181,7 @@ export function EvryShell({
   const searchParams = useSearchParams();
   const locationSearch = searchParams.toString();
   const router = useRouter();
+  const { replace: replaceRoute } = router;
   const { breadcrumbs } = useHeader();
   const visibleContext = useMemo(
     () => visibleEvryPageContextFor(pathname, breadcrumbs),
@@ -225,6 +230,7 @@ export function EvryShell({
     pathname: string;
     search: string;
   }> | null>(null);
+  const navigationHrefFenceRef = useRef<(href: string) => void>(() => {});
   const mountedConversationIdRef = useRef<string | null>(null);
   const sequencedWorkRef = useRef<EvrySequencedWorkState | null>(null);
   const pendingWorkRequestIdRef = useRef<string | null>(null);
@@ -605,7 +611,9 @@ export function EvryShell({
     setExpandedFromPanel(true);
     setPanelOpen(false);
     const query = conversation ? `?conversation=${conversation.id}` : "";
-    router.push(`/evry${query}`);
+    const href = `/evry${query}`;
+    navigationHrefFenceRef.current(href);
+    router.push(href);
   }, [conversation, router]);
 
   const returnToPage = useCallback(() => {
@@ -616,6 +624,7 @@ export function EvryShell({
       router.back();
       return;
     }
+    navigationHrefFenceRef.current("/dashboard");
     router.push("/dashboard");
   }, [cancelActiveConversationLoads, expandedFromPanel, router]);
 
@@ -642,56 +651,83 @@ export function EvryShell({
     clearPendingRecipeReuse(marker.requestId, 2);
   }, [clearPendingRecipeReuse]);
 
+  const fenceRecipeReuseForHref = useCallback(
+    (href: string) => {
+      const marker = pendingRecipeReuseRef.current;
+      if (!marker) return;
+      const origin =
+        typeof window.location?.origin === "string"
+          ? window.location.origin
+          : "https://everyfield.invalid";
+      try {
+        const source = new URL(
+          `${marker.sourceLocation.pathname}${marker.sourceLocation.search}`,
+          origin
+        );
+        const destination = new URL(href, source);
+        if (
+          destination.origin === source.origin &&
+          destination.pathname === source.pathname &&
+          destination.search === source.search
+        ) {
+          return;
+        }
+      } catch {
+        // Let Next own validation, but revoke reuse ownership for an opaque
+        // destination before it can enqueue any route action.
+      }
+      fenceRecipeReuseForNavigationIntent();
+    },
+    [fenceRecipeReuseForNavigationIntent]
+  );
+  useEffect(() => {
+    navigationHrefFenceRef.current = fenceRecipeReuseForHref;
+  }, [fenceRecipeReuseForHref]);
+
+  const navigationRouter = useMemo<AppRouterInstance>(
+    () => ({
+      back: router.back,
+      forward: router.forward,
+      refresh: router.refresh,
+      prefetch: router.prefetch,
+      bfcacheId: router.bfcacheId,
+      push: (href, options) => {
+        fenceRecipeReuseForHref(href);
+        router.push(href, options);
+      },
+      replace: (href, options) => {
+        fenceRecipeReuseForHref(href);
+        replaceRoute(href, options);
+      },
+      experimental_gesturePush: router.experimental_gesturePush
+        ? (href, options) => {
+            fenceRecipeReuseForHref(href);
+            router.experimental_gesturePush?.(href, options);
+          }
+        : undefined,
+    }),
+    [fenceRecipeReuseForHref, replaceRoute, router]
+  );
+
   useEffect(() => {
     if (
       !enabled ||
-      typeof document === "undefined" ||
-      typeof document.addEventListener !== "function"
+      typeof window === "undefined" ||
+      typeof window.addEventListener !== "function"
     )
       return;
-    const potentialNavigation = (event: Event) => {
-      const target = event.target as {
-        closest?(selectors: string): unknown;
-      } | null;
-      if (!target?.closest) return;
-      if (target.closest("a[href],[role='link']")) {
-        fenceRecipeReuseForNavigationIntent();
-        return;
-      }
-      if (target.closest("[data-evry-conversation-surface]")) return;
+    const historyNavigation = () => {
+      const pending = pendingRecipeReuseRef.current;
+      if (!pending) return;
       if (
-        target.closest(
-          "button,input,select,textarea,[role='button'],[role='menuitem'],[role='tab']"
-        )
+        window.location.pathname !== pending.sourceLocation.pathname ||
+        window.location.search !== pending.sourceLocation.search
       ) {
         fenceRecipeReuseForNavigationIntent();
       }
     };
-    const formNavigation = (event: Event) => {
-      const target = event.target as {
-        closest?(selectors: string): unknown;
-      } | null;
-      if (!target?.closest?.("[data-evry-conversation-surface]")) {
-        fenceRecipeReuseForNavigationIntent();
-      }
-    };
-    const historyNavigation = () => fenceRecipeReuseForNavigationIntent();
-    document.addEventListener("click", potentialNavigation, true);
-    document.addEventListener("change", potentialNavigation, true);
-    document.addEventListener("submit", formNavigation, true);
-    if (typeof window.addEventListener === "function") {
-      window.addEventListener("popstate", historyNavigation);
-    }
-    return () => {
-      if (typeof document.removeEventListener === "function") {
-        document.removeEventListener("click", potentialNavigation, true);
-        document.removeEventListener("change", potentialNavigation, true);
-        document.removeEventListener("submit", formNavigation, true);
-      }
-      if (typeof window.removeEventListener === "function") {
-        window.removeEventListener("popstate", historyNavigation);
-      }
-    };
+    window.addEventListener("popstate", historyNavigation);
+    return () => window.removeEventListener("popstate", historyNavigation);
   }, [enabled, fenceRecipeReuseForNavigationIntent]);
 
   useEffect(() => {
@@ -901,12 +937,8 @@ export function EvryShell({
   const clearContext = useCallback(() => setActiveContext(null), []);
   const loadConversation = useCallback(
     async (conversationId: string) => {
-      if (
-        isSending ||
-        isWorking ||
-        pendingRecipeReuseRef.current ||
-        pendingRouteDepartureRef.current
-      )
+      if (isSending || isWorking) return;
+      if (pendingRecipeReuseRef.current || pendingRouteDepartureRef.current)
         return;
       if (conversation?.id === conversationId) {
         setRequestedConversationId(null);
@@ -1428,8 +1460,10 @@ export function EvryShell({
 
   return (
     <EvryShellContext.Provider value={value}>
-      {children}
-      {enabled && hasOpenedPanel ? <EvryPanel /> : null}
+      <AppRouterContext.Provider value={navigationRouter}>
+        {children}
+        {enabled && hasOpenedPanel ? <EvryPanel /> : null}
+      </AppRouterContext.Provider>
     </EvryShellContext.Provider>
   );
 }

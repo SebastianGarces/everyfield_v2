@@ -3,12 +3,15 @@ import { mock, test } from "node:test";
 
 import {
   createElement,
+  useContext,
   useEffect,
   useMemo,
   useSyncExternalStore,
+  type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
+import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared-runtime";
 
 const SOURCE_ID = "20000000-0000-4000-8000-000000000001";
 const TARGET_ID = "20000000-0000-4000-8000-000000000002";
@@ -18,7 +21,16 @@ let route = { pathname: "/evry", search: `?conversation=${SOURCE_ID}` };
 const listeners = new Set<() => void>();
 const pushes: string[] = [];
 const router = {
+  bfcacheId: "fixture",
   back() {},
+  forward() {},
+  refresh() {},
+  replace(value: string) {
+    pushes.push(value);
+  },
+  prefetch() {
+    return Promise.resolve();
+  },
   push(value: string) {
     pushes.push(value);
   },
@@ -46,14 +58,52 @@ mock.module("next/navigation", {
         [current.search]
       );
     },
-    useRouter: () => router,
+    useRouter: () => useContext(AppRouterContext) ?? router,
   },
 });
 mock.module("next/dynamic", { defaultExport: () => () => null });
-mock.module("next/link", {
-  defaultExport: ({ children, ...props }: { children: ReactNode }) =>
-    createElement("a", props, children),
-});
+function MockLink({
+  children,
+  href,
+  onClick,
+  ...props
+}: {
+  children: ReactNode;
+  href: string;
+  onClick?: (event: ReactMouseEvent<HTMLAnchorElement>) => void;
+  target?: string;
+  download?: string;
+  id?: string;
+}) {
+  const appRouter = useContext(AppRouterContext) ?? router;
+  return createElement(
+    "a",
+    {
+      ...props,
+      href,
+      onClick: (event: ReactMouseEvent<HTMLAnchorElement>) => {
+        onClick?.(event);
+        if (
+          event.defaultPrevented ||
+          event.button !== 0 ||
+          event.metaKey ||
+          event.ctrlKey ||
+          event.shiftKey ||
+          event.altKey ||
+          props.target === "_blank" ||
+          props.download !== undefined ||
+          href.startsWith("#")
+        ) {
+          return;
+        }
+        event.preventDefault();
+        appRouter.push(href);
+      },
+    },
+    children
+  );
+}
+mock.module("next/link", { defaultExport: MockLink });
 mock.module("@/components/header/header-context", {
   namedExports: { useHeader: () => ({ breadcrumbs: [] }) },
 });
@@ -83,6 +133,31 @@ function conversation(id: string) {
     state: {},
     messages: [],
   };
+}
+
+function clickEvent(
+  overrides: Partial<
+    Pick<
+      ReactMouseEvent<HTMLAnchorElement>,
+      "button" | "metaKey" | "ctrlKey" | "shiftKey" | "altKey"
+    >
+  > = {}
+): ReactMouseEvent<HTMLAnchorElement> {
+  let defaultPrevented = false;
+  return {
+    button: 0,
+    metaKey: false,
+    ctrlKey: false,
+    shiftKey: false,
+    altKey: false,
+    ...overrides,
+    get defaultPrevented() {
+      return defaultPrevented;
+    },
+    preventDefault() {
+      defaultPrevented = true;
+    },
+  } as ReactMouseEvent<HTMLAnchorElement>;
 }
 
 test("reuse owns delayed workspace navigation and ignores completion after departure", async (t) => {
@@ -121,6 +196,11 @@ test("reuse owns delayed workspace navigation and ignores completion after depar
     configurable: true,
     value: {
       sessionStorage: storage,
+      location: {
+        origin: "https://example.test",
+        pathname: "/evry",
+        search: `?conversation=${SOURCE_ID}`,
+      },
       setTimeout,
       clearTimeout,
       addEventListener: (
@@ -160,7 +240,8 @@ test("reuse owns delayed workspace navigation and ignores completion after depar
   const first = Promise.withResolvers<Response>();
   const second = Promise.withResolvers<Response>();
   const third = Promise.withResolvers<Response>();
-  const responses = [first, second, third];
+  const fourth = Promise.withResolvers<Response>();
+  const responses = [first, second, third, fourth];
   const fetches: string[] = [];
   const bodies: string[] = [];
   t.mock.method(
@@ -175,8 +256,11 @@ test("reuse owns delayed workspace navigation and ignores completion after depar
     }
   );
   const { EvryShell, useEvryShell } = await import("../evry-shell");
+  const Link = (await import("next/link")).default;
+  const { useRouter } = await import("next/navigation");
   function MountedWorkspace() {
     const current = useEvryShell();
+    const navigation = useRouter();
     const mountedConversationId = current.conversation?.id ?? null;
     const acknowledgeConversationMounted =
       current.acknowledgeConversationMounted;
@@ -185,12 +269,77 @@ test("reuse owns delayed workspace navigation and ignores completion after depar
         acknowledgeConversationMounted(mountedConversationId);
       }
     }, [acknowledgeConversationMounted, mountedConversationId]);
-    return createElement("output", {
-      "data-id": current.conversation?.id ?? "none",
-      "data-blocked": String(current.isComposerBlocked),
-      "data-load": current.loadConversation,
-      "data-start": current.startRecipeReuse,
-    });
+    return createElement(
+      "section",
+      null,
+      createElement("output", {
+        "data-id": current.conversation?.id ?? "none",
+        "data-blocked": String(current.isComposerBlocked),
+        "data-load": current.loadConversation,
+        "data-start": current.startRecipeReuse,
+      }),
+      createElement(
+        Link,
+        {
+          id: "control-disabled-link",
+          href: "/evry?new=1",
+          "aria-disabled": "true",
+          onClick: (event: ReactMouseEvent<HTMLAnchorElement>) =>
+            event.preventDefault(),
+        },
+        "New"
+      ),
+      createElement(
+        Link,
+        { id: "control-modified-link", href: "/dashboard" },
+        "Modified"
+      ),
+      createElement(
+        Link,
+        {
+          id: "control-new-context-link",
+          href: "/dashboard",
+          target: "_blank",
+        },
+        "New context"
+      ),
+      createElement(
+        Link,
+        { id: "control-hash-link", href: "#receipt" },
+        "Receipt"
+      ),
+      createElement(
+        Link,
+        {
+          id: "control-download-link",
+          href: "/download",
+          download: "receipt.json",
+        },
+        "Download"
+      ),
+      createElement("button", {
+        id: "control-ordinary-button",
+        onClick: () => undefined,
+      }),
+      createElement(
+        "form",
+        {
+          id: "control-prevented-form",
+          onSubmit: (event: Event) => event.preventDefault(),
+        },
+        createElement("button", { type: "submit" })
+      ),
+      createElement(
+        Link,
+        { id: "control-proceeding-link", href: "/dashboard" },
+        "Dashboard"
+      ),
+      createElement("button", {
+        id: "control-programmatic-current",
+        onClick: () =>
+          navigation.push(`/evry?conversation=${SOURCE_ID}#receipt`),
+      })
+    );
   }
   let renderer: ReactTestRenderer | null = null;
   await act(async () => {
@@ -247,27 +396,25 @@ test("reuse owns delayed workspace navigation and ignores completion after depar
       recipeIdentity: "meeting.invitation.reference",
     });
   });
+  const control = (name: string) =>
+    mounted.root.findAllByProps({ id: `control-${name}` }).at(-1)!;
   await act(async () => {
-    for (const listener of documentListeners.get("click") ?? []) {
-      listener({
-        target: {
-          closest(selectors: string) {
-            return selectors.includes("data-evry-conversation-surface")
-              ? null
-              : this;
-          },
-        },
-      } as unknown as Event);
-    }
+    control("disabled-link").props.onClick(clickEvent());
+    control("modified-link").props.onClick(clickEvent({ metaKey: true }));
+    control("new-context-link").props.onClick(clickEvent());
+    control("hash-link").props.onClick(clickEvent());
+    control("download-link").props.onClick(clickEvent());
+    control("ordinary-button").props.onClick();
+    const preventedSubmit = clickEvent();
+    control("prevented-form").props.onSubmit(preventedSubmit);
+    assert.equal(preventedSubmit.defaultPrevented, true);
+    control("programmatic-current").props.onClick();
   });
-  pushes.push("/dashboard");
   assert.equal(
     output()["data-blocked"],
     "true",
-    "source remains blocked while the unrelated navigation is pending"
+    "the valid reuse remains the only reason the composer is blocked"
   );
-  await act(async () => void (await output()["data-load"](SOURCE_ID)));
-  assert.equal(fetches.length, 2, "pending departure cannot reload source A");
   second.resolve(
     Response.json(
       { status: "created", conversation: conversation(TARGET_ID) },
@@ -275,17 +422,53 @@ test("reuse owns delayed workspace navigation and ignores completion after depar
     )
   );
   await act(async () => void (await started));
+  assert.equal(output()["data-id"], TARGET_ID);
   assert.deepEqual(
     pushes,
-    [`/evry?conversation=${TARGET_ID}`, "/dashboard"],
-    "late completion cannot enqueue B behind an already pending navigation"
+    [
+      `/evry?conversation=${TARGET_ID}`,
+      `/evry?conversation=${SOURCE_ID}#receipt`,
+      `/evry?conversation=${TARGET_ID}`,
+    ],
+    "disabled, prevented, modified, new-context, hash, download, and ordinary controls preserve reuse ownership"
   );
+  assert.equal(storage.length, 1);
+  await act(async () => navigate("/evry", `?conversation=${TARGET_ID}`));
   assert.equal(storage.length, 0);
+  assert.equal(output()["data-blocked"], "false");
+
+  await act(async () => navigate("/evry", `?conversation=${SOURCE_ID}`));
+  await act(async () => {
+    started = output()["data-start"]({
+      sourceConversationId: SOURCE_ID,
+      resultArtifactId: ARTIFACT_ID,
+      recipeIdentity: "meeting.invitation.reference",
+    });
+  });
+  await act(async () => {
+    control("proceeding-link").props.onClick(clickEvent());
+  });
   assert.equal(
     output()["data-blocked"],
     "true",
-    "committed hooks still report A, so source actions stay fenced"
+    "source remains blocked while the real Next navigation is pending"
   );
+  await act(async () => void (await output()["data-load"](SOURCE_ID)));
+  assert.equal(fetches.length, 3, "pending departure cannot reload source A");
+  third.resolve(
+    Response.json(
+      { status: "created", conversation: conversation(TARGET_ID) },
+      { status: 201 }
+    )
+  );
+  await act(async () => void (await started));
+  assert.equal(
+    pushes.at(-1),
+    "/dashboard",
+    "late completion cannot enqueue B behind the pending Next navigation"
+  );
+  assert.equal(storage.length, 0);
+  assert.equal(output()["data-blocked"], "true");
   await act(async () => navigate("/dashboard"));
   assert.equal(output()["data-blocked"], "false");
   await act(async () => mounted.unmount());
@@ -320,7 +503,7 @@ test("reuse owns delayed workspace navigation and ignores completion after depar
     );
   });
   assert.ok(reloadedRenderer);
-  third.resolve(
+  fourth.resolve(
     Response.json(
       { status: "created", conversation: conversation(TARGET_ID) },
       { status: 201 }
