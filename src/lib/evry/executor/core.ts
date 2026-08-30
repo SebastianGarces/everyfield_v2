@@ -37,6 +37,7 @@ import {
 import {
   createEvryExecutionCapabilityRegistry,
   defineEvryExecutionCapability,
+  type EvryClaimedEffectInput,
   type EvryExecutionCapabilityRegistration,
   type EvryExecutionCapabilityRegistry,
 } from "./registry";
@@ -139,6 +140,19 @@ function publicDurable(
   outcome: EvryDurableStepOutcome
 ): EvryExecutionStepResult {
   return Object.freeze({ ...outcome, durable: true as const });
+}
+
+/** Claim lookup is a network boundary; transport failures stay retryable. */
+async function reconcileClaimedEffect(
+  registration: EvryExecutionCapabilityRegistration,
+  input: EvryClaimedEffectInput
+) {
+  if (!registration.reconcileClaimed) return null;
+  try {
+    return await registration.reconcileClaimed(input);
+  } catch {
+    return { status: "retryable" } as const;
+  }
 }
 
 function resultFromSnapshot(
@@ -442,26 +456,22 @@ export function createEvryExecutor(boundaries: EvryExecutorBoundaries) {
         stepId: step.id,
         capabilityIdentity: step.capabilityIdentity,
       };
-      let effect = executionRegistration.reconcileClaimed
-        ? await executionRegistration.reconcileClaimed({
-            effectKey,
-            execution,
-            arguments: step.arguments,
-          })
-        : null;
+      let effect = await reconcileClaimedEffect(executionRegistration, {
+        effectKey,
+        execution,
+        arguments: step.arguments,
+      });
 
       if (effect === null) {
         const authorization = await boundaries.authorizeCapability(
           step.capabilityIdentity
         );
         if (!authorization) {
-          effect = executionRegistration.reconcileClaimed
-            ? await executionRegistration.reconcileClaimed({
-                effectKey,
-                execution,
-                arguments: step.arguments,
-              })
-            : null;
+          effect = await reconcileClaimedEffect(executionRegistration, {
+            effectKey,
+            execution,
+            arguments: step.arguments,
+          });
           if (effect === null) {
             results.set(
               step.id,
@@ -507,13 +517,11 @@ export function createEvryExecutor(boundaries: EvryExecutorBoundaries) {
             }) !== canonicalDocument ||
             currentStep.capabilityIdentity !== step.capabilityIdentity
           ) {
-            effect = executionRegistration.reconcileClaimed
-              ? await executionRegistration.reconcileClaimed({
-                  effectKey,
-                  execution,
-                  arguments: step.arguments,
-                })
-              : null;
+            effect = await reconcileClaimedEffect(executionRegistration, {
+              effectKey,
+              execution,
+              arguments: step.arguments,
+            });
             if (effect === null) {
               results.set(
                 step.id,

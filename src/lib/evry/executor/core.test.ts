@@ -95,6 +95,7 @@ type HarnessOptions = Readonly<{
   throwAfterCommitStep?: string;
   initiallyExpired?: boolean;
   claimDuringAuthorizationRefusal?: boolean;
+  reconcileThrows?: boolean;
 }>;
 
 function createHarness(options: HarnessOptions = {}) {
@@ -125,6 +126,9 @@ function createHarness(options: HarnessOptions = {}) {
       async reconcileClaimed(input) {
         checks.push("claim");
         lastEffectKey = input.effectKey;
+        if (options.reconcileThrows) {
+          throw new Error("claim store temporarily unavailable");
+        }
         return effectClaims.get(input.effectKey) ?? null;
       },
       async executeIfCurrent(input) {
@@ -513,6 +517,19 @@ test("a claim committed during authorization is rechecked before refusal", async
   assert.equal(result.steps[0]?.status, "completed");
   assert.equal(harness.effectCalls.size, 0);
   assert.equal(harness.checks.filter((check) => check === "claim").length, 2);
+});
+
+test("claim-store lookup failures remain non-durable and retryable", async () => {
+  const harness = createHarness({ reconcileThrows: true });
+  const result = await harness.execute(harness.input);
+  assert.equal(result.status, "retryable");
+  assert.deepEqual(
+    result.steps.map(({ status, durable }) => [status, durable]),
+    [["retryable", false]]
+  );
+  assert.equal(harness.effectCalls.size, 0);
+  assert.equal(harness.durable.size, 0);
+  assert.equal(harness.stats().finishes, 0);
 });
 
 test("terminal replay returns immutable plan order despite reverse commit order", async () => {

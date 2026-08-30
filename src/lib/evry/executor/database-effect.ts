@@ -112,6 +112,8 @@ export async function findExactEvryDatabaseEffectOutcome(
 export async function claimEvryDatabaseEffectDecision(input: {
   execution: EvryEffectInput["execution"];
   effectKey: EvryAuditKey;
+  /** Trusted owner-specific authority/source predicate evaluated atomically. */
+  eligibility?: SQL;
   /** Additional top-level CTEs owned by a compound domain writer. */
   mutationCtes?: SQL;
   mutation: SQL;
@@ -148,6 +150,7 @@ export async function claimEvryDatabaseEffectDecision(input: {
           and a.plan_fingerprint = ${input.execution.fingerprint}
           and a.correlation_id = ${input.execution.correlationId}::uuid
           and s.status = 'executing'
+          and (${input.eligibility ?? sql`true`})
           and not exists (select 1 from existing)
       )${input.mutationCtes ? sql`, ${input.mutationCtes}` : sql``}, mutation as materialized (
         ${input.mutation}

@@ -1,5 +1,64 @@
 import { createHash } from "node:crypto";
 
+import { sql, type SQL } from "drizzle-orm";
+
+import { db } from "@/db";
+import type { EvryAuditKey } from "@/lib/evry/audit/identity";
+import type { EvryEffectInput, EvryEffectResult } from "@/lib/evry/executor";
+import { claimEvryDatabaseEffect } from "@/lib/evry/executor/database-effect";
+
+/** Re-read the exact admin-plus plant seat at the lasting-effect boundary. */
+export async function actorStillHoldsCommunicationSend(
+  execution: EvryEffectInput["execution"]
+): Promise<boolean> {
+  const result = await db.execute(sql`
+    select 1
+    from users actor
+    where actor.id = ${execution.actorUserId}::uuid
+      and actor.church_id = ${execution.plantId}::uuid
+      and actor.sending_church_id is null
+      and actor.sending_network_id is null
+      and actor.seat in ('owner', 'admin')
+    limit 1
+  `);
+  return result.rows.length === 1;
+}
+
+/**
+ * Claim a Communication database mutation through the shared effect ledger
+ * while keeping the owning workflow's admin-plus authority check in the same
+ * SQL statement as the domain write.
+ */
+export async function claimEvryCommunicationDatabaseEffect(input: {
+  execution: EvryEffectInput["execution"];
+  effectKey: EvryAuditKey;
+  mutation: SQL;
+  targetIsCurrent(): Promise<boolean>;
+}): Promise<EvryEffectResult> {
+  return claimEvryDatabaseEffect({
+    execution: input.execution,
+    effectKey: input.effectKey,
+    eligibility: sql`
+      exists (
+        select 1
+        from users actor
+        where actor.id = ${input.execution.actorUserId}::uuid
+          and actor.church_id = ${input.execution.plantId}::uuid
+          and actor.sending_church_id is null
+          and actor.sending_network_id is null
+          and actor.seat in ('owner', 'admin')
+      )
+    `,
+    mutation: input.mutation,
+    async targetIsCurrent() {
+      return (
+        (await actorStillHoldsCommunicationSend(input.execution)) &&
+        (await input.targetIsCurrent())
+      );
+    },
+  });
+}
+
 /** Stable database/provider identity derived only from the approved effect. */
 export function communicationEvryEffectUuid(
   effectKey: string,
