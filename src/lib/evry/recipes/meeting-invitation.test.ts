@@ -24,6 +24,7 @@ import {
   type MeetingInvitationReferenceRequest,
 } from "./meeting-invitation";
 import { trustedReviewForEvryPlanDocument } from "@/lib/evry/artifacts/trusted-plan-review";
+import { storedEvryClarificationArtifactDocument } from "@/lib/evry/conversations/artifacts";
 import {
   createMeetingInvitationConversationContinuation,
   meetingInvitationRequestForConversation,
@@ -383,18 +384,21 @@ test("missing year and duration return focused clarifications before any fact re
   assert.equal(year.factReads(), 0);
 });
 
-test("an ambiguous church location returns closed choices and zero resolved effects", async () => {
+test("two maximum-length locations persist bounded durable choices", async () => {
+  const northName = "N".repeat(255);
+  const southName = "S".repeat(255);
+  const northAddress = "A".repeat(500);
   const ambiguous = facts({
     church: { ...facts().church, streetAddress: null },
     locations: [
       {
         id: "30000000-0000-4000-8000-000000000001",
-        name: "North",
-        address: "1 North St",
+        name: northName,
+        address: northAddress,
       },
       {
         id: "30000000-0000-4000-8000-000000000002",
-        name: "South",
+        name: southName,
         address: "2 South St",
       },
     ],
@@ -403,23 +407,39 @@ test("an ambiguous church location returns closed choices and zero resolved effe
   const result = await resolve({ actor: ACTOR, request: BASE_REQUEST });
   assert.equal(result.kind, "clarification");
   if (result.kind !== "clarification") return;
+  assert.equal(
+    storedEvryClarificationArtifactDocument(result.artifact).kind,
+    "clarification"
+  );
   assert.equal(result.artifact.mode, "choice");
   if (result.artifact.mode === "choice") {
     assert.deepEqual(
       result.artifact.choices.map(({ id, label }) => ({ id, label })),
       [
-        { id: "30000000-0000-4000-8000-000000000001", label: "North" },
-        { id: "30000000-0000-4000-8000-000000000002", label: "South" },
+        {
+          id: "30000000-0000-4000-8000-000000000001",
+          label: "Location 1",
+        },
+        {
+          id: "30000000-0000-4000-8000-000000000002",
+          label: "Location 2",
+        },
       ]
     );
+    assert.deepEqual(result.artifact.choices[0]?.distinguishingFacts, [
+      { label: "Name", value: northName },
+      { label: "Address", value: northAddress },
+    ]);
+    assert.equal(result.artifact.choices[0]?.sourceLink.label, "Open Meetings");
     assert.equal(result.artifact.defaultChoiceId, null);
   }
 });
 
-test("nine active locations use durable focused narrowing through the ordinary continuation", async () => {
+test("nine locations narrow an exact maximum-length name through ordinary continuation", async () => {
+  const maxLocationName = "X".repeat(255);
   const locations = Array.from({ length: 9 }, (_, index) => ({
     id: `30000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
-    name: `Location ${index + 1}`,
+    name: index === 8 ? maxLocationName : `Location ${index + 1}`,
     address: `${index + 1} Main Street`,
   }));
   const manyLocations = resolver({
@@ -507,11 +527,11 @@ test("nine active locations use durable focused narrowing through the ordinary c
           body: first?.body ?? "",
           artifacts: [{ artifact: first?.artifacts[0] }],
         },
-        { author: "user", body: "Location 9", artifacts: [] },
+        { author: "user", body: maxLocationName, artifacts: [] },
       ],
     } as never,
     userRequestKey: "location-nine",
-    literalUserText: "Location 9",
+    literalUserText: maxLocationName,
     pageContext: null,
     requestPageContext: null,
     now: new Date("2026-08-01T12:00:00.000Z"),
@@ -621,7 +641,7 @@ test("the registered People resolver denies missing and stale-session authority 
   }
 });
 
-test("the exact planner feeds the future meeting into Communication and refuses audience drift", async () => {
+test("the exact planner reviews the 100-recipient and 511-character-name boundary", async () => {
   const resolved = await resolver({}).resolve({
     actor: ACTOR,
     request: BASE_REQUEST,
@@ -817,12 +837,13 @@ test("the exact planner feeds the future meeting into Communication and refuses 
     })
   );
 
+  const maxPersonLabel = `${"F".repeat(255)} ${"L".repeat(255)}`;
   const peopleBoundary = Array.from({ length: 100 }, (_, index) => {
     const suffix = String(index + 1).padStart(12, "0");
     return {
       personId: `60000000-0000-4000-8000-${suffix}`,
       attendanceId: `70000000-0000-4000-8000-${suffix}`,
-      label: `Person ${index + 1}`,
+      label: index === 0 ? maxPersonLabel : `Person ${index + 1}`,
       email: `person-${index + 1}@example.test`,
     };
   });
@@ -897,13 +918,29 @@ test("the exact planner feeds the future meeting into Communication and refuses 
   assert.equal(boundaryArtifact.steps[1]?.counts[0]?.count, 100);
   assert.equal(boundaryArtifact.steps[1]?.contentPreviews.length, 100);
   assert.equal(
+    boundaryArtifact.steps[1]?.contentPreviews[0]?.content,
+    JSON.stringify(boundarySnapshot.guests.targets[0])
+  );
+  assert.equal(
     boundaryArtifact.steps[1]?.contentPreviews[99]?.content,
     JSON.stringify(boundarySnapshot.guests.targets[99])
   );
   assert.equal(boundaryArtifact.steps[2]?.contentPreviews.length, 300);
+  assert.deepEqual(boundaryArtifact.steps[2]?.contentPreviews.slice(0, 3), [
+    {
+      label: "Recipient 1 identity",
+      content: JSON.stringify({
+        personId: peopleBoundary[0]!.personId,
+        label: peopleBoundary[0]!.label,
+        email: peopleBoundary[0]!.email,
+      }),
+    },
+    { label: "Recipient 1 subject", content: BASE_REQUEST.subject },
+    { label: "Recipient 1 message", content: BASE_REQUEST.body },
+  ]);
   assert.deepEqual(boundaryArtifact.steps[2]?.contentPreviews.slice(-3), [
     {
-      label: "Person 100 recipient",
+      label: "Recipient 100 identity",
       content: JSON.stringify({
         personId: peopleBoundary[99]!.personId,
         label: "Person 100",
@@ -911,11 +948,11 @@ test("the exact planner feeds the future meeting into Communication and refuses 
       }),
     },
     {
-      label: "Person 100 subject",
+      label: "Recipient 100 subject",
       content: BASE_REQUEST.subject,
     },
     {
-      label: "Person 100 message",
+      label: "Recipient 100 message",
       content: BASE_REQUEST.body,
     },
   ]);
