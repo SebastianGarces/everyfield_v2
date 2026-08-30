@@ -58,7 +58,7 @@ export type TeamsEvryCapabilityInventory = Readonly<{
   authoritativeSources: Readonly<{
     actions: "src/lib/auth/capability-map.ts";
     routes: "src/app/(dashboard)/teams/**/{page,layout}.tsx";
-    rscOperations: "called Teams/People/Meetings service imports in Teams RSC modules";
+    rscOperations: "called Teams/People/Meetings service imports that return Teams-owned data";
   }>;
   capabilities: readonly Readonly<{
     identity: string;
@@ -101,6 +101,8 @@ const RSC_CAPABILITY = {
   getStaffingSummary: "teams.read.list",
   getTeam: "teams.read.detail",
   getTeamCountsForPeople: "teams.read.candidates",
+  getPersonTeams: "teams.read.person-assignments",
+  getPersonTraining: "teams.read.person-training",
   getTrainingMatrix: "teams.read.training",
   listMeetings: "teams.read.meetings",
   listPeople: "teams.read.candidates",
@@ -118,6 +120,14 @@ const READ_METADATA = {
   "teams.read.health": { domain: "teams", label: "Review team health" },
   "teams.read.list": { domain: "teams", label: "List ministry teams" },
   "teams.read.meetings": { domain: "meetings", label: "List team meetings" },
+  "teams.read.person-assignments": {
+    domain: "members",
+    label: "Review a person's ministry team assignments",
+  },
+  "teams.read.person-training": {
+    domain: "training",
+    label: "Review a person's ministry training",
+  },
   "teams.read.responsibilities": {
     domain: "responsibilities",
     label: "List team responsibilities",
@@ -252,10 +262,15 @@ function rscEntries(repoRoot: string): TeamsEvrySurface[] {
     .concat([
       "src/app/(dashboard)/teams/[teamId]/layout.tsx",
       "src/app/(dashboard)/teams/layout.tsx",
+      "src/app/(dashboard)/people/[id]/teams/page.tsx",
+      "src/app/(dashboard)/meetings/new/page.tsx",
     ])
     .filter((source, index, values) => values.indexOf(source) === index)
-    .filter((source) =>
-      source.startsWith(toPosix(path.relative(repoRoot, root)))
+    .filter(
+      (source) =>
+        source.startsWith(toPosix(path.relative(repoRoot, root))) ||
+        source === "src/app/(dashboard)/people/[id]/teams/page.tsx" ||
+        source === "src/app/(dashboard)/meetings/new/page.tsx"
     );
   return files.flatMap((source): TeamsEvrySurface[] => {
     const body = readFileSync(path.join(repoRoot, source), "utf8");
@@ -385,7 +400,7 @@ export function generateTeamsCapabilityInventory(
       actions: "src/lib/auth/capability-map.ts",
       routes: "src/app/(dashboard)/teams/**/{page,layout}.tsx",
       rscOperations:
-        "called Teams/People/Meetings service imports in Teams RSC modules",
+        "called Teams/People/Meetings service imports that return Teams-owned data",
     },
     capabilities,
     entries,

@@ -4,7 +4,7 @@
   "authoritativeSources": {
     "actions": "src/lib/auth/capability-map.ts",
     "routes": "src/app/(dashboard)/teams/**/{page,layout}.tsx",
-    "rscOperations": "called Teams/People/Meetings service imports in Teams RSC modules"
+    "rscOperations": "called Teams/People/Meetings service imports that return Teams-owned data"
   },
   "capabilities": [
     {
@@ -220,6 +220,7 @@
         "action:src/app/(dashboard)/teams/actions.ts → listTeamsAction",
         "route:/teams",
         "route:/teams/org-chart",
+        "rsc-operation:src/app/(dashboard)/meetings/new/page.tsx → listTeams",
         "rsc-operation:src/app/(dashboard)/teams/health/page.tsx → getStaffingSummary",
         "rsc-operation:src/app/(dashboard)/teams/org-chart/page.tsx → listTeams",
         "rsc-operation:src/app/(dashboard)/teams/page.tsx → getStaffingSummary",
@@ -248,6 +249,46 @@
       ],
       "parityCapability": "teams",
       "domain": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "teams.read.person-assignments",
+      "surfaceIdentities": [
+        "rsc-operation:src/app/(dashboard)/people/[id]/teams/page.tsx → getPersonTeams"
+      ],
+      "parityCapability": "teams",
+      "domain": "members",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "teams.read.person-training",
+      "surfaceIdentities": [
+        "rsc-operation:src/app/(dashboard)/people/[id]/teams/page.tsx → getPersonTraining"
+      ],
+      "parityCapability": "teams",
+      "domain": "training",
       "operationKind": "read",
       "applicationCapability": "read",
       "confirmation": "not_required",
@@ -912,6 +953,45 @@
     },
     {
       "kind": "rsc_operation",
+      "identity": "rsc-operation:src/app/(dashboard)/meetings/new/page.tsx → listTeams",
+      "source": "src/app/(dashboard)/meetings/new/page.tsx",
+      "exportName": "listTeams",
+      "capabilityIdentity": "teams.read.list",
+      "domain": "teams",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc-operation:src/app/(dashboard)/people/[id]/teams/page.tsx → getPersonTeams",
+      "source": "src/app/(dashboard)/people/[id]/teams/page.tsx",
+      "exportName": "getPersonTeams",
+      "capabilityIdentity": "teams.read.person-assignments",
+      "domain": "members",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc-operation:src/app/(dashboard)/people/[id]/teams/page.tsx → getPersonTraining",
+      "source": "src/app/(dashboard)/people/[id]/teams/page.tsx",
+      "exportName": "getPersonTraining",
+      "capabilityIdentity": "teams.read.person-training",
+      "domain": "training",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_operation",
       "identity": "rsc-operation:src/app/(dashboard)/teams/[teamId]/layout.tsx → getTeam",
       "source": "src/app/(dashboard)/teams/[teamId]/layout.tsx",
       "exportName": "getTeam",
@@ -1109,8 +1189,8 @@
   "summary": {
     "actions": 20,
     "routes": 7,
-    "rscOperations": 16,
-    "readCapabilities": 7,
+    "rscOperations": 19,
+    "readCapabilities": 9,
     "effectCapabilities": 19,
     "unclassified": 0
   }

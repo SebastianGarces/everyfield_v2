@@ -24,7 +24,10 @@ import {
 import { defineEvryPlanCapability } from "@/lib/evry/plans/registry";
 import { trustedReviewForEvryPlanDocument } from "@/lib/evry/artifacts/trusted-plan-review";
 
-import { executeTeamsEffect } from "./atomic-effect";
+import {
+  executeTeamsEffect,
+  reconcileClaimedTeamsEffect,
+} from "./atomic-effect";
 import { TEAMS_CAPABILITIES } from "./catalog";
 import {
   TEAMS_EFFECT_ARGUMENT_SHAPE,
@@ -55,6 +58,7 @@ export const TEAMS_EXECUTION_CAPABILITIES = Object.freeze(
   Object.values(PLAN_BY_OPERATION).map((planCapability) =>
     defineEvryExecutionCapability({
       planCapability,
+      reconcileClaimed: reconcileClaimedTeamsEffect,
       executeIfCurrent: executeTeamsEffect,
     })
   )

@@ -545,7 +545,9 @@ export async function syncMeetingNotifications(
  * Converge an already-confirmed create plan through F11 without recomposing
  * copy or dedupe keys. `enqueue` still performs its fresh recipient/tenant
  * gate and unique-key claim for every item, while the shared sync loop keeps
- * one recipient's failure from affecting the others.
+ * every recipient despite partial failures. The shared loop still attempts
+ * every intent, then throws if any write failed so a durable domain claim
+ * remains retryable until the full confirmed set converges.
  */
 export async function reconcileMeetingNotificationIntents(
   churchId: string,
@@ -570,6 +572,7 @@ export async function reconcileMeetingNotificationIntents(
   return runNotificationSync<MeetingNotificationReason>({
     ...meetingSubject(churchId, meetingId),
     mustCancel: false,
+    failureMode: "required",
     plan: () => ({ notifications: [...intents], skipped: null }),
     deps,
   });

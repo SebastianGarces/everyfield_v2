@@ -23,6 +23,8 @@ const READ_IDENTITY = {
   read_meetings: "teams.read.meetings",
   read_responsibilities: "teams.read.responsibilities",
   read_candidates: "teams.read.candidates",
+  read_person_assignments: "teams.read.person-assignments",
+  read_person_training: "teams.read.person-training",
 } as const;
 
 const unavailable = {

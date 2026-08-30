@@ -1,8 +1,12 @@
-import { and, eq, sql, type SQL } from "drizzle-orm";
+import { sql, type SQL } from "drizzle-orm";
 
 import { db } from "@/db";
-import { evryExecutionEffectClaims } from "@/db/schema";
-import type { EvryEffectInput, EvryEffectResult } from "@/lib/evry/executor";
+import {
+  type EvryClaimedEffectInput,
+  type EvryEffectInput,
+  type EvryEffectResult,
+} from "@/lib/evry/executor";
+import { findExactEvryDatabaseEffectClaim } from "@/lib/evry/executor/database-effect";
 import {
   MEETING_NOTIFICATION_CATEGORY,
   planMeetingNotifications,
@@ -26,7 +30,7 @@ interface CompletedRow extends Record<string, unknown> {
 }
 
 export type TeamsEffectExecutionDeps = Readonly<{
-  findCompletedOutcome: typeof completedOutcome;
+  findCompletedOutcome: typeof findExactEvryDatabaseEffectClaim;
   executeStatement: typeof executeStatement;
   reconcileMeetingNotifications: typeof reconcileMeetingNotificationIntents;
   composeMeetingNotificationIntents: typeof composeMeetingNotificationIntents;
@@ -41,47 +45,6 @@ function exactTuple(input: EvryEffectInput, identity: string): boolean {
     input.execution.actorUserId === actor.userId &&
     input.execution.plantId === actor.plantId
   );
-}
-
-async function completedOutcome(
-  input: EvryEffectInput
-): Promise<EvryEffectResult | null> {
-  const [row] = await db
-    .select({
-      affectedCount: evryExecutionEffectClaims.affectedCount,
-      excludedCount: evryExecutionEffectClaims.excludedCount,
-    })
-    .from(evryExecutionEffectClaims)
-    .where(
-      and(
-        eq(evryExecutionEffectClaims.attemptId, input.execution.attemptId),
-        eq(evryExecutionEffectClaims.planId, input.execution.planId),
-        eq(evryExecutionEffectClaims.churchId, input.execution.plantId),
-        eq(evryExecutionEffectClaims.actorUserId, input.execution.actorUserId),
-        eq(
-          evryExecutionEffectClaims.planFingerprint,
-          input.execution.fingerprint
-        ),
-        eq(
-          evryExecutionEffectClaims.correlationId,
-          input.execution.correlationId
-        ),
-        eq(evryExecutionEffectClaims.stepId, input.execution.stepId),
-        eq(
-          evryExecutionEffectClaims.capabilityIdentity,
-          input.execution.capabilityIdentity
-        ),
-        eq(evryExecutionEffectClaims.effectKey, input.effectKey)
-      )
-    )
-    .limit(1);
-  return row
-    ? {
-        status: "completed",
-        affectedCount: row.affectedCount,
-        excludedCount: row.excludedCount,
-      }
-    : null;
 }
 
 function outcomePrelude(
@@ -391,7 +354,7 @@ function notificationIntentsAreCurrent(
 }
 
 async function reconcileMeetingAfterCommit(
-  input: EvryEffectInput,
+  input: EvryClaimedEffectInput,
   args: TeamsEffectArguments,
   reconcile: typeof reconcileMeetingNotificationIntents
 ): Promise<void> {
@@ -400,29 +363,71 @@ async function reconcileMeetingAfterCommit(
     ({ table, mode }) => table === "church_meetings" && mode === "insert"
   );
   if (!meeting) return;
-  try {
-    await reconcile(
-      input.execution.plantId,
-      meeting.id,
-      confirmedMeetingIntents(args)
-    );
-  } catch (error) {
-    if (process.env.EVRY_TEAMS_EFFECT_DEBUG === "1") {
-      console.error("Teams meeting notification reconciliation debug", error);
-    }
-  }
+  await reconcile(
+    input.execution.plantId,
+    meeting.id,
+    confirmedMeetingIntents(args)
+  );
 }
 
 async function completedWithNotificationReconciliation(
   result: EvryEffectResult,
-  input: EvryEffectInput,
+  input: EvryClaimedEffectInput,
   args: TeamsEffectArguments,
   reconcile: typeof reconcileMeetingNotificationIntents
 ): Promise<EvryEffectResult> {
   if (result.status === "completed") {
-    await reconcileMeetingAfterCommit(input, args, reconcile);
+    try {
+      await reconcileMeetingAfterCommit(input, args, reconcile);
+    } catch (error) {
+      if (process.env.EVRY_TEAMS_EFFECT_DEBUG === "1") {
+        console.error("Teams meeting notification reconciliation debug", error);
+      }
+      return { status: "retryable" };
+    }
   }
   return result;
+}
+
+/** Recover an exact durable Teams claim before consulting current authority. */
+export async function reconcileClaimedTeamsEffect(
+  input: EvryClaimedEffectInput,
+  dependencies: Pick<
+    Partial<TeamsEffectExecutionDeps>,
+    "findCompletedOutcome" | "reconcileMeetingNotifications"
+  > = {}
+): Promise<EvryEffectResult | null> {
+  try {
+    const findCompleted =
+      dependencies.findCompletedOutcome ?? findExactEvryDatabaseEffectClaim;
+    const claim = await findCompleted(input);
+    if (!claim) return null;
+    const operation = input.arguments.operation;
+    if (
+      typeof operation !== "string" ||
+      !(operation in TEAMS_EFFECT_IDENTITY_BY_OPERATION)
+    ) {
+      return { status: "retryable" };
+    }
+    const typedOperation =
+      operation as keyof typeof TEAMS_EFFECT_IDENTITY_BY_OPERATION;
+    if (
+      input.execution.capabilityIdentity !==
+      TEAMS_EFFECT_IDENTITY_BY_OPERATION[typedOperation]
+    ) {
+      return { status: "retryable" };
+    }
+    const args = parseTeamsEffectArguments(typedOperation, input.arguments);
+    return completedWithNotificationReconciliation(
+      claim,
+      input,
+      args,
+      dependencies.reconcileMeetingNotifications ??
+        reconcileMeetingNotificationIntents
+    );
+  } catch {
+    return { status: "retryable" };
+  }
 }
 
 /** One PostgreSQL statement owns exact drift refusal, effect claim, and writes. */
@@ -430,7 +435,8 @@ export async function executeTeamsEffect(
   input: EvryEffectInput,
   dependencies: Partial<TeamsEffectExecutionDeps> = {}
 ): Promise<EvryEffectResult> {
-  const findCompleted = dependencies.findCompletedOutcome ?? completedOutcome;
+  const findCompleted =
+    dependencies.findCompletedOutcome ?? findExactEvryDatabaseEffectClaim;
   const runStatement = dependencies.executeStatement ?? executeStatement;
   const reconcile =
     dependencies.reconcileMeetingNotifications ??

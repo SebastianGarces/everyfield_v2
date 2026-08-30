@@ -363,7 +363,7 @@ test("a save that moves nothing a reminder says leaves the live rows alone", asy
   );
 });
 
-test("confirmed literal reconciliation isolates one recipient failure and replay fills only the missing row", async () => {
+test("confirmed literal reconciliation stays retryable after one recipient failure and replay fills only the missing row", async () => {
   const h = harness();
   const scheduledFor = new Date("2026-08-14T09:00:00.000Z");
   const literal = (recipientUserId: string) => ({
@@ -380,11 +380,8 @@ test("confirmed literal reconciliation isolates one recipient failure and replay
   });
   const intents = [literal(ORGANISER), literal(GUEST)];
 
-  const first = await reconcileMeetingNotificationIntents(
-    CHURCH,
-    MEETING,
-    intents,
-    {
+  await assert.rejects(
+    reconcileMeetingNotificationIntents(CHURCH, MEETING, intents, {
       ...h.deps,
       enqueue: async (intent) => {
         if (intent.recipientUserId === GUEST) {
@@ -392,16 +389,10 @@ test("confirmed literal reconciliation isolates one recipient failure and replay
         }
         return h.deps.enqueue(intent);
       },
-    }
+    }),
+    /required meeting notification write/
   );
-  assert.deepEqual(
-    {
-      considered: first.considered,
-      created: first.created,
-      failed: first.failed,
-    },
-    { considered: 2, created: 1, failed: 1 }
-  );
+  assert.equal(h.queue.pending(MEETING_SCHEDULED_TYPE).length, 1);
 
   const replay = await reconcileMeetingNotificationIntents(
     CHURCH,

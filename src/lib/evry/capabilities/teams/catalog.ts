@@ -56,6 +56,14 @@ const READ_METADATA = {
     label: "List team meetings",
     argumentKeys: ["teamId"],
   },
+  "teams.read.person-assignments": {
+    label: "Review a person's ministry team assignments",
+    argumentKeys: ["personId"],
+  },
+  "teams.read.person-training": {
+    label: "Review a person's ministry training",
+    argumentKeys: ["personId"],
+  },
   "teams.read.responsibilities": {
     label: "List team responsibilities",
     argumentKeys: ["teamId"],

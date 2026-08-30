@@ -895,18 +895,12 @@ async function main(): Promise<void> {
       ),
       "the immutable plan binds literal F11 anchor, copy, entity, and dedupe fields"
     );
-    assert.equal((await response(failurePost, failurePlan)).status, 200);
-    assert.deepEqual(isolatedFailureReports, [
-      {
-        cancelled: 0,
-        considered: 7,
-        recorded: 3,
-        created: 3,
-        skipped: 0,
-        failed: 4,
-        reason: null,
-      },
-    ]);
+    assert.equal(
+      (await response(failurePost, failurePlan)).status,
+      503,
+      "a partial F11 failure leaves the claimed executor step retryable"
+    );
+    assert.deepEqual(isolatedFailureReports, []);
     const [failureMeeting] = await db
       .select()
       .from(churchMeetings)
@@ -930,12 +924,12 @@ async function main(): Promise<void> {
           .where(eq(notifications.entityId, failureMeeting.id))
       ).length,
       3,
-      "one recipient's failures did not cost the other recipient"
+      "one recipient's failures did not cost the other recipient's rows"
     );
     assert.equal(
-      (await response(failurePost, failurePlan)).status,
+      (await response(route.POST, failurePlan)).status,
       200,
-      "the exact plan remains a successful keyed replay"
+      "production replay fills only the missing confirmed intents"
     );
     assert.equal(
       (
@@ -964,8 +958,23 @@ async function main(): Promise<void> {
           .from(notifications)
           .where(eq(notifications.entityId, failureMeeting.id))
       ).length,
-      3,
-      "terminal replay duplicates neither the meeting nor the successful recipient rows"
+      plannedMeetingNotificationCount,
+      "replay converges the full literal intent set without duplicating completed rows"
+    );
+    assert.equal(
+      (await response(route.POST, failurePlan)).status,
+      200,
+      "the converged execution becomes a stable terminal replay"
+    );
+    assert.equal(
+      (
+        await db
+          .select()
+          .from(notifications)
+          .where(eq(notifications.entityId, failureMeeting.id))
+      ).length,
+      plannedMeetingNotificationCount,
+      "terminal replay resends no completed intent"
     );
 
     const crashRegistry = executor.createEvryExecutionCapabilityRegistry(
@@ -1048,11 +1057,15 @@ async function main(): Promise<void> {
       0,
       "the domain claim is not a terminal executor step"
     );
+    await db.update(users).set({ seat: "member" }).where(eq(users.id, actorId));
+    sessionUser = { ...sessionUser!, seat: "member" };
     assert.equal(
       (await response(route.POST, crashPlan)).status,
       200,
-      "production executor replay reaches post-commit F11 reconciliation"
+      "claimed recovery reaches post-commit F11 reconciliation after authority loss"
     );
+    await db.update(users).set({ seat: "owner" }).where(eq(users.id, actorId));
+    sessionUser = { ...sessionUser!, seat: "owner" };
     assert.equal(
       (
         await db
