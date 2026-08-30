@@ -3,8 +3,10 @@ import { test } from "node:test";
 
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
 import type { EvryDateTimeResolution } from "@/lib/evry/resolvers/datetime";
+import { evryConversationPlanIdentitySchema } from "@/lib/evry/conversations/contract";
 
 import {
+  buildMeetingInvitationConfirmation,
   createMeetingInvitationReferenceResolver,
   type MeetingInvitationReferenceFacts,
   type MeetingInvitationReferenceRequest,
@@ -168,6 +170,45 @@ test("the canonical audience combines core team with unvisited prospects and dis
     address: "144 Oak Street, Albany, NY, USA",
   });
   assert.equal(result.dateTime.timeZone, "America/New_York");
+
+  const artifact = buildMeetingInvitationConfirmation({
+    plan: evryConversationPlanIdentitySchema.parse({
+      planId: "40000000-0000-4000-8000-000000000001",
+      fingerprint: "a".repeat(64),
+    }),
+    resolved: result,
+  });
+  assert.equal(artifact.actionLabel, "Create meeting and send 3");
+  assert.deepEqual(
+    artifact.steps.map(({ stepId }) => stepId),
+    ["create-meeting", "add-guests", "send-invitations"]
+  );
+  assert.deepEqual(artifact.steps[0]?.dateTime, {
+    startsAt: DATE_TIME,
+    endsAt: {
+      calendarDate: "2026-08-05",
+      localTime: "11:30 AM",
+      timeZone: "America/New_York",
+      utcOffset: "-04:00",
+      instantUtc: "2026-08-05T15:30:00.000Z",
+      interpretation: {
+        basis: "explicit-calendar-date",
+        sourceText: "90 minutes after August 5, 2026 at 10 AM",
+        statedCalendarDate: "2026-08-05",
+      },
+    },
+  });
+  assert.equal(artifact.steps[1]?.resolvedTargets.length, 3);
+  assert.deepEqual(artifact.steps[1]?.exclusions, [
+    { reason: "Missing email address", count: 1 },
+    { reason: "Prior Vision Meeting attendance", count: 1 },
+    { reason: "Duplicate email address", count: 1 },
+    { reason: "Suppressed email address", count: 1 },
+  ]);
+  assert.deepEqual(artifact.steps[2]?.contentPreviews, [
+    { label: "Subject", content: "You're invited to Vision Meeting" },
+    { label: "Message", content: "Join us for Vision Meeting." },
+  ]);
 });
 
 test("missing year and duration return focused clarifications before any fact read", async () => {
