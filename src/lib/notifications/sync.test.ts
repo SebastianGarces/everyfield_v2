@@ -224,6 +224,39 @@ test("a thrown cancel or plan is swallowed — a notification never fails its wr
   assert.equal(thrownPlan.considered, 0);
 });
 
+test("a required reconciler fails closed when its cancel or plan fails", async () => {
+  const h = harness();
+
+  await assert.rejects(
+    runNotificationSync({
+      ...SUBJECT,
+      mustCancel: true,
+      plan: () => ({ notifications: [input()], skipped: null }),
+      deps: {
+        enqueue: h.deps.enqueue,
+        cancelByEntity: () => {
+          throw new Error("database is down");
+        },
+      },
+      failureMode: "required",
+    }),
+    /required task notification write/
+  );
+
+  await assert.rejects(
+    runNotificationSync({
+      ...SUBJECT,
+      mustCancel: false,
+      plan: () => {
+        throw new Error("the facts read failed");
+      },
+      deps: h.deps,
+      failureMode: "required",
+    }),
+    /required task notification write/
+  );
+});
+
 test("a planner's refusal is reported as its own reason", async () => {
   const h = harness();
   const report = await runNotificationSync<"no_due_date">({

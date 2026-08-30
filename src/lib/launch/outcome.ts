@@ -19,7 +19,22 @@ import { requireChurchAccess } from "@/lib/auth/access";
 import { assertSeatFor } from "@/lib/auth/seat-rules";
 import { markPlantDirty } from "@/lib/phase-engine/dirty-handler";
 import { daysUntilTarget } from "./countdown";
-import { getLaunchForChurch } from "./queries";
+import { getLaunchForChurch, type LaunchRecord } from "./queries";
+
+type LaunchOutcomeExpectedSource = Readonly<
+  Pick<
+    LaunchRecord,
+    | "id"
+    | "targetDate"
+    | "status"
+    | "outcomeRecordedAt"
+    | "attendanceCount"
+    | "decisionsCount"
+    | "outcomeNotes"
+    | "captureTheDay"
+    | "updatedAt"
+  >
+>;
 
 // ----------------------------------------------------------------------------
 // Messages
@@ -48,6 +63,21 @@ export const OUTCOME_TOO_EARLY_MESSAGE =
  */
 export const OUTCOME_NOT_RECORDED_MESSAGE =
   "There is no recorded outcome to correct yet — record the day first.";
+
+export const OUTCOME_CHANGED_ELSEWHERE_MESSAGE =
+  "The launch outcome changed while you were reviewing it. Reload to see the current outcome.";
+
+function storedOutcomeMatches(
+  launch: LaunchRecord,
+  outcome: LaunchOutcomeInput
+): boolean {
+  return (
+    launch.attendanceCount === outcome.attendanceCount &&
+    launch.decisionsCount === outcome.decisionsCount &&
+    launch.outcomeNotes === outcome.outcomeNotes &&
+    launch.captureTheDay === outcome.captureTheDay
+  );
+}
 
 // ----------------------------------------------------------------------------
 // Validation
@@ -114,7 +144,7 @@ export type LaunchOutcomeInput = z.infer<typeof launchOutcomeSchema>;
  * luck: its `inserted` CTE says `where not exists (select 1 from current)`,
  * which forces `current` first.
  */
-export function recordLaunchOutcomeStatement(input: {
+type RecordLaunchOutcomeStatementInput = Readonly<{
   churchId: string;
   actorUserId: string;
   asOfDay: string;
@@ -122,10 +152,17 @@ export function recordLaunchOutcomeStatement(input: {
   decisionsCount: number | null;
   outcomeNotes: string | null;
   captureTheDay: string | null;
-}): SQL {
-  return sql`
-    with current as (
-      select id, target_date, status
+  expected?: LaunchOutcomeExpectedSource;
+  /** Trusted outer write gate used by the Evry exact-effect transaction. */
+  writeEligibility?: SQL;
+}>;
+
+export function recordLaunchOutcomeEffectMutation(
+  input: RecordLaunchOutcomeStatementInput
+): Readonly<{ ctes: SQL; result: SQL }> {
+  const ctes = sql`current as (
+      select id, target_date, status, updated_at, outcome_recorded_at,
+             attendance_count, decisions_count, outcome_notes, capture_the_day
       from launches
       where church_id = ${input.churchId}
       for update
@@ -140,7 +177,27 @@ export function recordLaunchOutcomeStatement(input: {
           updated_at = now()
       from current c
       where l.id = c.id
+        ${
+          input.expected
+            ? sql`
+          and c.id = ${input.expected.id}
+          and c.target_date is not distinct from ${input.expected.targetDate}::date
+          and c.status = ${input.expected.status}
+          ${
+            input.expected.outcomeRecordedAt
+              ? sql`and date_trunc('milliseconds', c.outcome_recorded_at at time zone 'UTC') = ${input.expected.outcomeRecordedAt}`
+              : sql`and c.outcome_recorded_at is null`
+          }
+          and c.attendance_count is not distinct from ${input.expected.attendanceCount}::int
+          and c.decisions_count is not distinct from ${input.expected.decisionsCount}::int
+          and c.outcome_notes is not distinct from ${input.expected.outcomeNotes}::text
+          and c.capture_the_day is not distinct from ${input.expected.captureTheDay}::text
+          and date_trunc('milliseconds', c.updated_at at time zone 'UTC') = ${input.expected.updatedAt}
+        `
+            : sql``
+        }
         and c.status <> 'completed'
+        and ${input.writeEligibility ?? sql`true`}
         and c.target_date is not null
         and c.target_date <= ${input.asOfDay}::date
       returning
@@ -163,9 +220,19 @@ export function recordLaunchOutcomeStatement(input: {
         ${input.actorUserId}, ${input.outcomeNotes}
       from updated u
       returning id
-    )
-    select u.id as launch_id, u.target_date as target_date from updated u
-  `;
+    )`;
+  return {
+    ctes,
+    result: sql`select 1::int affected_count, 0::int excluded_count from updated limit 1`,
+  };
+}
+
+export function recordLaunchOutcomeStatement(
+  input: RecordLaunchOutcomeStatementInput
+): SQL {
+  const mutation = recordLaunchOutcomeEffectMutation(input);
+  return sql`with ${mutation.ctes}
+    select u.id as launch_id, u.target_date as target_date from updated u`;
 }
 
 /**
@@ -211,17 +278,23 @@ export function recordLaunchOutcomeStatement(input: {
  * pair (`journalEntryLabel` in `src/components/launch/presentation.ts`), so no
  * enum value had to be invented in a workstream that does not own the schema.
  */
-export function updateLaunchOutcomeStatement(input: {
+type UpdateLaunchOutcomeStatementInput = Readonly<{
   churchId: string;
   actorUserId: string;
   attendanceCount: number | null;
   decisionsCount: number | null;
   outcomeNotes: string | null;
   captureTheDay: string | null;
-}): SQL {
-  return sql`
-    with current as (
-      select id, target_date, status, outcome_recorded_at,
+  expected?: LaunchOutcomeExpectedSource;
+  /** Trusted outer write gate used by the Evry exact-effect transaction. */
+  writeEligibility?: SQL;
+}>;
+
+export function updateLaunchOutcomeEffectMutation(
+  input: UpdateLaunchOutcomeStatementInput
+): Readonly<{ ctes: SQL; result: SQL }> {
+  const ctes = sql`current as (
+      select id, target_date, status, outcome_recorded_at, updated_at,
              attendance_count, decisions_count, outcome_notes, capture_the_day
       from launches
       where church_id = ${input.churchId}
@@ -235,7 +308,27 @@ export function updateLaunchOutcomeStatement(input: {
           updated_at = now()
       from current c
       where l.id = c.id
+        ${
+          input.expected
+            ? sql`
+          and c.id = ${input.expected.id}
+          and c.target_date is not distinct from ${input.expected.targetDate}::date
+          and c.status = ${input.expected.status}
+          ${
+            input.expected.outcomeRecordedAt
+              ? sql`and date_trunc('milliseconds', c.outcome_recorded_at at time zone 'UTC') = ${input.expected.outcomeRecordedAt}`
+              : sql`and c.outcome_recorded_at is null`
+          }
+          and c.attendance_count is not distinct from ${input.expected.attendanceCount}::int
+          and c.decisions_count is not distinct from ${input.expected.decisionsCount}::int
+          and c.outcome_notes is not distinct from ${input.expected.outcomeNotes}::text
+          and c.capture_the_day is not distinct from ${input.expected.captureTheDay}::text
+          and date_trunc('milliseconds', c.updated_at at time zone 'UTC') = ${input.expected.updatedAt}
+        `
+            : sql``
+        }
         and c.status = 'completed'
+        and ${input.writeEligibility ?? sql`true`}
         and c.outcome_recorded_at is not null
         and (
           c.attendance_count is distinct from ${input.attendanceCount}::int
@@ -263,9 +356,19 @@ export function updateLaunchOutcomeStatement(input: {
         ${input.actorUserId}, ${input.outcomeNotes}
       from updated u
       returning id
-    )
-    select u.id as launch_id, u.target_date as target_date from updated u
-  `;
+    )`;
+  return {
+    ctes,
+    result: sql`select 1::int affected_count, 0::int excluded_count from updated limit 1`,
+  };
+}
+
+export function updateLaunchOutcomeStatement(
+  input: UpdateLaunchOutcomeStatementInput
+): SQL {
+  const mutation = updateLaunchOutcomeEffectMutation(input);
+  return sql`with ${mutation.ctes}
+    select u.id as launch_id, u.target_date as target_date from updated u`;
 }
 
 // ----------------------------------------------------------------------------
@@ -275,6 +378,13 @@ export function updateLaunchOutcomeStatement(input: {
 export type RecordLaunchOutcomeResult =
   | { status: "recorded"; targetDate: string }
   | { status: "error"; error: string };
+
+/** Replay-safe owner-side consequence of a durable outcome write. */
+export async function reconcileLaunchOutcomeAfterWrite(
+  churchId: string
+): Promise<void> {
+  await markPlantDirty(churchId);
+}
 
 /**
  * Record how Launch Sunday went (LS-006).
@@ -295,7 +405,8 @@ export async function recordLaunchOutcome(
   user: User,
   churchId: string,
   input: LaunchOutcomeInput,
-  asOf: Date = new Date()
+  asOf: Date = new Date(),
+  options: Readonly<{ expected?: LaunchOutcomeExpectedSource }> = {}
 ): Promise<RecordLaunchOutcomeResult> {
   assertSeatFor(user, "launch.schedule");
   await requireChurchAccess(user, churchId);
@@ -311,6 +422,7 @@ export async function recordLaunchOutcome(
       actorUserId: user.id,
       asOfDay: utcDay(asOf),
       ...parsed.data,
+      expected: options.expected,
     })
   );
 
@@ -322,13 +434,23 @@ export async function recordLaunchOutcome(
     if (!stored?.targetDate) {
       return { status: "error", error: OUTCOME_NO_LAUNCH_MESSAGE };
     }
+    if (
+      options.expected &&
+      stored.status === "completed" &&
+      storedOutcomeMatches(stored, parsed.data)
+    ) {
+      return { status: "recorded", targetDate: stored.targetDate };
+    }
+    if (options.expected) {
+      return { status: "error", error: OUTCOME_CHANGED_ELSEWHERE_MESSAGE };
+    }
     if (stored.status === "completed") {
       return { status: "error", error: OUTCOME_ALREADY_RECORDED_MESSAGE };
     }
     return { status: "error", error: OUTCOME_TOO_EARLY_MESSAGE };
   }
 
-  await markPlantDirty(churchId);
+  await reconcileLaunchOutcomeAfterWrite(churchId);
 
   return { status: "recorded", targetDate: written.target_date };
 }
@@ -358,7 +480,8 @@ export type UpdateLaunchOutcomeResult =
 export async function updateLaunchOutcome(
   user: User,
   churchId: string,
-  input: LaunchOutcomeInput
+  input: LaunchOutcomeInput,
+  options: Readonly<{ expected?: LaunchOutcomeExpectedSource }> = {}
 ): Promise<UpdateLaunchOutcomeResult> {
   assertSeatFor(user, "launch.schedule");
   await requireChurchAccess(user, churchId);
@@ -373,6 +496,7 @@ export async function updateLaunchOutcome(
       churchId,
       actorUserId: user.id,
       ...parsed.data,
+      expected: options.expected,
     })
   );
 
@@ -390,10 +514,15 @@ export async function updateLaunchOutcome(
     if (stored.status !== "completed" || stored.outcomeRecordedAt === null) {
       return { status: "error", error: OUTCOME_NOT_RECORDED_MESSAGE };
     }
+    if (options.expected) {
+      return storedOutcomeMatches(stored, parsed.data)
+        ? { status: "unchanged", targetDate: stored.targetDate }
+        : { status: "error", error: OUTCOME_CHANGED_ELSEWHERE_MESSAGE };
+    }
     return { status: "unchanged", targetDate: stored.targetDate };
   }
 
-  await markPlantDirty(churchId);
+  await reconcileLaunchOutcomeAfterWrite(churchId);
 
   return { status: "updated", targetDate: written.target_date };
 }

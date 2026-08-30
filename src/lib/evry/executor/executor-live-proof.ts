@@ -8,11 +8,15 @@ import { z } from "zod";
 import { db } from "@/db";
 import {
   churches,
+  communicationRecipients,
+  communications,
+  evryExecutionEffectClaims,
   evryActionPlans,
   evryActionPlanStates,
   evryExecutionAttempts,
   evryExecutionOutcomes,
   evryProductAuditEvents,
+  persons,
   sessions,
   users,
 } from "@/db/schema";
@@ -290,7 +294,7 @@ async function seedApprovedPlan(
     decidedAt: new Date(createdAt.getTime() + 1_000),
   });
   assert.equal(confirmation.status, "approved");
-  return { id, fingerprint };
+  return { id, fingerprint, expiresAt };
 }
 
 function request(plan: { id: string; fingerprint: string }): Request {
@@ -374,6 +378,10 @@ async function main(): Promise<void> {
   const plans = await import("@/lib/evry/plans");
   const planRepository = await import("@/lib/evry/plans/repository");
   const executor = await import("@/lib/evry/executor");
+  const communicationMessages =
+    await import("@/lib/evry/capabilities/communication/messages");
+  const communicationEffect = await import("@/lib/communication/evry-effect");
+  const communicationSend = await import("@/lib/communication/evry-send");
   const route = await import("@/app/api/evry/plans/[planId]/execute/route");
   const modules: PlanModules = {
     correlationForPlanRequest: auditIdentity.correlationForPlanRequest,
@@ -401,11 +409,31 @@ async function main(): Promise<void> {
       ]),
     },
   });
+  const communicationProviderCalls: string[] = [];
+  const communicationExecution =
+    communicationMessages.createCommunicationEvryMessageExecutions({
+      mailer: {
+        async send(input) {
+          communicationProviderCalls.push(input.to);
+          if (communicationProviderCalls.length === 1) {
+            await db
+              .update(users)
+              .set({ seat: "member" })
+              .where(eq(users.id, sessionUser!.id));
+          }
+          return {
+            status: "accepted" as const,
+            providerId: `executor-live-${communicationProviderCalls.length}`,
+          };
+        },
+      },
+    }).send;
   const registry = executor.createEvryExecutionCapabilityRegistry([
     executor.defineEvryExecutionCapability({
       planCapability,
       executeIfCurrent: executeFixtureEffect,
     }),
+    communicationExecution,
   ]);
   const post = route.createEvryPlanExecutePost({ registry });
 
@@ -521,6 +549,273 @@ async function main(): Promise<void> {
   assert.equal(evidence.outcomes.length, 2);
   assert.equal(await domainEffectCount(crashTarget), 1);
   assert.equal(adapterCalls.get(crashTarget), 2);
+
+  assert.ok(sessionUser.churchId);
+  const communicationPeople = await db
+    .insert(persons)
+    .values(
+      ["First", "Second", "Third"].map((firstName) => ({
+        churchId: sessionUser!.churchId!,
+        firstName,
+        lastName: "Authority recovery",
+        email: `${firstName.toLowerCase()}-${randomUUID()}@scratch.invalid`,
+        createdBy: sessionUser!.id,
+      }))
+    )
+    .returning({ id: persons.id, email: persons.email });
+  assert.equal(communicationPeople.length, 3);
+  const communicationAudience =
+    await communicationSend.resolveEvryCommunicationAudience({
+      churchId: sessionUser.churchId,
+      recipientIds: communicationPeople.map(({ id }) => id),
+      subject: "Executor authority recovery",
+      body: "Finish the exact approved batch",
+    });
+  assert.ok(communicationAudience);
+  const communicationId = randomUUID();
+  const communicationDocument = plans.parseEvryActionPlanCandidate({
+    candidate: {
+      steps: [
+        {
+          id: "send-authority-recovery",
+          capabilityIdentity:
+            communicationMessages.COMMUNICATION_MESSAGE_SEND_IDENTITY,
+          arguments: {
+            communicationId,
+            recipientSource: {
+              kind: "people",
+              recipientIds: communicationPeople.map(({ id }) => id),
+            },
+            audience: communicationAudience,
+          },
+          dependsOn: [],
+        },
+      ],
+    },
+    registry: registry.planRegistry,
+    eligibleCapabilities: [
+      {
+        identity: communicationMessages.COMMUNICATION_MESSAGE_SEND_IDENTITY,
+      },
+    ],
+  });
+  const communicationPlan = await seedApprovedPlan(
+    modules,
+    communicationDocument,
+    14 * 60 * 1_000 + 30_000
+  );
+
+  const interruptedCommunication = await response(post, communicationPlan);
+  assert.equal(interruptedCommunication.status, 503);
+  assert.equal(interruptedCommunication.body.status, "retryable");
+  assert.equal(communicationProviderCalls.length, 1);
+
+  const unauthorizedReplay = await response(post, communicationPlan);
+  assert.equal(unauthorizedReplay.status, 503);
+  assert.equal(unauthorizedReplay.body.status, "retryable");
+  assert.equal(communicationProviderCalls.length, 1);
+  assert.equal(
+    await db
+      .select({ id: evryExecutionEffectClaims.id })
+      .from(evryExecutionEffectClaims)
+      .where(eq(evryExecutionEffectClaims.planId, communicationPlan.id))
+      .then((rows) => rows.length),
+    0
+  );
+  assert.equal(
+    await db
+      .select({ id: evryExecutionOutcomes.id })
+      .from(evryExecutionOutcomes)
+      .where(eq(evryExecutionOutcomes.planId, communicationPlan.id))
+      .then((rows) => rows.length),
+    0,
+    "authority loss must not turn a prepared batch into a durable refusal"
+  );
+
+  const driftedUnsentPerson = communicationPeople.find(
+    ({ email }) => email !== communicationProviderCalls[0]
+  );
+  assert.ok(driftedUnsentPerson);
+  await db
+    .update(persons)
+    .set({ email: `drifted-${randomUUID()}@scratch.invalid` })
+    .where(eq(persons.id, driftedUnsentPerson.id));
+
+  const untilExpired = communicationPlan.expiresAt.getTime() - Date.now();
+  if (untilExpired >= 0) {
+    await new Promise((resolve) => setTimeout(resolve, untilExpired + 100));
+  }
+  await db
+    .update(users)
+    .set({ seat: "owner" })
+    .where(eq(users.id, sessionUser.id));
+  const recoveredCommunication = await response(post, communicationPlan);
+  assert.equal(recoveredCommunication.status, 200);
+  assert.equal(recoveredCommunication.body.status, "completed");
+  assert.equal(communicationProviderCalls.length, 2);
+  assert.equal(new Set(communicationProviderCalls).size, 2);
+  assert.deepEqual(
+    (
+      await db
+        .select({ status: communicationRecipients.status })
+        .from(communicationRecipients)
+        .where(eq(communicationRecipients.communicationId, communicationId))
+    )
+      .map(({ status }) => status)
+      .toSorted(),
+    ["failed", "sent", "sent"]
+  );
+  assert.deepEqual(
+    await db
+      .select({
+        affectedCount: evryExecutionEffectClaims.affectedCount,
+        excludedCount: evryExecutionEffectClaims.excludedCount,
+      })
+      .from(evryExecutionEffectClaims)
+      .where(eq(evryExecutionEffectClaims.planId, communicationPlan.id))
+      .then((rows) => rows),
+    [{ affectedCount: 2, excludedCount: 1 }]
+  );
+  assert.equal((await response(post, communicationPlan)).status, 200);
+  assert.equal(communicationProviderCalls.length, 2);
+
+  const stagedGroupPeople = await db
+    .insert(persons)
+    .values(
+      ["Staged first", "Staged second"].map((firstName) => ({
+        churchId: sessionUser!.churchId!,
+        firstName,
+        lastName: "Source recovery",
+        email: `${firstName.replace(" ", "-").toLowerCase()}-${randomUUID()}@scratch.invalid`,
+        status: "core_group" as const,
+        createdBy: sessionUser!.id,
+      }))
+    )
+    .returning({ id: persons.id });
+  assert.equal(stagedGroupPeople.length, 2);
+  const stagedGroupAudience =
+    await communicationSend.resolveEvryCommunicationAudience({
+      churchId: sessionUser.churchId,
+      recipientIds: stagedGroupPeople.map(({ id }) => id),
+      subject: "Prepared source recovery",
+      body: "Do not send after the group changes",
+    });
+  assert.ok(stagedGroupAudience);
+  const stagedGroupCommunicationId = randomUUID();
+  const stagedGroupStepId = "send-prepared-group";
+  const stagedGroupDocument = plans.parseEvryActionPlanCandidate({
+    candidate: {
+      steps: [
+        {
+          id: stagedGroupStepId,
+          capabilityIdentity:
+            communicationMessages.COMMUNICATION_MESSAGE_SEND_IDENTITY,
+          arguments: {
+            communicationId: stagedGroupCommunicationId,
+            recipientSource: { kind: "group", selector: "core_group" },
+            audience: stagedGroupAudience,
+          },
+          dependsOn: [],
+        },
+      ],
+    },
+    registry: registry.planRegistry,
+    eligibleCapabilities: [
+      {
+        identity: communicationMessages.COMMUNICATION_MESSAGE_SEND_IDENTITY,
+      },
+    ],
+  });
+  const stagedGroupPlan = await seedApprovedPlan(modules, stagedGroupDocument);
+  const stagedGroupEffectKey = auditIdentity.executionEffectKey(
+    stagedGroupPlan.id,
+    stagedGroupPlan.fingerprint,
+    stagedGroupStepId
+  );
+  await db.batch([
+    db.insert(communications).values({
+      id: stagedGroupCommunicationId,
+      churchId: sessionUser.churchId,
+      subject: stagedGroupAudience.subject,
+      body: stagedGroupAudience.body,
+      bodyHtml: stagedGroupAudience.bodyHtml,
+      channel: stagedGroupAudience.channel,
+      templateId: stagedGroupAudience.templateId,
+      meetingId: stagedGroupAudience.meetingId,
+      status: "sending",
+      recipientCount: stagedGroupAudience.recipients.length,
+      createdById: sessionUser.id,
+    }),
+    db.insert(communicationRecipients).values(
+      stagedGroupAudience.recipients.map((recipient) => ({
+        id: communicationEffect.communicationEvryEffectUuid(
+          stagedGroupEffectKey,
+          `recipient:${recipient.personId}`
+        ),
+        churchId: sessionUser!.churchId!,
+        communicationId: stagedGroupCommunicationId,
+        personId: recipient.personId,
+        email: recipient.email,
+        channel: "email" as const,
+        status: "pending" as const,
+      }))
+    ),
+  ]);
+  const markerRaceSuffix = randomUUID().replaceAll("-", "");
+  const markerRaceFunction = `evry_marker_race_${markerRaceSuffix}`;
+  const markerRaceTrigger = `evry_marker_race_trigger_${markerRaceSuffix}`;
+  await db.execute(
+    sql.raw(`
+      create function ${markerRaceFunction}() returns trigger
+      language plpgsql as $marker_race$
+      begin
+        update users set seat = 'member'
+        where id = '${sessionUser.id}'::uuid;
+        return null;
+      end
+      $marker_race$
+    `)
+  );
+  await db.execute(
+    sql.raw(`
+      create trigger ${markerRaceTrigger}
+      before update on communication_recipients
+      for each statement execute function ${markerRaceFunction}()
+    `)
+  );
+  const stagedUnauthorized = await response(post, stagedGroupPlan);
+  await db.execute(
+    sql.raw(`drop trigger ${markerRaceTrigger} on communication_recipients`)
+  );
+  await db.execute(sql.raw(`drop function ${markerRaceFunction}()`));
+  assert.equal(stagedUnauthorized.status, 503);
+  assert.equal(stagedUnauthorized.body.status, "retryable");
+  assert.equal(communicationProviderCalls.length, 2);
+
+  await db.batch([
+    db
+      .update(persons)
+      .set({ status: "prospect" })
+      .where(eq(persons.id, stagedGroupPeople[0]!.id)),
+    db.update(users).set({ seat: "owner" }).where(eq(users.id, sessionUser.id)),
+  ]);
+  const stalePreparedGroup = await response(post, stagedGroupPlan);
+  assert.equal(stalePreparedGroup.status, 409);
+  assert.equal(communicationProviderCalls.length, 2);
+  assert.deepEqual(
+    (
+      await db
+        .select({ status: communicationRecipients.status })
+        .from(communicationRecipients)
+        .where(
+          eq(
+            communicationRecipients.communicationId,
+            stagedGroupCommunicationId
+          )
+        )
+    ).map(({ status }) => status),
+    ["pending", "pending"]
+  );
 
   assert.ok(sessionUser.churchId);
   const originalPlantId = sessionUser.churchId;

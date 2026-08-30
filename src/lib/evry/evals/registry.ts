@@ -4,6 +4,7 @@ import {
   SEND_MESSAGE_IDENTITY,
 } from "@/lib/evry/recipes/fixtures.test-helper";
 import communicationInventory from "@/lib/evry/capabilities/communication/inventory.generated.json";
+import launchInventory from "@/lib/evry/capabilities/launch/inventory.generated.json";
 
 import {
   defineEvryCapabilityEvalFixture,
@@ -57,6 +58,18 @@ export const EVRY_EVAL_PROOFS: readonly EvryEvalProof[] = Object.freeze([
   {
     id: "communication-effect-live",
     testFile: "src/lib/communication/evry-effect-live.test.ts",
+    lane: "live_database",
+    safetyGates: [],
+  },
+  {
+    id: "launch-capability-contract",
+    testFile: "src/lib/evry/capabilities/launch/eval-fixtures.test.ts",
+    lane: "deterministic",
+    safetyGates: [],
+  },
+  {
+    id: "launch-capability-live",
+    testFile: "src/lib/evry/capabilities/launch/effect-live.test.ts",
     lane: "live_database",
     safetyGates: [],
   },
@@ -207,6 +220,48 @@ function communicationCapabilityFixture(
   });
 }
 
+function launchCapabilityFixture(
+  capabilityIdentity: string,
+  operationKind: string
+): EvryCapabilityEvalFixture {
+  if (operationKind !== "read" && operationKind !== "effect") {
+    throw new Error(
+      `Launch capability ${capabilityIdentity} has an invalid operation kind`
+    );
+  }
+  const evalCase = (layer: EvryCapabilityEvalLayer) => {
+    // The opt-in PostgreSQL proof executes exact reviewed effects through the
+    // production registry. Launch read adapter DB parity is also checked there,
+    // but it is not mislabeled as an authenticated registered-read outcome.
+    const live =
+      operationKind === "effect" && COMMUNICATION_LIVE_EFFECT_LAYERS.has(layer);
+    return [
+      {
+        id: `${capabilityIdentity}:${layer}`,
+        proofId: live ? "launch-capability-live" : "launch-capability-contract",
+        testName: live
+          ? `${capabilityIdentity}:${layer}:live`
+          : `${capabilityIdentity}:${layer}`,
+      },
+    ];
+  };
+  return defineEvryCapabilityEvalFixture({
+    capabilityIdentity,
+    cases: {
+      policy: evalCase("policy"),
+      selection: evalCase("selection"),
+      arguments: evalCase("arguments"),
+      tenancy: evalCase("tenancy"),
+      permission: evalCase("permission"),
+      confirmation: evalCase("confirmation"),
+      execution: evalCase("execution"),
+      idempotency: evalCase("idempotency"),
+      errors: evalCase("errors"),
+      ui_artifact: evalCase("ui_artifact"),
+    },
+  });
+}
+
 /**
  * Only concrete effect registrations exercised by the reference recipe enter
  * this release corpus. Each slot names its own node:test outcome; shared live
@@ -223,6 +278,9 @@ export const EVRY_CAPABILITY_EVAL_FIXTURES = Object.freeze([
     .map(capabilityFixture),
   ...communicationInventory.capabilities.map(({ identity, operationKind }) =>
     communicationCapabilityFixture(identity, operationKind)
+  ),
+  ...launchInventory.capabilities.map(({ identity, operationKind }) =>
+    launchCapabilityFixture(identity, operationKind)
   ),
 ]);
 

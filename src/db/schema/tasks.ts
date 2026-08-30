@@ -213,6 +213,18 @@ export const tasks = pgTable(
       .where(
         sql`${table.category} = 'follow_up' and ${table.relatedType} = 'person' and ${table.deletedAt} is null`
       ),
+    // A recurring chain may have only one live successor. The first instance
+    // can omit `seriesId`; every minted successor carries it, and completion
+    // closes the predecessor before the next insert. This is the database
+    // arbiter that makes owner and Evry retries/races converge.
+    uniqueIndex("tasks_open_recurrence_series_unique_idx")
+      .on(
+        table.churchId,
+        sql`(coalesce(${table.recurrenceRule} ->> 'seriesId', ${table.id}::text))`
+      )
+      .where(
+        sql`${table.isRecurring} and ${table.status} <> 'complete' and ${table.deletedAt} is null`
+      ),
     // Composite FKs on task_dependencies reference (id, church_id), so both
     // ends of an edge are the same church as the row that names them. `id` is
     // already unique; this pair exists so Postgres can spell the FK.

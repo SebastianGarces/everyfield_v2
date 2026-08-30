@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import {
@@ -11,6 +11,7 @@ import {
   evryActionPlans,
   evryActionPlanStates,
   evryExecutionAttempts,
+  evryExecutionEffectClaims,
   evryExecutionOutcomes,
   evryPlanConfirmations,
   evryProductAuditEvents,
@@ -35,7 +36,8 @@ import { mintEvryPlanRequestKey } from "@/lib/evry/plans";
 import { recordAddressSuppression } from "@/lib/notifications/channels/suppression";
 
 import {
-  EVRY_COMMUNICATION_PERMANENT_PREFIX,
+  EVRY_COMMUNICATION_ATTEMPTED_PREFIX,
+  EVRY_COMMUNICATION_LOCAL_PREFIX,
   type EvryCommunicationMailer,
   resolveEvryCommunicationAudience,
   sendFrozenEvryCommunication,
@@ -218,7 +220,10 @@ function deterministicMailer(
       const providerId = `fake-${deliveries.size + 1}`;
       deliveries.set(input.idempotencyKey, providerId);
       if (outcome === "accepted_response_lost") {
-        throw new Error("response lost after provider acceptance");
+        return {
+          status: "retryable",
+          reason: "response lost after provider acceptance",
+        };
       }
       return { status: "accepted", providerId };
     },
@@ -796,6 +801,193 @@ async function main(): Promise<void> {
   assert.equal(new Set(transientMailer.calls).size, 1);
   assert.equal(transientMailer.deliveries.size, 1);
 
+  // A provider may accept the stable request while its response is lost. Once
+  // that boundary is ambiguous, later recipient drift cannot truthfully turn
+  // the durable row into a local exclusion; replay must reconcile the same
+  // provider key first.
+  const lostResponseEmail = `${randomUUID()}@scratch.invalid`;
+  const [lostResponsePerson] = await db
+    .insert(persons)
+    .values({
+      churchId: plant.id,
+      firstName: "Lost",
+      lastName: "Response",
+      email: lostResponseEmail,
+      createdBy: owner.id,
+    })
+    .returning({ id: persons.id });
+  assert.ok(lostResponsePerson);
+  const lostResponseAudience = await resolveEvryCommunicationAudience({
+    churchId: plant.id,
+    recipientIds: [lostResponsePerson.id],
+    subject: "Lost provider response",
+    body: "Approved before recipient drift",
+  });
+  assert.ok(lostResponseAudience);
+  const lostResponseEffect = await seedEffect({
+    churchId: plant.id,
+    actorUserId: owner.id,
+    capabilityIdentity: SEND_MESSAGE,
+    stepId: "send-after-lost-response",
+  });
+  const lostResponseCommunicationId = randomUUID();
+  const lostResponseMailer = deterministicMailer([
+    "accepted_response_lost",
+    "accepted",
+  ]);
+  const lostResponseInput = {
+    effect: lostResponseEffect,
+    identity: SEND_MESSAGE,
+    communicationId: lostResponseCommunicationId,
+    audience: lostResponseAudience,
+    mailer: lostResponseMailer.mailer,
+  };
+  assert.deepEqual(await sendFrozenEvryCommunication(lostResponseInput), {
+    status: "retryable",
+  });
+  const [ambiguousRecipient] = await db
+    .select({
+      status: communicationRecipients.status,
+      errorMessage: communicationRecipients.errorMessage,
+    })
+    .from(communicationRecipients)
+    .where(
+      eq(communicationRecipients.communicationId, lostResponseCommunicationId)
+    );
+  assert.equal(ambiguousRecipient?.status, "failed");
+  assert.match(
+    ambiguousRecipient?.errorMessage ?? "",
+    new RegExp(`^${EVRY_COMMUNICATION_ATTEMPTED_PREFIX}`)
+  );
+  await db
+    .update(persons)
+    .set({ email: `${randomUUID()}@scratch.invalid` })
+    .where(eq(persons.id, lostResponsePerson.id));
+  assert.deepEqual(await sendFrozenEvryCommunication(lostResponseInput), {
+    status: "completed",
+    affectedCount: 1,
+    excludedCount: 0,
+  });
+  assert.equal(lostResponseMailer.calls.length, 2);
+  assert.equal(new Set(lostResponseMailer.calls).size, 1);
+  assert.equal(lostResponseMailer.deliveries.size, 1);
+  const [reconciledRecipient] = await db
+    .select({
+      status: communicationRecipients.status,
+      errorMessage: communicationRecipients.errorMessage,
+      externalId: communicationRecipients.externalId,
+    })
+    .from(communicationRecipients)
+    .where(
+      eq(communicationRecipients.communicationId, lostResponseCommunicationId)
+    );
+  assert.deepEqual(reconciledRecipient, {
+    status: "sent",
+    errorMessage: null,
+    externalId: "fake-1",
+  });
+
+  // The same attempted marker must also survive a concurrent local safety
+  // change. Hold executor A inside the provider seam, suppress the recipient,
+  // then let executor B observe the committed marker. Both requests reuse one
+  // provider key and both report the one truthful delivery.
+  const inFlightEmail = `${randomUUID()}@scratch.invalid`;
+  const [inFlightPerson] = await db
+    .insert(persons)
+    .values({
+      churchId: plant.id,
+      firstName: "In flight",
+      lastName: "Recipient",
+      email: inFlightEmail,
+      createdBy: owner.id,
+    })
+    .returning({ id: persons.id });
+  assert.ok(inFlightPerson);
+  const inFlightAudience = await resolveEvryCommunicationAudience({
+    churchId: plant.id,
+    recipientIds: [inFlightPerson.id],
+    subject: "Concurrent provider reconciliation",
+    body: "Approved before concurrent suppression",
+  });
+  assert.ok(inFlightAudience);
+  const inFlightEffect = await seedEffect({
+    churchId: plant.id,
+    actorUserId: owner.id,
+    capabilityIdentity: SEND_MESSAGE,
+    stepId: "send-during-concurrent-suppression",
+  });
+  const inFlightCalls: string[] = [];
+  const inFlightDeliveries = new Map<string, string>();
+  let providerEntrants = 0;
+  let releaseProvider!: () => void;
+  const providerRelease = new Promise<void>((resolve) => {
+    releaseProvider = resolve;
+  });
+  let firstProviderEntered!: () => void;
+  const firstProviderEntry = new Promise<void>((resolve) => {
+    firstProviderEntered = resolve;
+  });
+  let bothProvidersEntered!: () => void;
+  const bothProviderEntries = new Promise<void>((resolve) => {
+    bothProvidersEntered = resolve;
+  });
+  const inFlightMailer: EvryCommunicationMailer = {
+    async send(input) {
+      inFlightCalls.push(input.idempotencyKey);
+      providerEntrants += 1;
+      if (providerEntrants === 1) firstProviderEntered();
+      if (providerEntrants === 2) bothProvidersEntered();
+      await providerRelease;
+      const existing = inFlightDeliveries.get(input.idempotencyKey);
+      if (existing) return { status: "accepted", providerId: existing };
+      const providerId = `in-flight-${inFlightDeliveries.size + 1}`;
+      inFlightDeliveries.set(input.idempotencyKey, providerId);
+      return { status: "accepted", providerId };
+    },
+  };
+  const inFlightInput = {
+    effect: inFlightEffect,
+    identity: SEND_MESSAGE,
+    communicationId: randomUUID(),
+    audience: inFlightAudience,
+    mailer: inFlightMailer,
+  };
+  const firstInFlightExecution = sendFrozenEvryCommunication(inFlightInput);
+  await firstProviderEntry;
+  await recordAddressSuppression({
+    email: inFlightEmail,
+    reason: "spam_complaint",
+    source: "live-proof-while-provider-in-flight",
+  });
+  const secondInFlightExecution = sendFrozenEvryCommunication(inFlightInput);
+  await bothProviderEntries;
+  releaseProvider();
+  assert.deepEqual(
+    await Promise.all([firstInFlightExecution, secondInFlightExecution]),
+    [
+      { status: "completed", affectedCount: 1, excludedCount: 0 },
+      { status: "completed", affectedCount: 1, excludedCount: 0 },
+    ]
+  );
+  assert.equal(inFlightCalls.length, 2);
+  assert.equal(new Set(inFlightCalls).size, 1);
+  assert.equal(inFlightDeliveries.size, 1);
+  const [inFlightRecipient] = await db
+    .select({
+      status: communicationRecipients.status,
+      errorMessage: communicationRecipients.errorMessage,
+      externalId: communicationRecipients.externalId,
+    })
+    .from(communicationRecipients)
+    .where(
+      eq(communicationRecipients.communicationId, inFlightInput.communicationId)
+    );
+  assert.deepEqual(inFlightRecipient, {
+    status: "sent",
+    errorMessage: null,
+    externalId: "in-flight-1",
+  });
+
   const shrinkEmail = `${randomUUID()}@scratch.invalid`;
   const [shrinkPerson] = await db
     .insert(persons)
@@ -1033,7 +1225,7 @@ async function main(): Promise<void> {
   assert.equal(skipped?.externalId, null);
   assert.match(
     skipped?.errorMessage ?? "",
-    new RegExp(`^${EVRY_COMMUNICATION_PERMANENT_PREFIX}`)
+    new RegExp(`^${EVRY_COMMUNICATION_LOCAL_PREFIX}`)
   );
 
   const groupEmail = `${randomUUID()}@scratch.invalid`;
@@ -1309,22 +1501,101 @@ async function main(): Promise<void> {
     .select({
       communications: sql<number>`count(distinct ${communications.id})::int`,
       recipients: sql<number>`count(distinct ${communicationRecipients.id})::int`,
-      outcomes: sql<number>`count(distinct ${evryExecutionOutcomes.id})::int`,
     })
     .from(communications)
     .leftJoin(
       communicationRecipients,
       eq(communicationRecipients.communicationId, communications.id)
     )
-    .leftJoin(
-      evryExecutionOutcomes,
-      eq(evryExecutionOutcomes.churchId, communications.churchId)
-    )
     .where(eq(communications.churchId, plant.id));
   assert.ok(counts);
   assert.ok(counts.communications >= 8);
   assert.ok(counts.recipients >= 8);
-  assert.ok(counts.outcomes >= 8);
+
+  const claimedEffects = [
+    createEffect,
+    updateEffect,
+    forkEffect,
+    systemEditEffect,
+    deleteEffect,
+    concurrentEffect,
+    transientEffect,
+    lostResponseEffect,
+    inFlightEffect,
+    authorityRaceEffect,
+    raceEffect,
+    resendEffect,
+  ] as const;
+  for (const effect of claimedEffects) {
+    const rows = await db
+      .select({
+        attemptId: evryExecutionEffectClaims.attemptId,
+        planId: evryExecutionEffectClaims.planId,
+        churchId: evryExecutionEffectClaims.churchId,
+        actorUserId: evryExecutionEffectClaims.actorUserId,
+        planFingerprint: evryExecutionEffectClaims.planFingerprint,
+        correlationId: evryExecutionEffectClaims.correlationId,
+        effectKey: evryExecutionEffectClaims.effectKey,
+        stepId: evryExecutionEffectClaims.stepId,
+        capabilityIdentity: evryExecutionEffectClaims.capabilityIdentity,
+      })
+      .from(evryExecutionEffectClaims)
+      .where(
+        and(
+          eq(evryExecutionEffectClaims.attemptId, effect.execution.attemptId),
+          eq(evryExecutionEffectClaims.planId, effect.execution.planId),
+          eq(evryExecutionEffectClaims.churchId, effect.execution.plantId),
+          eq(
+            evryExecutionEffectClaims.actorUserId,
+            effect.execution.actorUserId
+          ),
+          eq(
+            evryExecutionEffectClaims.planFingerprint,
+            effect.execution.fingerprint
+          ),
+          eq(
+            evryExecutionEffectClaims.correlationId,
+            effect.execution.correlationId
+          ),
+          eq(evryExecutionEffectClaims.effectKey, effect.effectKey),
+          eq(evryExecutionEffectClaims.stepId, effect.execution.stepId),
+          eq(
+            evryExecutionEffectClaims.capabilityIdentity,
+            effect.execution.capabilityIdentity
+          )
+        )
+      );
+    assert.deepEqual(rows, [
+      {
+        attemptId: effect.execution.attemptId,
+        planId: effect.execution.planId,
+        churchId: effect.execution.plantId,
+        actorUserId: effect.execution.actorUserId,
+        planFingerprint: effect.execution.fingerprint,
+        correlationId: effect.execution.correlationId,
+        effectKey: effect.effectKey,
+        stepId: effect.execution.stepId,
+        capabilityIdentity: effect.execution.capabilityIdentity,
+      },
+    ]);
+  }
+  assert.equal(
+    await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(evryExecutionEffectClaims)
+      .where(eq(evryExecutionEffectClaims.churchId, plant.id))
+      .then(([row]) => row?.count ?? -1),
+    claimedEffects.length
+  );
+  assert.equal(
+    await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(evryExecutionOutcomes)
+      .where(eq(evryExecutionOutcomes.churchId, plant.id))
+      .then(([row]) => row?.count ?? -1),
+    0,
+    "direct adapters claim domain effects; only the executor writes outcomes"
+  );
 
   const foreignMessage = await db
     .select({ count: sql<number>`count(*)::int` })
