@@ -93,7 +93,8 @@ import { meetingDisplayTitle } from "./labels";
 // ============================================================================
 
 /** The F11 category every row here is filed under (N-005). */
-export const MEETING_NOTIFICATION_CATEGORY: NotificationCategory = "meetings";
+export const MEETING_NOTIFICATION_CATEGORY =
+  "meetings" as const satisfies NotificationCategory;
 
 /**
  * How many days before the start each reminder lands (VM-018, Workflow 2).
@@ -299,6 +300,24 @@ export interface MeetingNotificationPlan {
   notifications: EnqueueNotificationInput[];
   skipped: MeetingNotificationSkip | null;
 }
+
+/**
+ * Every behavior-bearing F11 field confirmed for an Evry-created meeting.
+ * Unlike the general enqueue input, none are optional: recovery must replay
+ * the exact rendered message and dedupe identity the user approved.
+ */
+export type MeetingNotificationIntent = Readonly<{
+  churchId: string;
+  recipientUserId: string;
+  category: typeof MEETING_NOTIFICATION_CATEGORY;
+  type: string;
+  title: string;
+  body: string;
+  entityType: "meeting";
+  entityId: string;
+  dedupeKey: string;
+  scheduledFor: Date;
+}>;
 
 /**
  * What this meeting owes right now. Pure.
@@ -523,6 +542,43 @@ export async function syncMeetingNotifications(
 }
 
 /**
+ * Converge an already-confirmed create plan through F11 without recomposing
+ * copy or dedupe keys. `enqueue` still performs its fresh recipient/tenant
+ * gate and unique-key claim for every item, while the shared sync loop keeps
+ * every recipient despite partial failures. The shared loop still attempts
+ * every intent, then throws if any write failed so a durable domain claim
+ * remains retryable until the full confirmed set converges.
+ */
+export async function reconcileMeetingNotificationIntents(
+  churchId: string,
+  meetingId: string,
+  intents: readonly MeetingNotificationIntent[],
+  deps: MeetingNotificationDeps = dbMeetingNotificationDeps
+): Promise<MeetingNotifyReport> {
+  if (
+    intents.some(
+      (intent) =>
+        intent.churchId !== churchId ||
+        intent.category !== MEETING_NOTIFICATION_CATEGORY ||
+        intent.entityType !== "meeting" ||
+        intent.entityId !== meetingId
+    )
+  ) {
+    throw new Error(
+      "Meeting notification intent escaped its confirmed subject"
+    );
+  }
+
+  return runNotificationSync<MeetingNotificationReason>({
+    ...meetingSubject(churchId, meetingId),
+    mustCancel: false,
+    failureMode: "required",
+    plan: () => ({ notifications: [...intents], skipped: null }),
+    deps,
+  });
+}
+
+/**
  * The meeting went away — cancelled or deleted. Cancel every pending row about
  * it, by entity reference, across every recipient.
  *
@@ -634,6 +690,34 @@ export function coreGroupUserIdsQuery(churchId: string) {
 
 export async function listCoreGroupUserIds(churchId: string) {
   const rows = await coreGroupUserIdsQuery(churchId);
+  return [...new Set(rows.map((row) => row.userId))];
+}
+
+/**
+ * Resolve a known set of people to the accounts they hold in this church.
+ * Meeting creation uses this before attendance rows exist, so it cannot go
+ * through `guestListUserIdsQuery` yet. The bridge and all of its tenancy and
+ * soft-delete rules remain the same canonical predicates.
+ */
+export function personUserIdsQuery(
+  churchId: string,
+  personIds: readonly string[]
+) {
+  return db
+    .selectDistinct({ userId: users.id })
+    .from(persons)
+    .innerJoin(users, personIsUserInChurch(churchId))
+    .where(
+      and(personHoldsLoginFilter(churchId), inArray(persons.id, [...personIds]))
+    );
+}
+
+export async function listPersonUserIds(
+  churchId: string,
+  personIds: readonly string[]
+): Promise<string[]> {
+  if (personIds.length === 0) return [];
+  const rows = await personUserIdsQuery(churchId, personIds);
   return [...new Set(rows.map((row) => row.userId))];
 }
 

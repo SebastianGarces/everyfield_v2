@@ -1,0 +1,1197 @@
+{
+  "schemaVersion": 1,
+  "generatedBy": "pnpm evry:teams-inventory",
+  "authoritativeSources": {
+    "actions": "src/lib/auth/capability-map.ts",
+    "routes": "src/app/(dashboard)/teams/**/{page,layout}.tsx",
+    "rscOperations": "called Teams/People/Meetings service imports that return Teams-owned data"
+  },
+  "capabilities": [
+    {
+      "identity": "teams.create",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/teams/actions.ts → createTeamAction"
+      ],
+      "parityCapability": "teams",
+      "domain": "teams",
+      "operationKind": "effect",
+      "applicationCapability": "teams.write",
+      "confirmation": "required",
+      "mutationShape": "single_create",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "teams.initialize",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/teams/actions.ts → initializeTeamsAction"
+      ],
+      "parityCapability": "teams",
+      "domain": "teams",
+      "operationKind": "effect",
+      "applicationCapability": "teams.write",
+      "confirmation": "required",
+      "mutationShape": "bulk_import",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "teams.initialize-with-roles",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/teams/actions.ts → initializeTeamsWithRolesAction"
+      ],
+      "parityCapability": "teams",
+      "domain": "teams",
+      "operationKind": "effect",
+      "applicationCapability": "teams.write",
+      "confirmation": "required",
+      "mutationShape": "compound_write",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "teams.leader.assign",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/teams/actions.ts → assignTeamLeaderAction"
+      ],
+      "parityCapability": "teams",
+      "domain": "teams",
+      "operationKind": "effect",
+      "applicationCapability": "teams.write",
+      "confirmation": "required",
+      "mutationShape": "compound_write",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "teams.meetings.create",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/teams/actions.ts → createMeetingAction"
+      ],
+      "parityCapability": "teams",
+      "domain": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "teams.write",
+      "confirmation": "required",
+      "mutationShape": "compound_write",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "teams.members.assign",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/teams/actions.ts → assignMemberAction"
+      ],
+      "parityCapability": "teams",
+      "domain": "members",
+      "operationKind": "effect",
+      "applicationCapability": "teams.write",
+      "confirmation": "required",
+      "mutationShape": "compound_write",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "teams.members.remove",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/teams/actions.ts → removeMemberAction"
+      ],
+      "parityCapability": "teams",
+      "domain": "members",
+      "operationKind": "effect",
+      "applicationCapability": "teams.write",
+      "confirmation": "required",
+      "mutationShape": "compound_write",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "teams.read.candidates",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/teams/actions.ts → searchTeamCandidatesAction",
+        "rsc-operation:src/app/(dashboard)/teams/[teamId]/page.tsx → getTeamCountsForPeople",
+        "rsc-operation:src/app/(dashboard)/teams/[teamId]/page.tsx → listPeople"
+      ],
+      "parityCapability": "teams",
+      "domain": "members",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "teams.read.detail",
+      "surfaceIdentities": [
+        "route:/teams/[teamId]",
+        "rsc-operation:src/app/(dashboard)/teams/[teamId]/layout.tsx → getTeam",
+        "rsc-operation:src/app/(dashboard)/teams/[teamId]/meetings/page.tsx → getTeam",
+        "rsc-operation:src/app/(dashboard)/teams/[teamId]/page.tsx → getTeam",
+        "rsc-operation:src/app/(dashboard)/teams/[teamId]/training/page.tsx → getTeam"
+      ],
+      "parityCapability": "teams",
+      "domain": "teams",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "teams.read.health",
+      "surfaceIdentities": [
+        "route:/teams/health",
+        "rsc-operation:src/app/(dashboard)/teams/health/page.tsx → getAllTeamsHealth"
+      ],
+      "parityCapability": "teams",
+      "domain": "teams",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "teams.read.list",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/teams/actions.ts → listTeamsAction",
+        "route:/teams",
+        "route:/teams/org-chart",
+        "rsc-operation:src/app/(dashboard)/meetings/new/page.tsx → listTeams",
+        "rsc-operation:src/app/(dashboard)/teams/health/page.tsx → getStaffingSummary",
+        "rsc-operation:src/app/(dashboard)/teams/org-chart/page.tsx → listTeams",
+        "rsc-operation:src/app/(dashboard)/teams/page.tsx → getStaffingSummary",
+        "rsc-operation:src/app/(dashboard)/teams/page.tsx → listTeams"
+      ],
+      "parityCapability": "teams",
+      "domain": "teams",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "teams.read.meetings",
+      "surfaceIdentities": [
+        "route:/teams/[teamId]/meetings",
+        "rsc-operation:src/app/(dashboard)/teams/[teamId]/meetings/page.tsx → listMeetings"
+      ],
+      "parityCapability": "teams",
+      "domain": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "teams.read.person-assignments",
+      "surfaceIdentities": [
+        "rsc-operation:src/app/(dashboard)/people/[id]/teams/page.tsx → getPersonTeams"
+      ],
+      "parityCapability": "teams",
+      "domain": "members",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "teams.read.person-training",
+      "surfaceIdentities": [
+        "rsc-operation:src/app/(dashboard)/people/[id]/teams/page.tsx → getPersonTraining"
+      ],
+      "parityCapability": "teams",
+      "domain": "training",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "teams.read.responsibilities",
+      "surfaceIdentities": [
+        "route:/teams/[teamId]/responsibilities",
+        "rsc-read:src/app/(dashboard)/teams/[teamId]/responsibilities/page.tsx → listResponsibilities:returned-rows"
+      ],
+      "parityCapability": "teams",
+      "domain": "responsibilities",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "teams.read.training",
+      "surfaceIdentities": [
+        "route:/teams/[teamId]/training",
+        "rsc-operation:src/app/(dashboard)/teams/[teamId]/training/page.tsx → getTrainingMatrix",
+        "rsc-operation:src/app/(dashboard)/teams/[teamId]/training/page.tsx → listTrainingPrograms"
+      ],
+      "parityCapability": "teams",
+      "domain": "training",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "teams.responsibilities.completion",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/teams/actions.ts → setResponsibilityCompleteAction"
+      ],
+      "parityCapability": "teams",
+      "domain": "responsibilities",
+      "operationKind": "effect",
+      "applicationCapability": "teams.write",
+      "confirmation": "required",
+      "mutationShape": "single_update",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "teams.responsibilities.create",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/teams/actions.ts → createResponsibilityAction"
+      ],
+      "parityCapability": "teams",
+      "domain": "responsibilities",
+      "operationKind": "effect",
+      "applicationCapability": "teams.write",
+      "confirmation": "required",
+      "mutationShape": "single_create",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "teams.responsibilities.delete",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/teams/actions.ts → deleteResponsibilityAction"
+      ],
+      "parityCapability": "teams",
+      "domain": "responsibilities",
+      "operationKind": "effect",
+      "applicationCapability": "teams.write",
+      "confirmation": "required",
+      "mutationShape": "single_delete",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "teams.responsibilities.initialize",
+      "surfaceIdentities": [
+        "rsc-effect:src/app/(dashboard)/teams/[teamId]/responsibilities/page.tsx → listResponsibilities:first-view-seed"
+      ],
+      "parityCapability": "teams",
+      "domain": "responsibilities",
+      "operationKind": "effect",
+      "applicationCapability": "read",
+      "confirmation": "required",
+      "mutationShape": "compound_write",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "teams.responsibilities.update",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/teams/actions.ts → updateResponsibilityAction"
+      ],
+      "parityCapability": "teams",
+      "domain": "responsibilities",
+      "operationKind": "effect",
+      "applicationCapability": "teams.write",
+      "confirmation": "required",
+      "mutationShape": "single_update",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "teams.roles.create",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/teams/actions.ts → createRoleAction"
+      ],
+      "parityCapability": "teams",
+      "domain": "roles",
+      "operationKind": "effect",
+      "applicationCapability": "teams.write",
+      "confirmation": "required",
+      "mutationShape": "single_create",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "teams.roles.delete",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/teams/actions.ts → deleteRoleAction"
+      ],
+      "parityCapability": "teams",
+      "domain": "roles",
+      "operationKind": "effect",
+      "applicationCapability": "teams.write",
+      "confirmation": "required",
+      "mutationShape": "compound_write",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "teams.roles.import",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/teams/actions.ts → importRoleTemplatesAction"
+      ],
+      "parityCapability": "teams",
+      "domain": "roles",
+      "operationKind": "effect",
+      "applicationCapability": "teams.write",
+      "confirmation": "required",
+      "mutationShape": "bulk_import",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "teams.roles.update",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/teams/actions.ts → updateRoleAction"
+      ],
+      "parityCapability": "teams",
+      "domain": "roles",
+      "operationKind": "effect",
+      "applicationCapability": "teams.write",
+      "confirmation": "required",
+      "mutationShape": "compound_write",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "teams.training.complete",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/teams/actions.ts → markTrainingCompleteAction"
+      ],
+      "parityCapability": "teams",
+      "domain": "training",
+      "operationKind": "effect",
+      "applicationCapability": "teams.write",
+      "confirmation": "required",
+      "mutationShape": "association_add",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "teams.training.create-program",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/teams/actions.ts → createTrainingProgramAction"
+      ],
+      "parityCapability": "teams",
+      "domain": "training",
+      "operationKind": "effect",
+      "applicationCapability": "teams.write",
+      "confirmation": "required",
+      "mutationShape": "single_create",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "teams.update",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/teams/actions.ts → updateTeamAction"
+      ],
+      "parityCapability": "teams",
+      "domain": "teams",
+      "operationKind": "effect",
+      "applicationCapability": "teams.write",
+      "confirmation": "required",
+      "mutationShape": "single_update",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    }
+  ],
+  "entries": [
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/teams/actions.ts → assignMemberAction",
+      "source": "src/app/(dashboard)/teams/actions.ts",
+      "exportName": "assignMemberAction",
+      "capabilityIdentity": "teams.members.assign",
+      "domain": "members",
+      "operationKind": "effect",
+      "applicationCapability": "teams.write",
+      "confirmation": "required",
+      "mutationShape": "compound_write",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/teams/actions.ts → assignTeamLeaderAction",
+      "source": "src/app/(dashboard)/teams/actions.ts",
+      "exportName": "assignTeamLeaderAction",
+      "capabilityIdentity": "teams.leader.assign",
+      "domain": "teams",
+      "operationKind": "effect",
+      "applicationCapability": "teams.write",
+      "confirmation": "required",
+      "mutationShape": "compound_write",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/teams/actions.ts → createMeetingAction",
+      "source": "src/app/(dashboard)/teams/actions.ts",
+      "exportName": "createMeetingAction",
+      "capabilityIdentity": "teams.meetings.create",
+      "domain": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "teams.write",
+      "confirmation": "required",
+      "mutationShape": "compound_write",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/teams/actions.ts → createResponsibilityAction",
+      "source": "src/app/(dashboard)/teams/actions.ts",
+      "exportName": "createResponsibilityAction",
+      "capabilityIdentity": "teams.responsibilities.create",
+      "domain": "responsibilities",
+      "operationKind": "effect",
+      "applicationCapability": "teams.write",
+      "confirmation": "required",
+      "mutationShape": "single_create",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/teams/actions.ts → createRoleAction",
+      "source": "src/app/(dashboard)/teams/actions.ts",
+      "exportName": "createRoleAction",
+      "capabilityIdentity": "teams.roles.create",
+      "domain": "roles",
+      "operationKind": "effect",
+      "applicationCapability": "teams.write",
+      "confirmation": "required",
+      "mutationShape": "single_create",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/teams/actions.ts → createTeamAction",
+      "source": "src/app/(dashboard)/teams/actions.ts",
+      "exportName": "createTeamAction",
+      "capabilityIdentity": "teams.create",
+      "domain": "teams",
+      "operationKind": "effect",
+      "applicationCapability": "teams.write",
+      "confirmation": "required",
+      "mutationShape": "single_create",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/teams/actions.ts → createTrainingProgramAction",
+      "source": "src/app/(dashboard)/teams/actions.ts",
+      "exportName": "createTrainingProgramAction",
+      "capabilityIdentity": "teams.training.create-program",
+      "domain": "training",
+      "operationKind": "effect",
+      "applicationCapability": "teams.write",
+      "confirmation": "required",
+      "mutationShape": "single_create",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/teams/actions.ts → deleteResponsibilityAction",
+      "source": "src/app/(dashboard)/teams/actions.ts",
+      "exportName": "deleteResponsibilityAction",
+      "capabilityIdentity": "teams.responsibilities.delete",
+      "domain": "responsibilities",
+      "operationKind": "effect",
+      "applicationCapability": "teams.write",
+      "confirmation": "required",
+      "mutationShape": "single_delete",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/teams/actions.ts → deleteRoleAction",
+      "source": "src/app/(dashboard)/teams/actions.ts",
+      "exportName": "deleteRoleAction",
+      "capabilityIdentity": "teams.roles.delete",
+      "domain": "roles",
+      "operationKind": "effect",
+      "applicationCapability": "teams.write",
+      "confirmation": "required",
+      "mutationShape": "compound_write",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/teams/actions.ts → importRoleTemplatesAction",
+      "source": "src/app/(dashboard)/teams/actions.ts",
+      "exportName": "importRoleTemplatesAction",
+      "capabilityIdentity": "teams.roles.import",
+      "domain": "roles",
+      "operationKind": "effect",
+      "applicationCapability": "teams.write",
+      "confirmation": "required",
+      "mutationShape": "bulk_import",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/teams/actions.ts → initializeTeamsAction",
+      "source": "src/app/(dashboard)/teams/actions.ts",
+      "exportName": "initializeTeamsAction",
+      "capabilityIdentity": "teams.initialize",
+      "domain": "teams",
+      "operationKind": "effect",
+      "applicationCapability": "teams.write",
+      "confirmation": "required",
+      "mutationShape": "bulk_import",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/teams/actions.ts → initializeTeamsWithRolesAction",
+      "source": "src/app/(dashboard)/teams/actions.ts",
+      "exportName": "initializeTeamsWithRolesAction",
+      "capabilityIdentity": "teams.initialize-with-roles",
+      "domain": "teams",
+      "operationKind": "effect",
+      "applicationCapability": "teams.write",
+      "confirmation": "required",
+      "mutationShape": "compound_write",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/teams/actions.ts → listTeamsAction",
+      "source": "src/app/(dashboard)/teams/actions.ts",
+      "exportName": "listTeamsAction",
+      "capabilityIdentity": "teams.read.list",
+      "domain": "teams",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/teams/actions.ts → markTrainingCompleteAction",
+      "source": "src/app/(dashboard)/teams/actions.ts",
+      "exportName": "markTrainingCompleteAction",
+      "capabilityIdentity": "teams.training.complete",
+      "domain": "training",
+      "operationKind": "effect",
+      "applicationCapability": "teams.write",
+      "confirmation": "required",
+      "mutationShape": "association_add",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/teams/actions.ts → removeMemberAction",
+      "source": "src/app/(dashboard)/teams/actions.ts",
+      "exportName": "removeMemberAction",
+      "capabilityIdentity": "teams.members.remove",
+      "domain": "members",
+      "operationKind": "effect",
+      "applicationCapability": "teams.write",
+      "confirmation": "required",
+      "mutationShape": "compound_write",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/teams/actions.ts → searchTeamCandidatesAction",
+      "source": "src/app/(dashboard)/teams/actions.ts",
+      "exportName": "searchTeamCandidatesAction",
+      "capabilityIdentity": "teams.read.candidates",
+      "domain": "members",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/teams/actions.ts → setResponsibilityCompleteAction",
+      "source": "src/app/(dashboard)/teams/actions.ts",
+      "exportName": "setResponsibilityCompleteAction",
+      "capabilityIdentity": "teams.responsibilities.completion",
+      "domain": "responsibilities",
+      "operationKind": "effect",
+      "applicationCapability": "teams.write",
+      "confirmation": "required",
+      "mutationShape": "single_update",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/teams/actions.ts → updateResponsibilityAction",
+      "source": "src/app/(dashboard)/teams/actions.ts",
+      "exportName": "updateResponsibilityAction",
+      "capabilityIdentity": "teams.responsibilities.update",
+      "domain": "responsibilities",
+      "operationKind": "effect",
+      "applicationCapability": "teams.write",
+      "confirmation": "required",
+      "mutationShape": "single_update",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/teams/actions.ts → updateRoleAction",
+      "source": "src/app/(dashboard)/teams/actions.ts",
+      "exportName": "updateRoleAction",
+      "capabilityIdentity": "teams.roles.update",
+      "domain": "roles",
+      "operationKind": "effect",
+      "applicationCapability": "teams.write",
+      "confirmation": "required",
+      "mutationShape": "compound_write",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/teams/actions.ts → updateTeamAction",
+      "source": "src/app/(dashboard)/teams/actions.ts",
+      "exportName": "updateTeamAction",
+      "capabilityIdentity": "teams.update",
+      "domain": "teams",
+      "operationKind": "effect",
+      "applicationCapability": "teams.write",
+      "confirmation": "required",
+      "mutationShape": "single_update",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/teams",
+      "source": "src/app/(dashboard)/teams/page.tsx",
+      "exportName": null,
+      "capabilityIdentity": "teams.read.list",
+      "domain": "teams",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/teams/[teamId]",
+      "source": "src/app/(dashboard)/teams/[teamId]/page.tsx",
+      "exportName": null,
+      "capabilityIdentity": "teams.read.detail",
+      "domain": "teams",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/teams/[teamId]/meetings",
+      "source": "src/app/(dashboard)/teams/[teamId]/meetings/page.tsx",
+      "exportName": null,
+      "capabilityIdentity": "teams.read.meetings",
+      "domain": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/teams/[teamId]/responsibilities",
+      "source": "src/app/(dashboard)/teams/[teamId]/responsibilities/page.tsx",
+      "exportName": null,
+      "capabilityIdentity": "teams.read.responsibilities",
+      "domain": "responsibilities",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/teams/[teamId]/training",
+      "source": "src/app/(dashboard)/teams/[teamId]/training/page.tsx",
+      "exportName": null,
+      "capabilityIdentity": "teams.read.training",
+      "domain": "training",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/teams/health",
+      "source": "src/app/(dashboard)/teams/health/page.tsx",
+      "exportName": null,
+      "capabilityIdentity": "teams.read.health",
+      "domain": "teams",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/teams/org-chart",
+      "source": "src/app/(dashboard)/teams/org-chart/page.tsx",
+      "exportName": null,
+      "capabilityIdentity": "teams.read.list",
+      "domain": "teams",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc-effect:src/app/(dashboard)/teams/[teamId]/responsibilities/page.tsx → listResponsibilities:first-view-seed",
+      "source": "src/app/(dashboard)/teams/[teamId]/responsibilities/page.tsx",
+      "exportName": "listResponsibilities",
+      "capabilityIdentity": "teams.responsibilities.initialize",
+      "domain": "responsibilities",
+      "operationKind": "effect",
+      "applicationCapability": "read",
+      "confirmation": "required",
+      "mutationShape": "compound_write",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc-operation:src/app/(dashboard)/meetings/new/page.tsx → listTeams",
+      "source": "src/app/(dashboard)/meetings/new/page.tsx",
+      "exportName": "listTeams",
+      "capabilityIdentity": "teams.read.list",
+      "domain": "teams",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc-operation:src/app/(dashboard)/people/[id]/teams/page.tsx → getPersonTeams",
+      "source": "src/app/(dashboard)/people/[id]/teams/page.tsx",
+      "exportName": "getPersonTeams",
+      "capabilityIdentity": "teams.read.person-assignments",
+      "domain": "members",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc-operation:src/app/(dashboard)/people/[id]/teams/page.tsx → getPersonTraining",
+      "source": "src/app/(dashboard)/people/[id]/teams/page.tsx",
+      "exportName": "getPersonTraining",
+      "capabilityIdentity": "teams.read.person-training",
+      "domain": "training",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc-operation:src/app/(dashboard)/teams/[teamId]/layout.tsx → getTeam",
+      "source": "src/app/(dashboard)/teams/[teamId]/layout.tsx",
+      "exportName": "getTeam",
+      "capabilityIdentity": "teams.read.detail",
+      "domain": "teams",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc-operation:src/app/(dashboard)/teams/[teamId]/meetings/page.tsx → getTeam",
+      "source": "src/app/(dashboard)/teams/[teamId]/meetings/page.tsx",
+      "exportName": "getTeam",
+      "capabilityIdentity": "teams.read.detail",
+      "domain": "teams",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc-operation:src/app/(dashboard)/teams/[teamId]/meetings/page.tsx → listMeetings",
+      "source": "src/app/(dashboard)/teams/[teamId]/meetings/page.tsx",
+      "exportName": "listMeetings",
+      "capabilityIdentity": "teams.read.meetings",
+      "domain": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc-operation:src/app/(dashboard)/teams/[teamId]/page.tsx → getTeam",
+      "source": "src/app/(dashboard)/teams/[teamId]/page.tsx",
+      "exportName": "getTeam",
+      "capabilityIdentity": "teams.read.detail",
+      "domain": "teams",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc-operation:src/app/(dashboard)/teams/[teamId]/page.tsx → getTeamCountsForPeople",
+      "source": "src/app/(dashboard)/teams/[teamId]/page.tsx",
+      "exportName": "getTeamCountsForPeople",
+      "capabilityIdentity": "teams.read.candidates",
+      "domain": "members",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc-operation:src/app/(dashboard)/teams/[teamId]/page.tsx → listPeople",
+      "source": "src/app/(dashboard)/teams/[teamId]/page.tsx",
+      "exportName": "listPeople",
+      "capabilityIdentity": "teams.read.candidates",
+      "domain": "members",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc-operation:src/app/(dashboard)/teams/[teamId]/training/page.tsx → getTeam",
+      "source": "src/app/(dashboard)/teams/[teamId]/training/page.tsx",
+      "exportName": "getTeam",
+      "capabilityIdentity": "teams.read.detail",
+      "domain": "teams",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc-operation:src/app/(dashboard)/teams/[teamId]/training/page.tsx → getTrainingMatrix",
+      "source": "src/app/(dashboard)/teams/[teamId]/training/page.tsx",
+      "exportName": "getTrainingMatrix",
+      "capabilityIdentity": "teams.read.training",
+      "domain": "training",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc-operation:src/app/(dashboard)/teams/[teamId]/training/page.tsx → listTrainingPrograms",
+      "source": "src/app/(dashboard)/teams/[teamId]/training/page.tsx",
+      "exportName": "listTrainingPrograms",
+      "capabilityIdentity": "teams.read.training",
+      "domain": "training",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc-operation:src/app/(dashboard)/teams/health/page.tsx → getAllTeamsHealth",
+      "source": "src/app/(dashboard)/teams/health/page.tsx",
+      "exportName": "getAllTeamsHealth",
+      "capabilityIdentity": "teams.read.health",
+      "domain": "teams",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc-operation:src/app/(dashboard)/teams/health/page.tsx → getStaffingSummary",
+      "source": "src/app/(dashboard)/teams/health/page.tsx",
+      "exportName": "getStaffingSummary",
+      "capabilityIdentity": "teams.read.list",
+      "domain": "teams",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc-operation:src/app/(dashboard)/teams/org-chart/page.tsx → listTeams",
+      "source": "src/app/(dashboard)/teams/org-chart/page.tsx",
+      "exportName": "listTeams",
+      "capabilityIdentity": "teams.read.list",
+      "domain": "teams",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc-operation:src/app/(dashboard)/teams/page.tsx → getStaffingSummary",
+      "source": "src/app/(dashboard)/teams/page.tsx",
+      "exportName": "getStaffingSummary",
+      "capabilityIdentity": "teams.read.list",
+      "domain": "teams",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc-operation:src/app/(dashboard)/teams/page.tsx → listTeams",
+      "source": "src/app/(dashboard)/teams/page.tsx",
+      "exportName": "listTeams",
+      "capabilityIdentity": "teams.read.list",
+      "domain": "teams",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc-read:src/app/(dashboard)/teams/[teamId]/responsibilities/page.tsx → listResponsibilities:returned-rows",
+      "source": "src/app/(dashboard)/teams/[teamId]/responsibilities/page.tsx",
+      "exportName": "listResponsibilities",
+      "capabilityIdentity": "teams.read.responsibilities",
+      "domain": "responsibilities",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    }
+  ],
+  "summary": {
+    "actions": 20,
+    "routes": 7,
+    "rscOperations": 19,
+    "readCapabilities": 9,
+    "effectCapabilities": 19,
+    "unclassified": 0
+  }
+}

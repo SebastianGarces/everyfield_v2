@@ -4,9 +4,12 @@ import path from "node:path";
 import { test } from "node:test";
 
 import {
+  DEDICATED_LIVE_SUITES,
   databaseForSuite,
+  LIVE_SUITE_PHASES,
   liveSuiteDatabases,
   LIVE_SUITES,
+  PARALLEL_LIVE_SUITES,
   suiteForPath,
 } from "../../scripts/live-db-names";
 import { preflight } from "../../scripts/live-db-preflight";
@@ -139,6 +142,32 @@ test("`test:live` preloads the endpoint switch, and nothing in src/ does it inst
     [],
     "#411 round 1: `neonConfig` belongs to the test runner's preload, never to a module the app imports on a request"
   );
+});
+
+test("nested-process proofs own singleton phases without dropping a live suite", () => {
+  assert.deepEqual(DEDICATED_LIVE_SUITES, [
+    "src/lib/communication/evry-effect-live.test.ts",
+    "src/lib/evry/capabilities/teams/effect-live.test.ts",
+    "src/lib/evry/executor/executor-live.test.ts",
+    "src/lib/evry/capabilities/launch/effect-live.test.ts",
+  ]);
+  for (const suite of DEDICATED_LIVE_SUITES) {
+    assert.equal(PARALLEL_LIVE_SUITES.includes(suite), false);
+  }
+  assert.deepEqual(
+    LIVE_SUITE_PHASES.slice(0, DEDICATED_LIVE_SUITES.length),
+    DEDICATED_LIVE_SUITES.map((suite) => [suite])
+  );
+
+  const phased = LIVE_SUITE_PHASES.flat();
+  assert.deepEqual(phased.toSorted(), [...LIVE_SUITES].toSorted());
+  assert.equal(new Set(phased).size, LIVE_SUITES.length);
+
+  const runner = readFileSync(
+    path.join(process.cwd(), "scripts", "live-db-run.ts"),
+    "utf8"
+  );
+  assert.match(runner, /for \(const suites of LIVE_SUITE_PHASES\)/);
 });
 
 // ----------------------------------------------------------------------------

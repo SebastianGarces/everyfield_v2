@@ -61,6 +61,7 @@ export const LIVE_SUITES = [
   "src/lib/evry/plans/confirmation-race.test.ts",
   "src/lib/evry/audit/audit-live.test.ts",
   "src/lib/evry/conversations/conversations-live.test.ts",
+  "src/lib/evry/capabilities/teams/effect-live.test.ts",
   "src/lib/evry/executor/executor-live.test.ts",
   "src/lib/evry/capabilities/launch/effect-live.test.ts",
   "src/lib/evry/recipes/recipe-live.test.ts",
@@ -77,6 +78,30 @@ export const LIVE_SUITES = [
   "src/lib/seats/seat-removal-live.test.ts",
   "src/lib/tasks/follow-up-race.test.ts",
   "src/lib/tasks/subtask-parent-fk.test.ts",
+] as const;
+
+/** Proof wrappers that each spawn another long-lived Node/Next process. */
+export const DEDICATED_LIVE_SUITES = [
+  "src/lib/communication/evry-effect-live.test.ts",
+  "src/lib/evry/capabilities/teams/effect-live.test.ts",
+  "src/lib/evry/executor/executor-live.test.ts",
+  "src/lib/evry/capabilities/launch/effect-live.test.ts",
+] as const;
+
+const dedicatedLiveSuites = new Set<string>(DEDICATED_LIVE_SUITES);
+
+export const PARALLEL_LIVE_SUITES = LIVE_SUITES.filter(
+  (suite) => !dedicatedLiveSuites.has(suite)
+);
+
+const dedicatedLiveSuitePhases = DEDICATED_LIVE_SUITES.map(
+  (suite) => [suite] as const
+);
+
+/** Heavy nested proofs run alone; ordinary isolated-database suites share a phase. */
+export const LIVE_SUITE_PHASES = [
+  ...dedicatedLiveSuitePhases,
+  PARALLEL_LIVE_SUITES,
 ] as const;
 
 /**

@@ -69,6 +69,7 @@ export type { PersonTeamAssignment } from "./memberships";
 
 export {
   listResponsibilities,
+  listStoredResponsibilities,
   createResponsibility,
   updateResponsibility,
   deleteResponsibility,
