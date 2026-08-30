@@ -22,7 +22,7 @@
 --   DROP FUNCTION IF EXISTS tasks_validate_no_live_orphan_children();
 --   DROP FUNCTION IF EXISTS tasks_guard_structure();
 --   DROP FUNCTION IF EXISTS lock_task_structure(uuid);
---   DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1788031147139;
+--   DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1788062099349;
 
 CREATE OR REPLACE FUNCTION lock_task_structure(target_church_id uuid)
 RETURNS void
