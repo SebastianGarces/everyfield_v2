@@ -1,0 +1,2325 @@
+{
+  "schemaVersion": 1,
+  "generatedBy": "pnpm evry:meetings-inventory",
+  "authoritativeSources": {
+    "actions": "src/lib/auth/capability-map.ts",
+    "routes": "src/app/(dashboard)/{meetings,teams/[teamId]/meetings}/**/page.tsx",
+    "reads": "server data imports used by authenticated Meetings pages"
+  },
+  "capabilities": [
+    {
+      "identity": "meetings.add-guests",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/meetings/actions.ts → addToGuestListAction"
+      ],
+      "parityCapability": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "meetings.write",
+      "confirmation": "required",
+      "label": "Add meeting guest",
+      "actionLabel": "Add meeting guest",
+      "argumentKeys": [
+        "meetingId",
+        "attendanceId",
+        "personId",
+        "expectedMeetingUpdatedAt",
+        "expectedPersonUpdatedAt",
+        "expectedAttendanceAbsent",
+        "notificationBaseline",
+        "notificationTargets"
+      ],
+      "difficultToReverse": false,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "meetings.agenda.replace",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/meetings/actions.ts → saveAgendaAction"
+      ],
+      "parityCapability": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "meetings.write",
+      "confirmation": "required",
+      "label": "Replace meeting agenda",
+      "actionLabel": "Replace meeting agenda",
+      "argumentKeys": [
+        "meetingId",
+        "expectedUpdatedAt",
+        "beforeSections",
+        "afterSections"
+      ],
+      "difficultToReverse": false,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "meetings.attendance.add",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/meetings/actions.ts → addAttendeeAction"
+      ],
+      "parityCapability": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "meetings.write",
+      "confirmation": "required",
+      "label": "Add attendee",
+      "actionLabel": "Add attendee",
+      "argumentKeys": [
+        "meetingId",
+        "attendanceId",
+        "personId",
+        "attendanceType",
+        "attendanceDerivation",
+        "status",
+        "invitedById",
+        "responseStatus",
+        "notes",
+        "expectedMeetingUpdatedAt",
+        "expectedPersonUpdatedAt",
+        "expectedAttendanceAbsent",
+        "notificationBaseline",
+        "notificationTargets"
+      ],
+      "difficultToReverse": false,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "meetings.attendance.batch-record",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/meetings/actions.ts → recordAttendanceBatchAction"
+      ],
+      "parityCapability": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "meetings.write",
+      "confirmation": "required",
+      "label": "Record meeting attendance",
+      "actionLabel": "Record meeting attendance",
+      "argumentKeys": ["meetingId", "expectedMeetingUpdatedAt", "records"],
+      "difficultToReverse": false,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "meetings.attendance.finalize",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/meetings/actions.ts → finalizeAttendanceAction"
+      ],
+      "parityCapability": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "meetings.write",
+      "confirmation": "required",
+      "label": "Finalize meeting attendance",
+      "actionLabel": "Finalize meeting attendance",
+      "argumentKeys": [
+        "meetingId",
+        "meetingType",
+        "meetingTitle",
+        "meetingDatetime",
+        "timezone",
+        "expectedMeetingUpdatedAt",
+        "expectedActualAttendance",
+        "attendees",
+        "personStatusChanges",
+        "followUpTaskTargets",
+        "evaluationTaskTarget",
+        "expectedTaskAssigneeId",
+        "expectedLeadershipStatus",
+        "expectedChurchMaterialEventAt"
+      ],
+      "difficultToReverse": false,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "meetings.attendance.note",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/meetings/actions.ts → addAttendeeNoteAction"
+      ],
+      "parityCapability": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "meetings.write",
+      "confirmation": "required",
+      "label": "Update attendee note",
+      "actionLabel": "Update attendee note",
+      "argumentKeys": [
+        "meetingId",
+        "personId",
+        "meetingType",
+        "note",
+        "activityId",
+        "expectedMeetingUpdatedAt",
+        "expectedPersonUpdatedAt"
+      ],
+      "difficultToReverse": false,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "meetings.attendance.person-create-and-add",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/meetings/actions.ts → quickAddAttendeeAction"
+      ],
+      "parityCapability": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "meetings.write",
+      "confirmation": "required",
+      "label": "Create person and add attendee",
+      "actionLabel": "Create person and add attendee",
+      "argumentKeys": [
+        "meetingId",
+        "personId",
+        "personActivityId",
+        "attendanceId",
+        "firstName",
+        "lastName",
+        "email",
+        "phone",
+        "attendanceType",
+        "invitedById",
+        "expectedMeetingUpdatedAt",
+        "expectedPersonAbsent",
+        "expectedAttendanceAbsent",
+        "notificationBaseline",
+        "notificationTargets",
+        "expectedChurchMaterialEventAt"
+      ],
+      "difficultToReverse": false,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "meetings.attendance.person-create-and-walk-in",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/meetings/actions.ts → quickAddWalkInAction"
+      ],
+      "parityCapability": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "meetings.write",
+      "confirmation": "required",
+      "label": "Create person and add walk-in attendee",
+      "actionLabel": "Create person and add walk-in attendee",
+      "argumentKeys": [
+        "meetingId",
+        "personId",
+        "personActivityId",
+        "attendanceId",
+        "firstName",
+        "lastName",
+        "email",
+        "phone",
+        "attendanceType",
+        "expectedMeetingUpdatedAt",
+        "expectedPersonAbsent",
+        "expectedAttendanceAbsent",
+        "notificationBaseline",
+        "notificationTargets",
+        "expectedChurchMaterialEventAt"
+      ],
+      "difficultToReverse": false,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "meetings.attendance.remove",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/meetings/actions.ts → removeAttendeeAction"
+      ],
+      "parityCapability": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "meetings.write",
+      "confirmation": "required",
+      "label": "Remove meeting attendee",
+      "actionLabel": "Remove meeting attendee",
+      "argumentKeys": [
+        "meetingId",
+        "personId",
+        "beforeAttendance",
+        "beforeResponse",
+        "expectedAttendanceUpdatedAt",
+        "expectedResponseUpdatedAt",
+        "pendingNotifications",
+        "notificationBaseline",
+        "notificationTargets"
+      ],
+      "difficultToReverse": true,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "meetings.attendance.toggle",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/meetings/actions.ts → toggleAttendanceStatusAction"
+      ],
+      "parityCapability": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "meetings.write",
+      "confirmation": "required",
+      "label": "Update attendance status",
+      "actionLabel": "Update attendance status",
+      "argumentKeys": [
+        "meetingId",
+        "personId",
+        "beforeStatus",
+        "afterStatus",
+        "afterAttendanceType",
+        "attendanceDerivation",
+        "expectedAttendanceUpdatedAt"
+      ],
+      "difficultToReverse": false,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "meetings.attendance.walk-in.add",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/meetings/actions.ts → addWalkInAttendeeAction"
+      ],
+      "parityCapability": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "meetings.write",
+      "confirmation": "required",
+      "label": "Add walk-in attendee",
+      "actionLabel": "Add walk-in attendee",
+      "argumentKeys": [
+        "meetingId",
+        "attendanceId",
+        "personId",
+        "attendanceType",
+        "attendanceDerivation",
+        "expectedMeetingUpdatedAt",
+        "expectedPersonUpdatedAt",
+        "expectedAttendanceAbsent",
+        "notificationBaseline",
+        "notificationTargets"
+      ],
+      "difficultToReverse": false,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "meetings.checklist.toggle",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/meetings/actions.ts → toggleChecklistItemAction"
+      ],
+      "parityCapability": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "meetings.write",
+      "confirmation": "required",
+      "label": "Update checklist item",
+      "actionLabel": "Update checklist item",
+      "argumentKeys": [
+        "itemId",
+        "meetingId",
+        "beforeChecked",
+        "afterChecked",
+        "expectedUpdatedAt"
+      ],
+      "difficultToReverse": false,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "meetings.checklist.update",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/meetings/actions.ts → updateChecklistItemAction"
+      ],
+      "parityCapability": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "meetings.write",
+      "confirmation": "required",
+      "label": "Update checklist item details",
+      "actionLabel": "Update checklist item details",
+      "argumentKeys": [
+        "itemId",
+        "meetingId",
+        "beforeNotes",
+        "afterNotes",
+        "beforeAssignedTo",
+        "afterAssignedTo",
+        "expectedAssignedPersonUpdatedAt",
+        "expectedUpdatedAt"
+      ],
+      "difficultToReverse": false,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "meetings.create",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/meetings/actions.ts → createMeetingAction"
+      ],
+      "parityCapability": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "meetings.write",
+      "confirmation": "required",
+      "label": "Create meeting",
+      "actionLabel": "Create meeting",
+      "argumentKeys": [
+        "meetingId",
+        "type",
+        "title",
+        "datetime",
+        "timezone",
+        "status",
+        "locationId",
+        "locationName",
+        "locationAddress",
+        "savedLocationId",
+        "teamId",
+        "meetingSubtype",
+        "estimatedAttendance",
+        "actualAttendance",
+        "durationMinutes",
+        "notes",
+        "agenda",
+        "meetingNumber",
+        "checklistItems",
+        "resolvedTeamMemberIds",
+        "attendanceRows",
+        "notificationBaseline",
+        "notificationTargets",
+        "expectedMeetingAbsent",
+        "createdById"
+      ],
+      "difficultToReverse": false,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "meetings.evaluation.create",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/meetings/actions.ts → createEvaluationAction"
+      ],
+      "parityCapability": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "meetings.write",
+      "confirmation": "required",
+      "label": "Save meeting evaluation",
+      "actionLabel": "Save meeting evaluation",
+      "argumentKeys": [
+        "meetingId",
+        "evaluationId",
+        "attendanceScore",
+        "locationScore",
+        "logisticsScore",
+        "agendaScore",
+        "vibeScore",
+        "messageScore",
+        "closeScore",
+        "nextStepsScore",
+        "notes",
+        "expectedMeetingUpdatedAt",
+        "expectedEvaluationAbsent",
+        "evaluationTask"
+      ],
+      "difficultToReverse": false,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "meetings.guests.person-create-and-add",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/meetings/actions.ts → quickAddPersonToGuestListAction"
+      ],
+      "parityCapability": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "meetings.write",
+      "confirmation": "required",
+      "label": "Create person and add meeting guest",
+      "actionLabel": "Create person and add meeting guest",
+      "argumentKeys": [
+        "meetingId",
+        "personId",
+        "personActivityId",
+        "attendanceId",
+        "firstName",
+        "lastName",
+        "email",
+        "phone",
+        "expectedMeetingUpdatedAt",
+        "expectedPersonAbsent",
+        "expectedAttendanceAbsent",
+        "notificationBaseline",
+        "notificationTargets",
+        "expectedChurchMaterialEventAt"
+      ],
+      "difficultToReverse": false,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "meetings.guests.remove",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/meetings/actions.ts → removeFromGuestListAction"
+      ],
+      "parityCapability": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "meetings.write",
+      "confirmation": "required",
+      "label": "Remove meeting guest",
+      "actionLabel": "Remove meeting guest",
+      "argumentKeys": [
+        "meetingId",
+        "personId",
+        "beforeAttendance",
+        "expectedAttendanceUpdatedAt",
+        "pendingNotifications",
+        "notificationBaseline",
+        "notificationTargets"
+      ],
+      "difficultToReverse": true,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "meetings.guests.rsvp",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/meetings/actions.ts → updateRsvpStatusAction"
+      ],
+      "parityCapability": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "meetings.write",
+      "confirmation": "required",
+      "label": "Update meeting RSVP",
+      "actionLabel": "Update meeting RSVP",
+      "argumentKeys": [
+        "meetingId",
+        "personId",
+        "beforeStatus",
+        "afterStatus",
+        "expectedAttendanceUpdatedAt"
+      ],
+      "difficultToReverse": false,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "meetings.lifecycle.delete",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/meetings/actions.ts → deleteMeetingAction"
+      ],
+      "parityCapability": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "meetings.write",
+      "confirmation": "required",
+      "label": "Delete meeting",
+      "actionLabel": "Delete meeting",
+      "argumentKeys": [
+        "meetingId",
+        "timezone",
+        "expectedUpdatedAt",
+        "before",
+        "expectedAttendanceIds",
+        "expectedChecklistItemIds",
+        "expectedResponseIds",
+        "expectedEvaluationId",
+        "expectedInvitationIds",
+        "expectedConfirmationTokenIds",
+        "pendingNotifications"
+      ],
+      "difficultToReverse": true,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "meetings.lifecycle.status",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/meetings/actions.ts → updateMeetingStatusAction"
+      ],
+      "parityCapability": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "meetings.write",
+      "confirmation": "required",
+      "label": "Update meeting status",
+      "actionLabel": "Update meeting status",
+      "argumentKeys": [
+        "meetingId",
+        "beforeStatus",
+        "afterStatus",
+        "expectedUpdatedAt",
+        "pendingNotifications",
+        "notificationBaseline",
+        "notificationTargets"
+      ],
+      "difficultToReverse": false,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "meetings.lifecycle.update",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/meetings/actions.ts → updateMeetingAction"
+      ],
+      "parityCapability": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "meetings.write",
+      "confirmation": "required",
+      "label": "Update meeting",
+      "actionLabel": "Update meeting",
+      "argumentKeys": [
+        "meetingId",
+        "timezone",
+        "expectedUpdatedAt",
+        "before",
+        "after",
+        "pendingNotifications",
+        "notificationBaseline",
+        "notificationTargets"
+      ],
+      "difficultToReverse": false,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "meetings.location.create",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/meetings/actions.ts → createLocationAction"
+      ],
+      "parityCapability": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "meetings.write",
+      "confirmation": "required",
+      "label": "Create meeting location",
+      "actionLabel": "Create meeting location",
+      "argumentKeys": [
+        "locationId",
+        "name",
+        "address",
+        "contactName",
+        "contactPhone",
+        "contactEmail",
+        "cost",
+        "capacity",
+        "notes",
+        "expectedLocationAbsent"
+      ],
+      "difficultToReverse": false,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "meetings.location.update",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/meetings/actions.ts → updateLocationAction"
+      ],
+      "parityCapability": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "meetings.write",
+      "confirmation": "required",
+      "label": "Update meeting location",
+      "actionLabel": "Update meeting location",
+      "argumentKeys": ["locationId", "expectedUpdatedAt", "before", "after"],
+      "difficultToReverse": false,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "meetings.read.analytics",
+      "surfaceIdentities": [
+        "read-operation:src/app/(dashboard)/meetings/[id]/analytics/page.tsx → getAttendanceTrend",
+        "read-operation:src/app/(dashboard)/meetings/[id]/analytics/page.tsx → getMeeting",
+        "read-operation:src/app/(dashboard)/meetings/[id]/analytics/page.tsx → getMeetingSummaryStats",
+        "route:/meetings/[id]/analytics"
+      ],
+      "parityCapability": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "label": "Review meeting analytics",
+      "actionLabel": null,
+      "argumentKeys": ["meetingId", "type", "limit"],
+      "difficultToReverse": false,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "meetings.read.detail",
+      "surfaceIdentities": [
+        "read-operation:src/app/(dashboard)/meetings/[id]/attendance/page.tsx → getAttendanceSummary",
+        "read-operation:src/app/(dashboard)/meetings/[id]/attendance/page.tsx → getGuestList",
+        "read-operation:src/app/(dashboard)/meetings/[id]/attendance/page.tsx → getMeeting",
+        "read-operation:src/app/(dashboard)/meetings/[id]/attendance/page.tsx → listMeetingResponses",
+        "read-operation:src/app/(dashboard)/meetings/[id]/evaluation/page.tsx → getEvaluation",
+        "read-operation:src/app/(dashboard)/meetings/[id]/evaluation/page.tsx → getEvaluationTrend",
+        "read-operation:src/app/(dashboard)/meetings/[id]/evaluation/page.tsx → getMeeting",
+        "read-operation:src/app/(dashboard)/meetings/[id]/evaluation/page.tsx → listAttendees",
+        "read-operation:src/app/(dashboard)/meetings/[id]/invitations/page.tsx → getGuestList",
+        "read-operation:src/app/(dashboard)/meetings/[id]/invitations/page.tsx → getMeeting",
+        "read-operation:src/app/(dashboard)/meetings/[id]/invitations/page.tsx → getMeetingTrackingByPerson",
+        "read-operation:src/app/(dashboard)/meetings/[id]/layout.tsx → getMeeting",
+        "read-operation:src/app/(dashboard)/meetings/[id]/logistics/page.tsx → getChecklist",
+        "read-operation:src/app/(dashboard)/meetings/[id]/logistics/page.tsx → getChecklistSummary",
+        "read-operation:src/app/(dashboard)/meetings/[id]/logistics/page.tsx → getMeeting",
+        "read-operation:src/app/(dashboard)/meetings/[id]/outcomes/page.tsx → getMeeting",
+        "read-operation:src/app/(dashboard)/meetings/[id]/outcomes/page.tsx → getMeetingResponseBreakdown",
+        "read-operation:src/app/(dashboard)/meetings/[id]/page.tsx → getFollowUpCompletion",
+        "read-operation:src/app/(dashboard)/meetings/[id]/page.tsx → getGuestList",
+        "read-operation:src/app/(dashboard)/meetings/[id]/page.tsx → getMeeting",
+        "read-operation:src/app/(dashboard)/meetings/[id]/page.tsx → getMeetingCommunications",
+        "read-operation:src/app/(dashboard)/meetings/[id]/page.tsx → listLocations",
+        "route:/meetings/[id]",
+        "route:/meetings/[id]/attendance",
+        "route:/meetings/[id]/evaluation",
+        "route:/meetings/[id]/invitations",
+        "route:/meetings/[id]/logistics",
+        "route:/meetings/[id]/outcomes"
+      ],
+      "parityCapability": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "label": "Review meeting details",
+      "actionLabel": null,
+      "argumentKeys": ["meetingId"],
+      "difficultToReverse": false,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "meetings.read.list",
+      "surfaceIdentities": [
+        "read-operation:src/app/(dashboard)/meetings/page.tsx → hasMeetingHistory",
+        "read-operation:src/app/(dashboard)/meetings/page.tsx → listMeetings",
+        "read-operation:src/app/(dashboard)/teams/[teamId]/meetings/page.tsx → getTeam",
+        "read-operation:src/app/(dashboard)/teams/[teamId]/meetings/page.tsx → listMeetings",
+        "route:/meetings",
+        "route:/teams/[teamId]/meetings"
+      ],
+      "parityCapability": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "label": "List meetings",
+      "actionLabel": null,
+      "argumentKeys": ["type", "teamId"],
+      "difficultToReverse": false,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "meetings.read.schedule",
+      "surfaceIdentities": [
+        "read-operation:src/app/(dashboard)/meetings/new/page.tsx → listLocations",
+        "read-operation:src/app/(dashboard)/meetings/new/page.tsx → listTeams",
+        "route:/meetings/new"
+      ],
+      "parityCapability": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "meetings.write",
+      "confirmation": "not_required",
+      "label": "Review meeting scheduling options",
+      "actionLabel": null,
+      "argumentKeys": [],
+      "difficultToReverse": false,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "meetings.response-card.clear",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/meetings/actions.ts → clearResponseCardAction"
+      ],
+      "parityCapability": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "meetings.write",
+      "confirmation": "required",
+      "label": "Clear response card",
+      "actionLabel": "Clear response card",
+      "argumentKeys": [
+        "meetingId",
+        "personId",
+        "responseId",
+        "beforeResponse",
+        "expectedAttendanceUpdatedAt"
+      ],
+      "difficultToReverse": false,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "meetings.response-card.record",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/meetings/actions.ts → recordResponseCardAction"
+      ],
+      "parityCapability": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "meetings.write",
+      "confirmation": "required",
+      "label": "Record response card",
+      "actionLabel": "Record response card",
+      "argumentKeys": [
+        "meetingId",
+        "personId",
+        "responseType",
+        "notes",
+        "responseId",
+        "expectedAttendanceUpdatedAt",
+        "beforeResponse"
+      ],
+      "difficultToReverse": false,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    }
+  ],
+  "entries": [
+    {
+      "identity": "action:src/app/(dashboard)/meetings/actions.ts → addAttendeeAction",
+      "kind": "action",
+      "capabilityIdentity": "meetings.attendance.add",
+      "parityCapability": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "meetings.write",
+      "confirmation": "required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "action:src/app/(dashboard)/meetings/actions.ts → addAttendeeNoteAction",
+      "kind": "action",
+      "capabilityIdentity": "meetings.attendance.note",
+      "parityCapability": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "meetings.write",
+      "confirmation": "required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "action:src/app/(dashboard)/meetings/actions.ts → addToGuestListAction",
+      "kind": "action",
+      "capabilityIdentity": "meetings.add-guests",
+      "parityCapability": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "meetings.write",
+      "confirmation": "required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "action:src/app/(dashboard)/meetings/actions.ts → addWalkInAttendeeAction",
+      "kind": "action",
+      "capabilityIdentity": "meetings.attendance.walk-in.add",
+      "parityCapability": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "meetings.write",
+      "confirmation": "required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "action:src/app/(dashboard)/meetings/actions.ts → clearResponseCardAction",
+      "kind": "action",
+      "capabilityIdentity": "meetings.response-card.clear",
+      "parityCapability": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "meetings.write",
+      "confirmation": "required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "action:src/app/(dashboard)/meetings/actions.ts → createEvaluationAction",
+      "kind": "action",
+      "capabilityIdentity": "meetings.evaluation.create",
+      "parityCapability": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "meetings.write",
+      "confirmation": "required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "action:src/app/(dashboard)/meetings/actions.ts → createLocationAction",
+      "kind": "action",
+      "capabilityIdentity": "meetings.location.create",
+      "parityCapability": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "meetings.write",
+      "confirmation": "required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "action:src/app/(dashboard)/meetings/actions.ts → createMeetingAction",
+      "kind": "action",
+      "capabilityIdentity": "meetings.create",
+      "parityCapability": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "meetings.write",
+      "confirmation": "required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "action:src/app/(dashboard)/meetings/actions.ts → deleteMeetingAction",
+      "kind": "action",
+      "capabilityIdentity": "meetings.lifecycle.delete",
+      "parityCapability": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "meetings.write",
+      "confirmation": "required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "action:src/app/(dashboard)/meetings/actions.ts → finalizeAttendanceAction",
+      "kind": "action",
+      "capabilityIdentity": "meetings.attendance.finalize",
+      "parityCapability": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "meetings.write",
+      "confirmation": "required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "action:src/app/(dashboard)/meetings/actions.ts → quickAddAttendeeAction",
+      "kind": "action",
+      "capabilityIdentity": "meetings.attendance.person-create-and-add",
+      "parityCapability": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "meetings.write",
+      "confirmation": "required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "action:src/app/(dashboard)/meetings/actions.ts → quickAddPersonToGuestListAction",
+      "kind": "action",
+      "capabilityIdentity": "meetings.guests.person-create-and-add",
+      "parityCapability": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "meetings.write",
+      "confirmation": "required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "action:src/app/(dashboard)/meetings/actions.ts → quickAddWalkInAction",
+      "kind": "action",
+      "capabilityIdentity": "meetings.attendance.person-create-and-walk-in",
+      "parityCapability": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "meetings.write",
+      "confirmation": "required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "action:src/app/(dashboard)/meetings/actions.ts → recordAttendanceBatchAction",
+      "kind": "action",
+      "capabilityIdentity": "meetings.attendance.batch-record",
+      "parityCapability": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "meetings.write",
+      "confirmation": "required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "action:src/app/(dashboard)/meetings/actions.ts → recordResponseCardAction",
+      "kind": "action",
+      "capabilityIdentity": "meetings.response-card.record",
+      "parityCapability": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "meetings.write",
+      "confirmation": "required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "action:src/app/(dashboard)/meetings/actions.ts → removeAttendeeAction",
+      "kind": "action",
+      "capabilityIdentity": "meetings.attendance.remove",
+      "parityCapability": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "meetings.write",
+      "confirmation": "required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "action:src/app/(dashboard)/meetings/actions.ts → removeFromGuestListAction",
+      "kind": "action",
+      "capabilityIdentity": "meetings.guests.remove",
+      "parityCapability": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "meetings.write",
+      "confirmation": "required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "action:src/app/(dashboard)/meetings/actions.ts → saveAgendaAction",
+      "kind": "action",
+      "capabilityIdentity": "meetings.agenda.replace",
+      "parityCapability": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "meetings.write",
+      "confirmation": "required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "action:src/app/(dashboard)/meetings/actions.ts → toggleAttendanceStatusAction",
+      "kind": "action",
+      "capabilityIdentity": "meetings.attendance.toggle",
+      "parityCapability": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "meetings.write",
+      "confirmation": "required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "action:src/app/(dashboard)/meetings/actions.ts → toggleChecklistItemAction",
+      "kind": "action",
+      "capabilityIdentity": "meetings.checklist.toggle",
+      "parityCapability": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "meetings.write",
+      "confirmation": "required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "action:src/app/(dashboard)/meetings/actions.ts → updateChecklistItemAction",
+      "kind": "action",
+      "capabilityIdentity": "meetings.checklist.update",
+      "parityCapability": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "meetings.write",
+      "confirmation": "required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "action:src/app/(dashboard)/meetings/actions.ts → updateLocationAction",
+      "kind": "action",
+      "capabilityIdentity": "meetings.location.update",
+      "parityCapability": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "meetings.write",
+      "confirmation": "required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "action:src/app/(dashboard)/meetings/actions.ts → updateMeetingAction",
+      "kind": "action",
+      "capabilityIdentity": "meetings.lifecycle.update",
+      "parityCapability": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "meetings.write",
+      "confirmation": "required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "action:src/app/(dashboard)/meetings/actions.ts → updateMeetingStatusAction",
+      "kind": "action",
+      "capabilityIdentity": "meetings.lifecycle.status",
+      "parityCapability": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "meetings.write",
+      "confirmation": "required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "action:src/app/(dashboard)/meetings/actions.ts → updateRsvpStatusAction",
+      "kind": "action",
+      "capabilityIdentity": "meetings.guests.rsvp",
+      "parityCapability": "meetings",
+      "operationKind": "effect",
+      "applicationCapability": "meetings.write",
+      "confirmation": "required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "effect-import:src/lib/meetings/locations.ts → deactivateLocation",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "no_authenticated_surface"
+      }
+    },
+    {
+      "identity": "read-import:src/lib/meetings/locations.ts → getLocation",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "no_authenticated_surface"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/analytics/page.tsx → analyticsMeetingTypeArg",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/analytics/page.tsx → analyticsMeetingTypeLabel",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/analytics/page.tsx → cn",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/analytics/page.tsx → getAttendanceTrend",
+      "kind": "read_operation",
+      "capabilityIdentity": "meetings.read.analytics",
+      "parityCapability": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/analytics/page.tsx → getMeeting",
+      "kind": "read_operation",
+      "capabilityIdentity": "meetings.read.analytics",
+      "parityCapability": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/analytics/page.tsx → getMeetingSummaryStats",
+      "kind": "read_operation",
+      "capabilityIdentity": "meetings.read.analytics",
+      "parityCapability": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/analytics/page.tsx → notFound",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/analytics/page.tsx → parseAnalyticsMeetingTypeFilter",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/analytics/page.tsx → redirect",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/analytics/page.tsx → verifySession",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/attendance/page.tsx → getAttendanceSummary",
+      "kind": "read_operation",
+      "capabilityIdentity": "meetings.read.detail",
+      "parityCapability": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/attendance/page.tsx → getGuestList",
+      "kind": "read_operation",
+      "capabilityIdentity": "meetings.read.detail",
+      "parityCapability": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/attendance/page.tsx → getMeeting",
+      "kind": "read_operation",
+      "capabilityIdentity": "meetings.read.detail",
+      "parityCapability": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/attendance/page.tsx → listMeetingResponses",
+      "kind": "read_operation",
+      "capabilityIdentity": "meetings.read.detail",
+      "parityCapability": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/attendance/page.tsx → notFound",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/attendance/page.tsx → redirect",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/attendance/page.tsx → verifySession",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/evaluation/page.tsx → compareEvaluationToHistory",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/evaluation/page.tsx → getEvaluation",
+      "kind": "read_operation",
+      "capabilityIdentity": "meetings.read.detail",
+      "parityCapability": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/evaluation/page.tsx → getEvaluationTrend",
+      "kind": "read_operation",
+      "capabilityIdentity": "meetings.read.detail",
+      "parityCapability": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/evaluation/page.tsx → getMeeting",
+      "kind": "read_operation",
+      "capabilityIdentity": "meetings.read.detail",
+      "parityCapability": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/evaluation/page.tsx → listAttendees",
+      "kind": "read_operation",
+      "capabilityIdentity": "meetings.read.detail",
+      "parityCapability": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/evaluation/page.tsx → meetingDisplayTitle",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/evaluation/page.tsx → notFound",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/evaluation/page.tsx → redirect",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/evaluation/page.tsx → verifySession",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/invitations/page.tsx → getGuestList",
+      "kind": "read_operation",
+      "capabilityIdentity": "meetings.read.detail",
+      "parityCapability": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/invitations/page.tsx → getMeeting",
+      "kind": "read_operation",
+      "capabilityIdentity": "meetings.read.detail",
+      "parityCapability": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/invitations/page.tsx → getMeetingTrackingByPerson",
+      "kind": "read_operation",
+      "capabilityIdentity": "meetings.read.detail",
+      "parityCapability": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/invitations/page.tsx → notFound",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/invitations/page.tsx → redirect",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/invitations/page.tsx → verifySession",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/layout.tsx → getCurrentUserChurch",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/layout.tsx → getMeeting",
+      "kind": "read_operation",
+      "capabilityIdentity": "meetings.read.detail",
+      "parityCapability": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/layout.tsx → meetingDisplayTitle",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/layout.tsx → notFound",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/layout.tsx → redirect",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/layout.tsx → verifySession",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/logistics/page.tsx → getChecklist",
+      "kind": "read_operation",
+      "capabilityIdentity": "meetings.read.detail",
+      "parityCapability": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/logistics/page.tsx → getChecklistSummary",
+      "kind": "read_operation",
+      "capabilityIdentity": "meetings.read.detail",
+      "parityCapability": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/logistics/page.tsx → getMeeting",
+      "kind": "read_operation",
+      "capabilityIdentity": "meetings.read.detail",
+      "parityCapability": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/logistics/page.tsx → notFound",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/logistics/page.tsx → redirect",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/logistics/page.tsx → verifySession",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/outcomes/page.tsx → getMeeting",
+      "kind": "read_operation",
+      "capabilityIdentity": "meetings.read.detail",
+      "parityCapability": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/outcomes/page.tsx → getMeetingResponseBreakdown",
+      "kind": "read_operation",
+      "capabilityIdentity": "meetings.read.detail",
+      "parityCapability": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/outcomes/page.tsx → notFound",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/outcomes/page.tsx → redirect",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/outcomes/page.tsx → verifySession",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/page.tsx → churches",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/page.tsx → defaultAgendaTemplatesForType",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/page.tsx → eq",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/page.tsx → getFollowUpCompletion",
+      "kind": "read_operation",
+      "capabilityIdentity": "meetings.read.detail",
+      "parityCapability": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/page.tsx → getGuestList",
+      "kind": "read_operation",
+      "capabilityIdentity": "meetings.read.detail",
+      "parityCapability": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/page.tsx → getMeeting",
+      "kind": "read_operation",
+      "capabilityIdentity": "meetings.read.detail",
+      "parityCapability": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/page.tsx → getMeetingCommunications",
+      "kind": "read_operation",
+      "capabilityIdentity": "meetings.read.detail",
+      "parityCapability": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/page.tsx → getMeetingContextualTemplates",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/page.tsx → listLocations",
+      "kind": "read_operation",
+      "capabilityIdentity": "meetings.read.detail",
+      "parityCapability": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/page.tsx → meetingComposeUrl",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/page.tsx → meetingLinkedTaskProgressCopy",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/page.tsx → notFound",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/page.tsx → parseAgenda",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/page.tsx → redirect",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/page.tsx → verifySession",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/new/page.tsx → holdsSeatFor",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/new/page.tsx → listLocations",
+      "kind": "read_operation",
+      "capabilityIdentity": "meetings.read.schedule",
+      "parityCapability": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "meetings.write",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/new/page.tsx → listTeams",
+      "kind": "read_operation",
+      "capabilityIdentity": "meetings.read.schedule",
+      "parityCapability": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "meetings.write",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/new/page.tsx → parseMeetingType",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/new/page.tsx → redirect",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/new/page.tsx → verifySession",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/page.tsx → analyticsMeetingTypeArg",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/page.tsx → getCurrentUserChurch",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/page.tsx → hasMeetingHistory",
+      "kind": "read_operation",
+      "capabilityIdentity": "meetings.read.list",
+      "parityCapability": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/page.tsx → holdsSeatFor",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/page.tsx → listMeetings",
+      "kind": "read_operation",
+      "capabilityIdentity": "meetings.read.list",
+      "parityCapability": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/page.tsx → meetingsListSubtitle",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/page.tsx → parseListMeetingTypeFilter",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/page.tsx → redirect",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/page.tsx → verifySession",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/teams/[teamId]/meetings/page.tsx → getTeam",
+      "kind": "read_operation",
+      "capabilityIdentity": "meetings.read.list",
+      "parityCapability": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/teams/[teamId]/meetings/page.tsx → listMeetings",
+      "kind": "read_operation",
+      "capabilityIdentity": "meetings.read.list",
+      "parityCapability": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/teams/[teamId]/meetings/page.tsx → notFound",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/teams/[teamId]/meetings/page.tsx → redirect",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/teams/[teamId]/meetings/page.tsx → verifySession",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "route:/meetings",
+      "kind": "route",
+      "capabilityIdentity": "meetings.read.list",
+      "parityCapability": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "route:/meetings/[id]",
+      "kind": "route",
+      "capabilityIdentity": "meetings.read.detail",
+      "parityCapability": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "route:/meetings/[id]/analytics",
+      "kind": "route",
+      "capabilityIdentity": "meetings.read.analytics",
+      "parityCapability": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "route:/meetings/[id]/attendance",
+      "kind": "route",
+      "capabilityIdentity": "meetings.read.detail",
+      "parityCapability": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "route:/meetings/[id]/evaluation",
+      "kind": "route",
+      "capabilityIdentity": "meetings.read.detail",
+      "parityCapability": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "route:/meetings/[id]/invitations",
+      "kind": "route",
+      "capabilityIdentity": "meetings.read.detail",
+      "parityCapability": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "route:/meetings/[id]/logistics",
+      "kind": "route",
+      "capabilityIdentity": "meetings.read.detail",
+      "parityCapability": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "route:/meetings/[id]/outcomes",
+      "kind": "route",
+      "capabilityIdentity": "meetings.read.detail",
+      "parityCapability": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "route:/meetings/new",
+      "kind": "route",
+      "capabilityIdentity": "meetings.read.schedule",
+      "parityCapability": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "meetings.write",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "route:/teams/[teamId]/meetings",
+      "kind": "route",
+      "capabilityIdentity": "meetings.read.list",
+      "parityCapability": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    }
+  ],
+  "summary": {
+    "actions": 25,
+    "routes": 10,
+    "readOperations": 31,
+    "exclusions": 55,
+    "readCapabilities": 4,
+    "effectCapabilities": 25,
+    "unclassified": 0
+  }
+}

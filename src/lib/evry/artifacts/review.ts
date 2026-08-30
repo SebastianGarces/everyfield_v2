@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { EVRY_EXACT_CONTENT_MAX_PAGE_CHARACTERS } from "./exact-content-pages";
+
 import {
   EVRY_CONVERSATION_DURABLE_RESULT_CODES,
   evryConversationPlanIdentitySchema,
@@ -17,6 +19,7 @@ const semanticIdSchema = z.string().regex(/^[a-z][a-z0-9_.:-]{0,127}$/);
 const titleSchema = z.string().trim().min(1).max(200);
 const labelSchema = z.string().trim().min(1).max(160);
 const displayTextSchema = z.string().trim().min(1).max(4_000);
+const exactDisplayTextSchema = z.string().min(1).max(4_000);
 const countSchema = z.number().int().nonnegative();
 
 export const evryReviewSourceLinkSchema = z
@@ -37,7 +40,7 @@ export const evryReviewSourceLinkSchema = z
 const resolvedTargetSchema = z
   .strictObject({
     label: labelSchema,
-    value: displayTextSchema,
+    value: exactDisplayTextSchema,
     sourceLink: evryReviewSourceLinkSchema.nullable(),
   })
   .readonly();
@@ -61,14 +64,17 @@ const contentPreviewSchema = z
     format: z.enum(["plain_text", "rich_text"]).optional(),
   })
   .superRefine((preview, context) => {
-    if (preview.format !== "rich_text" && preview.content.length > 4_000) {
+    if (
+      preview.format !== "rich_text" &&
+      preview.content.length > EVRY_EXACT_CONTENT_MAX_PAGE_CHARACTERS
+    ) {
       context.addIssue({
         code: "too_big",
-        maximum: 4_000,
+        maximum: EVRY_EXACT_CONTENT_MAX_PAGE_CHARACTERS,
         origin: "string",
         inclusive: true,
         path: ["content"],
-        message: "Plain-text previews must be at most 4,000 characters",
+        message: `Plain-text previews must be at most ${EVRY_EXACT_CONTENT_MAX_PAGE_CHARACTERS.toLocaleString()} characters`,
       });
     }
   })
@@ -77,8 +83,8 @@ const contentPreviewSchema = z
 const beforeAfterSchema = z
   .strictObject({
     label: labelSchema,
-    before: displayTextSchema,
-    after: displayTextSchema,
+    before: exactDisplayTextSchema,
+    after: exactDisplayTextSchema,
     count: z.number().int().positive(),
   })
   .readonly();
@@ -135,7 +141,7 @@ const confirmationStepSchema = z
     // recipient. The immutable plan already carries those variants, so an
     // artifact cap must not silently collapse them after confirmation.
     contentPreviews: z.array(contentPreviewSchema).readonly(),
-    beforeAfter: z.array(beforeAfterSchema).max(32).readonly(),
+    beforeAfter: z.array(beforeAfterSchema).readonly(),
   })
   .superRefine((step, context) => {
     if (step.effectKind === "meeting" && step.dateTime === null) {

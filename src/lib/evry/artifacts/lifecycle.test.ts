@@ -347,6 +347,35 @@ test("a replay returns the persisted receipt without a second confirm or executi
   assert.deepEqual(fake.calls, callsAfterFirstRun);
 });
 
+test("receipt survives cleanup failure and replay retries cleanup without a second effect", async () => {
+  const fake = harness();
+  let cleanupCalls = 0;
+  const run = createEvryArtifactLifecycle({
+    ...fake.boundaries,
+    cleanupPlanResources: async () => ({
+      failed: cleanupCalls++ === 0 ? 1 : 0,
+    }),
+  });
+
+  await assert.rejects(
+    run(request("execute")),
+    /terminal resource cleanup remains incomplete/
+  );
+  assert.equal(fake.calls.filter((call) => call === "execute").length, 1);
+  assert.equal(
+    fake
+      .conversation()
+      .messages.flatMap(({ artifacts }) => artifacts)
+      .some(({ document }) => document.kind === "result"),
+    true
+  );
+
+  const replay = await run(request("execute"));
+  assert.equal(replay.status, "already_finished");
+  assert.equal(fake.calls.filter((call) => call === "execute").length, 1);
+  assert.equal(cleanupCalls, 2);
+});
+
 test("cancel and edit durably cancel the exact plan and clear conversation authority", async () => {
   for (const action of ["cancel", "edit"] as const) {
     const fake = harness();
@@ -361,6 +390,52 @@ test("cancel and edit durably cancel the exact plan and clear conversation autho
       action === "edit" ? /fresh plan/ : /cancelled/
     );
   }
+});
+
+test("terminal lifecycle states clean exact plan resources while safe retry preserves them", async () => {
+  for (const action of ["cancel", "edit", "execute"] as const) {
+    const fake = harness();
+    const cleaned: unknown[] = [];
+    const result = await createEvryArtifactLifecycle({
+      ...fake.boundaries,
+      cleanupPlanResources: async (input) => void cleaned.push(input),
+    })(request(action));
+    assert.equal(
+      result.status,
+      action === "cancel"
+        ? "cancelled"
+        : action === "edit"
+          ? "editing"
+          : "executed"
+    );
+    assert.deepEqual(cleaned, [
+      {
+        actor: ACTOR,
+        plan: EVRY_CONFIRMATION_FIXTURES.meeting.plan,
+      },
+    ]);
+  }
+
+  const fake = harness();
+  fake.setExecuteResult({
+    status: "retryable",
+    correlationId: "a0000000-0000-4000-8000-000000000003",
+    steps: EVRY_CONFIRMATION_FIXTURES.meeting.steps.map((step) => ({
+      stepId: step.stepId,
+      capabilityIdentity: "fixture.effect",
+      status: "retryable",
+      durable: false,
+      affectedCount: 0,
+      excludedCount: 0,
+    })),
+  });
+  let cleanupCalls = 0;
+  const retryable = await createEvryArtifactLifecycle({
+    ...fake.boundaries,
+    cleanupPlanResources: async () => void cleanupCalls++,
+  })(request("execute"));
+  assert.equal(retryable.status, "retryable");
+  assert.equal(cleanupCalls, 0);
 });
 
 test("a mismatched conversation plan reaches no plan or persistence boundary", async () => {
