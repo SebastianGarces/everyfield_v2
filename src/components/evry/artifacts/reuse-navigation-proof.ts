@@ -20,6 +20,7 @@ const RELOAD_REQUEST_ID = "40000000-0000-4000-8000-000000000001";
 let route = { pathname: "/evry", search: `?conversation=${SOURCE_ID}` };
 const listeners = new Set<() => void>();
 const pushes: string[] = [];
+let beforeDirectLinkDispatch: (() => void) | null = null;
 const router = {
   bfcacheId: "fixture",
   back() {},
@@ -66,16 +67,17 @@ function MockLink({
   children,
   href,
   onClick,
+  onNavigate,
   ...props
 }: {
   children: ReactNode;
   href: string;
   onClick?: (event: ReactMouseEvent<HTMLAnchorElement>) => void;
+  onNavigate?: (event: { preventDefault(): void }) => void;
   target?: string;
   download?: string;
   id?: string;
 }) {
-  const appRouter = useContext(AppRouterContext) ?? router;
   return createElement(
     "a",
     {
@@ -90,14 +92,21 @@ function MockLink({
           event.ctrlKey ||
           event.shiftKey ||
           event.altKey ||
-          props.target === "_blank" ||
-          props.download !== undefined ||
-          href.startsWith("#")
+          (props.target !== undefined && props.target !== "_self") ||
+          props.download !== undefined
         ) {
           return;
         }
         event.preventDefault();
-        appRouter.push(href);
+        let navigationPrevented = false;
+        onNavigate?.({
+          preventDefault: () => {
+            navigationPrevented = true;
+          },
+        });
+        if (navigationPrevented) return;
+        beforeDirectLinkDispatch?.();
+        pushes.push(href);
       },
     },
     children
@@ -228,6 +237,7 @@ test("reuse owns delayed workspace navigation and ignores completion after depar
     },
   });
   t.after(() => {
+    beforeDirectLinkDispatch = null;
     listeners.clear();
     if (originalWindow)
       Object.defineProperty(globalThis, "window", originalWindow);
@@ -256,7 +266,7 @@ test("reuse owns delayed workspace navigation and ignores completion after depar
     }
   );
   const { EvryShell, useEvryShell } = await import("../evry-shell");
-  const Link = (await import("next/link")).default;
+  const { EvryLink } = await import("../navigation-intent");
   const { useRouter } = await import("next/navigation");
   function MountedWorkspace() {
     const current = useEvryShell();
@@ -279,7 +289,7 @@ test("reuse owns delayed workspace navigation and ignores completion after depar
         "data-start": current.startRecipeReuse,
       }),
       createElement(
-        Link,
+        EvryLink,
         {
           id: "control-disabled-link",
           href: "/evry?new=1",
@@ -290,12 +300,12 @@ test("reuse owns delayed workspace navigation and ignores completion after depar
         "New"
       ),
       createElement(
-        Link,
+        EvryLink,
         { id: "control-modified-link", href: "/dashboard" },
         "Modified"
       ),
       createElement(
-        Link,
+        EvryLink,
         {
           id: "control-new-context-link",
           href: "/dashboard",
@@ -304,12 +314,12 @@ test("reuse owns delayed workspace navigation and ignores completion after depar
         "New context"
       ),
       createElement(
-        Link,
+        EvryLink,
         { id: "control-hash-link", href: "#receipt" },
         "Receipt"
       ),
       createElement(
-        Link,
+        EvryLink,
         {
           id: "control-download-link",
           href: "/download",
@@ -330,7 +340,17 @@ test("reuse owns delayed workspace navigation and ignores completion after depar
         createElement("button", { type: "submit" })
       ),
       createElement(
-        Link,
+        EvryLink,
+        {
+          id: "control-prevented-navigation",
+          href: "/dashboard",
+          onNavigate: (event: { preventDefault(): void }) =>
+            event.preventDefault(),
+        },
+        "Prevented navigation"
+      ),
+      createElement(
+        EvryLink,
         { id: "control-proceeding-link", href: "/dashboard" },
         "Dashboard"
       ),
@@ -408,6 +428,7 @@ test("reuse owns delayed workspace navigation and ignores completion after depar
     const preventedSubmit = clickEvent();
     control("prevented-form").props.onSubmit(preventedSubmit);
     assert.equal(preventedSubmit.defaultPrevented, true);
+    control("prevented-navigation").props.onClick(clickEvent());
     control("programmatic-current").props.onClick();
   });
   assert.equal(
@@ -427,6 +448,7 @@ test("reuse owns delayed workspace navigation and ignores completion after depar
     pushes,
     [
       `/evry?conversation=${TARGET_ID}`,
+      "#receipt",
       `/evry?conversation=${SOURCE_ID}#receipt`,
       `/evry?conversation=${TARGET_ID}`,
     ],
@@ -445,9 +467,17 @@ test("reuse owns delayed workspace navigation and ignores completion after depar
       recipeIdentity: "meeting.invitation.reference",
     });
   });
+  beforeDirectLinkDispatch = () => {
+    assert.equal(
+      storage.length,
+      0,
+      "product onNavigate revokes reuse before Next direct dispatch"
+    );
+  };
   await act(async () => {
     control("proceeding-link").props.onClick(clickEvent());
   });
+  beforeDirectLinkDispatch = null;
   assert.equal(
     output()["data-blocked"],
     "true",

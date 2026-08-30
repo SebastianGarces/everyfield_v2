@@ -74,6 +74,7 @@ import {
   type EvryRunRecoveryMarker,
 } from "./streaming/run-recovery";
 import { requestEvryRecipeReuse } from "./artifacts/reuse-request";
+import { EvryNavigationIntentProvider } from "./navigation-intent";
 
 const EvryPanel = dynamic(() =>
   import("./evry-panel").then((module) => module.EvryPanel)
@@ -1461,8 +1462,10 @@ export function EvryShell({
   return (
     <EvryShellContext.Provider value={value}>
       <AppRouterContext.Provider value={navigationRouter}>
-        {children}
-        {enabled && hasOpenedPanel ? <EvryPanel /> : null}
+        <EvryNavigationIntentProvider value={fenceRecipeReuseForHref}>
+          {children}
+          {enabled && hasOpenedPanel ? <EvryPanel /> : null}
+        </EvryNavigationIntentProvider>
       </AppRouterContext.Provider>
     </EvryShellContext.Provider>
   );

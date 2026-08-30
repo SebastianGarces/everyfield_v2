@@ -17,7 +17,6 @@ import {
   ShieldAlert,
   ShieldX,
 } from "lucide-react";
-import Link from "next/link";
 import { useId, type ReactNode } from "react";
 
 import { EvryBoundaryMessage } from "@/components/evry/boundary-message";
@@ -40,6 +39,7 @@ import {
 import type { EvryPublicArtifact } from "@/lib/evry/artifacts/public";
 import { formatDateTimeWithZone, formatTime } from "@/lib/datetime";
 import { cn } from "@/lib/utils";
+import { EvryLink } from "@/components/evry/navigation-intent";
 
 export const EVRY_ARTIFACT_RENDER_VARIANTS = [
   "context",
@@ -220,9 +220,12 @@ function renderClarification(
                     Choose {choice.label}
                   </Button>
                 ) : (
-                  <Link href={choice.sourceLink.href} className={linkClassName}>
+                  <EvryLink
+                    href={choice.sourceLink.href}
+                    className={linkClassName}
+                  >
                     Open {choice.sourceLink.label}
-                  </Link>
+                  </EvryLink>
                 )}
               </div>
             </li>
@@ -271,9 +274,9 @@ function renderRead(artifact: ArtifactByVariant["read"]) {
       <ul className="space-y-2">
         {artifact.items.map((item) => (
           <li key={item.id} className="rounded-lg border p-3">
-            <Link href={item.sourceLink.href} className={linkClassName}>
+            <EvryLink href={item.sourceLink.href} className={linkClassName}>
               {item.label}
-            </Link>
+            </EvryLink>
             <dl className="mt-2 grid gap-1 text-sm sm:grid-cols-2">
               {item.facts.map((fact) => (
                 <div key={fact.label}>
@@ -361,12 +364,12 @@ function DetailedConfirmation({
                       {target.label}:{" "}
                     </span>
                     {target.sourceLink ? (
-                      <Link
+                      <EvryLink
                         href={target.sourceLink.href}
                         className={linkClassName}
                       >
                         {target.value}
-                      </Link>
+                      </EvryLink>
                     ) : (
                       target.value
                     )}
@@ -729,9 +732,9 @@ function renderReceipt(
               <ul className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-sm">
                 {step.sourceLinks.map((link) => (
                   <li key={link.href}>
-                    <Link href={link.href} className={linkClassName}>
+                    <EvryLink href={link.href} className={linkClassName}>
                       Open {link.label}
-                    </Link>
+                    </EvryLink>
                   </li>
                 ))}
               </ul>
