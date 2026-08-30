@@ -269,6 +269,16 @@ test("mark-one refuses hostile review material before plan persistence", () => {
     hostileBody.length > MAX_REVIEWABLE_NOTIFICATION_PAYLOAD_UTF16_CODE_UNITS
   );
   assert.equal(markOneArgumentsSchema.safeParse(arguments_).success, false);
+  assert.equal(
+    markOneArgumentsSchema.safeParse({
+      notification: snapshot,
+      visibility: {
+        categories: Array.from({ length: 10_000 }, () => "meetings"),
+        checkedAt: "2030-01-01T00:00:00.000Z",
+      },
+    }).success,
+    false
+  );
   assert.throws(
     () =>
       parseEvryActionPlanCandidate({
