@@ -28,9 +28,10 @@ import { churches, tasks, users } from "@/db/schema";
 // nulls dangling parents before validating it) is
 // `src/db/schema/ruled-guards.test.ts`, which runs on every `pnpm test`.
 //
-// SOFT DELETES ARE UNAFFECTED and that is asserted below: `deleteTask` stamps
-// `deleted_at`, which Postgres sees as an ordinary UPDATE, so the application's
-// own parent+children clause is still doing the work there.
+// SOFT DELETES ARE GUARDED by the later Task-structure migration: a raw parent
+// update cannot strand live checklist rows. `deleteTask` still owns the
+// parent+children update because that is the one legal way to soft-delete the
+// whole checklist together.
 //
 // Everything written here is namespaced by `SCRATCH_NAME` and swept in `after`.
 // ----------------------------------------------------------------------------
@@ -137,7 +138,7 @@ test(
 );
 
 test(
-  "a HARD delete of a parent takes its checklist with it; a soft delete does not",
+  "a HARD delete cascades while an orphaning soft delete is refused",
   { skip },
   async (t: TestContext) => {
     if (!(await databaseReachable())) return t.skip(UNREACHABLE);
@@ -165,12 +166,29 @@ test(
       },
     ]);
 
-    // A soft delete is an UPDATE, so the cascade does not fire — the rows are
-    // still there, which is exactly why `deleteTask` stamps the children too.
-    await db
-      .update(tasks)
-      .set({ deletedAt: new Date() })
-      .where(eq(tasks.id, parent.id));
+    // The FK cascade is for hard deletes. The deferred structure guard closes
+    // the soft-delete door by refusing a parent-only update that would leave
+    // live checklist rows behind.
+    await assert.rejects(
+      () =>
+        db
+          .update(tasks)
+          .set({ deletedAt: new Date() })
+          .where(eq(tasks.id, parent.id)),
+      (error: unknown) => {
+        const text = [
+          error instanceof Error ? error.message : String(error),
+          error instanceof Error && error.cause instanceof Error
+            ? error.cause.message
+            : "",
+        ].join(" ");
+        assert.match(
+          text,
+          /tasks_no_live_orphan_children_guard|A live checklist item cannot outlive or nest beneath its parent/
+        );
+        return true;
+      }
+    );
 
     const [{ afterSoft }] = await db
       .select({ afterSoft: sql<number>`count(*)::int` })
@@ -179,7 +197,7 @@ test(
     assert.equal(
       afterSoft,
       3,
-      "a soft delete must not remove rows — the cascade fires on DELETE only"
+      "the refused soft delete must leave parent and checklist intact"
     );
 
     await db.delete(tasks).where(eq(tasks.id, parent.id));
