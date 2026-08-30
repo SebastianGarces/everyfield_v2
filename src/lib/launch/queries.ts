@@ -30,6 +30,8 @@ export interface LaunchRecord {
   decisionsCount: number | null;
   outcomeNotes: string | null;
   captureTheDay: string | null;
+  /** Optimistic source identity used by reviewed Evry effects. */
+  updatedAt: Date;
 }
 
 /** One plant's launch, or `null` when it has none yet. */
@@ -47,6 +49,7 @@ export async function getLaunchForChurch(
       decisionsCount: launches.decisionsCount,
       outcomeNotes: launches.outcomeNotes,
       captureTheDay: launches.captureTheDay,
+      updatedAt: launches.updatedAt,
     })
     .from(launches)
     .where(eq(launches.churchId, churchId))

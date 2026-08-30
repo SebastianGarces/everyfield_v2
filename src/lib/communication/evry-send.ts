@@ -32,10 +32,8 @@ import {
   renderEmailBodyText,
   renderSubject,
 } from "./merge";
-import {
-  claimEvryCommunicationDatabaseEffect,
-  communicationEvryEffectUuid,
-} from "./evry-effect";
+import { claimEvryDatabaseEffect } from "@/lib/evry/executor/database-effect";
+import { communicationEvryEffectUuid } from "./evry-effect";
 import { storedTemplateContent } from "./templates";
 
 export const EVRY_COMMUNICATION_TRANSIENT_PREFIX = "evry-transient:";
@@ -644,7 +642,7 @@ export async function sendFrozenEvryCommunication(input: {
     return { status: "failed", excludedCount };
   }
 
-  return claimEvryCommunicationDatabaseEffect({
+  return claimEvryDatabaseEffect({
     execution: input.effect.execution,
     effectKey: input.effect.effectKey,
     mutation: sql`

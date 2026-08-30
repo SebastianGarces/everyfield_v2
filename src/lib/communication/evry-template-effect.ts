@@ -4,7 +4,7 @@ import { db } from "@/db";
 import { messageTemplates } from "@/db/schema/communication";
 import type { EvryEffectInput, EvryEffectResult } from "@/lib/evry/executor";
 
-import { claimEvryCommunicationDatabaseEffect } from "./evry-effect";
+import { claimEvryDatabaseEffect } from "@/lib/evry/executor/database-effect";
 
 export type EvryCommunicationTemplateSnapshot = Readonly<{
   id: string;
@@ -111,7 +111,7 @@ export async function claimEvryCommunicationTemplateCreate(input: {
     return { status: "refused", excludedCount: 1 };
   }
   const churchId = input.effect.execution.plantId;
-  return claimEvryCommunicationDatabaseEffect({
+  return claimEvryDatabaseEffect({
     execution: input.effect.execution,
     effectKey: input.effect.effectKey,
     mutation: sql`
@@ -149,7 +149,7 @@ export async function claimEvryCommunicationTemplateUpdate(input: {
     return { status: "refused", excludedCount: 1 };
   }
   const churchId = input.effect.execution.plantId;
-  return claimEvryCommunicationDatabaseEffect({
+  return claimEvryDatabaseEffect({
     execution: input.effect.execution,
     effectKey: input.effect.effectKey,
     mutation: sql`
@@ -195,7 +195,7 @@ export async function claimEvryCommunicationSystemTemplateUpdate(input: {
   }
   const churchId = input.effect.execution.plantId;
   const mergeFields = frozenMergeFieldsSql(input.source.mergeFields);
-  return claimEvryCommunicationDatabaseEffect({
+  return claimEvryDatabaseEffect({
     execution: input.effect.execution,
     effectKey: input.effect.effectKey,
     mutation: sql`
@@ -256,7 +256,7 @@ export async function claimEvryCommunicationTemplateDelete(input: {
     return { status: "refused", excludedCount: 1 };
   }
   const churchId = input.effect.execution.plantId;
-  return claimEvryCommunicationDatabaseEffect({
+  return claimEvryDatabaseEffect({
     execution: input.effect.execution,
     effectKey: input.effect.effectKey,
     mutation: sql`
@@ -312,7 +312,7 @@ export async function claimEvryCommunicationTemplateFork(input: {
   }
   const churchId = input.effect.execution.plantId;
   const mergeFields = frozenMergeFieldsSql(input.source.mergeFields);
-  return claimEvryCommunicationDatabaseEffect({
+  return claimEvryDatabaseEffect({
     execution: input.effect.execution,
     effectKey: input.effect.effectKey,
     mutation: sql`

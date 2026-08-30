@@ -1,4 +1,5 @@
 import communicationInventory from "@/lib/evry/capabilities/communication/inventory.generated.json";
+import launchInventory from "@/lib/evry/capabilities/launch/inventory.generated.json";
 import peopleInventory from "@/lib/evry/capabilities/people/inventory.generated.json";
 import parityInventory from "@/lib/evry/capabilities/inventory.generated.json";
 import {
@@ -118,6 +119,29 @@ function generatedCommunicationRegistrations(): EvryCapabilityRegistration[] {
   });
 }
 
+function generatedLaunchRegistrations(): EvryCapabilityRegistration[] {
+  return launchInventory.capabilities.map((capability) => {
+    const [firstSurface, ...otherSurfaces] = capability.surfaceIdentities;
+    if (
+      !isApplicationCapability(capability.applicationCapability) ||
+      !firstSurface ||
+      (capability.operationKind !== "read" &&
+        capability.operationKind !== "effect")
+    ) {
+      throw new Error(
+        `Invalid generated Launch capability: ${capability.identity}`
+      );
+    }
+    return defineEvryCapabilityRegistration({
+      identity: capability.identity,
+      surfaceIdentities: [firstSurface, ...otherSurfaces],
+      parityCapability: capability.parityCapability,
+      operationKind: capability.operationKind,
+      applicationCapability: capability.applicationCapability,
+    });
+  });
+}
+
 /** Explicit shared proof registrations, replaced in place by owning packs. */
 const REFERENCE_REGISTRATIONS = [
   defineEvryCapabilityRegistration({
@@ -137,15 +161,6 @@ const REFERENCE_REGISTRATIONS = [
     parityCapability: "tasks",
     operationKind: "effect",
     applicationCapability: "tasks.own",
-  }),
-  defineEvryCapabilityRegistration({
-    identity: "launch.schedule",
-    surfaceIdentities: [
-      "action:src/app/(dashboard)/launch/actions.ts → scheduleLaunchAction",
-    ],
-    parityCapability: "launch",
-    operationKind: "effect",
-    applicationCapability: "launch.schedule",
   }),
   defineEvryCapabilityRegistration({
     identity: "meetings.create",
@@ -211,6 +226,29 @@ function generatedCommunicationSurfaces(): EvryAuthoritativeCapabilitySurface[] 
   });
 }
 
+function generatedLaunchSurfaces(): EvryAuthoritativeCapabilitySurface[] {
+  return launchInventory.entries.flatMap((entry) => {
+    if (
+      entry.classification.state !== "supported" ||
+      (entry.operationKind !== "read" && entry.operationKind !== "effect") ||
+      entry.applicationCapability === null ||
+      entry.capabilityIdentity === null ||
+      !isApplicationCapability(entry.applicationCapability)
+    ) {
+      return [];
+    }
+    return [
+      {
+        identity: entry.identity,
+        capabilityIdentity: entry.capabilityIdentity,
+        parityCapability: "launch" as const,
+        operationKind: entry.operationKind,
+        applicationCapability: entry.applicationCapability,
+      },
+    ];
+  });
+}
+
 function referenceSurfaces(): EvryAuthoritativeCapabilitySurface[] {
   return REFERENCE_REGISTRATIONS.flatMap((registration) =>
     registration.surfaceIdentities.map((surfaceIdentity) => {
@@ -242,11 +280,13 @@ const REGISTRY = createEvryCapabilityRegistry({
   registrations: [
     ...generatedPeopleRegistrations(),
     ...generatedCommunicationRegistrations(),
+    ...generatedLaunchRegistrations(),
     ...REFERENCE_REGISTRATIONS,
   ],
   authoritativeSurfaces: [
     ...generatedPeopleSurfaces(),
     ...generatedCommunicationSurfaces(),
+    ...generatedLaunchSurfaces(),
     ...referenceSurfaces(),
   ],
 });
@@ -273,7 +313,9 @@ export const EVRY_TASKS_READ_PROBE_IDENTITY = "tasks.list";
 export const EVRY_TASKS_COMPLETE_PROBE_IDENTITY = "tasks.complete";
 export const EVRY_LAUNCH_SCHEDULE_PROBE_IDENTITY = "launch.schedule";
 
-function seatFieldsOf(actor: EvryPlantActor): SeatFields {
+type EvryPlantSeat = Readonly<Pick<EvryPlantActor, "plantId" | "seat">>;
+
+function seatFieldsOf(actor: EvryPlantSeat): SeatFields {
   return {
     ...tenancyColumns({ type: "church", id: actor.plantId }),
     seat: actor.seat,
@@ -281,8 +323,8 @@ function seatFieldsOf(actor: EvryPlantActor): SeatFields {
 }
 
 /** Ask the application's one capability table whether this fresh actor may act. */
-function actorHolds(
-  actor: EvryPlantActor,
+export function evryActorHoldsApplicationCapability(
+  actor: EvryPlantSeat,
   applicationCapability: Capability
 ): boolean {
   return holdsSeatFor(seatFieldsOf(actor), applicationCapability);
@@ -299,7 +341,10 @@ export function eligibleEvryCapabilitiesFor(
   actor: EvryPlantActor
 ): readonly EvryCapabilityRegistration[] {
   return REGISTRY.registrations().filter((registration) =>
-    actorHolds(actor, registration.applicationCapability)
+    evryActorHoldsApplicationCapability(
+      actor,
+      registration.applicationCapability
+    )
   );
 }
 
@@ -324,7 +369,13 @@ export async function authorizeEvryCapability(
   const actor = await requireEvryPlantViewer();
   const registration = REGISTRY.registrationFor(identity);
 
-  if (!registration || !actorHolds(actor, registration.applicationCapability)) {
+  if (
+    !registration ||
+    !evryActorHoldsApplicationCapability(
+      actor,
+      registration.applicationCapability
+    )
+  ) {
     return null;
   }
 
@@ -359,7 +410,10 @@ export async function authorizeEvryReadCapability(
   if (
     !registration ||
     !isReadRegistration(registration) ||
-    !actorHolds(actor, registration.applicationCapability)
+    !evryActorHoldsApplicationCapability(
+      actor,
+      registration.applicationCapability
+    )
   ) {
     return null;
   }
@@ -389,7 +443,10 @@ export async function authorizeEvryEffectCapability(
   if (
     !registration ||
     !isEffectRegistration(registration) ||
-    !actorHolds(actor, registration.applicationCapability)
+    !evryActorHoldsApplicationCapability(
+      actor,
+      registration.applicationCapability
+    )
   ) {
     return null;
   }
