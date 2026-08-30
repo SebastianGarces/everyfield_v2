@@ -187,22 +187,26 @@ test("listTasks accepts a cursor only inside the exact filtered result", () => {
   );
 });
 
-test("a malformed direct-service cursor is unavailable before any database query", async () => {
-  // Both UUIDs are deliberately malformed. If listTasks reaches Postgres,
-  // either typed parameter is rejected; returning here proves the boundary ran
-  // first and did not silently reinterpret the request as page one.
-  assert.deepEqual(
-    await listTasks("not-a-plant-uuid", { cursor: "not-a-task-uuid" }),
-    {
-      tasks: [],
-      total: 0,
-      nextCursor: null,
-      cursorAvailable: false,
-    }
-  );
+test("every supplied malformed direct-service cursor is unavailable before any database query", async () => {
+  // The plant id is deliberately malformed. If any supplied cursor reaches
+  // Postgres, the typed plant parameter is rejected; returning here proves the
+  // boundary did not collapse empty/whitespace/invalid input into omission and
+  // silently restart page one.
+  for (const cursor of ["", "   ", "not-a-task-uuid"]) {
+    assert.deepEqual(
+      await listTasks("not-a-plant-uuid", { cursor }),
+      {
+        tasks: [],
+        total: 0,
+        nextCursor: null,
+        cursorAvailable: false,
+      },
+      JSON.stringify(cursor)
+    );
+  }
 });
 
-test("malformed URL and load-more cursors share the neutral unavailable page", async () => {
+test("empty, whitespace, and malformed URL/load-more cursors share the neutral unavailable page", async () => {
   const expected = {
     tasks: [],
     total: 0,
@@ -211,23 +215,22 @@ test("malformed URL and load-more cursors share the neutral unavailable page", a
     personNotes: {},
   };
 
-  // `/tasks?cursor=…` supplies the cursor in params.
-  assert.deepEqual(
-    await readTaskListPage("not-a-plant-uuid", "not-a-user-uuid", {
-      cursor: "not-a-task-uuid",
-    }),
-    expected
-  );
-  // `loadMoreTasksAction` supplies the fourth argument to this same reader.
-  assert.deepEqual(
-    await readTaskListPage(
-      "not-a-plant-uuid",
-      "not-a-user-uuid",
-      {},
-      "not-a-task-uuid"
-    ),
-    expected
-  );
+  for (const cursor of ["", "   ", "not-a-task-uuid"]) {
+    // `/tasks?cursor=…` supplies the cursor in params.
+    assert.deepEqual(
+      await readTaskListPage("not-a-plant-uuid", "not-a-user-uuid", {
+        cursor,
+      }),
+      expected,
+      `URL cursor ${JSON.stringify(cursor)}`
+    );
+    // `loadMoreTasksAction` supplies the fourth argument to this same reader.
+    assert.deepEqual(
+      await readTaskListPage("not-a-plant-uuid", "not-a-user-uuid", {}, cursor),
+      expected,
+      `action cursor ${JSON.stringify(cursor)}`
+    );
+  }
 
   const actionSource = stripComments(
     readFileSync(
