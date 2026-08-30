@@ -6,7 +6,7 @@ import test from "node:test";
 const migration = readFileSync(
   path.join(
     process.cwd(),
-    "src/db/migrations/0070_task_structure_serialization.sql"
+    "src/db/migrations/0072_task_structure_serialization.sql"
   ),
   "utf8"
 );
@@ -16,6 +16,10 @@ const service = readFileSync(
 );
 const dependencies = readFileSync(
   path.join(process.cwd(), "src/lib/tasks/dependencies.ts"),
+  "utf8"
+);
+const writeBoundary = readFileSync(
+  path.join(process.cwd(), "src/lib/tasks/write-boundary.ts"),
   "utf8"
 );
 const evry = readFileSync(
@@ -63,12 +67,11 @@ test("the dependency guard walks the committed graph before accepting an edge", 
 test("Evry and owning Task writers acquire the lock before mutating", () => {
   assert.equal(
     service.match(/taskStructureLockStatement\(churchId\)/g)?.length,
-    3
-  );
-  assert.equal(
-    service.match(/taskStructureLockStatement\(values(?:\[0\]!|)\.churchId\)/g)
-      ?.length,
     2
+  );
+  assert.match(
+    writeBoundary,
+    /db\.batch\(\[\s*taskStructureLockStatement\(churchId\)/
   );
   assert.match(
     dependencies,
