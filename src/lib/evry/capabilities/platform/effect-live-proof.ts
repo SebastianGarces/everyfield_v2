@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 
 import { db } from "@/db";
 import {
@@ -162,14 +162,15 @@ async function approvedPlan(input: {
 
 async function execute(
   plan: Awaited<ReturnType<typeof approvedPlan>>,
-  actor_: EvryPlantActor
+  actor_: EvryPlantActor,
+  executionRegistry = registry
 ) {
   currentActor = actor_;
   return executor({
     actor: actor_,
     planId: plan.id,
     fingerprint: plan.fingerprint,
-    registry,
+    registry: executionRegistry,
   });
 }
 
@@ -213,6 +214,7 @@ async function main() {
   ]);
   assert.ok(owner && foreignOwner);
   const plantActor = actor(plant.id, owner.id);
+  const foreignActor = actor(foreignPlant.id, foreignOwner.id);
   const now = new Date();
   const visible = await db
     .insert(notifications)
@@ -282,6 +284,8 @@ async function main() {
       visibility: oneSnapshot.visibility,
     }),
   });
+  assert.equal((await execute(onePlan, foreignActor)).status, "unavailable");
+  proofOutcomes.add(`${MARK_ONE_NOTIFICATION_IDENTITY}:tenancy`);
   const one = await execute(onePlan, plantActor);
   assert.equal(one.status, "completed");
   assert.equal(one.steps[0]?.affectedCount, 1);
@@ -384,6 +388,8 @@ async function main() {
     stepId: "mark-all",
     arguments: markAllArgumentsSchema.parse(allSnapshot),
   });
+  assert.equal((await execute(allPlan, foreignActor)).status, "unavailable");
+  proofOutcomes.add(`${MARK_ALL_NOTIFICATIONS_IDENTITY}:tenancy`);
   const [allLeft, allRight] = await Promise.all([
     execute(allPlan, plantActor),
     execute(allPlan, plantActor),
@@ -410,6 +416,105 @@ async function main() {
     "Future",
     "Hidden by preference",
   ]);
+
+  const [overlapA, overlapB] = await db
+    .insert(notifications)
+    .values([
+      {
+        churchId: plant.id,
+        recipientUserId: owner.id,
+        category: "phase",
+        type: "phase.overlap-a",
+        title: "Overlap A",
+        body: "Shared by the one and all plans",
+        scheduledFor: new Date(now.getTime() - 1_000),
+      },
+      {
+        churchId: plant.id,
+        recipientUserId: owner.id,
+        category: "phase",
+        type: "phase.overlap-b",
+        title: "Overlap B",
+        body: "Owned only by the all plan",
+        scheduledFor: new Date(now.getTime() - 1_000),
+      },
+    ])
+    .returning();
+  assert.ok(overlapA && overlapB);
+  const overlapOneSnapshot = await loadEvryUnreadNotificationSnapshot({
+    actor: plantActor,
+    notificationId: overlapA.id,
+    now: new Date(),
+  });
+  const overlapAllSnapshot = await loadEvryUnreadNotificationSnapshot({
+    actor: plantActor,
+    now: new Date(),
+  });
+  assert.deepEqual(
+    overlapAllSnapshot.notifications.map(({ id }) => id).toSorted(),
+    [overlapA.id, overlapB.id].toSorted()
+  );
+  const overlapOnePlan = await approvedPlan({
+    actor: plantActor,
+    identity: MARK_ONE_NOTIFICATION_IDENTITY,
+    stepId: "overlap-one",
+    arguments: markOneArgumentsSchema.parse({
+      notification: overlapOneSnapshot.notifications[0],
+      visibility: overlapOneSnapshot.visibility,
+    }),
+  });
+  const overlapAllPlan = await approvedPlan({
+    actor: plantActor,
+    identity: MARK_ALL_NOTIFICATIONS_IDENTITY,
+    stepId: "overlap-all",
+    arguments: markAllArgumentsSchema.parse(overlapAllSnapshot),
+  });
+  let barrierArrivals = 0;
+  let releaseBarrier: (() => void) | null = null;
+  const barrier = new Promise<void>((resolve) => {
+    releaseBarrier = resolve;
+  });
+  const overlapDependencies = {
+    async beforeClaim() {
+      barrierArrivals += 1;
+      if (barrierArrivals === 2) releaseBarrier?.();
+      await barrier;
+    },
+  };
+  const overlapRegistry = createEvryExecutionCapabilityRegistry([
+    createMarkOneNotificationExecution(overlapDependencies),
+    createMarkAllNotificationsExecution(overlapDependencies),
+    createSubmitFeedbackExecution(() => {}),
+  ]);
+  const [overlapOneResult, overlapAllResult] = await Promise.all([
+    execute(overlapOnePlan, plantActor, overlapRegistry),
+    execute(overlapAllPlan, plantActor, overlapRegistry),
+  ]);
+  assert.deepEqual(
+    [overlapOneResult.status, overlapAllResult.status].toSorted(),
+    ["completed", "refused"]
+  );
+  const overlapRows = await db
+    .select({ id: notifications.id, readAt: notifications.readAt })
+    .from(notifications)
+    .where(
+      and(
+        eq(notifications.churchId, plant.id),
+        inArray(notifications.id, [overlapA.id, overlapB.id])
+      )
+    );
+  const overlapRead = new Map(
+    overlapRows.map(({ id, readAt }) => [id, readAt !== null])
+  );
+  assert.equal(overlapRead.get(overlapA.id), true);
+  assert.equal(
+    overlapRead.get(overlapB.id),
+    overlapAllResult.status === "completed"
+  );
+  await db
+    .update(notifications)
+    .set({ readAt: new Date(), updatedAt: new Date() })
+    .where(inArray(notifications.id, [overlapA.id, overlapB.id]));
 
   const preferenceRace = await db
     .insert(notifications)
@@ -499,7 +604,52 @@ async function main() {
     null
   );
   await db.update(users).set({ seat: "owner" }).where(eq(users.id, owner.id));
+  proofOutcomes.add(`${MARK_ONE_NOTIFICATION_IDENTITY}:permission`);
   proofOutcomes.add(`${MARK_ALL_NOTIFICATIONS_IDENTITY}:errors`);
+
+  const markAllSeatRace = await db
+    .insert(notifications)
+    .values({
+      churchId: plant.id,
+      recipientUserId: owner.id,
+      category: "communication",
+      type: "communication.mark-all-seat-race",
+      title: "Mark-all seat race",
+      body: "Keep unread after the actor loses the plant seat",
+      scheduledFor: new Date(now.getTime() - 1_000),
+    })
+    .returning()
+    .then(([row]) => row);
+  assert.ok(markAllSeatRace);
+  const markAllSeatSnapshot = await loadEvryUnreadNotificationSnapshot({
+    actor: plantActor,
+    now: new Date(),
+  });
+  assert.ok(
+    markAllSeatSnapshot.notifications.some(
+      ({ id }) => id === markAllSeatRace.id
+    )
+  );
+  const markAllSeatPlan = await approvedPlan({
+    actor: plantActor,
+    identity: MARK_ALL_NOTIFICATIONS_IDENTITY,
+    stepId: "mark-all-seat-race",
+    arguments: markAllArgumentsSchema.parse(markAllSeatSnapshot),
+  });
+  beforeNotificationClaim = async () => {
+    await db.update(users).set({ seat: null }).where(eq(users.id, owner.id));
+  };
+  assert.equal((await execute(markAllSeatPlan, plantActor)).status, "refused");
+  assert.equal(
+    await db
+      .select({ readAt: notifications.readAt })
+      .from(notifications)
+      .where(eq(notifications.id, markAllSeatRace.id))
+      .then(([row]) => row?.readAt),
+    null
+  );
+  await db.update(users).set({ seat: "owner" }).where(eq(users.id, owner.id));
+  proofOutcomes.add(`${MARK_ALL_NOTIFICATIONS_IDENTITY}:permission`);
 
   const feedbackId = randomUUID();
   const feedbackPlan = await approvedPlan({
@@ -513,6 +663,11 @@ async function main() {
       pageUrl: "/notifications",
     }),
   });
+  assert.equal(
+    (await execute(feedbackPlan, foreignActor)).status,
+    "unavailable"
+  );
+  proofOutcomes.add(`${SUBMIT_FEEDBACK_IDENTITY}:tenancy`);
   const feedbackResult = await execute(feedbackPlan, plantActor);
   assert.equal(feedbackResult.status, "completed");
   const [storedFeedback] = await db
@@ -527,6 +682,34 @@ async function main() {
   assert.deepEqual(await execute(feedbackPlan, plantActor), feedbackResult);
   assert.deepEqual(bridgeCalls, [feedbackId]);
   proofOutcomes.add(`${SUBMIT_FEEDBACK_IDENTITY}:idempotency`);
+
+  const seatLossFeedbackId = randomUUID();
+  const seatLossFeedbackPlan = await approvedPlan({
+    actor: plantActor,
+    identity: SUBMIT_FEEDBACK_IDENTITY,
+    stepId: "feedback-seat-loss",
+    arguments: feedbackArgumentsSchema.parse({
+      feedbackId: seatLossFeedbackId,
+      category: "question",
+      description: "Must not persist without a current seat",
+      pageUrl: null,
+    }),
+  });
+  await db.update(users).set({ seat: null }).where(eq(users.id, owner.id));
+  assert.equal(
+    (await execute(seatLossFeedbackPlan, plantActor)).status,
+    "refused"
+  );
+  assert.equal(
+    await db
+      .select({ id: feedback.id })
+      .from(feedback)
+      .where(eq(feedback.id, seatLossFeedbackId))
+      .then(([row]) => row),
+    undefined
+  );
+  await db.update(users).set({ seat: "owner" }).where(eq(users.id, owner.id));
+  proofOutcomes.add(`${SUBMIT_FEEDBACK_IDENTITY}:permission`);
 
   const bridgeFailureId = randomUUID();
   const bridgeFailurePlan = await approvedPlan({
@@ -553,7 +736,7 @@ async function main() {
   );
   proofOutcomes.add(`${SUBMIT_FEEDBACK_IDENTITY}:errors`);
 
-  assert.equal(proofOutcomes.size, 9);
+  assert.equal(proofOutcomes.size, 15);
   process.stdout.write("Platform effect live proof passed\n");
   process.stdout.write(
     `EVRY_PLATFORM_EFFECT_OUTCOMES=${JSON.stringify([...proofOutcomes].toSorted())}\n`

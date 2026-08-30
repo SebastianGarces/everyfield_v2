@@ -2,6 +2,11 @@ import { feedbackCreateSchema } from "@/lib/validations/feedback";
 import { z } from "zod";
 
 export type PlatformEvrySelection =
+  | Readonly<{
+      kind: "clarification";
+      subject: "notification" | "feedback";
+      prompt: string;
+    }>
   | Readonly<{ kind: "dashboard" }>
   | Readonly<{ kind: "notification_count" }>
   | Readonly<{
@@ -82,16 +87,43 @@ export function selectPlatformEvryRequest(
   if (/^mark all notifications read[.!?]*$/i.test(normalized)) {
     return { kind: "mark_all" };
   }
+  if (
+    /^mark\s+(?:(?:a|the)\s+)?notification(?:\s+.*)?[.!?]*$/i.test(
+      normalized
+    ) ||
+    /^mark\s+all\s+notifications(?:\s+.*)?[.!?]*$/i.test(normalized)
+  ) {
+    return {
+      kind: "clarification",
+      subject: "notification",
+      prompt:
+        "Which notification should be marked read? Ask “show notifications,” then send the visible Mark-read command for the notification you mean, or say “mark all notifications read.”",
+    };
+  }
 
   const prefix = /^submit feedback\s+/i.exec(normalized);
-  if (!prefix) return null;
+  if (!prefix) {
+    return /^submit feedback[.!?]*$/i.test(normalized)
+      ? {
+          kind: "clarification",
+          subject: "feedback",
+          prompt:
+            "What feedback should be submitted? Include a category (bug, suggestion, question, or other) and the exact description you want stored.",
+        }
+      : null;
+  }
   const payloadStart = value.boundaries[prefix[0].length];
   if (payloadStart === undefined) return null;
   let raw: unknown;
   try {
     raw = JSON.parse(literal.slice(payloadStart));
   } catch {
-    return null;
+    return {
+      kind: "clarification",
+      subject: "feedback",
+      prompt:
+        "What feedback should be submitted? Include a category (bug, suggestion, question, or other) and the exact description you want stored.",
+    };
   }
   const parsed = feedbackCreateSchema.safeParse(raw);
   return parsed.success
@@ -101,5 +133,10 @@ export function selectPlatformEvryRequest(
         description: parsed.data.description,
         pageUrl: parsed.data.pageUrl || null,
       }
-    : null;
+    : {
+        kind: "clarification",
+        subject: "feedback",
+        prompt:
+          "What feedback should be submitted? Include a category (bug, suggestion, question, or other) and the exact description you want stored.",
+      };
 }

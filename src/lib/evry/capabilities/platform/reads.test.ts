@@ -140,6 +140,11 @@ test("notifications.feed.list:execution:read", async () => {
   );
   assert.equal(artifact.items[0]?.facts[3]?.value, "Bring the guest list.");
   assert.equal(
+    artifact.items[0]?.facts.find(({ label }) => label === "Mark-read command")
+      ?.value,
+    "mark notification 30000000-0000-4000-8000-000000000001 read"
+  );
+  assert.equal(
     artifact.items[0]?.sourceLink.href,
     "/meetings/40000000-0000-4000-8000-000000000001"
   );

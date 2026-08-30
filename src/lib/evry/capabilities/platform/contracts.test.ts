@@ -216,7 +216,11 @@ test("maximum legal feedback is losslessly paged into a review artifact", () => 
   assert.ok(descriptionPages?.every(({ content }) => content.length <= 4_000));
 });
 
-test("an oversized legal notification plan uses a bounded immutable manifest", () => {
+test("a maximum-size mark-one payload is losslessly paged", () => {
+  const notification = {
+    ...snapshot,
+    body: "exact body ".repeat(24_000),
+  };
   const document = parseEvryActionPlanCandidate({
     candidate: {
       steps: [
@@ -224,10 +228,7 @@ test("an oversized legal notification plan uses a bounded immutable manifest", (
           id: "mark-one",
           capabilityIdentity: MARK_ONE_NOTIFICATION_PLAN.identity,
           arguments: {
-            notification: {
-              ...snapshot,
-              body: "exact body ".repeat(24_000),
-            },
+            notification,
             visibility: {
               categories: ["meetings"],
               checkedAt: "2030-01-01T00:00:00.000Z",
@@ -247,14 +248,15 @@ test("an oversized legal notification plan uses a bounded immutable manifest", (
   });
   assert.ok(review);
   const previews = review.confirmation.steps[0]?.contentPreviews;
-  assert.equal(previews?.length, 1);
-  assert.match(previews?.[0]?.label ?? "", /manifest/i);
-  assert.match(previews?.[0]?.content ?? "", /"notifications":1/);
-  assert.match(previews?.[0]?.content ?? "", /"sha256":"[0-9a-f]{64}"/);
+  assert.equal(
+    previews?.map(({ content }) => content).join(""),
+    JSON.stringify([notification])
+  );
+  assert.ok(previews?.every(({ content }) => content.length <= 4_000));
 });
 
-test("a large mark-all plan caps rendered targets without capping legal rows", () => {
-  const notifications = Array.from({ length: 150 }, (_, index) => ({
+test("the largest legal mark-all plan renders every exact target", () => {
+  const notifications = Array.from({ length: 100 }, (_, index) => ({
     ...snapshot,
     id: `10000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
     title: `Exact title ${index + 1}`,
@@ -288,5 +290,45 @@ test("a large mark-all plan caps rendered targets without capping legal rows", (
   const step = review.confirmation.steps[0];
   assert.equal(step?.counts[0]?.count, notifications.length);
   assert.equal(step?.resolvedTargets.length, 100);
-  assert.match(step?.resolvedTargets.at(-1)?.value ?? "", /51 more/);
+  assert.match(
+    step?.resolvedTargets.at(-1)?.value ?? "",
+    /Exact title 100.*100$/
+  );
+  assert.deepEqual(
+    step?.contentPreviews.map(({ content }) => content).join(""),
+    JSON.stringify(notifications)
+  );
+});
+
+test("mark-all refuses a target set that cannot be completely reviewed", () => {
+  const tooMany = Array.from({ length: 101 }, (_, index) => ({
+    ...snapshot,
+    id: `10000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+  }));
+  assert.equal(
+    markAllArgumentsSchema.safeParse({
+      notifications: tooMany,
+      visibility: {
+        categories: ["meetings"],
+        checkedAt: "2030-01-01T00:00:00.000Z",
+      },
+    }).success,
+    false
+  );
+
+  assert.equal(
+    markAllArgumentsSchema.safeParse({
+      notifications: [
+        {
+          ...snapshot,
+          body: "x".repeat(4_000 * 64),
+        },
+      ],
+      visibility: {
+        categories: ["meetings"],
+        checkedAt: "2030-01-01T00:00:00.000Z",
+      },
+    }).success,
+    false
+  );
 });

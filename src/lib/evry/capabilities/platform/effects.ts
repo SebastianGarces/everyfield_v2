@@ -53,6 +53,9 @@ const notificationSnapshotSchema = z.strictObject({
   createdAt: z.string().datetime(),
 });
 
+export const MAX_REVIEWABLE_MARK_ALL_TARGETS = 100;
+export const MAX_REVIEWABLE_MARK_ALL_UTF16_CODE_UNITS = 4_000 * 64;
+
 const visibilitySnapshotSchema = z.strictObject({
   categories: z.array(z.enum(notificationCategories)),
   checkedAt: z.string().datetime(),
@@ -63,7 +66,15 @@ const markOneArgumentsSchema = z.strictObject({
   visibility: visibilitySnapshotSchema,
 });
 const markAllArgumentsSchema = z.strictObject({
-  notifications: z.array(notificationSnapshotSchema).min(1),
+  notifications: z
+    .array(notificationSnapshotSchema)
+    .min(1)
+    .max(MAX_REVIEWABLE_MARK_ALL_TARGETS)
+    .refine(
+      (rows) =>
+        JSON.stringify(rows).length <= MAX_REVIEWABLE_MARK_ALL_UTF16_CODE_UNITS,
+      "The exact notification set is too large for a complete confirmation"
+    ),
   visibility: visibilitySnapshotSchema,
 });
 const feedbackArgumentsSchema = z.strictObject({
@@ -263,6 +274,8 @@ function notificationMutation(input: {
           ${input.exactAllVisible}
           or n.id in (select id from expected_rows)
         )
+      order by n.id
+      for update of n
     ), exact_set as materialized (
       select count(*)::int as expected_count
       from expected_rows
@@ -563,26 +576,8 @@ function literalPages(value: string, label: string) {
   return pages;
 }
 
-const MAX_BROWSER_PREVIEW_PAGES = 64;
-const MAX_BROWSER_RESOLVED_TARGETS = 100;
-
 function planPages(rows: readonly NotificationSnapshot[]) {
-  const json = JSON.stringify(rows);
-  if (json.length > 4_000 * MAX_BROWSER_PREVIEW_PAGES) {
-    return [
-      {
-        label: "Complete immutable notification manifest",
-        content: JSON.stringify({
-          utf16CodeUnits: json.length,
-          sha256: createHash("sha256").update(json).digest("hex"),
-          notifications: rows.length,
-          disclosure:
-            "The stored plan and confirmation fingerprint bind every exact notification; the browser preview is capped at 64 pages.",
-        }),
-      },
-    ];
-  }
-  return literalPages(json, "Exact immutable payload");
+  return literalPages(JSON.stringify(rows), "Exact immutable payload");
 }
 
 function notificationReview(input: {
@@ -594,11 +589,6 @@ function notificationReview(input: {
   title: string;
   actionLabel: string;
 }) {
-  const displayedRows =
-    input.rows.length > MAX_BROWSER_RESOLVED_TARGETS
-      ? input.rows.slice(0, MAX_BROWSER_RESOLVED_TARGETS - 1)
-      : input.rows;
-  const omittedRows = input.rows.length - displayedRows.length;
   return buildEvryConfirmationArtifact({
     kind: "confirmation",
     artifactVersion: 1,
@@ -614,28 +604,14 @@ function notificationReview(input: {
         title: input.title,
         effectKind: input.rows.length > 1 ? "bulk_change" : "other",
         reversibility: "reversible",
-        resolvedTargets: [
-          ...displayedRows.map((row) => ({
-            label: "Notification",
-            value: `${row.title} · ${row.id}`,
-            sourceLink: {
-              label: "Open notifications",
-              href: "/notifications",
-            },
-          })),
-          ...(omittedRows > 0
-            ? [
-                {
-                  label: "Additional exact notifications",
-                  value: `${omittedRows} more are bound by the immutable plan manifest`,
-                  sourceLink: {
-                    label: "Open notifications",
-                    href: "/notifications",
-                  },
-                },
-              ]
-            : []),
-        ],
+        resolvedTargets: input.rows.map((row) => ({
+          label: "Notification",
+          value: `${row.title} · ${row.id}`,
+          sourceLink: {
+            label: "Open notifications",
+            href: "/notifications",
+          },
+        })),
         counts: [
           { label: "Notifications to mark read", count: input.rows.length },
         ],
