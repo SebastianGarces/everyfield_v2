@@ -54,6 +54,7 @@ import { toCalendarDate } from "@/lib/datetime";
 import { blockedTaskIdsAmong } from "./dependencies";
 import { assertMayOwnFollowUp } from "./follow-up-ownership";
 import { mayActOnTaskRow } from "./own-duty";
+import { taskStructureLockStatement } from "./structure-lock";
 import {
   nextRecurrenceDueDate,
   parseRecurrenceRule,
@@ -828,7 +829,10 @@ export async function createTask(
     recurrence
   );
 
-  const [task] = await db.insert(tasks).values(values).returning();
+  const [, [task]] = await db.batch([
+    taskStructureLockStatement(churchId),
+    db.insert(tasks).values(values).returning(),
+  ]);
 
   // The row exists before anything is announced about it (T-018). A task with
   // no assignee or no due date enqueues nothing — the plan says so, not this
@@ -913,17 +917,20 @@ export async function updateTask(
   if (data.parentTaskId !== undefined)
     updateData.parentTaskId = data.parentTaskId ?? null;
 
-  const [updated] = await db
-    .update(tasks)
-    .set(updateData)
-    .where(
-      and(
-        eq(tasks.churchId, churchId),
-        eq(tasks.id, taskId),
-        isNull(tasks.deletedAt)
+  const [, [updated]] = await db.batch([
+    taskStructureLockStatement(churchId),
+    db
+      .update(tasks)
+      .set(updateData)
+      .where(
+        and(
+          eq(tasks.churchId, churchId),
+          eq(tasks.id, taskId),
+          isNull(tasks.deletedAt)
+        )
       )
-    )
-    .returning();
+      .returning(),
+  ]);
 
   if (!updated) {
     throw new Error("Failed to update task");
@@ -1047,7 +1054,10 @@ export const defaultRecurrenceDeps: RecurrenceDeps = {
   },
 
   async insertSuccessor(values) {
-    const [next] = await db.insert(tasks).values(values).returning();
+    const [, [next]] = await db.batch([
+      taskStructureLockStatement(values.churchId),
+      db.insert(tasks).values(values).returning(),
+    ]);
     return next ?? null;
   },
 
@@ -1076,7 +1086,10 @@ export const defaultRecurrenceDeps: RecurrenceDeps = {
 
   async insertChildren(values) {
     if (values.length === 0) return;
-    await db.insert(tasks).values(values);
+    await db.batch([
+      taskStructureLockStatement(values[0]!.churchId),
+      db.insert(tasks).values(values),
+    ]);
   },
 };
 
@@ -1406,17 +1419,20 @@ export async function deleteTask(
 
   const now = new Date();
 
-  const deleted = await db
-    .update(tasks)
-    .set({ deletedAt: now, updatedAt: now })
-    .where(
-      and(
-        eq(tasks.churchId, churchId),
-        or(eq(tasks.id, taskId), eq(tasks.parentTaskId, taskId)),
-        isNull(tasks.deletedAt)
+  const [, deleted] = await db.batch([
+    taskStructureLockStatement(churchId),
+    db
+      .update(tasks)
+      .set({ deletedAt: now, updatedAt: now })
+      .where(
+        and(
+          eq(tasks.churchId, churchId),
+          or(eq(tasks.id, taskId), eq(tasks.parentTaskId, taskId)),
+          isNull(tasks.deletedAt)
+        )
       )
-    )
-    .returning({ id: tasks.id });
+      .returning({ id: tasks.id }),
+  ]);
 
   // Every row the statement actually touched — the parent AND its checklist
   // items, which are tasks with due dates of their own. The ids come from the
