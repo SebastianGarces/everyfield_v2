@@ -81,6 +81,16 @@ export type EvryCommunicationAudienceSnapshot = Readonly<{
   exclusions: readonly Readonly<{ reason: string; count: number }>[];
 }>;
 
+export type EvryPlannedCommunicationMeeting = Readonly<{
+  id: string;
+  title: string | null;
+  type: string;
+  datetime: Date;
+  locationName: string | null;
+  locationAddress: string | null;
+  agenda: unknown;
+}>;
+
 function personLabel(person: { firstName: string; lastName: string }) {
   return (
     [person.firstName, person.lastName].filter(Boolean).join(" ") || "Person"
@@ -215,6 +225,8 @@ export async function resolveEvryCommunicationAudience(input: {
   channel?: CommunicationChannel;
   templateId?: string | null;
   meetingId?: string | null;
+  /** Trusted future meeting snapshot for a recipe whose create step runs first. */
+  plannedMeeting?: EvryPlannedCommunicationMeeting;
 }): Promise<EvryCommunicationAudienceSnapshot | null> {
   const selected = [...new Set(input.recipientIds)].sort();
   const duplicateSelections = input.recipientIds.length - selected.length;
@@ -225,7 +237,7 @@ export async function resolveEvryCommunicationAudience(input: {
     return null;
   }
 
-  const [[church], meeting, selectedPeople] = await Promise.all([
+  const [[church], storedMeeting, selectedPeople] = await Promise.all([
     db.select().from(churches).where(eq(churches.id, input.churchId)).limit(1),
     input.meetingId
       ? db
@@ -251,6 +263,11 @@ export async function resolveEvryCommunicationAudience(input: {
         )
       ),
   ]);
+  const meeting =
+    storedMeeting ??
+    (input.meetingId && input.plannedMeeting?.id === input.meetingId
+      ? input.plannedMeeting
+      : null);
   if (!church || (input.meetingId && !meeting)) return null;
 
   const withAddress = selectedPeople.filter(

@@ -2,11 +2,13 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
+import { mintEvryPlanRequestKey } from "@/lib/evry/plans";
 import type { EvryDateTimeResolution } from "@/lib/evry/resolvers/datetime";
 import { evryConversationPlanIdentitySchema } from "@/lib/evry/conversations/contract";
 
 import {
   buildMeetingInvitationConfirmation,
+  createMeetingInvitationPlanResolver,
   createMeetingInvitationReferenceResolver,
   type MeetingInvitationReferenceFacts,
   type MeetingInvitationReferenceRequest,
@@ -99,6 +101,7 @@ function person(
     email,
     status,
     attendedVisionMeeting,
+    expectedUpdatedAt: "2026-08-01T12:00:00.000Z",
   };
 }
 
@@ -315,5 +318,91 @@ test("a supplied location is exact and foreign or stale ids are neutral", async 
       },
     }),
     { kind: "unavailable" }
+  );
+});
+
+test("the exact planner feeds the future meeting into Communication and refuses audience drift", async () => {
+  const resolved = await resolver({}).resolve({
+    actor: ACTOR,
+    request: BASE_REQUEST,
+  });
+  assert.equal(resolved.kind, "resolved");
+  if (resolved.kind !== "resolved") return;
+
+  const audienceInputs: unknown[] = [];
+  const plan = createMeetingInvitationPlanResolver({
+    resolveMeeting: async () =>
+      ({
+        exportName: "createMeetingAction",
+        arguments: {
+          meetingId: "50000000-0000-4000-8000-000000000001",
+          type: "vision_meeting",
+          title: "Vision Meeting #1",
+          datetime: "2026-08-05T10:00:00.000Z",
+          timezone: "America/New_York",
+          locationId: "60000000-0000-4000-8000-000000000001",
+          locationName: "Riverside church location",
+          locationAddress: "144 Oak Street, Albany, NY, USA",
+          agenda: [],
+        },
+      }) as never,
+    resolveAudience: async (input) => {
+      audienceInputs.push(input);
+      return {
+        subject: BASE_REQUEST.subject,
+        body: BASE_REQUEST.body,
+        bodyHtml: `<p>${BASE_REQUEST.body}</p>`,
+        channel: "email",
+        templateId: null,
+        meetingId: "50000000-0000-4000-8000-000000000001",
+        messageClass: "transactional_meeting",
+        recipients: resolved.guests.map((guest) => ({
+          personId: guest.personId,
+          label: guest.label,
+          email: guest.email,
+          subject: BASE_REQUEST.subject,
+          bodyHtml: `<p>${BASE_REQUEST.body}</p>`,
+          bodyText: BASE_REQUEST.body,
+        })),
+        exclusions: [],
+      };
+    },
+  });
+  const snapshot = await plan({
+    actor: ACTOR,
+    resolved,
+    requestKey: mintEvryPlanRequestKey(),
+    now: new Date("2026-08-01T12:00:00.000Z"),
+  });
+  assert.ok(snapshot);
+  assert.equal(snapshot.guests.targets.length, 3);
+  assert.deepEqual(
+    snapshot.communication.recipientSource.recipientIds,
+    resolved.guests.map(({ personId }) => personId)
+  );
+  assert.equal(
+    (audienceInputs[0] as { plannedMeeting: { id: string } }).plannedMeeting.id,
+    snapshot.guests.meetingId
+  );
+
+  const drifted = createMeetingInvitationPlanResolver({
+    resolveMeeting: async () =>
+      ({
+        exportName: "createMeetingAction",
+        arguments: snapshot.meeting,
+      }) as never,
+    resolveAudience: async () => ({
+      ...snapshot.communication.audience,
+      recipients: snapshot.communication.audience.recipients.slice(1),
+    }),
+  });
+  assert.equal(
+    await drifted({
+      actor: ACTOR,
+      resolved,
+      requestKey: mintEvryPlanRequestKey(),
+      now: new Date("2026-08-01T12:00:00.000Z"),
+    }),
+    null
   );
 });
