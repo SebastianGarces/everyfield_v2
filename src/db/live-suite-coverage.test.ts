@@ -6,6 +6,7 @@ import { test } from "node:test";
 import {
   DEDICATED_LIVE_SUITES,
   databaseForSuite,
+  DOCUMENTS_WIKI_EFFECT_LIVE_SUITE,
   LIVE_SUITE_PHASES,
   liveSuiteDatabases,
   LIVE_SUITES,
@@ -219,9 +220,14 @@ test("every live suite derives its own database, and no two collide", () => {
   );
 });
 
-test("the monolithic People proof owns the first phase without dropping a live suite", () => {
-  assert.deepEqual(DEDICATED_LIVE_SUITES, [PEOPLE_EFFECT_LIVE_SUITE]);
-  assert.equal(PARALLEL_LIVE_SUITES.includes(PEOPLE_EFFECT_LIVE_SUITE), false);
+test("the monolithic effect proofs own the first phase without dropping a live suite", () => {
+  assert.deepEqual(DEDICATED_LIVE_SUITES, [
+    PEOPLE_EFFECT_LIVE_SUITE,
+    DOCUMENTS_WIKI_EFFECT_LIVE_SUITE,
+  ]);
+  for (const suite of DEDICATED_LIVE_SUITES) {
+    assert.equal(PARALLEL_LIVE_SUITES.includes(suite), false);
+  }
 
   const phased = LIVE_SUITE_PHASES.flat();
   assert.deepEqual(phased.toSorted(), [...LIVE_SUITES].toSorted());
