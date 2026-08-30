@@ -456,675 +456,714 @@ async function assertClosedFailure(
 }
 
 async function main() {
-  await startApplication();
-  try {
-    const production = await fixture("production-runtime");
-    const [sendingChurch] = await db
-      .insert(sendingChurches)
-      .values({ name: `${SCRATCH} oversight` })
-      .returning({ id: sendingChurches.id });
-    assert.ok(sendingChurch);
-    await setLaunchLiveProofSendingChurch(
-      production.plant.churchId,
-      sendingChurch.id
-    );
-    const [oversight] = await db
-      .insert(users)
-      .values({
-        email: `${crypto.randomUUID()}@scratch.invalid`,
-        passwordHash: "scratch",
-        name: `${SCRATCH} oversight`,
-        seat: "admin",
-        sendingChurchId: sendingChurch.id,
-      })
-      .returning({ id: users.id });
-    assert.ok(oversight);
-
-    const today = toCalendarDate(new Date(), "UTC");
-    const scheduled = await applyThroughProduction(
-      production,
-      `schedule launch for ${today} | Exact production path`
-    );
-    assert.equal(
-      scheduled.result.status,
-      "completed",
-      `${JSON.stringify(scheduled.result)}\n${serverOutput}`
-    );
-    assert.equal((await scheduled.replay()).status, "completed");
-    const [productionLaunch] = await db
-      .select()
-      .from(launches)
-      .where(eq(launches.churchId, production.plant.churchId));
-    assert.ok(productionLaunch);
-    const [productionTask] = await db
-      .select({ id: tasks.id })
-      .from(tasks)
-      .where(eq(tasks.churchId, production.plant.churchId))
-      .limit(1);
-    assert.ok(productionTask);
-    const taskCompletion = await applyThroughProduction(
-      production,
-      `mark launch task ${productionTask.id} complete`
-    );
-    assert.equal(
-      taskCompletion.result.status,
-      "completed",
-      `${JSON.stringify(taskCompletion.result)}\n${serverOutput}`
-    );
-    assert.equal((await taskCompletion.replay()).status, "completed");
-
-    const [productionMilestone] = await db
-      .select({ id: launchMilestones.id })
-      .from(launchMilestones)
-      .where(eq(launchMilestones.launchId, productionLaunch.id))
-      .limit(1);
-    assert.ok(productionMilestone);
-    const productionLinks = await db
-      .select({ taskId: launchMilestoneTasks.taskId })
-      .from(launchMilestoneTasks)
-      .where(eq(launchMilestoneTasks.milestoneId, productionMilestone.id));
-    await db
-      .update(tasks)
-      .set({ status: "complete", updatedAt: new Date() })
-      .where(
-        inArray(
-          tasks.id,
-          productionLinks.map(({ taskId }) => taskId)
-        )
+  const phase = process.argv[2];
+  if (phase === "production") {
+    await startApplication();
+    try {
+      const production = await fixture("production-runtime");
+      const [sendingChurch] = await db
+        .insert(sendingChurches)
+        .values({ name: `${SCRATCH} oversight` })
+        .returning({ id: sendingChurches.id });
+      assert.ok(sendingChurch);
+      await setLaunchLiveProofSendingChurch(
+        production.plant.churchId,
+        sendingChurch.id
       );
-    const milestoneCompletion = await applyThroughProduction(
-      production,
-      `complete launch milestone ${productionMilestone.id}`
-    );
-    assert.equal(milestoneCompletion.result.status, "completed");
-    assert.equal((await milestoneCompletion.replay()).status, "completed");
-    const milestoneReopen = await applyThroughProduction(
-      production,
-      `reopen launch milestone ${productionMilestone.id}`
-    );
-    assert.equal(milestoneReopen.result.status, "completed");
-    assert.equal((await milestoneReopen.replay()).status, "completed");
+      const [oversight] = await db
+        .insert(users)
+        .values({
+          email: `${crypto.randomUUID()}@scratch.invalid`,
+          passwordHash: "scratch",
+          name: `${SCRATCH} oversight`,
+          seat: "admin",
+          sendingChurchId: sendingChurch.id,
+        })
+        .returning({ id: users.id });
+      assert.ok(oversight);
 
-    const recorded = await applyThroughProduction(
-      production,
-      "record launch outcome|attendance=123|decisions=7|notes=Production proof|capture=null"
-    );
-    assert.equal(recorded.result.status, "completed");
-    assert.equal((await recorded.replay()).status, "completed");
-    const corrected = await applyThroughProduction(
-      production,
-      'correct launch outcome|attendance=124|decisions=8|notes="null"|capture=NULL'
-    );
-    assert.equal(corrected.result.status, "completed");
-    assert.equal((await corrected.replay()).status, "completed");
-    const [literalOutcome] = await db
-      .select({
-        notes: launches.outcomeNotes,
-        capture: launches.captureTheDay,
-      })
-      .from(launches)
-      .where(eq(launches.id, productionLaunch.id));
-    assert.deepEqual(literalOutcome, { notes: "null", capture: "NULL" });
-
-    const journalRows = Array.from({ length: 205 }, (_, index) => ({
-      id: crypto.randomUUID(),
-      launchId: productionLaunch.id,
-      churchId: production.plant.churchId,
-      event: "moved" as const,
-      previousTargetDate: today,
-      targetDate: today,
-      previousStatus: "scheduled" as const,
-      status: "scheduled" as const,
-      note: `Cursor proof ${index}`,
-      actorUserId: production.user.id,
-      createdAt: new Date(Date.UTC(2030, 0, 1, 0, 0, index)),
-    }));
-    await db.insert(launchEvents).values(journalRows);
-    const mutableHistoryPage = readArtifact(
-      await conversationThroughProduction(production, "show launch history"),
-      "Launch history"
-    );
-    const mutableCursorReason = mutableHistoryPage.exclusions.find(
-      ({ reason }) =>
-        typeof reason === "string" &&
-        reason.startsWith("Older history available after cursor ")
-    )?.reason;
-    if (typeof mutableCursorReason !== "string") {
-      throw new Error(
-        "Launch history did not disclose its continuation cursor"
-      );
-    }
-    const mutableCursor = mutableCursorReason.slice(
-      "Older history available after cursor ".length
-    );
-    assert.equal(
-      (
-        await applyThroughProduction(
-          production,
-          `complete launch milestone ${productionMilestone.id}`
-        )
-      ).result.status,
-      "completed"
-    );
-    const staleHistoryPage = readArtifact(
-      await conversationThroughProduction(
+      const today = toCalendarDate(new Date(), "UTC");
+      const scheduled = await applyThroughProduction(
         production,
-        `show launch history after ${mutableCursor}`
-      ),
-      "Launch history"
-    );
-    assert.equal(staleHistoryPage.items.length, 0);
-    assert.deepEqual(staleHistoryPage.exclusions, [
-      {
-        reason: "Launch history changed; restart without a cursor",
-        count: 1,
-      },
-    ]);
+        `schedule launch for ${today} | Exact production path`
+      );
+      assert.equal(
+        scheduled.result.status,
+        "completed",
+        `${JSON.stringify(scheduled.result)}\n${serverOutput}`
+      );
+      assert.equal((await scheduled.replay()).status, "completed");
+      const [productionLaunch] = await db
+        .select()
+        .from(launches)
+        .where(eq(launches.churchId, production.plant.churchId));
+      assert.ok(productionLaunch);
+      const [productionTask] = await db
+        .select({ id: tasks.id })
+        .from(tasks)
+        .where(eq(tasks.churchId, production.plant.churchId))
+        .limit(1);
+      assert.ok(productionTask);
+      const taskCompletion = await applyThroughProduction(
+        production,
+        `mark launch task ${productionTask.id} complete`
+      );
+      assert.equal(
+        taskCompletion.result.status,
+        "completed",
+        `${JSON.stringify(taskCompletion.result)}\n${serverOutput}`
+      );
+      assert.equal((await taskCompletion.replay()).status, "completed");
 
-    const seenJournalIds = new Set<string>();
-    let journalMessage = "show launch history";
-    for (let pageNumber = 0; pageNumber < 10; pageNumber += 1) {
-      const page = readArtifact(
-        await conversationThroughProduction(production, journalMessage),
+      const [productionMilestone] = await db
+        .select({ id: launchMilestones.id })
+        .from(launchMilestones)
+        .where(eq(launchMilestones.launchId, productionLaunch.id))
+        .limit(1);
+      assert.ok(productionMilestone);
+      const productionLinks = await db
+        .select({ taskId: launchMilestoneTasks.taskId })
+        .from(launchMilestoneTasks)
+        .where(eq(launchMilestoneTasks.milestoneId, productionMilestone.id));
+      await db
+        .update(tasks)
+        .set({ status: "complete", updatedAt: new Date() })
+        .where(
+          inArray(
+            tasks.id,
+            productionLinks.map(({ taskId }) => taskId)
+          )
+        );
+      const milestoneCompletion = await applyThroughProduction(
+        production,
+        `complete launch milestone ${productionMilestone.id}`
+      );
+      assert.equal(milestoneCompletion.result.status, "completed");
+      assert.equal((await milestoneCompletion.replay()).status, "completed");
+      const milestoneReopen = await applyThroughProduction(
+        production,
+        `reopen launch milestone ${productionMilestone.id}`
+      );
+      assert.equal(milestoneReopen.result.status, "completed");
+      assert.equal((await milestoneReopen.replay()).status, "completed");
+
+      const recorded = await applyThroughProduction(
+        production,
+        "record launch outcome|attendance=123|decisions=7|notes=Production proof|capture=null"
+      );
+      assert.equal(recorded.result.status, "completed");
+      assert.equal((await recorded.replay()).status, "completed");
+      const corrected = await applyThroughProduction(
+        production,
+        'correct launch outcome|attendance=124|decisions=8|notes="null"|capture=NULL'
+      );
+      assert.equal(corrected.result.status, "completed");
+      assert.equal((await corrected.replay()).status, "completed");
+      const [literalOutcome] = await db
+        .select({
+          notes: launches.outcomeNotes,
+          capture: launches.captureTheDay,
+        })
+        .from(launches)
+        .where(eq(launches.id, productionLaunch.id));
+      assert.deepEqual(literalOutcome, { notes: "null", capture: "NULL" });
+
+      const journalRows = Array.from({ length: 205 }, (_, index) => ({
+        id: crypto.randomUUID(),
+        launchId: productionLaunch.id,
+        churchId: production.plant.churchId,
+        event: "moved" as const,
+        previousTargetDate: today,
+        targetDate: today,
+        previousStatus: "scheduled" as const,
+        status: "scheduled" as const,
+        note: `Cursor proof ${index}`,
+        actorUserId: production.user.id,
+        createdAt: new Date(Date.UTC(2030, 0, 1, 0, 0, index)),
+      }));
+      await db.insert(launchEvents).values(journalRows);
+      const mutableHistoryPage = readArtifact(
+        await conversationThroughProduction(production, "show launch history"),
         "Launch history"
       );
-      for (const item of page.items) {
-        assert.equal(typeof item.id, "string");
-        assert.equal(seenJournalIds.has(item.id as string), false);
-        seenJournalIds.add(item.id as string);
-      }
-      const cursorReason = page.exclusions.find(
+      const mutableCursorReason = mutableHistoryPage.exclusions.find(
         ({ reason }) =>
           typeof reason === "string" &&
           reason.startsWith("Older history available after cursor ")
       )?.reason;
-      if (typeof cursorReason !== "string") break;
-      const cursor = cursorReason.slice(
+      if (typeof mutableCursorReason !== "string") {
+        throw new Error(
+          "Launch history did not disclose its continuation cursor"
+        );
+      }
+      const mutableCursor = mutableCursorReason.slice(
         "Older history available after cursor ".length
       );
-      assert.match(cursor, /^[A-Za-z0-9_-]+$/);
-      journalMessage = `show launch history after ${cursor}`;
-    }
-    assert.equal(
-      journalRows.every(({ id }) => seenJournalIds.has(`journal:${id}`)),
-      true,
-      "production journal cursor omitted older launch history"
-    );
+      assert.equal(
+        (
+          await applyThroughProduction(
+            production,
+            `complete launch milestone ${productionMilestone.id}`
+          )
+        ).result.status,
+        "completed"
+      );
+      const staleHistoryPage = readArtifact(
+        await conversationThroughProduction(
+          production,
+          `show launch history after ${mutableCursor}`
+        ),
+        "Launch history"
+      );
+      assert.equal(staleHistoryPage.items.length, 0);
+      assert.deepEqual(staleHistoryPage.exclusions, [
+        {
+          reason: "Launch history changed; restart without a cursor",
+          count: 1,
+        },
+      ]);
 
-    for (const identity of identities) mark(identity);
+      const seenJournalIds = new Set<string>();
+      let journalMessage = "show launch history";
+      for (let pageNumber = 0; pageNumber < 10; pageNumber += 1) {
+        const page = readArtifact(
+          await conversationThroughProduction(production, journalMessage),
+          "Launch history"
+        );
+        for (const item of page.items) {
+          assert.equal(typeof item.id, "string");
+          assert.equal(seenJournalIds.has(item.id as string), false);
+          seenJournalIds.add(item.id as string);
+        }
+        const cursorReason = page.exclusions.find(
+          ({ reason }) =>
+            typeof reason === "string" &&
+            reason.startsWith("Older history available after cursor ")
+        )?.reason;
+        if (typeof cursorReason !== "string") break;
+        const cursor = cursorReason.slice(
+          "Older history available after cursor ".length
+        );
+        assert.match(cursor, /^[A-Za-z0-9_-]+$/);
+        journalMessage = `show launch history after ${cursor}`;
+      }
+      assert.equal(
+        journalRows.every(({ id }) => seenJournalIds.has(`journal:${id}`)),
+        true,
+        "production journal cursor omitted older launch history"
+      );
 
-    const crash = await fixture("production-crash-replay");
-    const crashPlan = await prepareThroughProduction(
-      crash,
-      `schedule launch for ${today} | Crash after exact claim`
-    );
-    await db.execute(sql`
+      for (const identity of identities) mark(identity);
+
+      const crash = await fixture("production-crash-replay");
+      const crashPlan = await prepareThroughProduction(
+        crash,
+        `schedule launch for ${today} | Crash after exact claim`
+      );
+      await db.execute(sql`
       create function evry_launch_seed_crash_once() returns trigger
       language plpgsql as $$ begin
         raise exception 'injected post-claim crash';
       end $$
     `);
-    await db.execute(sql`
+      await db.execute(sql`
       create trigger evry_launch_seed_crash_once
       before insert on launch_milestones
       for each row execute function evry_launch_seed_crash_once()
     `);
-    const interrupted = await crashPlan.execute();
-    assert.equal(interrupted.status, "retryable");
-    assert.equal(interrupted.httpStatus, 503);
-    assert.equal(
-      (
-        await db
-          .select()
-          .from(evryExecutionEffectClaims)
-          .where(eq(evryExecutionEffectClaims.planId, crashPlan.plan.planId))
-      ).length,
-      1
-    );
-    assert.equal(
-      (
-        await db
-          .select()
-          .from(launches)
-          .where(eq(launches.churchId, crash.plant.churchId))
-      ).length,
-      1
-    );
-    assert.equal(
-      (
-        await db
-          .select()
-          .from(launchMilestones)
-          .where(eq(launchMilestones.churchId, crash.plant.churchId))
-      ).length,
-      0
-    );
-    await db.execute(
-      sql`drop trigger evry_launch_seed_crash_once on launch_milestones`
-    );
-    await db.execute(sql`drop function evry_launch_seed_crash_once()`);
-    assert.equal((await crashPlan.execute()).status, "completed");
-    assert.equal(
-      (
-        await db
-          .select()
-          .from(launchMilestones)
-          .where(eq(launchMilestones.churchId, crash.plant.churchId))
-      ).length,
-      LAUNCH_MILESTONE_TEMPLATES.length
-    );
+      const interrupted = await crashPlan.execute();
+      assert.equal(interrupted.status, "retryable");
+      assert.equal(interrupted.httpStatus, 503);
+      assert.equal(
+        (
+          await db
+            .select()
+            .from(evryExecutionEffectClaims)
+            .where(eq(evryExecutionEffectClaims.planId, crashPlan.plan.planId))
+        ).length,
+        1
+      );
+      assert.equal(
+        (
+          await db
+            .select()
+            .from(launches)
+            .where(eq(launches.churchId, crash.plant.churchId))
+        ).length,
+        1
+      );
+      assert.equal(
+        (
+          await db
+            .select()
+            .from(launchMilestones)
+            .where(eq(launchMilestones.churchId, crash.plant.churchId))
+        ).length,
+        0
+      );
+      await db.execute(
+        sql`drop trigger evry_launch_seed_crash_once on launch_milestones`
+      );
+      await db.execute(sql`drop function evry_launch_seed_crash_once()`);
+      assert.equal((await crashPlan.execute()).status, "completed");
+      assert.equal(
+        (
+          await db
+            .select()
+            .from(launchMilestones)
+            .where(eq(launchMilestones.churchId, crash.plant.churchId))
+        ).length,
+        LAUNCH_MILESTONE_TEMPLATES.length
+      );
 
-    const dualTenant = await fixture("production-dual-tenancy");
-    const dualArguments = await resolveLaunchEvryArguments(dualTenant.actor, {
-      kind: "schedule",
-      targetDate: today,
-      postpone: false,
-      note: "Dual-tenancy refusal proof",
-    });
-    assert.ok(dualArguments);
-    const directDualPlan = await prepare(
-      dualTenant,
-      LAUNCH_EFFECT_IDENTITIES.schedule,
-      dualArguments
-    );
-    const routedDualPlan = await prepareThroughProduction(
-      dualTenant,
-      `schedule launch for ${today} | Dual-tenancy refusal proof`
-    );
-    const [dualSendingChurch] = await db
-      .insert(sendingChurches)
-      .values({ name: `${SCRATCH} dual sending church` })
-      .returning({ id: sendingChurches.id });
-    const [dualSendingNetwork] = await db
-      .insert(sendingNetworks)
-      .values({ name: `${SCRATCH} dual sending network` })
-      .returning({ id: sendingNetworks.id });
-    assert.ok(dualSendingChurch && dualSendingNetwork);
-    await db
-      .update(users)
-      .set({
-        sendingChurchId: dualSendingChurch.id,
-        sendingNetworkId: dualSendingNetwork.id,
-      })
-      .where(eq(users.id, dualTenant.user.id));
-    assert.equal((await directDualPlan.execute()).status, "refused");
-    const routedDualRefusal = await routedDualPlan.execute();
-    assert.equal(routedDualRefusal.status, "unavailable");
-    assert.equal(routedDualRefusal.httpStatus, 404);
-    assert.equal(
-      (
-        await db
-          .select()
-          .from(launches)
-          .where(eq(launches.churchId, dualTenant.plant.churchId))
-      ).length,
-      0
-    );
+      const dualTenant = await fixture("production-dual-tenancy");
+      const dualArguments = await resolveLaunchEvryArguments(dualTenant.actor, {
+        kind: "schedule",
+        targetDate: today,
+        postpone: false,
+        note: "Dual-tenancy refusal proof",
+      });
+      assert.ok(dualArguments);
+      const directDualPlan = await prepare(
+        dualTenant,
+        LAUNCH_EFFECT_IDENTITIES.schedule,
+        dualArguments
+      );
+      const routedDualPlan = await prepareThroughProduction(
+        dualTenant,
+        `schedule launch for ${today} | Dual-tenancy refusal proof`
+      );
+      const [dualSendingChurch] = await db
+        .insert(sendingChurches)
+        .values({ name: `${SCRATCH} dual sending church` })
+        .returning({ id: sendingChurches.id });
+      const [dualSendingNetwork] = await db
+        .insert(sendingNetworks)
+        .values({ name: `${SCRATCH} dual sending network` })
+        .returning({ id: sendingNetworks.id });
+      assert.ok(dualSendingChurch && dualSendingNetwork);
+      await db
+        .update(users)
+        .set({
+          sendingChurchId: dualSendingChurch.id,
+          sendingNetworkId: dualSendingNetwork.id,
+        })
+        .where(eq(users.id, dualTenant.user.id));
+      assert.equal((await directDualPlan.execute()).status, "refused");
+      const routedDualRefusal = await routedDualPlan.execute();
+      assert.equal(routedDualRefusal.status, "unavailable");
+      assert.equal(routedDualRefusal.httpStatus, 404);
+      assert.equal(
+        (
+          await db
+            .select()
+            .from(launches)
+            .where(eq(launches.churchId, dualTenant.plant.churchId))
+        ).length,
+        0
+      );
 
-    const demotion = await fixture("production-demotion");
-    assert.equal(
-      (
-        await applyThroughProduction(
-          demotion,
-          `schedule launch for ${today} | Demotion proof`
-        )
-      ).result.status,
-      "completed"
-    );
-    const [demotionTask] = await db
-      .select({ id: tasks.id })
-      .from(tasks)
-      .where(eq(tasks.churchId, demotion.plant.churchId))
-      .limit(1);
-    assert.ok(demotionTask);
-    const demotionPlan = await prepareThroughProduction(
-      demotion,
-      `mark launch task ${demotionTask.id} complete`
-    );
-    await db
-      .update(users)
-      .set({ seat: "member" })
-      .where(eq(users.id, demotion.user.id));
-    const demoted = await demotionPlan.execute();
-    assert.equal(demoted.status, "refused");
-    assert.equal(demoted.httpStatus, 409);
-    const [stillOpen] = await db
-      .select({ status: tasks.status })
-      .from(tasks)
-      .where(eq(tasks.id, demotionTask.id));
-    assert.equal(stillOpen?.status, "not_started");
+      const demotion = await fixture("production-demotion");
+      assert.equal(
+        (
+          await applyThroughProduction(
+            demotion,
+            `schedule launch for ${today} | Demotion proof`
+          )
+        ).result.status,
+        "completed"
+      );
+      const [demotionTask] = await db
+        .select({ id: tasks.id })
+        .from(tasks)
+        .where(eq(tasks.churchId, demotion.plant.churchId))
+        .limit(1);
+      assert.ok(demotionTask);
+      const demotionPlan = await prepareThroughProduction(
+        demotion,
+        `mark launch task ${demotionTask.id} complete`
+      );
+      await db
+        .update(users)
+        .set({ seat: "member" })
+        .where(eq(users.id, demotion.user.id));
+      const demoted = await demotionPlan.execute();
+      assert.equal(demoted.status, "refused");
+      assert.equal(demoted.httpStatus, 409);
+      const [stillOpen] = await db
+        .select({ status: tasks.status })
+        .from(tasks)
+        .where(eq(tasks.id, demotionTask.id));
+      assert.equal(stillOpen?.status, "not_started");
 
-    const scheduleSourceRace = await fixture("production-source-lock-race");
-    const scheduleSourceRacePlan = await prepareThroughProduction(
-      scheduleSourceRace,
-      `schedule launch for ${today} | Atomic source race`
-    );
-    await db.execute(sql`
+      const scheduleSourceRace = await fixture("production-source-lock-race");
+      const scheduleSourceRacePlan = await prepareThroughProduction(
+        scheduleSourceRace,
+        `schedule launch for ${today} | Atomic source race`
+      );
+      await db.execute(sql`
       create function evry_launch_source_race_pause() returns trigger
       language plpgsql as $$ begin
         perform pg_sleep(2);
         return new;
       end $$
     `);
-    await db.execute(sql`
+      await db.execute(sql`
       create trigger evry_launch_source_race_pause
       before update of name on churches
       for each row execute function evry_launch_source_race_pause()
     `);
-    const scheduleSourceDrift = renameLaunchLiveProofChurch(
-      scheduleSourceRace.plant.churchId,
-      `${SCRATCH} source changed inside claim race`
-    );
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    const racedSchedule = await scheduleSourceRacePlan.execute();
-    await scheduleSourceDrift;
-    assert.equal(racedSchedule.status, "refused");
-    assert.equal(racedSchedule.httpStatus, 409);
-    assert.equal(
-      (
-        await db
-          .select()
-          .from(evryExecutionEffectClaims)
-          .where(
-            eq(
-              evryExecutionEffectClaims.planId,
-              scheduleSourceRacePlan.plan.planId
-            )
-          )
-      ).length,
-      0
-    );
-    assert.equal(
-      (
-        await db
-          .select()
-          .from(launches)
-          .where(eq(launches.churchId, scheduleSourceRace.plant.churchId))
-      ).length,
-      0
-    );
-    await db.execute(
-      sql`drop trigger evry_launch_source_race_pause on churches`
-    );
-    await db.execute(sql`drop function evry_launch_source_race_pause()`);
-
-    const copyDrift = await fixture("production-copy-drift");
-    const copyDriftPlan = await prepareThroughProduction(
-      copyDrift,
-      `schedule launch for ${today} | Reviewed original plant name`
-    );
-    await renameLaunchLiveProofChurch(
-      copyDrift.plant.churchId,
-      `${SCRATCH} changed after review`
-    );
-    const staleCopy = await copyDriftPlan.execute();
-    assert.equal(staleCopy.status, "refused");
-    assert.equal(staleCopy.httpStatus, 409);
-
-    const audienceDrift = await fixture("production-audience-drift");
-    const [audienceSendingChurch] = await db
-      .insert(sendingChurches)
-      .values({ name: `${SCRATCH} audience oversight` })
-      .returning({ id: sendingChurches.id });
-    assert.ok(audienceSendingChurch);
-    await setLaunchLiveProofSendingChurch(
-      audienceDrift.plant.churchId,
-      audienceSendingChurch.id
-    );
-    await db.insert(users).values({
-      email: `${crypto.randomUUID()}@scratch.invalid`,
-      passwordHash: "scratch",
-      name: `${SCRATCH} reviewed recipient`,
-      seat: "admin",
-      sendingChurchId: audienceSendingChurch.id,
-    });
-    const audienceDriftPlan = await prepareThroughProduction(
-      audienceDrift,
-      `schedule launch for ${today} | Exact reviewed audience`
-    );
-    await db.insert(users).values({
-      email: `${crypto.randomUUID()}@scratch.invalid`,
-      passwordHash: "scratch",
-      name: `${SCRATCH} late recipient`,
-      seat: "admin",
-      sendingChurchId: audienceSendingChurch.id,
-    });
-    const staleAudience = await audienceDriftPlan.execute();
-    assert.equal(staleAudience.status, "refused");
-    assert.equal(staleAudience.httpStatus, 409);
-
-    const templateDrift = await fixture("production-template-drift");
-    assert.equal(
-      (
-        await applyThroughProduction(
-          templateDrift,
-          `schedule launch for ${today} | Initial exact template`
-        )
-      ).result.status,
-      "completed"
-    );
-    const [templateLaunch] = await db
-      .select({ id: launches.id })
-      .from(launches)
-      .where(eq(launches.churchId, templateDrift.plant.churchId));
-    assert.ok(templateLaunch);
-    const [templateMilestone] = await db
-      .select({ id: launchMilestones.id })
-      .from(launchMilestones)
-      .where(eq(launchMilestones.churchId, templateDrift.plant.churchId))
-      .limit(1);
-    assert.ok(templateMilestone);
-    const removedTemplateTasks = await db
-      .select({ id: launchMilestoneTasks.taskId })
-      .from(launchMilestoneTasks)
-      .where(eq(launchMilestoneTasks.milestoneId, templateMilestone.id));
-    await db
-      .delete(launchMilestones)
-      .where(eq(launchMilestones.id, templateMilestone.id));
-    if (removedTemplateTasks.length > 0) {
-      await db.delete(tasks).where(
-        inArray(
-          tasks.id,
-          removedTemplateTasks.map(({ id }) => id)
-        )
+      const scheduleSourceDrift = renameLaunchLiveProofChurch(
+        scheduleSourceRace.plant.churchId,
+        `${SCRATCH} source changed inside claim race`
       );
-    }
-    const movedDate = new Date(Date.now() + 3 * 86_400_000)
-      .toISOString()
-      .slice(0, 10);
-    const templateDriftPlan = await prepareThroughProduction(
-      templateDrift,
-      `postpone launch to ${movedDate} | Reviewed missing readiness row`
-    );
-    const missingRows = await planMissingLaunchMilestoneSeedRows({
-      launchId: templateLaunch.id,
-      churchId: templateDrift.plant.churchId,
-    });
-    assert.equal(missingRows.length > 0, true);
-    await seedLaunchMilestones({
-      launchId: templateLaunch.id,
-      churchId: templateDrift.plant.churchId,
-      actorUserId: templateDrift.user.id,
-      rows: missingRows.map((row) => ({
-        ...row,
-        title: `${row.title} (changed after review)`,
-      })),
-    });
-    const staleTemplate = await templateDriftPlan.execute();
-    assert.equal(staleTemplate.status, "refused");
-    assert.equal(staleTemplate.httpStatus, 409);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      const racedSchedule = await scheduleSourceRacePlan.execute();
+      await scheduleSourceDrift;
+      assert.equal(racedSchedule.status, "refused");
+      assert.equal(racedSchedule.httpStatus, 409);
+      assert.equal(
+        (
+          await db
+            .select()
+            .from(evryExecutionEffectClaims)
+            .where(
+              eq(
+                evryExecutionEffectClaims.planId,
+                scheduleSourceRacePlan.plan.planId
+              )
+            )
+        ).length,
+        0
+      );
+      assert.equal(
+        (
+          await db
+            .select()
+            .from(launches)
+            .where(eq(launches.churchId, scheduleSourceRace.plant.churchId))
+        ).length,
+        0
+      );
+      await db.execute(
+        sql`drop trigger evry_launch_source_race_pause on churches`
+      );
+      await db.execute(sql`drop function evry_launch_source_race_pause()`);
 
-    const recurring = await fixture("production-recurring-replay");
-    assert.equal(
-      (
-        await applyThroughProduction(
-          recurring,
-          `schedule launch for ${today} | Recurring production proof`
-        )
-      ).result.status,
-      "completed"
-    );
-    const [recurringParent] = await db
-      .select({ id: tasks.id })
-      .from(tasks)
-      .where(eq(tasks.churchId, recurring.plant.churchId))
-      .limit(1);
-    assert.ok(recurringParent);
-    const recurringDueDate = new Date(Date.now() + 4 * 86_400_000)
-      .toISOString()
-      .slice(0, 10);
-    await db
-      .update(tasks)
-      .set({
+      const copyDrift = await fixture("production-copy-drift");
+      const copyDriftPlan = await prepareThroughProduction(
+        copyDrift,
+        `schedule launch for ${today} | Reviewed original plant name`
+      );
+      await renameLaunchLiveProofChurch(
+        copyDrift.plant.churchId,
+        `${SCRATCH} changed after review`
+      );
+      const staleCopy = await copyDriftPlan.execute();
+      assert.equal(staleCopy.status, "refused");
+      assert.equal(staleCopy.httpStatus, 409);
+
+      const audienceDrift = await fixture("production-audience-drift");
+      const [audienceSendingChurch] = await db
+        .insert(sendingChurches)
+        .values({ name: `${SCRATCH} audience oversight` })
+        .returning({ id: sendingChurches.id });
+      assert.ok(audienceSendingChurch);
+      await setLaunchLiveProofSendingChurch(
+        audienceDrift.plant.churchId,
+        audienceSendingChurch.id
+      );
+      await db.insert(users).values({
+        email: `${crypto.randomUUID()}@scratch.invalid`,
+        passwordHash: "scratch",
+        name: `${SCRATCH} reviewed recipient`,
+        seat: "admin",
+        sendingChurchId: audienceSendingChurch.id,
+      });
+      const audienceDriftPlan = await prepareThroughProduction(
+        audienceDrift,
+        `schedule launch for ${today} | Exact reviewed audience`
+      );
+      await db.insert(users).values({
+        email: `${crypto.randomUUID()}@scratch.invalid`,
+        passwordHash: "scratch",
+        name: `${SCRATCH} late recipient`,
+        seat: "admin",
+        sendingChurchId: audienceSendingChurch.id,
+      });
+      const staleAudience = await audienceDriftPlan.execute();
+      assert.equal(staleAudience.status, "refused");
+      assert.equal(staleAudience.httpStatus, 409);
+
+      const templateDrift = await fixture("production-template-drift");
+      assert.equal(
+        (
+          await applyThroughProduction(
+            templateDrift,
+            `schedule launch for ${today} | Initial exact template`
+          )
+        ).result.status,
+        "completed"
+      );
+      const [templateLaunch] = await db
+        .select({ id: launches.id })
+        .from(launches)
+        .where(eq(launches.churchId, templateDrift.plant.churchId));
+      assert.ok(templateLaunch);
+      const [templateMilestone] = await db
+        .select({ id: launchMilestones.id })
+        .from(launchMilestones)
+        .where(eq(launchMilestones.churchId, templateDrift.plant.churchId))
+        .limit(1);
+      assert.ok(templateMilestone);
+      const removedTemplateTasks = await db
+        .select({ id: launchMilestoneTasks.taskId })
+        .from(launchMilestoneTasks)
+        .where(eq(launchMilestoneTasks.milestoneId, templateMilestone.id));
+      await db
+        .delete(launchMilestones)
+        .where(eq(launchMilestones.id, templateMilestone.id));
+      if (removedTemplateTasks.length > 0) {
+        await db.delete(tasks).where(
+          inArray(
+            tasks.id,
+            removedTemplateTasks.map(({ id }) => id)
+          )
+        );
+      }
+      const movedDate = new Date(Date.now() + 3 * 86_400_000)
+        .toISOString()
+        .slice(0, 10);
+      const templateDriftPlan = await prepareThroughProduction(
+        templateDrift,
+        `postpone launch to ${movedDate} | Reviewed missing readiness row`
+      );
+      const missingRows = await planMissingLaunchMilestoneSeedRows({
+        launchId: templateLaunch.id,
+        churchId: templateDrift.plant.churchId,
+      });
+      assert.equal(missingRows.length > 0, true);
+      await seedLaunchMilestones({
+        launchId: templateLaunch.id,
+        churchId: templateDrift.plant.churchId,
+        actorUserId: templateDrift.user.id,
+        rows: missingRows.map((row) => ({
+          ...row,
+          title: `${row.title} (changed after review)`,
+        })),
+      });
+      const staleTemplate = await templateDriftPlan.execute();
+      assert.equal(staleTemplate.status, "refused");
+      assert.equal(staleTemplate.httpStatus, 409);
+
+      const recurring = await fixture("production-recurring-replay");
+      assert.equal(
+        (
+          await applyThroughProduction(
+            recurring,
+            `schedule launch for ${today} | Recurring production proof`
+          )
+        ).result.status,
+        "completed"
+      );
+      const [recurringParent] = await db
+        .select({ id: tasks.id })
+        .from(tasks)
+        .where(eq(tasks.churchId, recurring.plant.churchId))
+        .limit(1);
+      assert.ok(recurringParent);
+      const recurringDueDate = new Date(Date.now() + 4 * 86_400_000)
+        .toISOString()
+        .slice(0, 10);
+      await db
+        .update(tasks)
+        .set({
+          assignedToId: recurring.user.id,
+          dueDate: recurringDueDate,
+          isRecurring: true,
+          recurrenceRule: { interval: "weekly", endDate: null },
+          updatedAt: new Date(),
+        })
+        .where(eq(tasks.id, recurringParent.id));
+      const childId = crypto.randomUUID();
+      await db.insert(tasks).values({
+        id: childId,
+        churchId: recurring.plant.churchId,
+        title: "Exact recurring checklist item",
+        status: "complete",
+        priority: "high",
+        dueTime: "15:30:00",
         assignedToId: recurring.user.id,
-        dueDate: recurringDueDate,
-        isRecurring: true,
-        recurrenceRule: { interval: "weekly", endDate: null },
-        updatedAt: new Date(),
-      })
-      .where(eq(tasks.id, recurringParent.id));
-    const childId = crypto.randomUUID();
-    await db.insert(tasks).values({
-      id: childId,
-      churchId: recurring.plant.churchId,
-      title: "Exact recurring checklist item",
-      status: "complete",
-      priority: "high",
-      dueTime: "15:30:00",
-      assignedToId: recurring.user.id,
-      category: "launch_prep",
-      parentTaskId: recurringParent.id,
-      createdById: recurring.user.id,
-    });
-    const staleRecurringSourcePlan = await prepareThroughProduction(
-      recurring,
-      `mark launch task ${recurringParent.id} complete`
-    );
-    await db.execute(sql`
+        category: "launch_prep",
+        parentTaskId: recurringParent.id,
+        createdById: recurring.user.id,
+      });
+      const staleRecurringSourcePlan = await prepareThroughProduction(
+        recurring,
+        `mark launch task ${recurringParent.id} complete`
+      );
+      await db.execute(sql`
       create function evry_launch_child_race_pause() returns trigger
       language plpgsql as $$ begin
         perform pg_sleep(2);
         return new;
       end $$
     `);
-    await db.execute(sql`
+      await db.execute(sql`
       create trigger evry_launch_child_race_pause
       before update of title on tasks
       for each row execute function evry_launch_child_race_pause()
     `);
-    const childSourceDrift = (async () => {
+      const childSourceDrift = (async () => {
+        await db
+          .update(tasks)
+          .set({ title: "Changed while the exact claim waited" })
+          .where(eq(tasks.id, childId));
+      })();
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      const racedRecurringSource = await staleRecurringSourcePlan.execute();
+      await childSourceDrift;
+      assert.equal(racedRecurringSource.status, "refused");
+      assert.equal(racedRecurringSource.httpStatus, 409);
+      assert.equal(
+        (
+          await db
+            .select()
+            .from(evryExecutionEffectClaims)
+            .where(
+              eq(
+                evryExecutionEffectClaims.planId,
+                staleRecurringSourcePlan.plan.planId
+              )
+            )
+        ).length,
+        0
+      );
+      const [unclaimedParent] = await db
+        .select({ status: tasks.status })
+        .from(tasks)
+        .where(eq(tasks.id, recurringParent.id));
+      assert.equal(unclaimedParent?.status, "not_started");
+      await db.execute(sql`drop trigger evry_launch_child_race_pause on tasks`);
+      await db.execute(sql`drop function evry_launch_child_race_pause()`);
       await db
         .update(tasks)
-        .set({ title: "Changed while the exact claim waited" })
+        .set({ title: "Exact recurring checklist item" })
         .where(eq(tasks.id, childId));
-    })();
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    const racedRecurringSource = await staleRecurringSourcePlan.execute();
-    await childSourceDrift;
-    assert.equal(racedRecurringSource.status, "refused");
-    assert.equal(racedRecurringSource.httpStatus, 409);
-    assert.equal(
-      (
-        await db
-          .select()
-          .from(evryExecutionEffectClaims)
-          .where(
-            eq(
-              evryExecutionEffectClaims.planId,
-              staleRecurringSourcePlan.plan.planId
-            )
-          )
-      ).length,
-      0
-    );
-    const [unclaimedParent] = await db
-      .select({ status: tasks.status })
-      .from(tasks)
-      .where(eq(tasks.id, recurringParent.id));
-    assert.equal(unclaimedParent?.status, "not_started");
-    await db.execute(sql`drop trigger evry_launch_child_race_pause on tasks`);
-    await db.execute(sql`drop function evry_launch_child_race_pause()`);
-    await db
-      .update(tasks)
-      .set({ title: "Exact recurring checklist item" })
-      .where(eq(tasks.id, childId));
-    const recurringPlan = await prepareThroughProduction(
-      recurring,
-      `mark launch task ${recurringParent.id} complete`
-    );
-    await db.execute(sql`
+      const recurringPlan = await prepareThroughProduction(
+        recurring,
+        `mark launch task ${recurringParent.id} complete`
+      );
+      await db.execute(sql`
       create function evry_launch_task_effect_crash_once() returns trigger
       language plpgsql as $$ begin
         raise exception 'injected downstream task effect crash';
       end $$
     `);
-    await db.execute(sql`
+      await db.execute(sql`
       create trigger evry_launch_task_effect_crash_once
       before update on churches
       for each row execute function evry_launch_task_effect_crash_once()
     `);
-    const interruptedTask = await recurringPlan.execute();
-    assert.equal(interruptedTask.status, "retryable");
-    assert.equal(interruptedTask.httpStatus, 503);
-    const [durableCompletion] = await db
-      .select({ status: tasks.status })
-      .from(tasks)
-      .where(eq(tasks.id, recurringParent.id));
-    assert.equal(durableCompletion?.status, "complete");
-    await db.execute(
-      sql`drop trigger evry_launch_task_effect_crash_once on churches`
-    );
-    await db.execute(sql`drop function evry_launch_task_effect_crash_once()`);
-    const recoveredTasks = await Promise.all(
-      Array.from({ length: 8 }, () => recurringPlan.execute())
-    );
-    assert.deepEqual(
-      recoveredTasks.map(({ status }) => status),
-      Array.from({ length: 8 }, () => "completed")
-    );
-    const openSeries = await db
-      .select()
-      .from(tasks)
-      .where(
-        and(
-          eq(tasks.churchId, recurring.plant.churchId),
-          eq(tasks.isRecurring, true),
-          sql`${tasks.status} <> 'complete'`,
-          sql`${tasks.recurrenceRule} ->> 'seriesId' is not null`
-        )
+      const interruptedTask = await recurringPlan.execute();
+      assert.equal(interruptedTask.status, "retryable");
+      assert.equal(interruptedTask.httpStatus, 503);
+      const [durableCompletion] = await db
+        .select({ status: tasks.status })
+        .from(tasks)
+        .where(eq(tasks.id, recurringParent.id));
+      assert.equal(durableCompletion?.status, "complete");
+      await db.execute(
+        sql`drop trigger evry_launch_task_effect_crash_once on churches`
       );
-    assert.equal(openSeries.length, 1);
-    const successor = openSeries[0]!;
-    const successorChildren = await db
-      .select()
-      .from(tasks)
-      .where(eq(tasks.parentTaskId, successor.id));
-    assert.equal(successorChildren.length, 1);
-    assert.equal(successorChildren[0]?.title, "Exact recurring checklist item");
-    assert.equal(successorChildren[0]?.status, "not_started");
-    await assert.rejects(
-      db
-        .update(tasks)
-        .set({ status: "not_started" })
-        .where(eq(tasks.id, recurringParent.id)),
-      (error) =>
-        isUniqueViolation(error, "tasks_open_recurrence_series_unique_idx")
-    );
-    assert.equal(
-      (
-        await db
-          .select()
-          .from(notifications)
-          .where(eq(notifications.entityId, successor.id))
-      ).length,
-      2
-    );
-    const [dirtiedPlant] = await db
-      .select({ at: churches.lastMaterialEventAt })
-      .from(churches)
-      .where(eq(churches.id, recurring.plant.churchId));
-    assert.ok(dirtiedPlant?.at);
+      await db.execute(sql`drop function evry_launch_task_effect_crash_once()`);
+      const recoveredTasks = await Promise.all(
+        Array.from({ length: 8 }, () => recurringPlan.execute())
+      );
+      assert.deepEqual(
+        recoveredTasks.map(({ status }) => status),
+        Array.from({ length: 8 }, () => "completed")
+      );
+      const openSeries = await db
+        .select()
+        .from(tasks)
+        .where(
+          and(
+            eq(tasks.churchId, recurring.plant.churchId),
+            eq(tasks.isRecurring, true),
+            sql`${tasks.status} <> 'complete'`,
+            sql`${tasks.recurrenceRule} ->> 'seriesId' is not null`
+          )
+        );
+      assert.equal(openSeries.length, 1);
+      const successor = openSeries[0]!;
+      const successorChildren = await db
+        .select()
+        .from(tasks)
+        .where(eq(tasks.parentTaskId, successor.id));
+      assert.equal(successorChildren.length, 1);
+      assert.equal(
+        successorChildren[0]?.title,
+        "Exact recurring checklist item"
+      );
+      assert.equal(successorChildren[0]?.status, "not_started");
+      await assert.rejects(
+        db
+          .update(tasks)
+          .set({ status: "not_started" })
+          .where(eq(tasks.id, recurringParent.id)),
+        (error) =>
+          isUniqueViolation(error, "tasks_open_recurrence_series_unique_idx")
+      );
+      assert.equal(
+        (
+          await db
+            .select()
+            .from(notifications)
+            .where(eq(notifications.entityId, successor.id))
+        ).length,
+        2
+      );
+      const [dirtiedPlant] = await db
+        .select({ at: churches.lastMaterialEventAt })
+        .from(churches)
+        .where(eq(churches.id, recurring.plant.churchId));
+      assert.ok(dirtiedPlant?.at);
 
+      const lateReplay = await fixture("late-replay");
+      const firstSchedule = await applyThroughProduction(
+        lateReplay,
+        `schedule launch for ${today} | response may be lost`
+      );
+      assert.equal(firstSchedule.result.status, "completed");
+      const laterDate = new Date(Date.now() + 2 * 86_400_000)
+        .toISOString()
+        .slice(0, 10);
+      assert.equal(
+        (
+          await setLaunchDate(
+            lateReplay.user,
+            lateReplay.plant.churchId,
+            laterDate,
+            { note: "later independent change" }
+          )
+        ).status,
+        "changed"
+      );
+      assert.equal(
+        (await firstSchedule.replay()).status,
+        "completed",
+        "exact outcome replay consulted the later mutable Launch row"
+      );
+
+      process.stdout.write("EVRY_LAUNCH_EFFECT_PHASE=production:passed\n");
+    } finally {
+      await stopApplication();
+    }
+    return;
+  }
+
+  if (phase === "adapter") {
     // Evry audit/plan rows are intentionally immutable, so this isolated
     // per-suite database is the cleanup boundary. The live lane recreates it
     // from the migration template before every run.
@@ -1626,32 +1665,6 @@ async function main() {
         "a completed exact-key replay did not repair missing readiness rows"
       );
 
-      const lateReplay = await fixture("late-replay");
-      const firstSchedule = await applyThroughProduction(
-        lateReplay,
-        `schedule launch for ${today} | response may be lost`
-      );
-      assert.equal(firstSchedule.result.status, "completed");
-      const laterDate = new Date(Date.now() + 2 * 86_400_000)
-        .toISOString()
-        .slice(0, 10);
-      assert.equal(
-        (
-          await setLaunchDate(
-            lateReplay.user,
-            lateReplay.plant.churchId,
-            laterDate,
-            { note: "later independent change" }
-          )
-        ).status,
-        "changed"
-      );
-      assert.equal(
-        (await firstSchedule.replay()).status,
-        "completed",
-        "exact outcome replay consulted the later mutable Launch row"
-      );
-
       const recurringTask = await fixture("recurring-task");
       assert.equal(
         (
@@ -1772,11 +1785,13 @@ async function main() {
       process.stdout.write(
         `EVRY_LAUNCH_EFFECT_OUTCOMES=${JSON.stringify([...outcomes].sort())}\n`
       );
+      process.stdout.write("EVRY_LAUNCH_EFFECT_PHASE=adapter:passed\n");
       process.stdout.write("Launch effect live proof passed\n");
     }
-  } finally {
-    await stopApplication();
+    return;
   }
+
+  throw new Error(`Unknown Launch effect proof phase: ${String(phase)}`);
 }
 
 main().catch((error: unknown) => {
