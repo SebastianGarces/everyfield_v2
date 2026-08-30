@@ -19,6 +19,22 @@ interface CompletedEffectRow extends Record<string, unknown> {
   claimed_now: boolean;
 }
 
+async function actorStillHoldsPeopleWrite(
+  execution: EvryEffectInput["execution"]
+): Promise<boolean> {
+  const result = await db.execute(sql`
+    select 1
+    from users actor
+    where actor.id = ${execution.actorUserId}::uuid
+      and actor.church_id = ${execution.plantId}::uuid
+      and actor.sending_church_id is null
+      and actor.sending_network_id is null
+      and actor.seat in ('owner', 'admin')
+    limit 1
+  `);
+  return result.rows.length === 1;
+}
+
 export async function recoverCompletedEvryPeopleEffect(
   input: Pick<EvryEffectInput, "execution" | "effectKey">
 ): Promise<EvryEffectResult | null> {
@@ -101,6 +117,12 @@ export async function claimEvryPeopleEffect(input: {
       from evry_execution_attempts a
       join evry_action_plan_states s
         on s.plan_id = a.plan_id and s.church_id = a.church_id
+      join users actor
+        on actor.id = a.actor_user_id
+        and actor.church_id = a.church_id
+        and actor.sending_church_id is null
+        and actor.sending_network_id is null
+        and actor.seat in ('owner', 'admin')
       where a.id = ${input.execution.attemptId}::uuid
         and a.plan_id = ${input.execution.planId}::uuid
         and a.church_id = ${input.execution.plantId}::uuid
@@ -166,6 +188,9 @@ export async function claimEvryPeopleEffect(input: {
   }
   const replay = await recoverCompletedEvryPeopleEffect(input);
   if (replay) return replay;
+  if (!(await actorStillHoldsPeopleWrite(input.execution))) {
+    return { status: "refused", excludedCount: 1 };
+  }
   return (await input.targetIsCurrent())
     ? { status: "retryable" }
     : { status: "refused", excludedCount: 1 };

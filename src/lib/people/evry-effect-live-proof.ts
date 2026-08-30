@@ -20,6 +20,7 @@ import {
   personActivities,
   personTags,
   persons,
+  sendingChurches,
   skillsInventory,
   tags,
   users,
@@ -605,6 +606,74 @@ async function main(proofStorage: EvryPeopleEffectProofStorage): Promise<void> {
       note: "Must not cross plants",
     }),
     { status: "refused", excludedCount: 1 }
+  );
+
+  // The authorization token above represents the actor before this malformed
+  // second tenancy appeared. The write statement must independently re-check
+  // the current user row and refuse without claiming the effect.
+  const dualTenancyAttempt = await seedAttempt({
+    churchId: plant.id,
+    actorUserId: owner.id,
+    capabilityIdentity: NOTE_IDENTITY,
+    stepId: "dual-tenancy-note",
+  });
+  const [competingTenancy] = await db
+    .insert(sendingChurches)
+    .values({ name: "__People competing tenancy__" })
+    .returning({ id: sendingChurches.id });
+  assert.ok(competingTenancy);
+  await db
+    .update(users)
+    .set({ sendingChurchId: competingTenancy.id })
+    .where(eq(users.id, owner.id));
+  let dualTenancyResult;
+  try {
+    dualTenancyResult = await executeProductionEffect(
+      NOTE_IDENTITY,
+      dualTenancyAttempt,
+      {
+        personId: person.id,
+        firstName: "Ada",
+        lastName: "Lovelace",
+        note: "Malformed tenancy must not land",
+      }
+    );
+  } finally {
+    await db
+      .update(users)
+      .set({ sendingChurchId: null })
+      .where(eq(users.id, owner.id));
+  }
+  assert.deepEqual(dualTenancyResult, {
+    status: "refused",
+    excludedCount: 1,
+  });
+  assert.equal(
+    (
+      await db
+        .select({ id: personActivities.id })
+        .from(personActivities)
+        .where(
+          and(
+            eq(personActivities.churchId, plant.id),
+            eq(personActivities.personId, person.id),
+            sql`${personActivities.metadata}->>'note' = 'Malformed tenancy must not land'`
+          )
+        )
+    ).length,
+    0
+  );
+  assert.equal(
+    (
+      await db
+        .select({ id: evryExecutionOutcomes.id })
+        .from(evryExecutionOutcomes)
+        .where(
+          eq(evryExecutionOutcomes.planId, dualTenancyAttempt.execution.planId)
+        )
+    ).length,
+    0,
+    "malformed tenancy cannot claim a People effect"
   );
 
   const createAttempt = await seedAttempt({
