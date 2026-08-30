@@ -39,3 +39,37 @@ test(
     assert.match(proof.stdout, /Evry recipe live request proof passed/);
   }
 );
+
+test(
+  "the meeting invitation recipe binds create output and resumes only sending",
+  { skip },
+  () => {
+    const proof = spawnSync(
+      process.execPath,
+      [
+        "--no-warnings",
+        "--experimental-test-module-mocks",
+        "--import",
+        "tsx",
+        "--import",
+        "./scripts/live-db-endpoint.ts",
+        path.join(
+          process.cwd(),
+          "src/lib/evry/recipes/meeting-invitation-live-proof.ts"
+        ),
+      ],
+      {
+        cwd: process.cwd(),
+        encoding: "utf8",
+        env: process.env,
+        timeout: 120_000,
+      }
+    );
+    assert.equal(
+      proof.status,
+      0,
+      `live invitation proof failed\nerror: ${proof.error?.message ?? "none"}\nsignal: ${proof.signal ?? "none"}\nstdout:\n${proof.stdout}\nstderr:\n${proof.stderr}`
+    );
+    assert.match(proof.stdout, /Meeting invitation live proof passed/);
+  }
+);

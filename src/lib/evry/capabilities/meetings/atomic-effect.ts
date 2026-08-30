@@ -3,10 +3,12 @@ import { and, eq, sql, type SQL } from "drizzle-orm";
 import { db } from "@/db";
 import { evryExecutionOutcomes } from "@/db/schema";
 import {
+  executionEffectKey,
   executionStepOutcomeKey,
   type EvryAuditKey,
 } from "@/lib/evry/audit/identity";
 import type { EvryEffectInput, EvryEffectResult } from "@/lib/evry/executor";
+import type { EvryJsonValue } from "@/lib/evry/plans";
 
 import {
   MEETINGS_ACTION_CONTRACTS,
@@ -16,10 +18,17 @@ import {
   MEETINGS_EFFECT_ARGUMENT_SCHEMAS,
   type MeetingsEffectArguments,
 } from "./effect-contracts";
+import {
+  MEETING_CREATE_DEPENDENCY_OUTPUT_SCHEMA,
+  MEETING_GUEST_BATCH_ARGUMENT_SCHEMA,
+  type MeetingCreateDependencyOutput,
+  type MeetingGuestBatchArguments,
+} from "./dependency-output";
 
 interface CompletedEffectRow extends Record<string, unknown> {
   affected_count: number;
   excluded_count: number;
+  dependency_output: unknown | null;
 }
 
 type Execution = EvryEffectInput["execution"];
@@ -42,6 +51,7 @@ async function exactCompletedOutcome(input: {
     .select({
       affectedCount: evryExecutionOutcomes.affectedCount,
       excludedCount: evryExecutionOutcomes.excludedCount,
+      dependencyOutput: evryExecutionOutcomes.dependencyOutput,
     })
     .from(evryExecutionOutcomes)
     .where(
@@ -68,6 +78,9 @@ async function exactCompletedOutcome(input: {
         status: "completed",
         affectedCount: row.affectedCount,
         excludedCount: row.excludedCount,
+        ...(row.dependencyOutput !== null
+          ? { dependencyOutput: row.dependencyOutput as EvryJsonValue }
+          : {}),
       }
     : null;
 }
@@ -78,6 +91,7 @@ function effectPrelude(input: {
   effectKey: EvryAuditKey;
   current: SQL;
   affectedCount: number;
+  dependencyOutput?: SQL;
 }): SQL {
   const outcomeKey = executionStepOutcomeKey(
     input.execution.planId,
@@ -86,7 +100,7 @@ function effectPrelude(input: {
   );
   return sql`
     existing as materialized (
-      select o.affected_count, o.excluded_count
+      select o.affected_count, o.excluded_count, o.dependency_output
       from evry_execution_outcomes o
       where o.attempt_id = ${input.execution.attemptId}::uuid
         and o.plan_id = ${input.execution.planId}::uuid
@@ -126,17 +140,18 @@ function effectPrelude(input: {
         attempt_id, plan_id, church_id, actor_user_id, plan_fingerprint,
         correlation_id, outcome_key, effect_key, subject, step_id,
         capability_identity, status, result_code, affected_count,
-        excluded_count, occurred_at
+        excluded_count, occurred_at, dependency_output
       )
       select
         e.id, e.plan_id, e.church_id, e.actor_user_id, e.plan_fingerprint,
         e.correlation_id, ${outcomeKey}, ${input.effectKey}, 'step',
         ${input.execution.stepId}, ${input.execution.capabilityIdentity},
         'completed', 'effect_completed', ${input.affectedCount}, 0,
-        transaction_timestamp()
+        transaction_timestamp(), ${input.dependencyOutput ?? sql`null::jsonb`}
       from eligible e
       on conflict do nothing
-      returning affected_count, excluded_count, church_id, actor_user_id
+      returning affected_count, excluded_count, dependency_output,
+        church_id, actor_user_id
     )`;
 }
 
@@ -149,11 +164,11 @@ function effectTail(): SQL {
           or coalesce((select ok from mutation_complete), false)
         then 1 else 0 end as ok
     )
-    select e.affected_count, e.excluded_count
+    select e.affected_count, e.excluded_count, e.dependency_output
     from existing e
     cross join asserted
     union all
-    select c.affected_count, c.excluded_count
+    select c.affected_count, c.excluded_count, c.dependency_output
     from claimed c
     cross join asserted
     limit 1`;
@@ -832,6 +847,10 @@ function notificationTargetsCurrent(input: {
         kind: "create";
         actorUserId: string;
         rosterPersonIds: readonly string[];
+      }>
+    | Readonly<{
+        kind: "batch";
+        addPersonIds: readonly string[];
       }>;
 }): SQL {
   const targets = JSON.stringify(input.targets);
@@ -866,20 +885,31 @@ function notificationTargetsCurrent(input: {
           where a.meeting_id = ${input.meetingId}::uuid
             and a.church_id = ${input.plantId}::uuid
             and p.deleted_at is null and p.email is not null
-            and (${input.audience.removePersonId ?? null}::uuid is null
-              or p.id <> ${input.audience.removePersonId ?? null}::uuid)
+            and (${input.audience.kind === "existing" ? (input.audience.removePersonId ?? null) : null}::uuid is null
+              or p.id <> ${input.audience.kind === "existing" ? (input.audience.removePersonId ?? null) : null}::uuid)
           union select u.id
           from persons p join users u
             on u.church_id = ${input.plantId}::uuid
            and lower(u.email) = lower(p.email)
-          where p.id = ${input.audience.addPersonId ?? null}::uuid
+          where p.id = ${input.audience.kind === "batch" ? null : (input.audience.addPersonId ?? null)}::uuid
+            and p.church_id = ${input.plantId}::uuid
+            and p.deleted_at is null and p.email is not null
+          union select distinct u.id
+          from persons p join users u
+            on u.church_id = ${input.plantId}::uuid
+           and lower(u.email) = lower(p.email)
+          where p.id in (
+            select value::uuid from jsonb_array_elements_text(
+              ${JSON.stringify(input.audience.kind === "batch" ? input.audience.addPersonIds : [])}::jsonb
+            ) value
+          )
             and p.church_id = ${input.plantId}::uuid
             and p.deleted_at is null and p.email is not null
           union select u.id
           from users u
           where u.church_id = ${input.plantId}::uuid
-            and ${input.audience.addEmail ?? null}::text is not null
-            and lower(u.email) = lower(${input.audience.addEmail ?? null}::text)`;
+            and ${input.audience.kind === "batch" ? null : (input.audience.addEmail ?? null)}::text is not null
+            and lower(u.email) = lower(${input.audience.kind === "batch" ? null : (input.audience.addEmail ?? null)}::text)`;
   return sql`not exists (
     select u.id
     from persons p join users u
@@ -1151,6 +1181,103 @@ function addAttendanceStatement<
   `;
 }
 
+function exactMeetingCreateDependency(input: {
+  effect: EvryEffectInput;
+  args: MeetingGuestBatchArguments;
+}): MeetingCreateDependencyOutput | null {
+  const expectedEffectKey = executionEffectKey(
+    input.effect.execution.planId,
+    input.effect.execution.fingerprint,
+    input.args.dependencyStepId
+  );
+  const matches = (input.effect.dependencyOutputs ?? []).filter(
+    (dependency) =>
+      dependency.stepId === input.args.dependencyStepId &&
+      dependency.capabilityIdentity === "meetings.create" &&
+      dependency.effectKey === expectedEffectKey
+  );
+  if (matches.length !== 1) return null;
+  const parsed = MEETING_CREATE_DEPENDENCY_OUTPUT_SCHEMA.safeParse(
+    matches[0]!.value
+  );
+  return parsed.success && parsed.data.meetingId === input.args.meetingId
+    ? parsed.data
+    : null;
+}
+
+function addGuestBatchStatement(input: {
+  execution: Execution;
+  effectKey: EvryAuditKey;
+  args: MeetingGuestBatchArguments;
+  dependency: MeetingCreateDependencyOutput;
+}): SQL {
+  const { args, dependency } = input;
+  const targets = JSON.stringify(args.targets);
+  return sql`
+    with ${effectPrelude({
+      ...input,
+      affectedCount: args.targets.length,
+      current: sql`${notificationTargetsCurrent({
+        plantId: input.execution.plantId,
+        meetingId: args.meetingId,
+        baseline: {
+          coreGroupUserIds: args.expectedCoreGroupUserIds,
+          reminderUserIds: args.expectedReminderUserIds,
+          activeNotifications: dependency.activeNotifications,
+        },
+        targets: args.notificationTargets,
+        audience: {
+          kind: "batch",
+          addPersonIds: args.targets.map(({ personId }) => personId),
+        },
+      })}
+        and exists (
+          select 1 from church_meetings m
+          where m.id = ${args.meetingId}::uuid
+            and m.church_id = ${input.execution.plantId}::uuid
+            and ${serializedTimestampMatches(
+              sql`m.updated_at`,
+              dependency.expectedMeetingUpdatedAt
+            )}
+        )
+        and not exists (
+          select 1 from jsonb_array_elements(${targets}::jsonb) t
+          left join persons p
+            on p.id = (t->>'personId')::uuid
+           and p.church_id = ${input.execution.plantId}::uuid
+           and p.deleted_at is null
+           and date_trunc('milliseconds', p.updated_at) =
+             (t->>'expectedPersonUpdatedAt')::timestamp
+          where p.id is null
+            or exists (
+              select 1 from meeting_attendance a
+              where a.id = (t->>'attendanceId')::uuid
+                 or (a.meeting_id = ${args.meetingId}::uuid
+                     and a.person_id = (t->>'personId')::uuid)
+            )
+        )`,
+    })}, guest_input as materialized (
+      select target from jsonb_array_elements(${targets}::jsonb) target
+    ), attendance_inserted as (
+      insert into meeting_attendance (
+        id, church_id, meeting_id, person_id, status, created_by,
+        created_at, updated_at
+      )
+      select (g.target->>'attendanceId')::uuid, c.church_id,
+        ${args.meetingId}::uuid, (g.target->>'personId')::uuid, 'absent',
+        c.actor_user_id, transaction_timestamp(), transaction_timestamp()
+      from claimed c cross join guest_input g
+      returning id
+    ), ${notificationsWritten({ targets: args.notificationTargets })},
+    mutation_complete as (
+      select (select count(*) from attendance_inserted) = ${args.targets.length}
+        and ${notificationCountsComplete({
+          targetCount: args.notificationTargets.length,
+        })} as ok
+    ), ${effectTail()}
+  `;
+}
+
 function removeAttendanceStatement<
   ExportName extends "removeAttendeeAction" | "removeFromGuestListAction",
 >(input: {
@@ -1408,6 +1535,7 @@ function createMeetingStatement(input: {
   const checklist = JSON.stringify(args.checklistItems);
   const attendance = JSON.stringify(args.attendanceRows);
   const roster = JSON.stringify(args.resolvedTeamMemberIds);
+  const notificationTargets = JSON.stringify(args.notificationTargets);
   const locationCurrent = args.locationId
     ? args.savedLocationId
       ? sql`${args.savedLocationId}::uuid = ${args.locationId}::uuid
@@ -1466,6 +1594,30 @@ function createMeetingStatement(input: {
         (args.savedLocationId ? 1 : 0) +
         args.checklistItems.length +
         args.attendanceRows.length,
+      dependencyOutput: sql`jsonb_build_object(
+        'kind', 'meetings.create.output.v1',
+        'meetingId', ${args.meetingId}::text,
+        'expectedMeetingUpdatedAt', to_char(
+          date_trunc('milliseconds', transaction_timestamp()),
+          'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
+        ),
+        'activeNotifications', coalesce((
+          select jsonb_agg(jsonb_build_object(
+            'notificationId', target->>'notificationId',
+            'recipientUserId', target->>'recipientUserId',
+            'type', target->>'type',
+            'entityId', target->>'entityId',
+            'dedupeKey', target->>'dedupeKey',
+            'scheduledFor', target->>'scheduledFor',
+            'status', 'pending',
+            'expectedUpdatedAt', to_char(
+              date_trunc('milliseconds', transaction_timestamp()),
+              'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
+            )
+          ) order by target->>'notificationId')
+          from jsonb_array_elements(${notificationTargets}::jsonb) target
+        ), '[]'::jsonb)
+      )`,
       current: sql`${locationCurrent} and ${teamCurrent}
         and ${notificationTargetsCurrent({
           plantId: input.execution.plantId,
@@ -2464,6 +2616,41 @@ export async function executeMeetingsEffect(
   if (!exportName || !exactTuple(input, input.execution.capabilityIdentity)) {
     return { status: "refused", excludedCount: 1 };
   }
+  const guestBatch =
+    exportName === "addToGuestListAction"
+      ? MEETING_GUEST_BATCH_ARGUMENT_SCHEMA.safeParse(input.arguments)
+      : null;
+  if (guestBatch?.success) {
+    const dependency = exactMeetingCreateDependency({
+      effect: input,
+      args: guestBatch.data,
+    });
+    if (!dependency) return { status: "refused", excludedCount: 1 };
+    const [, result] = await db.batch([
+      db.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${input.effectKey}, 0))`
+      ),
+      db.execute<CompletedEffectRow>(
+        addGuestBatchStatement({
+          execution: input.execution,
+          effectKey: input.effectKey,
+          args: guestBatch.data,
+          dependency,
+        })
+      ),
+    ]);
+    const row = result.rows[0];
+    return row
+      ? {
+          status: "completed",
+          affectedCount: row.affected_count,
+          excludedCount: row.excluded_count,
+        }
+      : ((await exactCompletedOutcome(input)) ?? {
+          status: "refused",
+          excludedCount: 1,
+        });
+  }
   const parsed = MEETINGS_EFFECT_ARGUMENT_SCHEMAS[exportName].safeParse(
     input.arguments
   );
@@ -2488,6 +2675,9 @@ export async function executeMeetingsEffect(
       status: "completed",
       affectedCount: row.affected_count,
       excludedCount: row.excluded_count,
+      ...(row.dependency_output !== null
+        ? { dependencyOutput: row.dependency_output as EvryJsonValue }
+        : {}),
     };
   }
   return (
