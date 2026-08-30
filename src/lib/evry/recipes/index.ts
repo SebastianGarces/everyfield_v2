@@ -32,9 +32,11 @@ export {
 } from "./schema";
 export {
   buildMeetingInvitationConfirmation,
+  createMeetingInvitationRecipeRegistry,
   createMeetingInvitationPlanResolver,
   createMeetingInvitationReferenceResolver,
   MEETING_INVITATION_CAPABILITY_IDENTITY,
+  MEETING_INVITATION_RECIPE_REGISTRY,
   MEETING_INVITATION_RECIPE_IDENTITY,
   resolveMeetingInvitationPlan,
   resolveMeetingInvitationReference,

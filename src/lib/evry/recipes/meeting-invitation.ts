@@ -26,8 +26,22 @@ import {
 import type { EvryClarificationArtifact } from "@/lib/evry/artifacts/types";
 import type { EvryConversationPlanIdentity } from "@/lib/evry/conversations/contract";
 import { resolveMeetingsEvryEffect } from "@/lib/evry/capabilities/meetings/resolver";
+import { resolveMeetingGuestBatchAfterCreate } from "@/lib/evry/capabilities/meetings/resolver";
+import type { MeetingGuestBatchArguments } from "@/lib/evry/capabilities/meetings/dependency-output";
+import { MEETING_GUEST_BATCH_ARGUMENT_SCHEMA } from "@/lib/evry/capabilities/meetings/dependency-output";
+import { MEETINGS_EFFECT_ARGUMENT_SCHEMAS } from "@/lib/evry/capabilities/meetings/effect-contracts";
+import { MEETINGS_EXECUTION_CAPABILITIES } from "@/lib/evry/capabilities/meetings/runtime";
+import {
+  COMMUNICATION_MESSAGE_SEND_EXECUTION,
+  COMMUNICATION_MESSAGE_SEND_PLAN,
+} from "@/lib/evry/capabilities/communication/messages";
 import type { EvryJsonValue, EvryPlanRequestKey } from "@/lib/evry/plans";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
+import {
+  createEvryExecutionCapabilityRegistry,
+  type EvryExecutionCapabilityRegistration,
+} from "@/lib/evry/executor";
+import { createEvryRecipeRegistry } from "./schema";
 import {
   resolveEvryPlantDateTimeRequest,
   type EvryDateTimeResolution,
@@ -41,6 +55,8 @@ import {
 export const MEETING_INVITATION_RECIPE_IDENTITY =
   "meeting.invitation.reference";
 export const MEETING_INVITATION_CAPABILITY_IDENTITY = "meetings.create";
+export const MEETING_INVITATION_ADD_GUESTS_IDENTITY = "meetings.add-guests";
+export const MEETING_INVITATION_SEND_IDENTITY = "communication.messages.send";
 
 const CORE_TEAM_STATUSES = new Set(["core_group", "launch_team", "leader"]);
 
@@ -118,15 +134,7 @@ export type MeetingInvitationReferenceResolution =
 
 export type MeetingInvitationPlanSnapshot = Readonly<{
   meeting: Readonly<Record<string, EvryJsonValue>>;
-  guests: Readonly<{
-    meetingId: string;
-    targets: readonly Readonly<{
-      attendanceId: string;
-      personId: string;
-      expectedPersonUpdatedAt: string;
-      expectedAttendanceAbsent: true;
-    }>[];
-  }>;
+  guests: MeetingGuestBatchArguments;
   communication: Readonly<{
     communicationId: string;
     recipientSource: Readonly<{
@@ -139,6 +147,7 @@ export type MeetingInvitationPlanSnapshot = Readonly<{
 
 type MeetingInvitationPlanDependencies = Readonly<{
   resolveMeeting: typeof resolveMeetingsEvryEffect;
+  resolveGuests: typeof resolveMeetingGuestBatchAfterCreate;
   resolveAudience: typeof resolveEvryCommunicationAudience;
 }>;
 
@@ -222,24 +231,29 @@ export function createMeetingInvitationPlanResolver(
     ) {
       return null;
     }
+    const guestTargets = input.resolved.guests.map((guest) =>
+      Object.freeze({
+        attendanceId: communicationEvryEffectUuid(
+          input.requestKey,
+          `meeting-guest:${guest.personId}`
+        ),
+        personId: guest.personId,
+        expectedPersonUpdatedAt: guest.expectedPersonUpdatedAt,
+        expectedAttendanceAbsent: true as const,
+      })
+    );
+    const guests = await dependencies.resolveGuests({
+      actor: input.actor,
+      create: meetingArguments,
+      dependencyStepId: "create-meeting",
+      targets: guestTargets,
+      requestKey: input.requestKey,
+      now: input.now,
+    });
+    if (!guests) return null;
     return Object.freeze({
       meeting: meetingArguments,
-      guests: Object.freeze({
-        meetingId: meetingArguments.meetingId,
-        targets: Object.freeze(
-          input.resolved.guests.map((guest) =>
-            Object.freeze({
-              attendanceId: communicationEvryEffectUuid(
-                input.requestKey,
-                `meeting-guest:${guest.personId}`
-              ),
-              personId: guest.personId,
-              expectedPersonUpdatedAt: guest.expectedPersonUpdatedAt,
-              expectedAttendanceAbsent: true as const,
-            })
-          )
-        ),
-      }),
+      guests,
       communication: Object.freeze({
         communicationId: communicationEvryEffectUuid(
           input.requestKey,
@@ -258,9 +272,161 @@ export function createMeetingInvitationPlanResolver(
 export const resolveMeetingInvitationPlan = createMeetingInvitationPlanResolver(
   {
     resolveMeeting: resolveMeetingsEvryEffect,
+    resolveGuests: resolveMeetingGuestBatchAfterCreate,
     resolveAudience: resolveEvryCommunicationAudience,
   }
 );
+
+function inputBindings(keys: readonly string[], inputKey: string) {
+  return Object.fromEntries(
+    keys.map((key) => [
+      key,
+      { kind: "input_path" as const, inputKey, path: [key] },
+    ])
+  );
+}
+
+function disclosureItems(keys: readonly string[]) {
+  return keys.map((key) => ({
+    label: key,
+    value: { kind: "argument" as const, argumentKey: key },
+  }));
+}
+
+const GUEST_BATCH_KEYS = [
+  "mode",
+  "meetingId",
+  "dependencyStepId",
+  "targets",
+  "expectedCoreGroupUserIds",
+  "expectedReminderUserIds",
+  "notificationTargets",
+] as const;
+const COMMUNICATION_KEYS = [
+  "communicationId",
+  "recipientSource",
+  "audience",
+] as const;
+
+/** Canonical EV-019 execution graph; all target IDs live in these inputs. */
+export function meetingInvitationRecipeDefinition() {
+  const meetingKeys = Object.keys(
+    MEETINGS_EFFECT_ARGUMENT_SCHEMAS.createMeetingAction.shape
+  );
+  return {
+    identity: MEETING_INVITATION_RECIPE_IDENTITY,
+    requiredInputs: [
+      {
+        key: "meeting",
+        schema: MEETINGS_EFFECT_ARGUMENT_SCHEMAS.createMeetingAction,
+      },
+      { key: "guests", schema: MEETING_GUEST_BATCH_ARGUMENT_SCHEMA },
+      {
+        key: "communication",
+        schema: COMMUNICATION_MESSAGE_SEND_PLAN.argumentsSchema,
+      },
+    ],
+    optionalInputs: [],
+    recordResolvers: [],
+    preconditions: [],
+    eligibleCapabilities: [
+      MEETING_INVITATION_CAPABILITY_IDENTITY,
+      MEETING_INVITATION_ADD_GUESTS_IDENTITY,
+      MEETING_INVITATION_SEND_IDENTITY,
+    ],
+    confirmation: {
+      title: "Create Vision Meeting and send invitations",
+      actionLabel: "Create meeting and send invitations",
+    },
+    steps: [
+      {
+        id: "create-meeting",
+        capabilityIdentity: MEETING_INVITATION_CAPABILITY_IDENTITY,
+        arguments: inputBindings(meetingKeys, "meeting"),
+        dependsOn: [],
+        disclosure: {
+          title: "Create Vision Meeting",
+          items: disclosureItems(meetingKeys),
+          consequences: ["Creates one Vision Meeting in the plant calendar."],
+        },
+        failurePolicy: { retry: "same_plan" },
+      },
+      {
+        id: "add-guests",
+        capabilityIdentity: MEETING_INVITATION_ADD_GUESTS_IDENTITY,
+        arguments: inputBindings(GUEST_BATCH_KEYS, "guests"),
+        dependsOn: ["create-meeting"],
+        disclosure: {
+          title: "Add resolved guests",
+          items: disclosureItems(GUEST_BATCH_KEYS),
+          consequences: ["Adds the exact resolved people to the guest list."],
+        },
+        failurePolicy: { retry: "same_plan" },
+      },
+      {
+        id: "send-invitations",
+        capabilityIdentity: MEETING_INVITATION_SEND_IDENTITY,
+        arguments: inputBindings(COMMUNICATION_KEYS, "communication"),
+        dependsOn: ["add-guests"],
+        disclosure: {
+          title: "Send the invitation",
+          items: disclosureItems(COMMUNICATION_KEYS),
+          consequences: ["Sends the approved invitation emails immediately."],
+        },
+        failurePolicy: { retry: "same_plan" },
+      },
+    ],
+  };
+}
+
+const invitationMeetingsExecutions = MEETINGS_EXECUTION_CAPABILITIES.filter(
+  ({ planCapability }) =>
+    planCapability.identity === MEETING_INVITATION_CAPABILITY_IDENTITY ||
+    planCapability.identity === MEETING_INVITATION_ADD_GUESTS_IDENTITY
+);
+
+export function createMeetingInvitationRecipeRegistry(
+  overrides: Readonly<{
+    addGuests?: EvryExecutionCapabilityRegistration;
+    send?: EvryExecutionCapabilityRegistration;
+  }> = {}
+) {
+  const createExecution = invitationMeetingsExecutions.find(
+    ({ planCapability }) =>
+      planCapability.identity === MEETING_INVITATION_CAPABILITY_IDENTITY
+  );
+  const addGuests =
+    overrides.addGuests ??
+    invitationMeetingsExecutions.find(
+      ({ planCapability }) =>
+        planCapability.identity === MEETING_INVITATION_ADD_GUESTS_IDENTITY
+    );
+  const send = overrides.send ?? COMMUNICATION_MESSAGE_SEND_EXECUTION;
+  if (
+    !createExecution ||
+    !addGuests ||
+    addGuests.planCapability.identity !==
+      MEETING_INVITATION_ADD_GUESTS_IDENTITY ||
+    send.planCapability.identity !== MEETING_INVITATION_SEND_IDENTITY
+  ) {
+    throw new Error(
+      "Meeting invitation registry requires the exact send effect"
+    );
+  }
+  return createEvryRecipeRegistry({
+    executionRegistry: createEvryExecutionCapabilityRegistry([
+      createExecution,
+      addGuests,
+      send,
+    ]),
+    resolvers: [],
+    preconditions: [],
+    definitions: [meetingInvitationRecipeDefinition()],
+  });
+}
+
+export const MEETING_INVITATION_RECIPE_REGISTRY =
+  createMeetingInvitationRecipeRegistry();
 
 function localTimeAt(instant: Date, timeZone: string): string {
   return new Intl.DateTimeFormat("en-US", {

@@ -5,11 +5,14 @@ import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
 import { mintEvryPlanRequestKey } from "@/lib/evry/plans";
 import type { EvryDateTimeResolution } from "@/lib/evry/resolvers/datetime";
 import { evryConversationPlanIdentitySchema } from "@/lib/evry/conversations/contract";
+import { compileEvryRecipe } from "./compiler";
 
 import {
   buildMeetingInvitationConfirmation,
   createMeetingInvitationPlanResolver,
   createMeetingInvitationReferenceResolver,
+  MEETING_INVITATION_RECIPE_IDENTITY,
+  MEETING_INVITATION_RECIPE_REGISTRY,
   type MeetingInvitationReferenceFacts,
   type MeetingInvitationReferenceRequest,
 } from "./meeting-invitation";
@@ -340,12 +343,41 @@ test("the exact planner feeds the future meeting into Communication and refuses 
           title: "Vision Meeting #1",
           datetime: "2026-08-05T10:00:00.000Z",
           timezone: "America/New_York",
+          status: "planning",
           locationId: "60000000-0000-4000-8000-000000000001",
           locationName: "Riverside church location",
           locationAddress: "144 Oak Street, Albany, NY, USA",
           agenda: [],
+          savedLocationId: null,
+          teamId: null,
+          meetingSubtype: null,
+          estimatedAttendance: 3,
+          actualAttendance: null,
+          durationMinutes: 90,
+          notes: null,
+          meetingNumber: 1,
+          checklistItems: [],
+          resolvedTeamMemberIds: [],
+          attendanceRows: [],
+          notificationBaseline: {
+            coreGroupUserIds: [],
+            reminderUserIds: [],
+            activeNotifications: [],
+          },
+          notificationTargets: [],
+          expectedMeetingAbsent: true,
+          createdById: ACTOR.userId,
         },
       }) as never,
+    resolveGuests: async (input) => ({
+      mode: "batch-after-create",
+      meetingId: input.create.meetingId,
+      dependencyStepId: input.dependencyStepId,
+      targets: [...input.targets],
+      expectedCoreGroupUserIds: [],
+      expectedReminderUserIds: [],
+      notificationTargets: [],
+    }),
     resolveAudience: async (input) => {
       audienceInputs.push(input);
       return {
@@ -384,6 +416,29 @@ test("the exact planner feeds the future meeting into Communication and refuses 
     (audienceInputs[0] as { plannedMeeting: { id: string } }).plannedMeeting.id,
     snapshot.guests.meetingId
   );
+  const compiled = await compileEvryRecipe({
+    actor: ACTOR,
+    registry: MEETING_INVITATION_RECIPE_REGISTRY,
+    recipeIdentity: MEETING_INVITATION_RECIPE_IDENTITY,
+    inputValues: snapshot,
+    eligibleCapabilities: [
+      { identity: "meetings.create" },
+      { identity: "meetings.add-guests" },
+      { identity: "communication.messages.send" },
+    ],
+  });
+  assert.deepEqual(
+    compiled.document.steps.map(({ id, dependsOn }) => [id, dependsOn]),
+    [
+      ["create-meeting", []],
+      ["add-guests", ["create-meeting"]],
+      ["send-invitations", ["add-guests"]],
+    ]
+  );
+  assert.deepEqual(
+    compiled.document.steps[1]?.arguments.targets,
+    snapshot.guests.targets
+  );
 
   const drifted = createMeetingInvitationPlanResolver({
     resolveMeeting: async () =>
@@ -391,6 +446,7 @@ test("the exact planner feeds the future meeting into Communication and refuses 
         exportName: "createMeetingAction",
         arguments: snapshot.meeting,
       }) as never,
+    resolveGuests: async () => snapshot.guests,
     resolveAudience: async () => ({
       ...snapshot.communication.audience,
       recipients: snapshot.communication.audience.recipients.slice(1),

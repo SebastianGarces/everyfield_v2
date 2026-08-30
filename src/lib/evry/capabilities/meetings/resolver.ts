@@ -48,6 +48,10 @@ import {
   MEETINGS_EFFECT_ARGUMENT_SCHEMAS,
   type MeetingsEffectArguments,
 } from "./effect-contracts";
+import {
+  MEETING_GUEST_BATCH_ARGUMENT_SCHEMA,
+  type MeetingGuestBatchArguments,
+} from "./dependency-output";
 import type { MeetingsEvryEffectSelection } from "./selection";
 
 export type ResolvedMeetingsEffect = {
@@ -438,6 +442,123 @@ async function plannedMeetingNotificationTargets(input: {
     },
     notificationTargets,
   };
+}
+
+/** Resolve immutable batch targets for guests added after this exact create. */
+export async function resolveMeetingGuestBatchAfterCreate(input: {
+  actor: EvryPlantActor;
+  create: MeetingsEffectArguments<"createMeetingAction">;
+  dependencyStepId: string;
+  targets: readonly Readonly<{
+    attendanceId: string;
+    personId: string;
+    expectedPersonUpdatedAt: string;
+    expectedAttendanceAbsent: true;
+  }>[];
+  requestKey: EvryPlanRequestKey;
+  now: Date;
+}): Promise<MeetingGuestBatchArguments | null> {
+  if (
+    input.create.attendanceRows.length !== 0 ||
+    input.create.resolvedTeamMemberIds.length !== 0
+  ) {
+    return null;
+  }
+  const guestRows = await db
+    .select({
+      personId: persons.id,
+      expectedPersonUpdatedAt: persons.updatedAt,
+      userId: users.id,
+    })
+    .from(persons)
+    .leftJoin(users, personIsUserInChurch(input.actor.plantId))
+    .where(
+      and(
+        eq(persons.churchId, input.actor.plantId),
+        inArray(
+          persons.id,
+          input.targets.map(({ personId }) => personId)
+        ),
+        isNull(persons.deletedAt)
+      )
+    );
+  const versions = new Map(
+    guestRows.map(({ personId, expectedPersonUpdatedAt }) => [
+      personId,
+      expectedPersonUpdatedAt.toISOString(),
+    ])
+  );
+  if (
+    input.targets.some(
+      ({ personId, expectedPersonUpdatedAt }) =>
+        versions.get(personId) !== expectedPersonUpdatedAt
+    )
+  ) {
+    return null;
+  }
+  const expectedCoreGroupUserIds = await listCoreGroupUserIds(
+    input.actor.plantId
+  );
+  const expectedReminderUserIds = [
+    ...new Set([
+      input.actor.userId,
+      ...guestRows.flatMap(({ userId }) => (userId ? [userId] : [])),
+    ]),
+  ].toSorted();
+  const facts: MeetingNotificationFacts = {
+    id: input.create.meetingId,
+    churchId: input.actor.plantId,
+    type: input.create.type,
+    title: input.create.title,
+    meetingNumber: input.create.meetingNumber,
+    teamName: null,
+    datetime: new Date(input.create.datetime),
+    status: input.create.status,
+    createdBy: input.actor.userId,
+  };
+  const active = new Set(
+    input.create.notificationTargets.map(
+      ({ recipientUserId, dedupeKey }) => `${recipientUserId}:${dedupeKey}`
+    )
+  );
+  const notificationTargets = planMeetingNotifications(
+    facts,
+    {
+      coreGroup: expectedCoreGroupUserIds,
+      reminders: expectedReminderUserIds,
+    },
+    input.now
+  )
+    .notifications.filter(
+      ({ recipientUserId, dedupeKey }) =>
+        !active.has(`${recipientUserId}:${dedupeKey ?? ""}`)
+    )
+    .map((notification, index) => ({
+      notificationId: derivedUuid(
+        input.requestKey,
+        `invitation-guest-notification:${index}:${notification.recipientUserId}:${notification.dedupeKey}`
+      ),
+      recipientUserId: notification.recipientUserId,
+      category: "meetings" as const,
+      type: notification.type,
+      title: notification.title,
+      body: notification.body,
+      entityType: "meeting" as const,
+      entityId: input.create.meetingId,
+      dedupeKey: notification.dedupeKey ?? "",
+      scheduledFor: plannedInstant(notification.scheduledFor),
+      expectedAbsent: true as const,
+    }));
+  const parsed = MEETING_GUEST_BATCH_ARGUMENT_SCHEMA.safeParse({
+    mode: "batch-after-create",
+    meetingId: input.create.meetingId,
+    dependencyStepId: input.dependencyStepId,
+    targets: input.targets,
+    expectedCoreGroupUserIds: [...expectedCoreGroupUserIds].toSorted(),
+    expectedReminderUserIds,
+    notificationTargets,
+  });
+  return parsed.success ? parsed.data : null;
 }
 
 async function plannedTaskTargets(input: {
