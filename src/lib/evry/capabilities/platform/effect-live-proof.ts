@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import {
@@ -44,6 +44,10 @@ import {
   loadUnreadBadgeCount,
   notificationViewer,
 } from "@/lib/notifications/feed";
+import {
+  feedCursorFrom,
+  notificationFeedQuery,
+} from "@/lib/notifications/queries";
 
 import {
   MARK_ALL_NOTIFICATIONS_IDENTITY,
@@ -216,6 +220,63 @@ async function main() {
   const plantActor = actor(plant.id, owner.id);
   const foreignActor = actor(foreignPlant.id, foreignOwner.id);
   const now = new Date();
+  const [microsecondNewer, microsecondOlder] = await db
+    .insert(notifications)
+    .values([
+      {
+        id: "70000000-0000-4000-8000-000000000002",
+        churchId: plant.id,
+        recipientUserId: owner.id,
+        category: "tasks",
+        type: "task.microsecond-newer",
+        title: "Microsecond newer",
+        body: "First canonical page row",
+        scheduledFor: new Date(now.getTime() - 1_000),
+      },
+      {
+        id: "70000000-0000-4000-8000-000000000001",
+        churchId: plant.id,
+        recipientUserId: owner.id,
+        category: "tasks",
+        type: "task.microsecond-older",
+        title: "Microsecond older",
+        body: "Second canonical page row",
+        scheduledFor: new Date(now.getTime() - 1_000),
+      },
+    ])
+    .returning();
+  assert.ok(microsecondNewer && microsecondOlder);
+  await db.execute(sql`
+    update notifications
+    set created_at = case id
+      when ${microsecondNewer.id}::uuid then '2030-01-02 03:04:05.123900+00'::timestamptz
+      when ${microsecondOlder.id}::uuid then '2030-01-02 03:04:05.123100+00'::timestamptz
+    end
+    where id in (${microsecondNewer.id}::uuid, ${microsecondOlder.id}::uuid)
+  `);
+  const feedScope = {
+    churchId: plant.id,
+    recipientUserId: owner.id,
+  };
+  const [microsecondPageOne] = await notificationFeedQuery(feedScope, {
+    category: "tasks",
+    limit: 1,
+    now: new Date("2031-01-01T00:00:00.000Z"),
+  });
+  assert.ok(microsecondPageOne);
+  const [microsecondPageTwo] = await notificationFeedQuery(feedScope, {
+    before: feedCursorFrom(microsecondPageOne),
+    category: "tasks",
+    limit: 1,
+    now: new Date("2031-01-01T00:00:00.000Z"),
+  });
+  assert.equal(microsecondPageTwo?.id, microsecondOlder.id);
+  await db
+    .delete(notifications)
+    .where(
+      inArray(notifications.id, [microsecondNewer.id, microsecondOlder.id])
+    );
+  console.log("PASS notifications.feed.list:microsecond-pagination");
   const visible = await db
     .insert(notifications)
     .values({
