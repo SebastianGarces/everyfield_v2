@@ -179,15 +179,17 @@ async function proposeEffect(input: {
   });
   if (exact.notifications.length === 0) return null;
   if (input.selection.kind === "mark_one") {
+    const reviewable = markOneArgumentsSchema.safeParse({
+      notification: exact.notifications[0],
+      visibility: exact.visibility,
+    });
+    if (!reviewable.success) return null;
     return storePlan({
       actor: input.actor,
       identity: MARK_ONE_NOTIFICATION_IDENTITY,
       requestKey: input.requestKey,
       stepId: "mark-notification-read",
-      arguments: markOneArgumentsSchema.parse({
-        notification: exact.notifications[0],
-        visibility: exact.visibility,
-      }),
+      arguments: reviewable.data,
     });
   }
   const reviewable = markAllArgumentsSchema.safeParse(exact);

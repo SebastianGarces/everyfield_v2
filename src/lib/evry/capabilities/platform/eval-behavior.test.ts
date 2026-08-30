@@ -11,6 +11,7 @@ import { evryConversationPlanIdentitySchema } from "@/lib/evry/conversations/con
 import type { EvryReadCapabilityAuthorization } from "@/lib/evry/eligibility/capabilities";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
 import { parseEvryActionPlanCandidate } from "@/lib/evry/plans";
+import { resolveEvryPolicyDecision } from "@/lib/evry/policy/core";
 
 import {
   MARK_ALL_NOTIFICATIONS_IDENTITY,
@@ -26,10 +27,14 @@ import {
   type PlatformReadDependencies,
 } from "./reads";
 import {
+  PLATFORM_EVRY_EXECUTION_REGISTRY,
   PLATFORM_EVRY_PLAN_REGISTRY,
   PLATFORM_EVRY_REVIEW_REGISTRY,
 } from "./runtime";
-import type { PlatformEvrySelection } from "./selection";
+import {
+  selectPlatformEvryRequest,
+  type PlatformEvrySelection,
+} from "./selection";
 
 const ACTOR = {
   userId: "10000000-0000-4000-8000-000000000001",
@@ -60,6 +65,57 @@ const READ_SELECTIONS: Readonly<
   },
   [NOTIFICATION_COUNT_IDENTITY]: { kind: "notification_count" },
 };
+
+const CAPABILITY_CASES: Readonly<
+  Record<
+    string,
+    Readonly<{ command: string; selection: PlatformEvrySelection }>
+  >
+> = {
+  [DASHBOARD_SUMMARY_IDENTITY]: {
+    command: "show dashboard summary",
+    selection: READ_SELECTIONS[DASHBOARD_SUMMARY_IDENTITY]!,
+  },
+  [NOTIFICATION_FEED_IDENTITY]: {
+    command: "show notifications",
+    selection: READ_SELECTIONS[NOTIFICATION_FEED_IDENTITY]!,
+  },
+  [NOTIFICATION_COUNT_IDENTITY]: {
+    command: "show unread notification count",
+    selection: READ_SELECTIONS[NOTIFICATION_COUNT_IDENTITY]!,
+  },
+  [MARK_ONE_NOTIFICATION_IDENTITY]: {
+    command: `mark notification ${NOTIFICATION_ID} read`,
+    selection: { kind: "mark_one", notificationId: NOTIFICATION_ID },
+  },
+  [MARK_ALL_NOTIFICATIONS_IDENTITY]: {
+    command: "mark all notifications read",
+    selection: { kind: "mark_all" },
+  },
+  [SUBMIT_FEEDBACK_IDENTITY]: {
+    command:
+      'submit feedback {"category":"bug","description":"Exact feedback description","pageUrl":"/notifications"}',
+    selection: {
+      kind: "feedback",
+      category: "bug",
+      description: "Exact feedback description",
+      pageUrl: "/notifications",
+    },
+  },
+};
+
+function isReadSelection(
+  selection: PlatformEvrySelection
+): selection is Extract<
+  PlatformEvrySelection,
+  { kind: "dashboard" | "notification_count" | "notifications" }
+> {
+  return (
+    selection.kind === "dashboard" ||
+    selection.kind === "notification_count" ||
+    selection.kind === "notifications"
+  );
+}
 
 function authorization(
   identity: string,
@@ -205,35 +261,161 @@ const EFFECT_ARGUMENTS: Readonly<Record<string, Record<string, unknown>>> = {
   },
 };
 
+function effectReview(identity: string) {
+  const arguments_ = EFFECT_ARGUMENTS[identity];
+  assert.ok(arguments_, `missing effect arguments for ${identity}`);
+  const document = parseEvryActionPlanCandidate({
+    candidate: {
+      steps: [
+        {
+          id: "platform-effect",
+          capabilityIdentity: identity,
+          arguments: arguments_,
+          dependsOn: [],
+        },
+      ],
+    },
+    registry: PLATFORM_EVRY_PLAN_REGISTRY,
+    eligibleCapabilities: [{ identity }],
+  });
+  const review = trustedReviewForEvryPlanDocument({
+    plan: evryConversationPlanIdentitySchema.parse({
+      planId: "50000000-0000-4000-8000-000000000001",
+      fingerprint: "a".repeat(64),
+    }),
+    document,
+    reviewRegistry: PLATFORM_EVRY_REVIEW_REGISTRY,
+  });
+  assert.ok(review, `missing trusted review for ${identity}`);
+  return { document, review };
+}
+
+for (const [identity, fixture] of Object.entries(CAPABILITY_CASES)) {
+  test(`${identity}:policy:behavior`, () => {
+    const registration = PLATFORM_CAPABILITY_REGISTRY.registrationFor(identity);
+    assert.ok(registration);
+    const classification =
+      registration.operationKind === "read"
+        ? ("application_read" as const)
+        : ("application_action" as const);
+    const allowed = resolveEvryPolicyDecision(fixture.command, {
+      classification,
+    });
+    assert.equal(allowed.classification, classification);
+    assert.ok("continuation" in allowed);
+    assert.deepEqual(allowed.continuation, {
+      kind: classification,
+      literalUserText: fixture.command,
+    });
+    const stopped = resolveEvryPolicyDecision(fixture.command, {
+      classification: "unrelated",
+    });
+    assert.equal(stopped.classification, "unrelated");
+    assert.equal("continuation" in stopped, false);
+  });
+
+  test(`${identity}:selection:behavior`, () => {
+    assert.deepEqual(
+      selectPlatformEvryRequest(fixture.command),
+      fixture.selection
+    );
+  });
+
+  test(`${identity}:arguments:behavior`, () => {
+    if (isReadSelection(fixture.selection)) {
+      assert.equal(
+        selectPlatformEvryRequest(`${fixture.command} with forged arguments`),
+        null
+      );
+      assert.equal(
+        PLATFORM_EVRY_EXECUTION_REGISTRY.registrationFor(identity),
+        null
+      );
+      return;
+    }
+    const execution =
+      PLATFORM_EVRY_EXECUTION_REGISTRY.registrationFor(identity);
+    const arguments_ = EFFECT_ARGUMENTS[identity];
+    assert.ok(execution && arguments_);
+    assert.equal(
+      execution.planCapability.argumentsSchema.safeParse(arguments_).success,
+      true
+    );
+    assert.equal(
+      execution.planCapability.argumentsSchema.safeParse({
+        ...arguments_,
+        forgedTarget: "90000000-0000-4000-8000-000000000001",
+      }).success,
+      false
+    );
+  });
+
+  test(`${identity}:confirmation:behavior`, async () => {
+    if (isReadSelection(fixture.selection)) {
+      const harness = readHarness(async (requested) =>
+        authorization(requested, ACTOR)
+      );
+      const artifact = await continuePlatformEvryRead({
+        actor: ACTOR,
+        selection: fixture.selection,
+        dependencies: harness.dependencies,
+      });
+      assert.ok(artifact);
+      assert.equal(publicEvryArtifact(artifact).kind, "read");
+      assert.equal(
+        PLATFORM_EVRY_EXECUTION_REGISTRY.registrationFor(identity),
+        null
+      );
+      return;
+    }
+    const { document, review } = effectReview(identity);
+    assert.equal(
+      review.confirmation.plan.planId,
+      "50000000-0000-4000-8000-000000000001"
+    );
+    assert.equal(review.confirmation.plan.fingerprint, "a".repeat(64));
+    assert.equal(review.confirmation.steps.length, 1);
+    const step = review.confirmation.steps[0];
+    assert.equal(step?.stepId, document.steps[0]?.id);
+    assert.ok(step);
+    if (identity === SUBMIT_FEEDBACK_IDENTITY) {
+      assert.deepEqual(step.resolvedTargets, [
+        { label: "Category", value: "bug", sourceLink: null },
+      ]);
+      assert.deepEqual(step.contentPreviews, [
+        {
+          label: "Exact description",
+          content: "Exact feedback description",
+        },
+        { label: "Source page", content: "/notifications" },
+      ]);
+      return;
+    }
+    assert.deepEqual(
+      step.resolvedTargets.map(({ label, value }) => ({ label, value })),
+      [
+        {
+          label: "Notification",
+          value: `Exact notification title · ${NOTIFICATION_ID}`,
+        },
+      ]
+    );
+    assert.deepEqual(step.contentPreviews, [
+      {
+        label: "Exact immutable payload",
+        content: JSON.stringify([notificationSnapshot]),
+      },
+    ]);
+  });
+}
+
 for (const identity of [
   MARK_ONE_NOTIFICATION_IDENTITY,
   MARK_ALL_NOTIFICATIONS_IDENTITY,
   SUBMIT_FEEDBACK_IDENTITY,
 ]) {
   test(`${identity}:ui_artifact:behavior`, () => {
-    const document = parseEvryActionPlanCandidate({
-      candidate: {
-        steps: [
-          {
-            id: "platform-effect",
-            capabilityIdentity: identity,
-            arguments: EFFECT_ARGUMENTS[identity]!,
-            dependsOn: [],
-          },
-        ],
-      },
-      registry: PLATFORM_EVRY_PLAN_REGISTRY,
-      eligibleCapabilities: [{ identity }],
-    });
-    const review = trustedReviewForEvryPlanDocument({
-      plan: evryConversationPlanIdentitySchema.parse({
-        planId: "50000000-0000-4000-8000-000000000001",
-        fingerprint: "a".repeat(64),
-      }),
-      document,
-      reviewRegistry: PLATFORM_EVRY_REVIEW_REGISTRY,
-    });
-    assert.ok(review);
+    const { review } = effectReview(identity);
     const markup = renderToStaticMarkup(
       createElement(EvryArtifactRenderer, {
         model: { variant: "confirmation", artifact: review.confirmation },

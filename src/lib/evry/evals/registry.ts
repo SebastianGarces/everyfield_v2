@@ -251,6 +251,10 @@ function platformCapabilityFixture(
   const evalCase = (layer: EvryCapabilityEvalLayer) => {
     const live = operationKind === "effect" && liveLayers.has(layer);
     const behavior =
+      layer === "policy" ||
+      layer === "selection" ||
+      layer === "arguments" ||
+      layer === "confirmation" ||
       layer === "ui_artifact" ||
       (operationKind === "read" &&
         (layer === "tenancy" || layer === "permission"));
