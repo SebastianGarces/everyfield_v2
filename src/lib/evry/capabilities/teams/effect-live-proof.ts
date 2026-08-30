@@ -144,6 +144,8 @@ async function main(): Promise<void> {
       executorRepository,
       capabilityAuthorization,
       auditIdentity,
+      teamsReads,
+      teamRegistrations,
     ] = await Promise.all([
       import("./resolver"),
       import("./runtime"),
@@ -159,6 +161,8 @@ async function main(): Promise<void> {
       import("@/lib/evry/executor/repository"),
       import("@/lib/evry/eligibility/capabilities"),
       import("@/lib/evry/audit/identity"),
+      import("./reads"),
+      import("./registrations"),
     ]);
     const actorRef = await viewer.requireEvryPlantViewer();
     const post = route.createEvryPlanExecutePost({
@@ -1498,6 +1502,49 @@ async function main(): Promise<void> {
         createdBy: actorId,
       })
       .returning();
+    const [foreignPerson] = await db
+      .insert(persons)
+      .values({
+        churchId: foreignPlant.id,
+        firstName: "Foreign",
+        lastName: "Person",
+        status: "core_group",
+        createdBy: actorId,
+      })
+      .returning({ id: persons.id });
+    const [churchWideProgram] = await db
+      .insert(trainingPrograms)
+      .values({
+        churchId: plantId,
+        teamId: null,
+        name: "Church-wide privacy boundary",
+        isRequired: true,
+        createdBy: actorId,
+      })
+      .returning({ id: trainingPrograms.id });
+    assert.ok(foreignPerson && churchWideProgram);
+    for (const [identity, kind] of [
+      ["teams.read.person-assignments", "read_person_assignments"],
+      ["teams.read.person-training", "read_person_training"],
+    ] as const) {
+      const registration =
+        teamRegistrations.TEAMS_CAPABILITY_REGISTRY.registrationFor(identity);
+      assert.ok(registration?.operationKind === "read");
+      const authorization = {
+        actor: actorRef,
+        registration,
+      } as Parameters<typeof teamsReads.executeTeamsRead>[0]["authorization"];
+      for (const personId of [foreignPerson.id, randomUUID()]) {
+        assert.equal(
+          await teamsReads.executeTeamsRead({
+            authorization,
+            untrustedInput: { kind, personId },
+          }),
+          null,
+          `${identity} must emit no artifact or source link for a foreign or missing person even when church-wide training exists`
+        );
+      }
+    }
     assert.equal(
       await resolveTeamsEvryEffect({
         actor: actorRef,

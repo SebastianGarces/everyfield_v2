@@ -177,6 +177,12 @@ mock.module("@/lib/ministry-teams/service", {
 
 mock.module("@/lib/people/service", {
   namedExports: {
+    getPerson: async (plantId: string, personId: string) => {
+      seenPlants.push(plantId);
+      if (forceReadFailure)
+        throw new Error("forced Teams read service failure");
+      return personId === PERSON ? { id: PERSON } : null;
+    },
     listPeople: scoped({
       people: [
         {
@@ -294,8 +300,7 @@ async function main(): Promise<void> {
         authorization,
         untrustedInput: { ...selection, personId: FOREIGN },
       });
-      assert.ok(foreignPerson);
-      assert.equal(foreignPerson.counts.returned, 0);
+      assert.equal(foreignPerson, null);
     }
     forceReadFailure = true;
     try {
