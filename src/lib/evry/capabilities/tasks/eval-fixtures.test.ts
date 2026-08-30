@@ -95,6 +95,20 @@ test("Task list selection preserves the product view and owning cursor", () => {
   });
 });
 
+test("Task follow-up selection accepts ordinary user wording", () => {
+  for (const request of [
+    "Show me who needs follow-up",
+    "Who needs follow up?",
+    "List people needing follow-up",
+  ]) {
+    assert.deepEqual(selectTaskEvryRead(request), {
+      kind: "follow_up_ownership",
+      section: "contacts",
+      cursor: null,
+    });
+  }
+});
+
 test("Task list and count selectors preserve every legal UI filter", () => {
   const tuple = {
     view: "all" as const,

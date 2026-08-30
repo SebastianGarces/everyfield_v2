@@ -4,9 +4,13 @@ import type {
   EvryConversationAuthor,
   EvryConversationDeliveryStatus,
 } from "@/db/schema";
-import { hasDurableEvryCapabilityConversationResult } from "@/lib/evry/capabilities/conversation";
+import {
+  evryCapabilityConversationResultIdentity,
+  hasDurableEvryCapabilityConversationResult,
+} from "@/lib/evry/capabilities/conversation";
 import { continueProductionEvryCapabilityConversation } from "@/lib/evry/capabilities/production";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
+import { boundaryArtifactFor } from "@/lib/evry/policy/artifacts";
 import type {
   EvryPageContext,
   EvryResolvedPageContext,
@@ -14,6 +18,7 @@ import type {
 import type { EvryConversationStreamStage } from "@/lib/evry/streaming/conversation-wire";
 
 import {
+  evryBoundaryArtifactDocument,
   storedEvryClarificationArtifactDocument,
   type StoredEvryConversationArtifactDocument,
 } from "./artifacts";
@@ -63,6 +68,40 @@ export const evryConversationStore: EvryConversationStore = Object.freeze({
   find: findEvryConversationRecord,
   append: appendEvryConversationRecord,
 });
+
+async function appendUnmatchedEvryConversationResult(input: {
+  actor: EvryPlantActor;
+  conversation: EvryStoredConversation;
+  userRequestKey: EvryConversationRequestKey;
+  now: Date;
+  store: EvryConversationStore;
+}): Promise<EvryStoredConversation> {
+  const identity = evryCapabilityConversationResultIdentity({
+    conversationId: input.conversation.id,
+    userRequestKey: input.userRequestKey,
+  });
+  const artifact = boundaryArtifactFor("ambiguous");
+  return appendTrustedEvryConversationMessage({
+    messageId: identity.messageId,
+    actor: input.actor,
+    conversationId: input.conversation.id,
+    requestKey: identity.requestKey,
+    expectedStateVersion: input.conversation.stateVersion,
+    state: input.conversation.state,
+    author: "assistant",
+    body: artifact.message,
+    pageContext: null,
+    requestPageContext: null,
+    relevanceKeys: [],
+    deliveryStatus: "complete",
+    artifacts: [evryBoundaryArtifactDocument("ambiguous")],
+    idempotencyContext: { status: "none" },
+    replayReference: null,
+    activePlan: { mode: "preserve" },
+    now: input.now,
+    store: input.store,
+  });
+}
 
 export type EvryResumedConversation = Readonly<{
   conversation: EvryStoredConversation;
@@ -145,16 +184,16 @@ export async function createEvryConversation(input: {
     store,
   });
   if (continued === null) {
-    return Object.freeze({
+    conversation = await appendUnmatchedEvryConversationResult({
+      actor: input.actor,
       conversation,
-      activePlan: null,
-      context: compileEvryConversationContext({
-        conversation,
-        activePlan: null,
-      }),
+      userRequestKey: requestKey,
+      now: input.now,
+      store,
     });
+  } else {
+    conversation = continued;
   }
-  conversation = continued;
   const resumed = await resumeEvryConversation({
     actor: input.actor,
     conversationId: conversation.id,
@@ -436,20 +475,28 @@ export async function continueEvryConversation(input: {
       store,
     });
   } else {
+    const continued = await (
+      input.continueCapabilityConversation ??
+      continueProductionEvryCapabilityConversation
+    )({
+      actor: input.actor,
+      conversation: appended,
+      userRequestKey: requestKey.data,
+      literalUserText: input.message,
+      pageContext: input.pageContext,
+      requestPageContext: input.requestPageContext,
+      now: input.now,
+      store,
+    });
     appended =
-      (await (
-        input.continueCapabilityConversation ??
-        continueProductionEvryCapabilityConversation
-      )({
+      continued ??
+      (await appendUnmatchedEvryConversationResult({
         actor: input.actor,
         conversation: appended,
         userRequestKey: requestKey.data,
-        literalUserText: input.message,
-        pageContext: input.pageContext,
-        requestPageContext: input.requestPageContext,
         now: input.now,
         store,
-      })) ?? appended;
+      }));
   }
 
   await input.reportStage?.(
