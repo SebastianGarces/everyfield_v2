@@ -635,6 +635,8 @@ function authorityCurrent(input: {
     select 1 from users current_actor
     where current_actor.id = ${input.execution.actorUserId}::uuid
       and current_actor.church_id = ${input.execution.plantId}::uuid
+      and current_actor.sending_church_id is null
+      and current_actor.sending_network_id is null
       and current_actor.seat is not null
       and (${adminRequired} = false or current_actor.seat in ('owner', 'admin'))
   )`;
