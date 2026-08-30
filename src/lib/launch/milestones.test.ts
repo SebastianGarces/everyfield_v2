@@ -381,7 +381,7 @@ test("the seeded tasks take the one description door, like every other writer", 
   // every launch schedule, not a dev seed. T-021 says every write goes through
   // `normalizeTaskDescription` (`src/lib/tasks/descriptions.ts`), and this one wrote
   // the template's raw string straight into the column. Read off the source
-  // because `planSeedRows` is private and the statement builder is handed rows
+  // because the statement builder is handed rows
   // the test itself made up — the gate lives in the planner, not in the SQL.
   const read = sourceReader(
     readFileSync(
@@ -396,7 +396,10 @@ test("the seeded tasks take the one description door, like every other writer", 
     /import \{ normalizeTaskDescription \} from "@\/lib\/tasks\/descriptions"/
   );
 
-  const planner = read.span("function planSeedRows", "* Seed the Playbook set");
+  const planner = read.span(
+    "function planLaunchMilestoneSeedRows",
+    "* Seed the Playbook set"
+  );
   assert.match(
     planner,
     /description: normalizeTaskDescription\(task\.description\)/,

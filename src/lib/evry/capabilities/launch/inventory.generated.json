@@ -1,0 +1,563 @@
+{
+  "schemaVersion": 1,
+  "generatedBy": "pnpm evry:launch-inventory",
+  "authoritativeSources": {
+    "actions": "src/lib/auth/capability-map.ts",
+    "route": "src/app/(dashboard)/launch/page.tsx",
+    "rscOperations": "called imports in src/app/(dashboard)/launch/page.tsx",
+    "evryAdapters": "src/lib/launch/milestones.ts"
+  },
+  "capabilities": [
+    {
+      "identity": "launch.milestone.complete",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/launch/actions.ts → completeMilestoneAction"
+      ],
+      "parityCapability": "launch",
+      "operationKind": "effect",
+      "applicationCapability": "launch.milestone",
+      "confirmation": "required",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "launch.milestone.reopen",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/launch/actions.ts → reopenMilestoneAction"
+      ],
+      "parityCapability": "launch",
+      "operationKind": "effect",
+      "applicationCapability": "launch.milestone",
+      "confirmation": "required",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "launch.outcome.correct",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/launch/actions.ts → updateLaunchOutcomeAction"
+      ],
+      "parityCapability": "launch",
+      "operationKind": "effect",
+      "applicationCapability": "launch.schedule",
+      "confirmation": "required",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "launch.outcome.record",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/launch/actions.ts → recordLaunchOutcomeAction"
+      ],
+      "parityCapability": "launch",
+      "operationKind": "effect",
+      "applicationCapability": "launch.schedule",
+      "confirmation": "required",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "launch.read.journal",
+      "surfaceIdentities": [
+        "rsc:src/app/(dashboard)/launch/page.tsx → getLaunchJournalEntries",
+        "rsc:src/app/(dashboard)/launch/page.tsx → getLaunchMilestoneHistory"
+      ],
+      "parityCapability": "launch",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "launch.read.readiness",
+      "surfaceIdentities": [
+        "adapter:src/lib/launch/milestones.ts → getLaunchReadiness"
+      ],
+      "parityCapability": "launch",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "launch.read.status",
+      "surfaceIdentities": [
+        "route:/launch",
+        "rsc:src/app/(dashboard)/launch/page.tsx → getLaunchForChurch"
+      ],
+      "parityCapability": "launch",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "launch.schedule",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/launch/actions.ts → scheduleLaunchAction"
+      ],
+      "parityCapability": "launch",
+      "operationKind": "effect",
+      "applicationCapability": "launch.schedule",
+      "confirmation": "required",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "launch.task.set-completion",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/launch/actions.ts → setLaunchTaskCompleteAction"
+      ],
+      "parityCapability": "launch",
+      "operationKind": "effect",
+      "applicationCapability": "launch.milestone",
+      "confirmation": "required",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    }
+  ],
+  "entries": [
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/launch/actions.ts → completeMilestoneAction",
+      "source": "src/app/(dashboard)/launch/actions.ts",
+      "exportName": "completeMilestoneAction",
+      "capabilityIdentity": "launch.milestone.complete",
+      "operationKind": "effect",
+      "applicationCapability": "launch.milestone",
+      "confirmation": "required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/launch/actions.ts → recordLaunchOutcomeAction",
+      "source": "src/app/(dashboard)/launch/actions.ts",
+      "exportName": "recordLaunchOutcomeAction",
+      "capabilityIdentity": "launch.outcome.record",
+      "operationKind": "effect",
+      "applicationCapability": "launch.schedule",
+      "confirmation": "required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/launch/actions.ts → reopenMilestoneAction",
+      "source": "src/app/(dashboard)/launch/actions.ts",
+      "exportName": "reopenMilestoneAction",
+      "capabilityIdentity": "launch.milestone.reopen",
+      "operationKind": "effect",
+      "applicationCapability": "launch.milestone",
+      "confirmation": "required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/launch/actions.ts → scheduleLaunchAction",
+      "source": "src/app/(dashboard)/launch/actions.ts",
+      "exportName": "scheduleLaunchAction",
+      "capabilityIdentity": "launch.schedule",
+      "operationKind": "effect",
+      "applicationCapability": "launch.schedule",
+      "confirmation": "required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/launch/actions.ts → setLaunchTaskCompleteAction",
+      "source": "src/app/(dashboard)/launch/actions.ts",
+      "exportName": "setLaunchTaskCompleteAction",
+      "capabilityIdentity": "launch.task.set-completion",
+      "operationKind": "effect",
+      "applicationCapability": "launch.milestone",
+      "confirmation": "required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/launch/actions.ts → updateLaunchOutcomeAction",
+      "source": "src/app/(dashboard)/launch/actions.ts",
+      "exportName": "updateLaunchOutcomeAction",
+      "capabilityIdentity": "launch.outcome.correct",
+      "operationKind": "effect",
+      "applicationCapability": "launch.schedule",
+      "confirmation": "required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "evry_adapter",
+      "identity": "adapter:src/lib/launch/milestones.ts → getLaunchReadiness",
+      "source": "src/lib/launch/milestones.ts",
+      "exportName": "getLaunchReadiness",
+      "capabilityIdentity": "launch.read.readiness",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/launch",
+      "source": "src/app/(dashboard)/launch/page.tsx",
+      "exportName": null,
+      "capabilityIdentity": "launch.read.status",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc:src/app/(dashboard)/launch/page.tsx → buildLaunchHistory",
+      "source": "src/app/(dashboard)/launch/page.tsx",
+      "exportName": "buildLaunchHistory",
+      "capabilityIdentity": null,
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "presentation_projection"
+      }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc:src/app/(dashboard)/launch/page.tsx → canEditOutcome",
+      "source": "src/app/(dashboard)/launch/page.tsx",
+      "exportName": "canEditOutcome",
+      "capabilityIdentity": null,
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "presentation_projection"
+      }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc:src/app/(dashboard)/launch/page.tsx → canRecordOutcome",
+      "source": "src/app/(dashboard)/launch/page.tsx",
+      "exportName": "canRecordOutcome",
+      "capabilityIdentity": null,
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "presentation_projection"
+      }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc:src/app/(dashboard)/launch/page.tsx → convergeLaunchReadiness",
+      "source": "src/app/(dashboard)/launch/page.tsx",
+      "exportName": "convergeLaunchReadiness",
+      "capabilityIdentity": null,
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": { "state": "excluded", "reason": "owner_read_repair" }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc:src/app/(dashboard)/launch/page.tsx → daysUntilTarget",
+      "source": "src/app/(dashboard)/launch/page.tsx",
+      "exportName": "daysUntilTarget",
+      "capabilityIdentity": null,
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "presentation_projection"
+      }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc:src/app/(dashboard)/launch/page.tsx → getLaunchForChurch",
+      "source": "src/app/(dashboard)/launch/page.tsx",
+      "exportName": "getLaunchForChurch",
+      "capabilityIdentity": "launch.read.status",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc:src/app/(dashboard)/launch/page.tsx → getLaunchJournalEntries",
+      "source": "src/app/(dashboard)/launch/page.tsx",
+      "exportName": "getLaunchJournalEntries",
+      "capabilityIdentity": "launch.read.journal",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc:src/app/(dashboard)/launch/page.tsx → getLaunchMilestoneHistory",
+      "source": "src/app/(dashboard)/launch/page.tsx",
+      "exportName": "getLaunchMilestoneHistory",
+      "capabilityIdentity": "launch.read.journal",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc:src/app/(dashboard)/launch/page.tsx → HeaderBreadcrumbs",
+      "source": "src/app/(dashboard)/launch/page.tsx",
+      "exportName": "HeaderBreadcrumbs",
+      "capabilityIdentity": null,
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "presentation_component"
+      }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc:src/app/(dashboard)/launch/page.tsx → holdsSeatFor",
+      "source": "src/app/(dashboard)/launch/page.tsx",
+      "exportName": "holdsSeatFor",
+      "capabilityIdentity": null,
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": { "state": "excluded", "reason": "authorization_gate" }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc:src/app/(dashboard)/launch/page.tsx → isChurchLevelUser",
+      "source": "src/app/(dashboard)/launch/page.tsx",
+      "exportName": "isChurchLevelUser",
+      "capabilityIdentity": null,
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": { "state": "excluded", "reason": "authorization_gate" }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc:src/app/(dashboard)/launch/page.tsx → LaunchDateCard",
+      "source": "src/app/(dashboard)/launch/page.tsx",
+      "exportName": "LaunchDateCard",
+      "capabilityIdentity": null,
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "presentation_component"
+      }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc:src/app/(dashboard)/launch/page.tsx → launchDateEvents",
+      "source": "src/app/(dashboard)/launch/page.tsx",
+      "exportName": "launchDateEvents",
+      "capabilityIdentity": null,
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "presentation_projection"
+      }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc:src/app/(dashboard)/launch/page.tsx → LaunchHistory",
+      "source": "src/app/(dashboard)/launch/page.tsx",
+      "exportName": "LaunchHistory",
+      "capabilityIdentity": null,
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "presentation_component"
+      }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc:src/app/(dashboard)/launch/page.tsx → LaunchJournal",
+      "source": "src/app/(dashboard)/launch/page.tsx",
+      "exportName": "LaunchJournal",
+      "capabilityIdentity": null,
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "presentation_component"
+      }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc:src/app/(dashboard)/launch/page.tsx → LaunchTabs",
+      "source": "src/app/(dashboard)/launch/page.tsx",
+      "exportName": "LaunchTabs",
+      "capabilityIdentity": null,
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "presentation_component"
+      }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc:src/app/(dashboard)/launch/page.tsx → MilestoneBoard",
+      "source": "src/app/(dashboard)/launch/page.tsx",
+      "exportName": "MilestoneBoard",
+      "capabilityIdentity": null,
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "presentation_component"
+      }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc:src/app/(dashboard)/launch/page.tsx → OutcomeForm",
+      "source": "src/app/(dashboard)/launch/page.tsx",
+      "exportName": "OutcomeForm",
+      "capabilityIdentity": null,
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "presentation_component"
+      }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc:src/app/(dashboard)/launch/page.tsx → PageCanvas",
+      "source": "src/app/(dashboard)/launch/page.tsx",
+      "exportName": "PageCanvas",
+      "capabilityIdentity": null,
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "presentation_component"
+      }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc:src/app/(dashboard)/launch/page.tsx → redirect",
+      "source": "src/app/(dashboard)/launch/page.tsx",
+      "exportName": "redirect",
+      "capabilityIdentity": null,
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "framework_navigation"
+      }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc:src/app/(dashboard)/launch/page.tsx → ScheduleLaunchForm",
+      "source": "src/app/(dashboard)/launch/page.tsx",
+      "exportName": "ScheduleLaunchForm",
+      "capabilityIdentity": null,
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "presentation_component"
+      }
+    },
+    {
+      "kind": "rsc_operation",
+      "identity": "rsc:src/app/(dashboard)/launch/page.tsx → verifySession",
+      "source": "src/app/(dashboard)/launch/page.tsx",
+      "exportName": "verifySession",
+      "capabilityIdentity": null,
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": { "state": "excluded", "reason": "session_boundary" }
+    }
+  ],
+  "summary": {
+    "actions": 6,
+    "adapterOperations": 1,
+    "routes": 1,
+    "rscOperations": 22,
+    "exclusions": 19,
+    "readCapabilities": 3,
+    "effectCapabilities": 6,
+    "unclassified": 0
+  }
+}

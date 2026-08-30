@@ -17,7 +17,13 @@ import {
   DECLINE_PLACEHOLDER,
 } from "@/lib/email/components/communication-email";
 import { EMAIL_FROM, resend } from "@/lib/email/client";
-import type { EvryEffectInput, EvryEffectResult } from "@/lib/evry/executor";
+import type {
+  EvryClaimedEffectInput,
+  EvryEffectInput,
+  EvryEffectReconciliation,
+  EvryEffectResult,
+} from "@/lib/evry/executor";
+import { findExactEvryDatabaseEffectClaim } from "@/lib/evry/executor/database-effect";
 import {
   loadSuppressedAddresses,
   normalizeEmailAddress,
@@ -33,6 +39,7 @@ import {
   renderSubject,
 } from "./merge";
 import {
+  actorStillHoldsCommunicationSend,
   claimEvryCommunicationDatabaseEffect,
   communicationEvryEffectUuid,
 } from "./evry-effect";
@@ -40,6 +47,8 @@ import { storedTemplateContent } from "./templates";
 
 export const EVRY_COMMUNICATION_TRANSIENT_PREFIX = "evry-transient:";
 export const EVRY_COMMUNICATION_PERMANENT_PREFIX = "evry-permanent:";
+export const EVRY_COMMUNICATION_ATTEMPTED_PREFIX = "evry-attempted:";
+export const EVRY_COMMUNICATION_LOCAL_PREFIX = "evry-local:";
 /**
  * One Evry confirmation is intentionally one provider-sized send batch. This
  * keeps the immutable plan, API response, and eagerly rendered confirmation
@@ -78,17 +87,118 @@ function personLabel(person: { firstName: string; lastName: string }) {
   );
 }
 
-function dispatchableRecipient() {
-  return or(
-    eq(communicationRecipients.status, "pending"),
-    and(
-      eq(communicationRecipients.status, "failed"),
+function providerAttemptUncertainRecipient() {
+  return and(
+    or(
+      eq(communicationRecipients.status, "pending"),
+      eq(communicationRecipients.status, "failed")
+    ),
+    or(
+      like(
+        communicationRecipients.errorMessage,
+        `${EVRY_COMMUNICATION_ATTEMPTED_PREFIX}%`
+      ),
       like(
         communicationRecipients.errorMessage,
         `${EVRY_COMMUNICATION_TRANSIENT_PREFIX}%`
       )
     )
   );
+}
+
+function locallyExcludableRecipient() {
+  return and(
+    eq(communicationRecipients.status, "pending"),
+    sql`${communicationRecipients.errorMessage} is null`
+  );
+}
+
+function currentCommunicationSendAuthority(
+  execution: EvryEffectInput["execution"]
+) {
+  return sql`exists (
+    select 1
+    from users actor
+    where actor.id = ${execution.actorUserId}::uuid
+      and actor.church_id = ${execution.plantId}::uuid
+      and actor.sending_church_id is null
+      and actor.sending_network_id is null
+      and actor.seat in ('owner', 'admin')
+  )`;
+}
+
+async function acquireCommunicationProviderAttempt(input: {
+  execution: EvryEffectInput["execution"];
+  recipientId: string;
+}): Promise<boolean> {
+  const result = await db.execute<{ id: string }>(sql`
+    with eligible_actor as materialized (
+      select actor.id, actor.church_id
+      from users actor
+      where actor.id = ${input.execution.actorUserId}::uuid
+        and actor.church_id = ${input.execution.plantId}::uuid
+        and actor.sending_church_id is null
+        and actor.sending_network_id is null
+        and actor.seat in ('owner', 'admin')
+      for update
+    )
+    update communication_recipients recipient
+    set error_message = ${`${EVRY_COMMUNICATION_ATTEMPTED_PREFIX}provider request may have started`}
+    from eligible_actor actor
+    where recipient.id = ${input.recipientId}::uuid
+      and recipient.church_id = actor.church_id
+      and (
+        recipient.status = 'pending'
+        or (
+          recipient.status = 'failed'
+          and (
+            recipient.error_message like ${`${EVRY_COMMUNICATION_TRANSIENT_PREFIX}%`}
+            or recipient.error_message like ${`${EVRY_COMMUNICATION_ATTEMPTED_PREFIX}%`}
+          )
+        )
+      )
+    returning recipient.id
+  `);
+  return result.rows[0]?.id === input.recipientId;
+}
+
+async function exactStoredCommunicationRecipient(input: {
+  churchId: string;
+  communicationId: string;
+  recipientId: string;
+}) {
+  const [row] = await db
+    .select({
+      status: communicationRecipients.status,
+      errorMessage: communicationRecipients.errorMessage,
+    })
+    .from(communicationRecipients)
+    .where(
+      and(
+        eq(communicationRecipients.id, input.recipientId),
+        eq(communicationRecipients.churchId, input.churchId),
+        eq(communicationRecipients.communicationId, input.communicationId)
+      )
+    )
+    .limit(1);
+  return row ?? null;
+}
+
+function storedRecipientOutcome(
+  row: Awaited<ReturnType<typeof exactStoredCommunicationRecipient>>
+) {
+  if (!row) return "retryable" as const;
+  if (["sent", "delivered", "opened", "clicked"].includes(row.status)) {
+    return "affected" as const;
+  }
+  if (
+    row.status === "bounced" ||
+    row.errorMessage?.startsWith(EVRY_COMMUNICATION_PERMANENT_PREFIX) ||
+    row.errorMessage?.startsWith(EVRY_COMMUNICATION_LOCAL_PREFIX)
+  ) {
+    return "excluded" as const;
+  }
+  return "retryable" as const;
 }
 
 /**
@@ -310,6 +420,98 @@ async function exactCommunication(input: {
   );
 }
 
+async function exactFrozenCommunication(input: {
+  effect: Pick<EvryClaimedEffectInput, "effectKey" | "execution">;
+  communicationId: string;
+  audience: EvryCommunicationAudienceSnapshot;
+}) {
+  if (
+    !(await exactCommunication({
+      churchId: input.effect.execution.plantId,
+      communicationId: input.communicationId,
+      actorUserId: input.effect.execution.actorUserId,
+      audience: input.audience,
+    }))
+  ) {
+    return null;
+  }
+  const rows = await db
+    .select({
+      id: communicationRecipients.id,
+      personId: communicationRecipients.personId,
+      email: communicationRecipients.email,
+      status: communicationRecipients.status,
+      errorMessage: communicationRecipients.errorMessage,
+    })
+    .from(communicationRecipients)
+    .where(
+      and(
+        eq(communicationRecipients.churchId, input.effect.execution.plantId),
+        eq(communicationRecipients.communicationId, input.communicationId)
+      )
+    );
+  const exact =
+    rows.length === input.audience.recipients.length &&
+    input.audience.recipients.every((recipient) => {
+      const expectedId = communicationEvryEffectUuid(
+        input.effect.effectKey,
+        `recipient:${recipient.personId}`
+      );
+      return rows.some(
+        (row) =>
+          row.id === expectedId &&
+          row.personId === recipient.personId &&
+          row.email === recipient.email
+      );
+    });
+  return exact ? rows : null;
+}
+
+export type EvryFrozenCommunicationState = "absent" | "prepared" | "started";
+
+export async function frozenEvryCommunicationState(input: {
+  effect: EvryClaimedEffectInput;
+  communicationId: string;
+  audience: EvryCommunicationAudienceSnapshot;
+}): Promise<EvryFrozenCommunicationState> {
+  const rows = await exactFrozenCommunication(input);
+  if (!rows) return "absent";
+  return rows.some(
+    (row) =>
+      ["sent", "delivered", "opened", "clicked", "bounced"].includes(
+        row.status
+      ) ||
+      [
+        EVRY_COMMUNICATION_ATTEMPTED_PREFIX,
+        EVRY_COMMUNICATION_TRANSIENT_PREFIX,
+        EVRY_COMMUNICATION_PERMANENT_PREFIX,
+      ].some((prefix) => row.errorMessage?.startsWith(prefix))
+  )
+    ? "started"
+    : "prepared";
+}
+
+/**
+ * A prepared batch is already a lasting effect even before the final ledger
+ * claim. Keep it retryable while authority is absent so a later authorized
+ * replay can finish the exact reviewed recipients without resending completed
+ * rows or durably refusing the plan.
+ */
+export async function reconcileFrozenEvryCommunication(input: {
+  effect: EvryClaimedEffectInput;
+  communicationId: string;
+  audience: EvryCommunicationAudienceSnapshot;
+}): Promise<EvryEffectReconciliation | null> {
+  const claimed = await findExactEvryDatabaseEffectClaim(input.effect);
+  if (claimed) return claimed;
+  const state = await frozenEvryCommunicationState(input);
+  if (state === "absent") return null;
+  if (state === "started") return { status: "resume" };
+  return (await actorStillHoldsCommunicationSend(input.effect.execution))
+    ? null
+    : { status: "retryable" };
+}
+
 async function prepareFrozenCommunication(input: {
   effect: EvryEffectInput;
   communicationId: string;
@@ -317,22 +519,25 @@ async function prepareFrozenCommunication(input: {
 }): Promise<boolean> {
   const churchId = input.effect.execution.plantId;
   const actorUserId = input.effect.execution.actorUserId;
-  await db
-    .insert(communications)
-    .values({
-      id: input.communicationId,
-      churchId,
-      subject: input.audience.subject,
-      body: input.audience.body,
-      bodyHtml: input.audience.bodyHtml,
-      channel: input.audience.channel,
-      templateId: input.audience.templateId,
-      meetingId: input.audience.meetingId,
-      status: "sending",
-      recipientCount: input.audience.recipients.length,
-      createdById: actorUserId,
-    })
-    .onConflictDoNothing({ target: communications.id });
+  await db.execute(sql`
+    insert into communications (
+      id, church_id, subject, body, body_html, channel, template_id,
+      meeting_id, status, recipient_count, created_by_id
+    )
+    select
+      ${input.communicationId}::uuid, actor.church_id, ${input.audience.subject},
+      ${input.audience.body}, ${input.audience.bodyHtml},
+      ${input.audience.channel}, ${input.audience.templateId}::uuid,
+      ${input.audience.meetingId}::uuid, 'sending',
+      ${input.audience.recipients.length}::int, actor.id
+    from users actor
+    where actor.id = ${actorUserId}::uuid
+      and actor.church_id = ${churchId}::uuid
+      and actor.sending_church_id is null
+      and actor.sending_network_id is null
+      and actor.seat in ('owner', 'admin')
+    on conflict (id) do nothing
+  `);
   if (
     !(await exactCommunication({
       churchId,
@@ -343,27 +548,8 @@ async function prepareFrozenCommunication(input: {
   ) {
     return false;
   }
-  if (input.audience.recipients.length > 0) {
-    await db
-      .insert(communicationRecipients)
-      .values(
-        input.audience.recipients.map((recipient) => ({
-          id: communicationEvryEffectUuid(
-            input.effect.effectKey,
-            `recipient:${recipient.personId}`
-          ),
-          churchId,
-          communicationId: input.communicationId,
-          personId: recipient.personId,
-          email: recipient.email,
-          channel: "email" as const,
-          status: "pending" as const,
-        }))
-      )
-      .onConflictDoNothing({ target: communicationRecipients.id });
-  }
-  const rows = await db
-    .select()
+  const existingRecipients = await db
+    .select({ id: communicationRecipients.id })
     .from(communicationRecipients)
     .where(
       and(
@@ -371,14 +557,61 @@ async function prepareFrozenCommunication(input: {
         eq(communicationRecipients.communicationId, input.communicationId)
       )
     );
+  if (existingRecipients.length > 0) {
+    return (
+      (await exactFrozenCommunication({
+        effect: input.effect,
+        communicationId: input.communicationId,
+        audience: input.audience,
+      })) !== null
+    );
+  }
+  if (input.audience.recipients.length > 0) {
+    const recipientsJson = JSON.stringify(
+      input.audience.recipients.map((recipient) => ({
+        id: communicationEvryEffectUuid(
+          input.effect.effectKey,
+          `recipient:${recipient.personId}`
+        ),
+        person_id: recipient.personId,
+        email: recipient.email,
+      }))
+    );
+    await db.execute(sql`
+      insert into communication_recipients (
+        id, church_id, communication_id, person_id, email, channel, status
+      )
+      select
+        recipient.id::uuid, actor.church_id, message.id,
+        recipient.person_id::uuid, recipient.email, 'email', 'pending'
+      from users actor
+      join communications message
+        on message.id = ${input.communicationId}::uuid
+        and message.church_id = actor.church_id
+        and message.created_by_id = actor.id
+        and message.subject is not distinct from ${input.audience.subject}
+        and message.body = ${input.audience.body}
+        and message.body_html is not distinct from ${input.audience.bodyHtml}
+        and message.channel = ${input.audience.channel}
+        and message.template_id is not distinct from ${input.audience.templateId}::uuid
+        and message.meeting_id is not distinct from ${input.audience.meetingId}::uuid
+        and message.recipient_count = ${input.audience.recipients.length}::int
+      cross join jsonb_to_recordset(${recipientsJson}::jsonb)
+        as recipient(id text, person_id text, email text)
+      where actor.id = ${actorUserId}::uuid
+        and actor.church_id = ${churchId}::uuid
+        and actor.sending_church_id is null
+        and actor.sending_network_id is null
+        and actor.seat in ('owner', 'admin')
+      on conflict (id) do nothing
+    `);
+  }
   return (
-    rows.length === input.audience.recipients.length &&
-    rows.every((row) => {
-      const expected = input.audience.recipients.find(
-        ({ personId }) => personId === row.personId
-      );
-      return Boolean(expected && row.email === expected.email);
-    })
+    (await exactFrozenCommunication({
+      effect: input.effect,
+      communicationId: input.communicationId,
+      audience: input.audience,
+    })) !== null
   );
 }
 
@@ -490,6 +723,12 @@ export async function sendFrozenEvryCommunication(input: {
   ) {
     return { status: "refused", excludedCount: 1 };
   }
+  const frozenState = await frozenEvryCommunicationState(input);
+  if (!(await actorStillHoldsCommunicationSend(input.effect.execution))) {
+    return frozenState === "started"
+      ? { status: "retryable" }
+      : { status: "refused", excludedCount: 1 };
+  }
   // This gate deliberately precedes the communication row, recipient rows,
   // RSVP tokens, and provider calls. A stale confirmation must leave no trace.
   const [[church], current] = await Promise.all([
@@ -515,11 +754,21 @@ export async function sendFrozenEvryCommunication(input: {
       [...plannedPersonIds].every((personId) =>
         input.eligiblePersonIds?.has(personId)
       ));
-  if (!church || !sameCurrentRecipients || !sameResendRecipients) {
+  if (
+    !church ||
+    (frozenState !== "started" &&
+      (!sameCurrentRecipients || !sameResendRecipients))
+  ) {
     return { status: "refused", excludedCount: 1 };
   }
   if (!(await prepareFrozenCommunication(input))) {
-    return { status: "refused", excludedCount: 1 };
+    return (await exactFrozenCommunication({
+      effect: input.effect,
+      communicationId: input.communicationId,
+      audience: input.audience,
+    }))
+      ? { status: "retryable" }
+      : { status: "refused", excludedCount: 1 };
   }
   const storedRows = await db
     .select()
@@ -539,6 +788,20 @@ export async function sendFrozenEvryCommunication(input: {
   );
   let retryable = false;
   let permanentProviderFailures = 0;
+  function countTerminalStoredOutcome(
+    outcome: ReturnType<typeof storedRecipientOutcome>
+  ) {
+    if (outcome === "affected") {
+      affectedCount += 1;
+      return true;
+    }
+    if (outcome === "excluded") {
+      permanentProviderFailures += 1;
+      excludedCount += 1;
+      return true;
+    }
+    return false;
+  }
   const mailer = input.mailer ?? productionMailer;
   for (const recipient of input.audience.recipients) {
     const row = byPerson.get(recipient.personId);
@@ -549,10 +812,63 @@ export async function sendFrozenEvryCommunication(input: {
     }
     if (
       row.status === "bounced" ||
-      row.errorMessage?.startsWith(EVRY_COMMUNICATION_PERMANENT_PREFIX)
+      row.errorMessage?.startsWith(EVRY_COMMUNICATION_PERMANENT_PREFIX) ||
+      row.errorMessage?.startsWith(EVRY_COMMUNICATION_LOCAL_PREFIX)
     ) {
       permanentProviderFailures += 1;
       excludedCount += 1;
+      continue;
+    }
+    const providerAttemptIsUncertain = [
+      EVRY_COMMUNICATION_ATTEMPTED_PREFIX,
+      EVRY_COMMUNICATION_TRANSIENT_PREFIX,
+    ].some((prefix) => row.errorMessage?.startsWith(prefix));
+    // A complaint or hard-bounce webhook can arrive after the whole-audience
+    // stale-plan gate above. Recheck this exact address after composition and
+    // immediately before the provider boundary so a later recipient is never
+    // mailed from a now-stale batch. The terminal row makes the skip visible
+    // and prevents a retry from attempting it again.
+    if (!(await actorStillHoldsCommunicationSend(input.effect.execution))) {
+      return { status: "retryable" };
+    }
+    if (
+      !providerAttemptIsUncertain &&
+      ((input.eligiblePersonIds &&
+        !input.eligiblePersonIds.has(recipient.personId)) ||
+        !(await recipientIsStillDispatchable({
+          churchId: actor.plantId,
+          recipient,
+        })))
+    ) {
+      const [excluded] = await db
+        .update(communicationRecipients)
+        .set({
+          status: "failed",
+          errorMessage: `${EVRY_COMMUNICATION_LOCAL_PREFIX}recipient or source eligibility changed immediately before provider send`,
+        })
+        .where(
+          and(
+            eq(communicationRecipients.id, row.id),
+            locallyExcludableRecipient(),
+            currentCommunicationSendAuthority(input.effect.execution)
+          )
+        )
+        .returning({ id: communicationRecipients.id });
+      if (excluded) {
+        permanentProviderFailures += 1;
+        excludedCount += 1;
+        continue;
+      }
+      const outcome = storedRecipientOutcome(
+        await exactStoredCommunicationRecipient({
+          churchId: actor.plantId,
+          communicationId: input.communicationId,
+          recipientId: row.id,
+        })
+      );
+      if (!countTerminalStoredOutcome(outcome)) {
+        return { status: "retryable" };
+      }
       continue;
     }
     const outbound = await renderedOutbound({
@@ -561,28 +877,22 @@ export async function sendFrozenEvryCommunication(input: {
       meetingId: input.audience.meetingId,
       recipient,
     });
-    // A complaint or hard-bounce webhook can arrive after the whole-audience
-    // stale-plan gate above. Recheck this exact address after composition and
-    // immediately before the provider boundary so a later recipient is never
-    // mailed from a now-stale batch. The terminal row makes the skip visible
-    // and prevents a retry from attempting it again.
     if (
-      !(await recipientIsStillDispatchable({
-        churchId: actor.plantId,
-        recipient,
+      !(await acquireCommunicationProviderAttempt({
+        execution: input.effect.execution,
+        recipientId: row.id,
       }))
     ) {
-      await db
-        .update(communicationRecipients)
-        .set({
-          status: "failed",
-          errorMessage: `${EVRY_COMMUNICATION_PERMANENT_PREFIX}recipient or suppression changed immediately before provider send`,
+      const outcome = storedRecipientOutcome(
+        await exactStoredCommunicationRecipient({
+          churchId: actor.plantId,
+          communicationId: input.communicationId,
+          recipientId: row.id,
         })
-        .where(
-          and(eq(communicationRecipients.id, row.id), dispatchableRecipient())
-        );
-      permanentProviderFailures += 1;
-      excludedCount += 1;
+      );
+      if (!countTerminalStoredOutcome(outcome)) {
+        return { status: "retryable" };
+      }
       continue;
     }
     const result = await mailer.send({
@@ -593,7 +903,7 @@ export async function sendFrozenEvryCommunication(input: {
       idempotencyKey: `evry-${input.effect.effectKey}-${row.id}`,
     });
     if (result.status === "accepted") {
-      await db
+      const [sent] = await db
         .update(communicationRecipients)
         .set({
           status: "sent",
@@ -601,32 +911,83 @@ export async function sendFrozenEvryCommunication(input: {
           errorMessage: null,
         })
         .where(
-          and(eq(communicationRecipients.id, row.id), dispatchableRecipient())
+          and(
+            eq(communicationRecipients.id, row.id),
+            providerAttemptUncertainRecipient()
+          )
+        )
+        .returning({ id: communicationRecipients.id });
+      if (sent) {
+        affectedCount += 1;
+      } else {
+        const outcome = storedRecipientOutcome(
+          await exactStoredCommunicationRecipient({
+            churchId: actor.plantId,
+            communicationId: input.communicationId,
+            recipientId: row.id,
+          })
         );
-      affectedCount += 1;
+        if (!countTerminalStoredOutcome(outcome)) {
+          return { status: "retryable" };
+        }
+      }
     } else if (result.status === "retryable") {
-      await db
+      const [attemptRecorded] = await db
         .update(communicationRecipients)
         .set({
           status: "failed",
-          errorMessage: `${EVRY_COMMUNICATION_TRANSIENT_PREFIX}${result.reason}`,
+          errorMessage: `${EVRY_COMMUNICATION_ATTEMPTED_PREFIX}${result.reason}`,
         })
         .where(
-          and(eq(communicationRecipients.id, row.id), dispatchableRecipient())
+          and(
+            eq(communicationRecipients.id, row.id),
+            providerAttemptUncertainRecipient()
+          )
+        )
+        .returning({ id: communicationRecipients.id });
+      if (attemptRecorded) {
+        retryable = true;
+      } else {
+        const outcome = storedRecipientOutcome(
+          await exactStoredCommunicationRecipient({
+            churchId: actor.plantId,
+            communicationId: input.communicationId,
+            recipientId: row.id,
+          })
         );
-      retryable = true;
+        if (!countTerminalStoredOutcome(outcome)) {
+          retryable = true;
+        }
+      }
     } else {
-      await db
+      const [permanentlyFailed] = await db
         .update(communicationRecipients)
         .set({
           status: "failed",
           errorMessage: `${EVRY_COMMUNICATION_PERMANENT_PREFIX}${result.reason}`,
         })
         .where(
-          and(eq(communicationRecipients.id, row.id), dispatchableRecipient())
+          and(
+            eq(communicationRecipients.id, row.id),
+            providerAttemptUncertainRecipient()
+          )
+        )
+        .returning({ id: communicationRecipients.id });
+      if (permanentlyFailed) {
+        permanentProviderFailures += 1;
+        excludedCount += 1;
+      } else {
+        const outcome = storedRecipientOutcome(
+          await exactStoredCommunicationRecipient({
+            churchId: actor.plantId,
+            communicationId: input.communicationId,
+            recipientId: row.id,
+          })
         );
-      permanentProviderFailures += 1;
-      excludedCount += 1;
+        if (!countTerminalStoredOutcome(outcome)) {
+          return { status: "retryable" };
+        }
+      }
     }
   }
   if (retryable) return { status: "retryable" };
@@ -644,7 +1005,7 @@ export async function sendFrozenEvryCommunication(input: {
     return { status: "failed", excludedCount };
   }
 
-  return claimEvryCommunicationDatabaseEffect({
+  const completion = await claimEvryCommunicationDatabaseEffect({
     execution: input.effect.execution,
     effectKey: input.effect.effectKey,
     mutation: sql`
@@ -667,4 +1028,5 @@ export async function sendFrozenEvryCommunication(input: {
       });
     },
   });
+  return completion.status === "refused" ? { status: "retryable" } : completion;
 }

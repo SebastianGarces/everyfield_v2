@@ -17,10 +17,10 @@
 // not ask for a schema migration and must not be able to tell one happened.
 // ============================================================================
 
-import { sql, type SQL } from "drizzle-orm";
+import { eq, sql, type SQL } from "drizzle-orm";
 
 import { db } from "@/db";
-import type { User } from "@/db/schema";
+import { churches, type User } from "@/db/schema";
 import type { LaunchStatus } from "@/db/schema/launch";
 import { requireChurchAccess } from "@/lib/auth/access";
 import { assertSeatFor } from "@/lib/auth/seat-rules";
@@ -69,6 +69,13 @@ export interface SetLaunchDateOptions {
   postpone?: boolean;
   /** The planter's stated reason, when a surface collects one. */
   note?: string | null;
+  /** Trusted reviewed source identity; omitted by ordinary owning surfaces. */
+  expected?: Readonly<{
+    id: string;
+    targetDate: string | null;
+    status: LaunchStatus;
+    updatedAt?: Date;
+  }> | null;
 }
 
 // ----------------------------------------------------------------------------
@@ -142,13 +149,25 @@ export interface SetLaunchDateOptions {
  * caller resolves against the stored row: same date = `unchanged`, different
  * date = somebody else got there first.
  */
-export function setLaunchDateStatement(input: {
+type SetLaunchDateStatementInput = Readonly<{
   churchId: string;
   targetDate: string;
   actorUserId: string;
   postpone: boolean;
   note: string | null;
-}): SQL {
+  expected?: SetLaunchDateOptions["expected"];
+  /** Frozen reviewed write instant for Evry; owner callers use transaction time. */
+  changedAt?: Date;
+  /** Frozen id for a reviewed create; owner callers use the table default. */
+  launchId?: string;
+  /** Trusted outer write gate used by the Evry exact-effect transaction. */
+  writeEligibility?: SQL;
+}>;
+
+/** Compound writer fragments for an outer transaction-owned CTE chain. */
+export function setLaunchDateEffectMutation(
+  input: SetLaunchDateStatementInput
+): Readonly<{ ctes: SQL; result: SQL }> {
   const nextStatus: LaunchStatus = input.postpone ? "postponed" : "scheduled";
 
   // A FIRST commitment is `scheduled` however it was reached — there is no
@@ -168,17 +187,24 @@ export function setLaunchDateStatement(input: {
             else 'moved'
           end`;
 
-  return sql`
-    with current as (
-      select id, target_date, status
+  const ctes = sql`current as (
+      select id, target_date, status, updated_at
       from launches
       where church_id = ${input.churchId}
       for update
     ), inserted as (
-      insert into launches (church_id, target_date, status)
-      select ${input.churchId}, ${input.targetDate}, ${nextStatus}
+      insert into launches (id, church_id, target_date, status, updated_at)
+      select coalesce(${input.launchId ?? null}::uuid, gen_random_uuid()),
+             ${input.churchId}, ${input.targetDate}, ${nextStatus},
+             ${input.changedAt ?? sql`transaction_timestamp()`}
       where not exists (select 1 from current)
-      on conflict (church_id) do nothing
+        and ${input.expected === undefined || input.expected === null}
+        and ${input.writeEligibility ?? sql`true`}
+      -- A reviewed create freezes its id. Two separately confirmed plans may
+      -- therefore race with the same frozen id as well as the same church.
+      -- Either uniqueness boundary elects one writer; the losing plan returns
+      -- no written row and is resolved as stale/refused by the caller.
+      on conflict do nothing
       returning
         id,
         null::date as previous_target_date,
@@ -190,10 +216,26 @@ export function setLaunchDateStatement(input: {
       update launches l
       set target_date = ${input.targetDate},
           status = ${nextStatus},
-          updated_at = now()
+          updated_at = ${input.changedAt ?? sql`transaction_timestamp()`}
       from current c
       where l.id = c.id
+        ${
+          input.expected && input.expected !== null
+            ? sql`and c.id = ${input.expected.id}
+                  and c.target_date is not distinct from ${input.expected.targetDate}::date
+                  and c.status = ${input.expected.status}
+                  ${
+                    input.expected.updatedAt
+                      ? sql`and date_trunc('milliseconds', c.updated_at at time zone 'UTC') = ${input.expected.updatedAt}`
+                      : sql``
+                  }
+                  `
+            : input.expected === null
+              ? sql`and false`
+              : sql``
+        }
         and c.status <> 'completed'
+        and ${input.writeEligibility ?? sql`true`}
         and (
           c.target_date is distinct from ${input.targetDate}::date
           or c.status is distinct from ${nextStatus}::varchar
@@ -228,7 +270,23 @@ export function setLaunchDateStatement(input: {
         ${input.note}
       from written w
       returning id
-    )
+    )`;
+  return {
+    ctes,
+    result: sql`
+      select 1::int affected_count, 0::int excluded_count
+      from written
+      limit 1
+    `,
+  };
+}
+
+export function setLaunchDateStatement(
+  input: SetLaunchDateStatementInput
+): SQL {
+  const mutation = setLaunchDateEffectMutation(input);
+  return sql`
+    with ${mutation.ctes}
     select
       w.id as launch_id,
       w.target_date as target_date,
@@ -245,6 +303,30 @@ interface WriteRow extends Record<string, unknown> {
   status: LaunchStatus;
   updated_at: string | Date;
   church_name: string | null;
+}
+
+/**
+ * Deliver the best-effort oversight notice owed by a durable date change.
+ * The occurrence key includes the stored write instant, so replay after a lost
+ * response converges on the same notification instead of inventing another.
+ */
+export async function reconcileLaunchDateChangedAfterWrite(input: {
+  churchId: string;
+  launchDate: string;
+  changedAt: Date;
+}): Promise<void> {
+  const [church] = await db
+    .select({ name: churches.name })
+    .from(churches)
+    .where(eq(churches.id, input.churchId))
+    .limit(1);
+  if (!church) return;
+  await announceLaunchDateChanged({
+    churchId: input.churchId,
+    plantName: church.name,
+    launchDate: input.launchDate,
+    changedAt: input.changedAt,
+  });
 }
 
 // ----------------------------------------------------------------------------
@@ -299,6 +381,7 @@ export async function setLaunchDate(
       actorUserId: user.id,
       postpone: options.postpone ?? false,
       note: parsedNote.data,
+      expected: options.expected,
     })
   );
 
@@ -318,9 +401,8 @@ export async function setLaunchDate(
     return { status: "error", error: LAUNCH_CHANGED_ELSEWHERE_MESSAGE };
   }
 
-  await announceLaunchDateChanged({
+  await reconcileLaunchDateChangedAfterWrite({
     churchId,
-    plantName: written.church_name ?? "",
     launchDate: parsed.data,
     changedAt: new Date(written.updated_at),
   });

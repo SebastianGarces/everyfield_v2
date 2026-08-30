@@ -2,6 +2,8 @@ import { z } from "zod";
 
 import {
   EVRY_COMMUNICATION_MAX_RECIPIENTS,
+  frozenEvryCommunicationState,
+  reconcileFrozenEvryCommunication,
   type EvryCommunicationAudienceSnapshot,
   type EvryCommunicationMailer,
   resolveEvryCommunicationAudience,
@@ -473,6 +475,18 @@ export function createCommunicationEvryMessageExecutions(
 ) {
   const send = defineEvryExecutionCapability({
     planCapability: COMMUNICATION_MESSAGE_SEND_PLAN,
+    async reconcileClaimed(input) {
+      const parsed = sendArgumentsSchema.safeParse(input.arguments);
+      return parsed.success &&
+        input.execution.capabilityIdentity ===
+          COMMUNICATION_MESSAGE_SEND_IDENTITY
+        ? reconcileFrozenEvryCommunication({
+            effect: input,
+            communicationId: parsed.data.communicationId,
+            audience: parsed.data.audience,
+          })
+        : null;
+    },
     async executeIfCurrent(input) {
       const parsed = sendArgumentsSchema.safeParse(input.arguments);
       if (
@@ -482,7 +496,13 @@ export function createCommunicationEvryMessageExecutions(
         return { status: "refused", excludedCount: 1 };
       }
       try {
+        const frozenState = await frozenEvryCommunicationState({
+          effect: input,
+          communicationId: parsed.data.communicationId,
+          audience: parsed.data.audience,
+        });
         if (
+          frozenState !== "started" &&
           !(await sendAudienceIsCurrent({
             actor: input.authorization.actor,
             recipientSource: parsed.data.recipientSource,
@@ -506,6 +526,18 @@ export function createCommunicationEvryMessageExecutions(
 
   const resend = defineEvryExecutionCapability({
     planCapability: COMMUNICATION_RESEND_NON_OPENERS_PLAN,
+    async reconcileClaimed(input) {
+      const parsed = resendArgumentsSchema.safeParse(input.arguments);
+      return parsed.success &&
+        input.execution.capabilityIdentity ===
+          COMMUNICATION_RESEND_NON_OPENERS_IDENTITY
+        ? reconcileFrozenEvryCommunication({
+            effect: input,
+            communicationId: parsed.data.communicationId,
+            audience: parsed.data.audience,
+          })
+        : null;
+    },
     async executeIfCurrent(input) {
       const parsed = resendArgumentsSchema.safeParse(input.arguments);
       if (
@@ -515,7 +547,24 @@ export function createCommunicationEvryMessageExecutions(
         return { status: "refused", excludedCount: 1 };
       }
       try {
+        const frozenState = await frozenEvryCommunicationState({
+          effect: input,
+          communicationId: parsed.data.communicationId,
+          audience: parsed.data.audience,
+        });
+        const currentNonOpeners =
+          frozenState === "started"
+            ? new Set(
+                (
+                  await getNonOpenerSummary(
+                    input.authorization.actor.plantId,
+                    parsed.data.source.id
+                  )
+                ).personIds
+              )
+            : null;
         if (
+          !currentNonOpeners &&
           !(await resendAudienceIsCurrent({
             actor: input.authorization.actor,
             source: parsed.data.source,
@@ -530,7 +579,8 @@ export function createCommunicationEvryMessageExecutions(
           identity: COMMUNICATION_RESEND_NON_OPENERS_IDENTITY,
           communicationId: parsed.data.communicationId,
           audience: parsed.data.audience,
-          eligiblePersonIds: new Set(parsed.data.nonOpenerPersonIds),
+          eligiblePersonIds:
+            currentNonOpeners ?? new Set(parsed.data.nonOpenerPersonIds),
           mailer: dependencies.mailer,
         });
       } catch {

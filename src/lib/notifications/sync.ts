@@ -118,6 +118,12 @@ export interface NotificationSyncInput<
     | NotificationSyncPlan<Reason>
     | Promise<NotificationSyncPlan<Reason>>;
   deps: NotificationSyncDeps;
+  /**
+   * A replayable owner-side reconciler may require every queue write to
+   * converge before it records its own terminal outcome. Ordinary product
+   * writers remain best-effort because their subject write is already final.
+   */
+  failureMode?: "best_effort" | "required";
 }
 
 /**
@@ -136,6 +142,7 @@ export async function runNotificationSync<Reason extends string>(
   input: NotificationSyncInput<Reason>
 ): Promise<NotificationSyncReport<Reason>> {
   const report = emptyNotificationSyncReport<Reason>();
+  const failures: unknown[] = [];
 
   try {
     if (input.mustCancel) {
@@ -164,6 +171,7 @@ export async function runNotificationSync<Reason extends string>(
       } catch (error) {
         // One row's failure must not cost the rest of the plan theirs.
         report.failed += 1;
+        failures.push(error);
         console.error(`${input.label} notification enqueue failed`, {
           entityId: input.entityId,
           type: notification.type,
@@ -172,10 +180,19 @@ export async function runNotificationSync<Reason extends string>(
       }
     }
   } catch (error) {
+    if (input.failureMode === "required") report.failed += 1;
+    failures.push(error);
     console.error(`${input.label} notification sync failed`, {
       entityId: input.entityId,
       error,
     });
+  }
+
+  if (input.failureMode === "required" && failures.length > 0) {
+    throw new AggregateError(
+      failures,
+      `${failures.length} required ${input.label} notification write(s) failed`
+    );
   }
 
   return report;

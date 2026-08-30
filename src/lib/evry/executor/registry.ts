@@ -37,7 +37,15 @@ const effectResultSchema = z.discriminatedUnion("status", [
   z.strictObject({ status: z.literal("retryable") }),
 ]);
 
+const effectReconciliationSchema = z.union([
+  effectResultSchema,
+  z.strictObject({ status: z.literal("resume") }),
+]);
+
 export type EvryEffectResult = Readonly<z.infer<typeof effectResultSchema>>;
+export type EvryEffectReconciliation = Readonly<
+  z.infer<typeof effectReconciliationSchema>
+>;
 
 export type EvryEffectInput = Readonly<{
   authorization: EvryEffectCapabilityAuthorization;
@@ -55,15 +63,28 @@ export type EvryEffectInput = Readonly<{
   arguments: Readonly<Record<string, EvryJsonValue>>;
 }>;
 
+export type EvryClaimedEffectInput = Readonly<
+  Omit<EvryEffectInput, "authorization">
+>;
+
 export type EvryExecutionCapabilityRegistration = Readonly<{
   planCapability: EvryPlanCapabilityRegistration;
   /**
    * First return an existing exact `effectKey` claim's original closed result.
-   * Only an unclaimed key may atomically revalidate target state, claim, and
-   * apply. This ordering lets a crash-after-commit replay recover even when
-   * the applied effect changed the target. Raw errors must not cross here.
+   * `resume` means an irreversible boundary started before the final claim and
+   * must continue from its immutable inputs after fresh capability authority,
+   * even when ordinary plan freshness has elapsed. Raw errors must not cross.
    */
   executeIfCurrent(input: EvryEffectInput): Promise<EvryEffectResult>;
+  /**
+   * Reconcile a domain mutation that is already durably claimed. This runs
+   * before fresh authorization because revoking later authority cannot turn an
+   * already-committed mutation into a truthful refusal. `null` means no exact
+   * claim exists and the ordinary authorized path must run.
+   */
+  reconcileClaimed?(
+    input: EvryClaimedEffectInput
+  ): Promise<EvryEffectReconciliation | null>;
   [EVRY_EXECUTION_CAPABILITY]: true;
 }>;
 
@@ -76,6 +97,9 @@ export type EvryExecutionCapabilityRegistry = Readonly<{
 export function defineEvryExecutionCapability(input: {
   planCapability: EvryPlanCapabilityRegistration;
   executeIfCurrent(input: EvryEffectInput): Promise<EvryEffectResult>;
+  reconcileClaimed?(
+    input: EvryClaimedEffectInput
+  ): Promise<EvryEffectReconciliation | null>;
 }): EvryExecutionCapabilityRegistration {
   if (!isEvryEffectCapabilityIdentity(input.planCapability.identity)) {
     throw new Error(
@@ -89,6 +113,16 @@ export function defineEvryExecutionCapability(input: {
         await input.executeIfCurrent(effectInput)
       );
     },
+    ...(input.reconcileClaimed
+      ? {
+          async reconcileClaimed(effectInput: EvryClaimedEffectInput) {
+            const result = await input.reconcileClaimed!(effectInput);
+            return result === null
+              ? null
+              : effectReconciliationSchema.parse(result);
+          },
+        }
+      : {}),
     [EVRY_EXECUTION_CAPABILITY]: true as const,
   });
 }
