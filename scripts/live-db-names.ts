@@ -52,6 +52,9 @@ import { fileURLToPath } from "node:url";
  * `src/db/live-suite-coverage.test.ts` fails the build on any that opts in and
  * is missing, so this list cannot quietly go short.
  */
+export const TASK_EFFECT_LIVE_SUITE =
+  "src/lib/evry/capabilities/tasks/effect-live.test.ts" as const;
+
 export const LIVE_SUITES = [
   "src/db/seat-owner-uniqueness.test.ts",
   "src/lib/auth/access.test.ts",
@@ -61,7 +64,7 @@ export const LIVE_SUITES = [
   "src/lib/evry/plans/confirmation-race.test.ts",
   "src/lib/evry/audit/audit-live.test.ts",
   "src/lib/evry/conversations/conversations-live.test.ts",
-  "src/lib/evry/capabilities/tasks/effect-live.test.ts",
+  TASK_EFFECT_LIVE_SUITE,
   "src/lib/evry/executor/executor-live.test.ts",
   "src/lib/evry/recipes/recipe-live.test.ts",
   "src/lib/evry/runs/runs-live.test.ts",
@@ -78,6 +81,26 @@ export const LIVE_SUITES = [
   "src/lib/seats/seat-removal-live.test.ts",
   "src/lib/tasks/follow-up-race.test.ts",
   "src/lib/tasks/subtask-parent-fk.test.ts",
+] as const;
+
+/**
+ * The Task proof owns a second child process and exercises the entire
+ * capability pack in one fixture lifecycle. Give it its own phase so it does
+ * not compete with sibling suites for the two-core CI runner or the proxy's
+ * 20-connection pool.
+ */
+export const DEDICATED_LIVE_SUITES = [TASK_EFFECT_LIVE_SUITE] as const;
+
+const dedicatedLiveSuites = new Set<string>(DEDICATED_LIVE_SUITES);
+
+export const PARALLEL_LIVE_SUITES = LIVE_SUITES.filter(
+  (suite) => !dedicatedLiveSuites.has(suite)
+);
+
+/** Ordered, fail-fast phases for the live lane. */
+export const LIVE_SUITE_PHASES = [
+  ...DEDICATED_LIVE_SUITES.map((suite) => [suite] as const),
+  PARALLEL_LIVE_SUITES,
 ] as const;
 
 /**

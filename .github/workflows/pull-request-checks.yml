@@ -298,6 +298,11 @@ jobs:
       # first half of `test:live` — refuses to start the runner unless every
       # one of those databases answers, because an unreachable one would make
       # the suites SKIP and the job go green having asserted nothing.
+      #
+      # The monolithic Task capability proof runs in its own phase before the
+      # smaller suites run in parallel. Its database was already separate;
+      # this also separates its demand on the proxy's 20-connection pool and
+      # the two-core hosted runner.
       - name: Run the live suites
         run: LIVE_DB_TESTS=1 pnpm test:live
         env:
