@@ -49,6 +49,7 @@ import {
   syncTaskNotifications,
   syncTaskNotificationsFor,
   taskNotificationsDiffer,
+  type TaskNotificationFacts,
 } from "./notifications";
 import { toCalendarDate } from "@/lib/datetime";
 import { blockedTaskIdsAmong } from "./dependencies";
@@ -1245,6 +1246,187 @@ export function assertMayActOnTask(
   if (!mayActOnTask(actor, task)) throw new SeatRefusalError("tasks.own");
 }
 
+export function completeTaskStatement(input: {
+  churchId: string;
+  taskId: string;
+  actorUserId: string;
+  completedAt: Date;
+  expectedTitle?: string;
+  expectedStatus?: TaskStatus;
+  expectedAssignedToId?: string | null;
+  expectedIsRecurring?: boolean;
+  expectedUpdatedAt?: Date;
+  launchMilestoneId?: string;
+  /** Trusted outer write gate used by the Evry exact-effect transaction. */
+  writeEligibility?: SQL;
+}): SQL {
+  return sql`
+    update tasks t
+    set status = 'complete', completed_at = ${input.completedAt},
+        completed_by_id = ${input.actorUserId}::uuid,
+        updated_at = ${input.completedAt}
+    where t.church_id = ${input.churchId}::uuid
+      and t.id = ${input.taskId}::uuid
+      and t.deleted_at is null
+      and t.status <> 'complete'
+      ${input.expectedTitle ? sql`and t.title = ${input.expectedTitle}` : sql``}
+      ${input.expectedStatus ? sql`and t.status = ${input.expectedStatus}` : sql``}
+      ${
+        input.expectedAssignedToId === undefined
+          ? sql``
+          : input.expectedAssignedToId === null
+            ? sql`and t.assigned_to_id is null`
+            : sql`and t.assigned_to_id = ${input.expectedAssignedToId}::uuid`
+      }
+      ${
+        input.expectedIsRecurring === undefined
+          ? sql``
+          : sql`and t.is_recurring = ${input.expectedIsRecurring}`
+      }
+      and ${input.writeEligibility ?? sql`true`}
+      ${
+        input.expectedUpdatedAt
+          ? sql`and date_trunc('milliseconds', t.updated_at at time zone 'UTC') = ${input.expectedUpdatedAt}`
+          : sql``
+      }
+      ${
+        input.launchMilestoneId
+          ? sql`and exists (
+              select 1 from launch_milestone_tasks lmt
+              where lmt.task_id = t.id
+                and lmt.church_id = t.church_id
+                and lmt.milestone_id = ${input.launchMilestoneId}::uuid
+            )`
+          : sql``
+      }
+    returning t.id, 1::int affected_count, 0::int excluded_count
+  `;
+}
+
+export function reopenTaskStatement(input: {
+  churchId: string;
+  taskId: string;
+  expectedTitle?: string;
+  expectedStatus?: TaskStatus;
+  expectedAssignedToId?: string | null;
+  expectedIsRecurring?: boolean;
+  expectedUpdatedAt?: Date;
+  launchMilestoneId?: string;
+  /** Trusted outer write gate used by the Evry exact-effect transaction. */
+  writeEligibility?: SQL;
+}): SQL {
+  return sql`
+    update tasks t
+    set status = 'not_started', completed_at = null,
+        completed_by_id = null, updated_at = transaction_timestamp()
+    where t.church_id = ${input.churchId}::uuid
+      and t.id = ${input.taskId}::uuid
+      and t.deleted_at is null
+      and t.status = 'complete'
+      ${input.expectedTitle ? sql`and t.title = ${input.expectedTitle}` : sql``}
+      ${input.expectedStatus ? sql`and t.status = ${input.expectedStatus}` : sql``}
+      ${
+        input.expectedAssignedToId === undefined
+          ? sql``
+          : input.expectedAssignedToId === null
+            ? sql`and t.assigned_to_id is null`
+            : sql`and t.assigned_to_id = ${input.expectedAssignedToId}::uuid`
+      }
+      ${
+        input.expectedIsRecurring === undefined
+          ? sql``
+          : sql`and t.is_recurring = ${input.expectedIsRecurring}`
+      }
+      and ${input.writeEligibility ?? sql`true`}
+      ${
+        input.expectedUpdatedAt
+          ? sql`and date_trunc('milliseconds', t.updated_at at time zone 'UTC') = ${input.expectedUpdatedAt}`
+          : sql``
+      }
+      ${
+        input.launchMilestoneId
+          ? sql`and exists (
+              select 1 from launch_milestone_tasks lmt
+              where lmt.task_id = t.id
+                and lmt.church_id = t.church_id
+                and lmt.milestone_id = ${input.launchMilestoneId}::uuid
+            )`
+          : sql``
+      }
+    returning t.id, 1::int affected_count, 0::int excluded_count
+  `;
+}
+
+/**
+ * Finish the owner-side work owed by a durable task completion.
+ *
+ * This is deliberately replay-safe: notification cancellation and completion
+ * event consumers converge on the task identity, while recurring successors
+ * are guarded by the series' single-open-instance invariant. Evry can therefore
+ * retry this after its task row and execution outcome committed together.
+ */
+async function reconcileTaskCompletionEffects(
+  completed: Pick<
+    Task,
+    "id" | "churchId" | "category" | "relatedType" | "relatedId"
+  >,
+  completedById: string
+): Promise<void> {
+  await cancelTaskNotifications(completed.churchId, completed.id);
+  await emitTaskCompleted(
+    completed.id,
+    completed.churchId,
+    completed.category,
+    completed.relatedType,
+    completed.relatedId,
+    completedById
+  );
+}
+
+/** Exact completion effects for a reviewed task that cannot recur. */
+export async function reconcileNonRecurringCompletedTaskAfterWrite(
+  completed: Pick<
+    Task,
+    "id" | "churchId" | "category" | "relatedType" | "relatedId" | "isRecurring"
+  >,
+  completedById: string
+): Promise<void> {
+  if (completed.isRecurring) {
+    throw new Error("Recurring task completion needs a successor-aware plan");
+  }
+  await reconcileTaskCompletionEffects(completed, completedById);
+}
+
+export async function reconcileCompletedTaskAfterWrite(
+  completed: Task,
+  completedById: string
+): Promise<Task | null> {
+  await reconcileTaskCompletionEffects(completed, completedById);
+
+  try {
+    return await createNextRecurrence(
+      completed,
+      toCalendarDate(completed.completedAt ?? new Date())
+    );
+  } catch (error) {
+    // The completion is already durable. A missing successor is repaired by
+    // replaying this reconciliation (or by reopening and completing again).
+    console.error(
+      `completeTask failed to create the next recurrence of ${completed.id}:`,
+      error
+    );
+    return null;
+  }
+}
+
+/** Re-enqueue the notifications owed by a durable reopen; safe on replay. */
+export async function reconcileReopenedTaskAfterWrite(
+  reopened: TaskNotificationFacts,
+  mustCancel: boolean
+): Promise<void> {
+  await syncTaskNotifications(reopened, { mustCancel });
+}
+
 export async function completeTask(
   churchId: string,
   taskId: string,
@@ -1291,36 +1473,10 @@ export async function completeTask(
     throw new Error("Task is already complete");
   }
 
-  // The subject is resolved: nothing pending about this task may still be
-  // announced (N-011). By ENTITY REFERENCE, so it reaches every recipient's row
-  // and every condition at once — the assignee may have changed since.
-  await cancelTaskNotifications(churchId, completed.id);
-
-  // Emit task.completed event
-  await emitTaskCompleted(
-    completed.id,
-    completed.churchId,
-    completed.category,
-    completed.relatedType,
-    completed.relatedId,
+  const nextInstance = await reconcileCompletedTaskAfterWrite(
+    completed,
     actor.id
   );
-
-  let nextInstance: Task | null = null;
-  try {
-    nextInstance = await createNextRecurrence(
-      completed,
-      toCalendarDate(completedAt)
-    );
-  } catch (error) {
-    // The completion already landed and is correct on its own. A missing
-    // successor is repairable (reopen, re-complete); throwing here would tell
-    // the planter their completed task failed to complete.
-    console.error(
-      `completeTask failed to create the next recurrence of ${completed.id}:`,
-      error
-    );
-  }
 
   return { task: completed, nextInstance };
 }

@@ -754,6 +754,11 @@ export function completeLaunchMilestoneStatement(input: {
   milestoneId: string;
   churchId: string;
   actorUserId: string;
+  expectedTitle?: string;
+  expectedUpdatedAt?: Date;
+  expectedOpenTaskCount?: number;
+  /** Trusted outer write gate used by the Evry exact-effect transaction. */
+  writeEligibility?: SQL;
 }): SQL {
   return sql`
     update launch_milestones m
@@ -763,6 +768,13 @@ export function completeLaunchMilestoneStatement(input: {
     where m.id = ${input.milestoneId}
       and m.church_id = ${input.churchId}
       and m.completed_at is null
+      and ${input.writeEligibility ?? sql`true`}
+      ${input.expectedTitle ? sql`and m.title = ${input.expectedTitle}` : sql``}
+      ${
+        input.expectedUpdatedAt
+          ? sql`and date_trunc('milliseconds', m.updated_at at time zone 'UTC') = ${input.expectedUpdatedAt}`
+          : sql``
+      }
       and not exists (
         select 1
         from launch_milestone_tasks lmt
@@ -771,7 +783,19 @@ export function completeLaunchMilestoneStatement(input: {
           and t.deleted_at is null
           and t.status <> 'complete'
       )
-    returning m.id
+      ${
+        input.expectedOpenTaskCount === undefined
+          ? sql``
+          : sql`and (
+              select count(*)::int
+              from launch_milestone_tasks lmt
+              join tasks t on t.id = lmt.task_id
+              where lmt.milestone_id = m.id
+                and t.deleted_at is null
+                and t.status <> 'complete'
+            ) = ${input.expectedOpenTaskCount}`
+      }
+    returning m.id, 1::int affected_count, 0::int excluded_count
   `;
 }
 
@@ -779,6 +803,12 @@ export function completeLaunchMilestoneStatement(input: {
 export function reopenLaunchMilestoneStatement(input: {
   milestoneId: string;
   churchId: string;
+  expectedTitle?: string;
+  expectedCompletedAt?: Date;
+  expectedUpdatedAt?: Date;
+  expectedOpenTaskCount?: number;
+  /** Trusted outer write gate used by the Evry exact-effect transaction. */
+  writeEligibility?: SQL;
 }): SQL {
   return sql`
     update launch_milestones m
@@ -788,7 +818,31 @@ export function reopenLaunchMilestoneStatement(input: {
     where m.id = ${input.milestoneId}
       and m.church_id = ${input.churchId}
       and m.completed_at is not null
-    returning m.id
+      and ${input.writeEligibility ?? sql`true`}
+      ${input.expectedTitle ? sql`and m.title = ${input.expectedTitle}` : sql``}
+      ${
+        input.expectedCompletedAt
+          ? sql`and date_trunc('milliseconds', m.completed_at at time zone 'UTC') = ${input.expectedCompletedAt}`
+          : sql``
+      }
+      ${
+        input.expectedUpdatedAt
+          ? sql`and date_trunc('milliseconds', m.updated_at at time zone 'UTC') = ${input.expectedUpdatedAt}`
+          : sql``
+      }
+      ${
+        input.expectedOpenTaskCount === undefined
+          ? sql``
+          : sql`and (
+              select count(*)::int
+              from launch_milestone_tasks lmt
+              join tasks t on t.id = lmt.task_id
+              where lmt.milestone_id = m.id
+                and t.deleted_at is null
+                and t.status <> 'complete'
+            ) = ${input.expectedOpenTaskCount}`
+      }
+    returning m.id, 1::int affected_count, 0::int excluded_count
   `;
 }
 
@@ -813,7 +867,8 @@ export type MilestoneWriteResult =
 export async function completeLaunchMilestone(
   user: User,
   churchId: string,
-  milestoneId: string
+  milestoneId: string,
+  options: Readonly<{ expectedTitle?: string }> = {}
 ): Promise<MilestoneWriteResult> {
   assertSeatFor(user, "launch.milestone");
   await requireChurchAccess(user, churchId);
@@ -823,6 +878,7 @@ export async function completeLaunchMilestone(
       milestoneId,
       churchId,
       actorUserId: user.id,
+      expectedTitle: options.expectedTitle,
     })
   );
 
@@ -850,13 +906,18 @@ export async function completeLaunchMilestone(
 export async function reopenLaunchMilestone(
   user: User,
   churchId: string,
-  milestoneId: string
+  milestoneId: string,
+  options: Readonly<{ expectedTitle?: string }> = {}
 ): Promise<MilestoneWriteResult> {
   assertSeatFor(user, "launch.milestone");
   await requireChurchAccess(user, churchId);
 
   const result = await db.execute<{ id: string }>(
-    reopenLaunchMilestoneStatement({ milestoneId, churchId })
+    reopenLaunchMilestoneStatement({
+      milestoneId,
+      churchId,
+      expectedTitle: options.expectedTitle,
+    })
   );
 
   return result.rows[0] ? { status: "changed" } : { status: "unchanged" };
