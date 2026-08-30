@@ -8,8 +8,17 @@ import {
   meetingAttendance,
   persons,
 } from "@/db/schema";
-import { trustedEvryApplicationSourceLink } from "@/lib/evry/artifacts/types";
+import { toCalendarDate, utcOffsetForZonedTime } from "@/lib/datetime";
+import {
+  buildEvryConfirmationArtifact,
+  type EvryDetailedConfirmationArtifactDocument,
+} from "@/lib/evry/artifacts/review";
+import {
+  trustedEvryApplicationSourceLink,
+  type EvryConfirmationDateTimeDocument,
+} from "@/lib/evry/artifacts/types";
 import type { EvryClarificationArtifact } from "@/lib/evry/artifacts/types";
+import type { EvryConversationPlanIdentity } from "@/lib/evry/conversations/contract";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
 import {
   resolveEvryPlantDateTimeRequest,
@@ -96,6 +105,152 @@ export type MeetingInvitationReferenceResolution =
   | ResolvedMeetingInvitationReference
   | Readonly<{ kind: "clarification"; artifact: EvryClarificationArtifact }>
   | Readonly<{ kind: "unavailable" }>;
+
+function localTimeAt(instant: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).format(instant);
+}
+
+function endDateTime(
+  start: EvryResolvedPlantDateTime,
+  durationMinutes: number
+): EvryConfirmationDateTimeDocument {
+  const instant = new Date(
+    new Date(start.instantUtc).getTime() + durationMinutes * 60_000
+  );
+  const calendarDate = toCalendarDate(instant, start.timeZone);
+  const localTime = localTimeAt(instant, start.timeZone);
+  const match = /^(\d{1,2}):(\d{2}) (AM|PM)$/.exec(localTime);
+  if (!match) throw new Error("Meeting invitation end time is invalid");
+  const hour = (Number(match[1]) % 12) + (match[3] === "PM" ? 12 : 0);
+  return {
+    calendarDate,
+    localTime,
+    timeZone: start.timeZone,
+    utcOffset: utcOffsetForZonedTime(
+      calendarDate,
+      hour,
+      Number(match[2]),
+      instant
+    ),
+    instantUtc: instant.toISOString(),
+    interpretation: {
+      basis: "explicit-calendar-date",
+      sourceText: `${durationMinutes} minutes after ${start.interpretation.sourceText}`,
+      statedCalendarDate: calendarDate,
+    },
+  };
+}
+
+function exclusionCounts(exclusions: readonly MeetingInvitationExclusion[]) {
+  const counts = new Map<string, number>();
+  for (const { reason } of exclusions) {
+    counts.set(reason, (counts.get(reason) ?? 0) + 1);
+  }
+  return [...counts].map(([reason, count]) => ({ reason, count }));
+}
+
+/** Build the one review artifact solely from the exact resolved recipe data. */
+export function buildMeetingInvitationConfirmation(input: {
+  plan: EvryConversationPlanIdentity;
+  resolved: ResolvedMeetingInvitationReference;
+}): EvryDetailedConfirmationArtifactDocument {
+  const { resolved } = input;
+  const exclusions = exclusionCounts(resolved.exclusions);
+  const guestTargets = resolved.guests.map((guest) => ({
+    label: "Guest",
+    value: `${guest.label} · ${guest.email}`,
+    sourceLink: trustedEvryApplicationSourceLink({
+      label: `Open ${guest.label}`,
+      href: `/people/${guest.personId}`,
+    }),
+  }));
+  return buildEvryConfirmationArtifact({
+    kind: "confirmation",
+    artifactVersion: 1,
+    plan: input.plan,
+    title: "Create Vision Meeting and send invitations",
+    actionLabel: `Create meeting and send ${resolved.guests.length}`,
+    steps: [
+      {
+        stepId: "create-meeting",
+        title: "Create Vision Meeting",
+        effectKind: "meeting",
+        reversibility: "reversible",
+        resolvedTargets: [
+          { label: "Meeting", value: "Vision Meeting", sourceLink: null },
+          {
+            label: "Location",
+            value: `${resolved.location.name} · ${resolved.location.address}`,
+            sourceLink: null,
+          },
+        ],
+        counts: [{ label: "Meetings created", count: 1 }],
+        exclusions: [],
+        dateTime: {
+          startsAt: {
+            calendarDate: resolved.dateTime.calendarDate,
+            localTime: resolved.dateTime.localTime,
+            timeZone: resolved.dateTime.timeZone,
+            utcOffset: resolved.dateTime.utcOffset,
+            instantUtc: resolved.dateTime.instantUtc,
+            interpretation: { ...resolved.dateTime.interpretation },
+          },
+          endsAt: endDateTime(resolved.dateTime, resolved.durationMinutes),
+        },
+        contentPreviews: [],
+        beforeAfter: [],
+      },
+      {
+        stepId: "add-guests",
+        title: "Add resolved guests",
+        effectKind: "other",
+        reversibility: "reversible",
+        resolvedTargets: guestTargets,
+        counts: [{ label: "Guests added", count: resolved.guests.length }],
+        exclusions,
+        dateTime: null,
+        contentPreviews: [],
+        beforeAfter: [],
+      },
+      {
+        stepId: "send-invitations",
+        title: "Send the invitation",
+        effectKind: "communication",
+        reversibility: "irreversible",
+        resolvedTargets: guestTargets.map(({ value, sourceLink }) => ({
+          label: "Recipient",
+          value,
+          sourceLink,
+        })),
+        counts: [{ label: "Emails sent", count: resolved.guests.length }],
+        exclusions,
+        dateTime: null,
+        contentPreviews: [
+          { label: "Subject", content: resolved.subject },
+          { label: "Message", content: resolved.body },
+        ],
+        beforeAfter: [
+          {
+            label: "Invitation delivery",
+            before: "Not sent",
+            after: "Sent immediately",
+            count: resolved.guests.length,
+          },
+        ],
+      },
+    ],
+    consequences: [
+      "Creates one Vision Meeting in the plant calendar.",
+      `Adds ${resolved.guests.length} guests to the meeting.`,
+      `Sends ${resolved.guests.length} invitation emails immediately.`,
+    ],
+  });
+}
 
 export type MeetingInvitationReferenceResolverDependencies = Readonly<{
   resolveDateTime(request: unknown): Promise<EvryDateTimeResolution>;
