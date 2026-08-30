@@ -2,6 +2,8 @@ import { z } from "zod";
 
 import {
   EVRY_COMMUNICATION_MAX_RECIPIENTS,
+  hasExactFrozenEvryCommunication,
+  reconcileFrozenEvryCommunication,
   type EvryCommunicationAudienceSnapshot,
   type EvryCommunicationMailer,
   resolveEvryCommunicationAudience,
@@ -37,7 +39,6 @@ import {
   defineEvryExecutionCapability,
   type EvryEffectInput,
 } from "@/lib/evry/executor";
-import { findExactEvryDatabaseEffectClaim } from "@/lib/evry/executor/database-effect";
 import {
   parseEvryActionPlanCandidate,
   type EvryActionStep,
@@ -474,7 +475,18 @@ export function createCommunicationEvryMessageExecutions(
 ) {
   const send = defineEvryExecutionCapability({
     planCapability: COMMUNICATION_MESSAGE_SEND_PLAN,
-    reconcileClaimed: findExactEvryDatabaseEffectClaim,
+    async reconcileClaimed(input) {
+      const parsed = sendArgumentsSchema.safeParse(input.arguments);
+      return parsed.success &&
+        input.execution.capabilityIdentity ===
+          COMMUNICATION_MESSAGE_SEND_IDENTITY
+        ? reconcileFrozenEvryCommunication({
+            effect: input,
+            communicationId: parsed.data.communicationId,
+            audience: parsed.data.audience,
+          })
+        : null;
+    },
     async executeIfCurrent(input) {
       const parsed = sendArgumentsSchema.safeParse(input.arguments);
       if (
@@ -484,7 +496,13 @@ export function createCommunicationEvryMessageExecutions(
         return { status: "refused", excludedCount: 1 };
       }
       try {
+        const prepared = await hasExactFrozenEvryCommunication({
+          effect: input,
+          communicationId: parsed.data.communicationId,
+          audience: parsed.data.audience,
+        });
         if (
+          !prepared &&
           !(await sendAudienceIsCurrent({
             actor: input.authorization.actor,
             recipientSource: parsed.data.recipientSource,
@@ -508,7 +526,18 @@ export function createCommunicationEvryMessageExecutions(
 
   const resend = defineEvryExecutionCapability({
     planCapability: COMMUNICATION_RESEND_NON_OPENERS_PLAN,
-    reconcileClaimed: findExactEvryDatabaseEffectClaim,
+    async reconcileClaimed(input) {
+      const parsed = resendArgumentsSchema.safeParse(input.arguments);
+      return parsed.success &&
+        input.execution.capabilityIdentity ===
+          COMMUNICATION_RESEND_NON_OPENERS_IDENTITY
+        ? reconcileFrozenEvryCommunication({
+            effect: input,
+            communicationId: parsed.data.communicationId,
+            audience: parsed.data.audience,
+          })
+        : null;
+    },
     async executeIfCurrent(input) {
       const parsed = resendArgumentsSchema.safeParse(input.arguments);
       if (
@@ -518,7 +547,13 @@ export function createCommunicationEvryMessageExecutions(
         return { status: "refused", excludedCount: 1 };
       }
       try {
+        const prepared = await hasExactFrozenEvryCommunication({
+          effect: input,
+          communicationId: parsed.data.communicationId,
+          audience: parsed.data.audience,
+        });
         if (
+          !prepared &&
           !(await resendAudienceIsCurrent({
             actor: input.authorization.actor,
             source: parsed.data.source,

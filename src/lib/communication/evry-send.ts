@@ -17,7 +17,12 @@ import {
   DECLINE_PLACEHOLDER,
 } from "@/lib/email/components/communication-email";
 import { EMAIL_FROM, resend } from "@/lib/email/client";
-import type { EvryEffectInput, EvryEffectResult } from "@/lib/evry/executor";
+import type {
+  EvryClaimedEffectInput,
+  EvryEffectInput,
+  EvryEffectResult,
+} from "@/lib/evry/executor";
+import { findExactEvryDatabaseEffectClaim } from "@/lib/evry/executor/database-effect";
 import {
   loadSuppressedAddresses,
   normalizeEmailAddress,
@@ -311,6 +316,82 @@ async function exactCommunication(input: {
   );
 }
 
+async function exactFrozenCommunication(input: {
+  effect: Pick<EvryClaimedEffectInput, "effectKey" | "execution">;
+  communicationId: string;
+  audience: EvryCommunicationAudienceSnapshot;
+}) {
+  if (
+    !(await exactCommunication({
+      churchId: input.effect.execution.plantId,
+      communicationId: input.communicationId,
+      actorUserId: input.effect.execution.actorUserId,
+      audience: input.audience,
+    }))
+  ) {
+    return false;
+  }
+  const rows = await db
+    .select({
+      id: communicationRecipients.id,
+      personId: communicationRecipients.personId,
+      email: communicationRecipients.email,
+    })
+    .from(communicationRecipients)
+    .where(
+      and(
+        eq(communicationRecipients.churchId, input.effect.execution.plantId),
+        eq(communicationRecipients.communicationId, input.communicationId)
+      )
+    );
+  return (
+    rows.length === input.audience.recipients.length &&
+    input.audience.recipients.every((recipient) => {
+      const expectedId = communicationEvryEffectUuid(
+        input.effect.effectKey,
+        `recipient:${recipient.personId}`
+      );
+      return rows.some(
+        (row) =>
+          row.id === expectedId &&
+          row.personId === recipient.personId &&
+          row.email === recipient.email
+      );
+    })
+  );
+}
+
+export async function hasExactFrozenEvryCommunication(input: {
+  effect: EvryClaimedEffectInput;
+  communicationId: string;
+  audience: EvryCommunicationAudienceSnapshot;
+}): Promise<boolean> {
+  return exactFrozenCommunication({
+    effect: input.effect,
+    communicationId: input.communicationId,
+    audience: input.audience,
+  });
+}
+
+/**
+ * A prepared batch is already a lasting effect even before the final ledger
+ * claim. Keep it retryable while authority is absent so a later authorized
+ * replay can finish the exact reviewed recipients without resending completed
+ * rows or durably refusing the plan.
+ */
+export async function reconcileFrozenEvryCommunication(input: {
+  effect: EvryClaimedEffectInput;
+  communicationId: string;
+  audience: EvryCommunicationAudienceSnapshot;
+}): Promise<EvryEffectResult | null> {
+  const claimed = await findExactEvryDatabaseEffectClaim(input.effect);
+  if (claimed) return claimed;
+  if (!(await hasExactFrozenEvryCommunication(input))) return null;
+  return (await actorStillHoldsCommunicationSend(input.effect.execution))
+    ? null
+    : { status: "retryable" };
+}
+
 async function prepareFrozenCommunication(input: {
   effect: EvryEffectInput;
   communicationId: string;
@@ -346,6 +427,22 @@ async function prepareFrozenCommunication(input: {
     }))
   ) {
     return false;
+  }
+  const existingRecipients = await db
+    .select({ id: communicationRecipients.id })
+    .from(communicationRecipients)
+    .where(
+      and(
+        eq(communicationRecipients.churchId, churchId),
+        eq(communicationRecipients.communicationId, input.communicationId)
+      )
+    );
+  if (existingRecipients.length > 0) {
+    return exactFrozenCommunication({
+      effect: input.effect,
+      communicationId: input.communicationId,
+      audience: input.audience,
+    });
   }
   if (input.audience.recipients.length > 0) {
     const recipientsJson = JSON.stringify(
@@ -387,24 +484,11 @@ async function prepareFrozenCommunication(input: {
       on conflict (id) do nothing
     `);
   }
-  const rows = await db
-    .select()
-    .from(communicationRecipients)
-    .where(
-      and(
-        eq(communicationRecipients.churchId, churchId),
-        eq(communicationRecipients.communicationId, input.communicationId)
-      )
-    );
-  return (
-    rows.length === input.audience.recipients.length &&
-    rows.every((row) => {
-      const expected = input.audience.recipients.find(
-        ({ personId }) => personId === row.personId
-      );
-      return Boolean(expected && row.email === expected.email);
-    })
-  );
+  return exactFrozenCommunication({
+    effect: input.effect,
+    communicationId: input.communicationId,
+    audience: input.audience,
+  });
 }
 
 async function currentRecipientIds(input: {
@@ -547,10 +631,9 @@ export async function sendFrozenEvryCommunication(input: {
     return { status: "refused", excludedCount: 1 };
   }
   if (!(await prepareFrozenCommunication(input))) {
-    return (await exactCommunication({
-      churchId: actor.plantId,
+    return (await exactFrozenCommunication({
+      effect: input.effect,
       communicationId: input.communicationId,
-      actorUserId: actor.userId,
       audience: input.audience,
     }))
       ? { status: "retryable" }

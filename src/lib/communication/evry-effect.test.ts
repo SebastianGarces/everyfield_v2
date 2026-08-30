@@ -26,8 +26,8 @@ test("Communication effects require one current admin-plus plant tenancy", () =>
   );
   assert.ok(
     send.match(/actorStillHoldsCommunicationSend\(input\.effect\.execution\)/g)
-      ?.length === 3,
-    "send preparation, token rendering, and provider dispatch stay authority-gated"
+      ?.length === 4,
+    "reconciliation, preparation, token rendering, and provider dispatch stay authority-gated"
   );
   assert.match(
     send,
