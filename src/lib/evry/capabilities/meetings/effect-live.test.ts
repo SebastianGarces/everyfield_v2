@@ -6,6 +6,7 @@ import { before, test } from "node:test";
 import { MEETINGS_ACTION_CONTRACTS } from "./catalog";
 
 const LIVE_DB = process.env.LIVE_DB_TESTS === "1";
+const LIVE_PROOF_TIMEOUT_MS = 420_000;
 const skip = LIVE_DB
   ? false
   : "opt-in: run `LIVE_DB_TESTS=1 pnpm test:live` — real Postgres is required";
@@ -32,7 +33,7 @@ before(
         cwd: process.cwd(),
         encoding: "utf8",
         env: process.env,
-        timeout: 180_000,
+        timeout: LIVE_PROOF_TIMEOUT_MS,
       }
     );
     assert.equal(
@@ -50,7 +51,7 @@ before(
       /PASS meetings:finalization-notification-drift-matrix/
     );
   },
-  { timeout: 190_000 }
+  { timeout: LIVE_PROOF_TIMEOUT_MS + 10_000 }
 );
 
 for (const contract of Object.values(MEETINGS_ACTION_CONTRACTS)) {

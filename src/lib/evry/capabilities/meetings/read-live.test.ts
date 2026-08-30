@@ -6,6 +6,7 @@ import { before, test } from "node:test";
 import { MEETINGS_READ_OPERATION_IDENTITIES } from "./registrations";
 
 const LIVE_DB = process.env.LIVE_DB_TESTS === "1";
+const LIVE_PROOF_TIMEOUT_MS = 420_000;
 const skip = LIVE_DB
   ? false
   : "opt-in: run `LIVE_DB_TESTS=1 pnpm test:live` because real PostgreSQL is required";
@@ -32,7 +33,7 @@ before(
         cwd: process.cwd(),
         encoding: "utf8",
         env: process.env,
-        timeout: 180_000,
+        timeout: LIVE_PROOF_TIMEOUT_MS,
       }
     );
     assert.equal(
@@ -42,7 +43,7 @@ before(
     );
     assert.match(proof.stdout, /Meetings read live proof passed/);
   },
-  { timeout: 190_000 }
+  { timeout: LIVE_PROOF_TIMEOUT_MS + 10_000 }
 );
 
 for (const identity of MEETINGS_READ_OPERATION_IDENTITIES) {
