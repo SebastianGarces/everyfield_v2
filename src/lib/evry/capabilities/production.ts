@@ -15,6 +15,15 @@ import {
 } from "./communication/templates";
 import { composeEvryCapabilityConversationContinuations } from "./conversation";
 import { continuePeopleCoreConversation } from "./people/core-conversation";
+import { continueDocumentsWikiEffectConversation } from "./documents-wiki/effect-conversation";
+import { continueDocumentsWikiReadConversation } from "./documents-wiki/read-conversation";
+import {
+  DOCUMENTS_WIKI_EFFECT_IDENTITIES,
+  DOCUMENTS_WIKI_EXECUTIONS,
+  DOCUMENTS_WIKI_REVIEWS,
+  documentsWikiTargetIsCurrent,
+} from "./documents-wiki/effects";
+import { DOCUMENTS_WIKI_READ_REGISTRATIONS } from "./documents-wiki/reads";
 import {
   PEOPLE_CORE_EXECUTIONS,
   PEOPLE_CORE_IDENTITIES,
@@ -79,23 +88,18 @@ const PRODUCTION_PEOPLE_EFFECT_EXECUTIONS = [
   ...PEOPLE_FILE_EXECUTIONS,
 ] as const;
 
+const PRODUCTION_EFFECT_EXECUTIONS = [
+  ...COMMUNICATION_MESSAGE_EXECUTIONS,
+  ...COMMUNICATION_TEMPLATE_EXECUTIONS,
+  ...PRODUCTION_PEOPLE_EFFECT_EXECUTIONS,
+  ...DOCUMENTS_WIKI_EXECUTIONS,
+] as const;
+
 export const PRODUCTION_EVRY_PLAN_REGISTRY = createEvryPlanCapabilityRegistry([
-  ...COMMUNICATION_MESSAGE_EXECUTIONS.map(
-    ({ planCapability }) => planCapability
-  ),
-  ...COMMUNICATION_TEMPLATE_EXECUTIONS.map(
-    ({ planCapability }) => planCapability
-  ),
-  ...PRODUCTION_PEOPLE_EFFECT_EXECUTIONS.map(
-    ({ planCapability }) => planCapability
-  ),
+  ...PRODUCTION_EFFECT_EXECUTIONS.map(({ planCapability }) => planCapability),
 ]);
 export const PRODUCTION_EVRY_EXECUTION_REGISTRY =
-  createEvryExecutionCapabilityRegistry([
-    ...COMMUNICATION_MESSAGE_EXECUTIONS,
-    ...COMMUNICATION_TEMPLATE_EXECUTIONS,
-    ...PRODUCTION_PEOPLE_EFFECT_EXECUTIONS,
-  ]);
+  createEvryExecutionCapabilityRegistry(PRODUCTION_EFFECT_EXECUTIONS);
 export const PRODUCTION_EVRY_REVIEW_REGISTRY = createEvryArtifactReviewRegistry(
   [
     ...COMMUNICATION_MESSAGE_REVIEWS,
@@ -106,21 +110,26 @@ export const PRODUCTION_EVRY_REVIEW_REGISTRY = createEvryArtifactReviewRegistry(
     ...HOUSEHOLD_REVIEWS,
     ...MILESTONE_REVIEWS,
     ...PEOPLE_FILE_REVIEWS,
+    ...DOCUMENTS_WIKI_REVIEWS,
   ]
 );
-export const PRODUCTION_EVRY_READ_REGISTRATIONS = Object.freeze([
+const PRODUCTION_PEOPLE_READ_REGISTRATIONS = Object.freeze([
   PEOPLE_EVRY_LIST_READ,
   PEOPLE_EVRY_ACTIVITIES_READ,
   PEOPLE_EVRY_MORE_ACTIVITIES_READ,
   ...PEOPLE_DOMAIN_READ_REGISTRATIONS,
   ...PEOPLE_FILE_READ_REGISTRATIONS,
 ]);
+export const PRODUCTION_EVRY_READ_REGISTRATIONS = Object.freeze([
+  ...PRODUCTION_PEOPLE_READ_REGISTRATIONS,
+  ...DOCUMENTS_WIKI_READ_REGISTRATIONS,
+]);
 export const PRODUCTION_EVRY_PEOPLE_CAPABILITY_IDENTITIES = Object.freeze(
   [
     ...PRODUCTION_PEOPLE_EFFECT_EXECUTIONS.map(
       ({ planCapability }) => planCapability.identity
     ),
-    ...PRODUCTION_EVRY_READ_REGISTRATIONS.map(
+    ...PRODUCTION_PEOPLE_READ_REGISTRATIONS.map(
       ({ capabilityIdentity }) => capabilityIdentity
     ),
   ].toSorted()
@@ -135,6 +144,8 @@ export const continueProductionEvryCapabilityConversation =
     continuePeopleTaxonomyConversation,
     continuePeopleHouseholdConversation,
     continuePeopleMilestoneConversation,
+    continueDocumentsWikiReadConversation,
+    continueDocumentsWikiEffectConversation,
   ]);
 
 const NOTE_IDENTITIES = new Set([
@@ -154,6 +165,9 @@ const MILESTONE_IDENTITY_SET = new Set<string>(
 );
 const FILE_IDENTITY_SET = new Set<string>(
   Object.values(PEOPLE_FILE_IDENTITIES)
+);
+const DOCUMENTS_WIKI_IDENTITY_SET = new Set<string>(
+  Object.values(DOCUMENTS_WIKI_EFFECT_IDENTITIES)
 );
 
 export async function productionEvryPlanTargetIsCurrent(
@@ -179,5 +193,7 @@ export async function productionEvryPlanTargetIsCurrent(
   if (MILESTONE_IDENTITY_SET.has(identity))
     return milestoneTargetIsCurrent(input);
   if (FILE_IDENTITY_SET.has(identity)) return peopleFileTargetIsCurrent(input);
+  if (DOCUMENTS_WIKI_IDENTITY_SET.has(identity))
+    return documentsWikiTargetIsCurrent(input);
   return false;
 }

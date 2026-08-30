@@ -1,4 +1,5 @@
 import communicationInventory from "@/lib/evry/capabilities/communication/inventory.generated.json";
+import documentsWikiInventory from "@/lib/evry/capabilities/documents-wiki/inventory.generated.json";
 import peopleInventory from "@/lib/evry/capabilities/people/inventory.generated.json";
 import parityInventory from "@/lib/evry/capabilities/inventory.generated.json";
 import {
@@ -118,6 +119,29 @@ function generatedCommunicationRegistrations(): EvryCapabilityRegistration[] {
   });
 }
 
+function generatedDocumentsWikiRegistrations(): EvryCapabilityRegistration[] {
+  return documentsWikiInventory.capabilities.map((capability) => {
+    const [firstSurface, ...otherSurfaces] = capability.surfaceIdentities;
+    if (
+      !isApplicationCapability(capability.applicationCapability) ||
+      !firstSurface ||
+      (capability.operationKind !== "read" &&
+        capability.operationKind !== "effect")
+    ) {
+      throw new Error(
+        `Invalid generated Documents/wiki capability: ${capability.identity}`
+      );
+    }
+    return defineEvryCapabilityRegistration({
+      identity: capability.identity,
+      surfaceIdentities: [firstSurface, ...otherSurfaces],
+      parityCapability: capability.parityCapability,
+      operationKind: capability.operationKind,
+      applicationCapability: capability.applicationCapability,
+    });
+  });
+}
+
 /** Explicit shared proof registrations, replaced in place by owning packs. */
 const REFERENCE_REGISTRATIONS = [
   defineEvryCapabilityRegistration({
@@ -211,6 +235,28 @@ function generatedCommunicationSurfaces(): EvryAuthoritativeCapabilitySurface[] 
   });
 }
 
+function generatedDocumentsWikiSurfaces(): EvryAuthoritativeCapabilitySurface[] {
+  return documentsWikiInventory.entries.flatMap((entry) => {
+    if (
+      entry.classification.state !== "supported" ||
+      (entry.operationKind !== "read" && entry.operationKind !== "effect") ||
+      entry.applicationCapability === null ||
+      !isApplicationCapability(entry.applicationCapability)
+    )
+      return [];
+    return [
+      {
+        identity: entry.identity,
+        capabilityIdentity: entry.capabilityIdentity,
+        parityCapability:
+          entry.domain === "documents" ? "documents-and-files" : "wiki",
+        operationKind: entry.operationKind,
+        applicationCapability: entry.applicationCapability,
+      },
+    ];
+  });
+}
+
 function referenceSurfaces(): EvryAuthoritativeCapabilitySurface[] {
   return REFERENCE_REGISTRATIONS.flatMap((registration) =>
     registration.surfaceIdentities.map((surfaceIdentity) => {
@@ -242,11 +288,13 @@ const REGISTRY = createEvryCapabilityRegistry({
   registrations: [
     ...generatedPeopleRegistrations(),
     ...generatedCommunicationRegistrations(),
+    ...generatedDocumentsWikiRegistrations(),
     ...REFERENCE_REGISTRATIONS,
   ],
   authoritativeSurfaces: [
     ...generatedPeopleSurfaces(),
     ...generatedCommunicationSurfaces(),
+    ...generatedDocumentsWikiSurfaces(),
     ...referenceSurfaces(),
   ],
 });

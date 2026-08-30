@@ -18,6 +18,10 @@ import {
   assertPeopleCapabilityEvalRegistryComplete,
   PEOPLE_CAPABILITY_EVAL_FIXTURES,
 } from "./people-capabilities";
+import {
+  assertDocumentsWikiCapabilityEvalRegistryComplete,
+  DOCUMENTS_WIKI_CAPABILITY_EVAL_FIXTURES,
+} from "./documents-wiki-capabilities";
 
 const MEETING_INVITATION_RECIPE_IDENTITY = "fixture:meeting.invitation";
 
@@ -73,6 +77,18 @@ export const EVRY_EVAL_PROOFS: readonly EvryEvalProof[] = Object.freeze([
   {
     id: "people-capability-live-outcomes",
     testFile: "src/lib/people/evry-effect-live.test.ts",
+    lane: "live_database",
+    safetyGates: ["cross_tenant_access"],
+  },
+  {
+    id: "documents-wiki-capability-contract",
+    testFile: "src/lib/evry/capabilities/documents-wiki/runtime.test.ts",
+    lane: "deterministic",
+    safetyGates: [],
+  },
+  {
+    id: "documents-wiki-capability-live-outcomes",
+    testFile: "src/lib/evry/capabilities/documents-wiki/effect-live.test.ts",
     lane: "live_database",
     safetyGates: ["cross_tenant_access"],
   },
@@ -241,6 +257,7 @@ export const EVRY_CAPABILITY_EVAL_FIXTURES = Object.freeze([
     communicationCapabilityFixture(identity, operationKind)
   ),
   ...PEOPLE_CAPABILITY_EVAL_FIXTURES,
+  ...DOCUMENTS_WIKI_CAPABILITY_EVAL_FIXTURES,
 ]);
 
 export const EVRY_RECIPE_EVAL_FIXTURES: readonly EvryRecipeEvalFixture[] =
@@ -272,6 +289,7 @@ function assertUnique(values: readonly string[], subject: string): void {
 
 export function assertEvryEvalRegistryComplete(): void {
   assertPeopleCapabilityEvalRegistryComplete();
+  assertDocumentsWikiCapabilityEvalRegistryComplete();
   assertUnique(
     EVRY_EVAL_PROOFS.map(({ id }) => id),
     "proof"

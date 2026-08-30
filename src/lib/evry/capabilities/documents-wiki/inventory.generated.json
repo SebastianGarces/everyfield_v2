@@ -1,0 +1,715 @@
+{
+  "schemaVersion": 1,
+  "generatedBy": "pnpm evry:documents-wiki-inventory",
+  "capabilities": [
+    {
+      "identity": "documents.generate",
+      "surfaceIdentities": ["handler:GET:/api/documents/[templateId]"],
+      "parityCapability": "documents-and-files",
+      "domain": "documents",
+      "operationKind": "effect",
+      "applicationCapability": "read",
+      "confirmation": "required",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "documents.history.download",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/documents/actions.ts → getGeneratedDocumentDownloadUrlAction",
+        "handler:GET:/api/documents/history/[id]"
+      ],
+      "parityCapability": "documents-and-files",
+      "domain": "documents",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "documents.history.list",
+      "surfaceIdentities": [
+        "route:/documents/history",
+        "rsc-read:src/app/(dashboard)/documents/history/page.tsx → @/lib/documents/service#listGeneratedDocuments"
+      ],
+      "parityCapability": "documents-and-files",
+      "domain": "documents",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "documents.templates.list",
+      "surfaceIdentities": [
+        "route:/documents",
+        "rsc-read:src/app/(dashboard)/documents/page.tsx → @/lib/documents/merge-context#resolveDocumentMergeContext"
+      ],
+      "parityCapability": "documents-and-files",
+      "domain": "documents",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "wiki.article.read",
+      "surfaceIdentities": [
+        "handler:GET:/api/wiki/article",
+        "route:/wiki/[...slug]",
+        "rsc-read:src/app/(dashboard)/wiki/[...slug]/page.tsx → @/lib/wiki/article-data#getArticle",
+        "rsc-read:src/app/(dashboard)/wiki/[...slug]/page.tsx → @/lib/wiki/feedback#getArticleFeedbackForUser",
+        "rsc-read:src/app/(dashboard)/wiki/[...slug]/page.tsx → @/lib/wiki/get-article#compileArticle"
+      ],
+      "parityCapability": "wiki",
+      "domain": "wiki",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "wiki.bookmark.set",
+      "surfaceIdentities": [
+        "action:src/lib/wiki/bookmarks.ts → toggleBookmark"
+      ],
+      "parityCapability": "wiki",
+      "domain": "wiki",
+      "operationKind": "effect",
+      "applicationCapability": "self.write",
+      "confirmation": "required",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "wiki.feedback.set",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/wiki/actions.ts → submitArticleFeedbackAction"
+      ],
+      "parityCapability": "wiki",
+      "domain": "wiki",
+      "operationKind": "effect",
+      "applicationCapability": "self.write",
+      "confirmation": "required",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "wiki.navigation.read",
+      "surfaceIdentities": [
+        "route:/wiki",
+        "rsc-read:src/app/(dashboard)/wiki/[...slug]/page.tsx → @/lib/wiki/get-articles#getArticleNavigation",
+        "rsc-read:src/app/(dashboard)/wiki/[...slug]/page.tsx → @/lib/wiki/get-articles#getArticlesByPrefix",
+        "rsc-read:src/app/(dashboard)/wiki/[...slug]/page.tsx → @/lib/wiki/reads#getBookmarkedSlugs",
+        "rsc-read:src/app/(dashboard)/wiki/[...slug]/page.tsx → @/lib/wiki/reads#isBookmarked",
+        "rsc-read:src/app/(dashboard)/wiki/layout.tsx → @/lib/wiki/get-articles#getWikiNavigation",
+        "rsc-read:src/app/(dashboard)/wiki/layout.tsx → @/lib/wiki/reads#getBookmarks",
+        "rsc-read:src/app/(dashboard)/wiki/page.tsx → @/lib/wiki/get-articles#getArticles",
+        "rsc-read:src/app/(dashboard)/wiki/page.tsx → @/lib/wiki/reads#getBookmarkedSlugs"
+      ],
+      "parityCapability": "wiki",
+      "domain": "wiki",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "wiki.progress.read",
+      "surfaceIdentities": [
+        "route:/wiki/progress",
+        "rsc-read:src/app/(dashboard)/wiki/[...slug]/page.tsx → @/lib/wiki/reads#getArticlesProgress",
+        "rsc-read:src/app/(dashboard)/wiki/layout.tsx → @/lib/wiki/reads#getRecentlyViewed",
+        "rsc-read:src/app/(dashboard)/wiki/page.tsx → @/lib/wiki/reads#getArticlesProgress",
+        "rsc-read:src/app/(dashboard)/wiki/progress/page.tsx → @/lib/wiki/reads#getLastInProgress",
+        "rsc-read:src/app/(dashboard)/wiki/progress/page.tsx → @/lib/wiki/reads#getProgressStats"
+      ],
+      "parityCapability": "wiki",
+      "domain": "wiki",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "wiki.progress.set",
+      "surfaceIdentities": [
+        "action:src/lib/wiki/progress.ts → recordView",
+        "action:src/lib/wiki/progress.ts → updateProgress"
+      ],
+      "parityCapability": "wiki",
+      "domain": "wiki",
+      "operationKind": "effect",
+      "applicationCapability": "self.write",
+      "confirmation": "required",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "wiki.search",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/wiki/actions.ts → searchWikiArticles"
+      ],
+      "parityCapability": "wiki",
+      "domain": "wiki",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    }
+  ],
+  "entries": [
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/documents/actions.ts → getGeneratedDocumentDownloadUrlAction",
+      "source": "src/app/(dashboard)/documents/actions.ts",
+      "exportName": "getGeneratedDocumentDownloadUrlAction",
+      "applicationCapability": "read",
+      "exemption": null,
+      "domain": "documents",
+      "capabilityIdentity": "documents.history.download",
+      "operationKind": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "delegated",
+      "identity": "action:src/app/(dashboard)/people/import-export-actions.ts → downloadCsvTemplateAction",
+      "source": "src/app/(dashboard)/people/import-export-actions.ts",
+      "exportName": "downloadCsvTemplateAction",
+      "capabilityIdentity": "people.files.delegated",
+      "domain": "people_files",
+      "operationKind": "delegated",
+      "applicationCapability": "read",
+      "confirmation": "delegated",
+      "classification": { "state": "delegated", "owner": "people" }
+    },
+    {
+      "kind": "delegated",
+      "identity": "action:src/app/(dashboard)/people/import-export-actions.ts → executeBulkImportAction",
+      "source": "src/app/(dashboard)/people/import-export-actions.ts",
+      "exportName": "executeBulkImportAction",
+      "capabilityIdentity": "people.files.delegated",
+      "domain": "people_files",
+      "operationKind": "delegated",
+      "applicationCapability": "people.write",
+      "confirmation": "delegated",
+      "classification": { "state": "delegated", "owner": "people" }
+    },
+    {
+      "kind": "delegated",
+      "identity": "action:src/app/(dashboard)/people/import-export-actions.ts → exportPeopleAction",
+      "source": "src/app/(dashboard)/people/import-export-actions.ts",
+      "exportName": "exportPeopleAction",
+      "capabilityIdentity": "people.files.delegated",
+      "domain": "people_files",
+      "operationKind": "delegated",
+      "applicationCapability": "read",
+      "confirmation": "delegated",
+      "classification": { "state": "delegated", "owner": "people" }
+    },
+    {
+      "kind": "delegated",
+      "identity": "action:src/app/(dashboard)/people/import-export-actions.ts → previewImportAction",
+      "source": "src/app/(dashboard)/people/import-export-actions.ts",
+      "exportName": "previewImportAction",
+      "capabilityIdentity": "people.files.delegated",
+      "domain": "people_files",
+      "operationKind": "delegated",
+      "applicationCapability": "people.write",
+      "confirmation": "delegated",
+      "classification": { "state": "delegated", "owner": "people" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/wiki/actions.ts → searchWikiArticles",
+      "source": "src/app/(dashboard)/wiki/actions.ts",
+      "exportName": "searchWikiArticles",
+      "applicationCapability": "read",
+      "exemption": null,
+      "domain": "wiki",
+      "capabilityIdentity": "wiki.search",
+      "operationKind": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/wiki/actions.ts → submitArticleFeedbackAction",
+      "source": "src/app/(dashboard)/wiki/actions.ts",
+      "exportName": "submitArticleFeedbackAction",
+      "applicationCapability": "self.write",
+      "exemption": null,
+      "domain": "wiki",
+      "capabilityIdentity": "wiki.feedback.set",
+      "operationKind": "effect",
+      "confirmation": "required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/lib/wiki/bookmarks.ts → toggleBookmark",
+      "source": "src/lib/wiki/bookmarks.ts",
+      "exportName": "toggleBookmark",
+      "applicationCapability": "self.write",
+      "exemption": null,
+      "domain": "wiki",
+      "capabilityIdentity": "wiki.bookmark.set",
+      "operationKind": "effect",
+      "confirmation": "required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/lib/wiki/progress.ts → recordView",
+      "source": "src/lib/wiki/progress.ts",
+      "exportName": "recordView",
+      "applicationCapability": "self.write",
+      "exemption": null,
+      "domain": "wiki",
+      "capabilityIdentity": "wiki.progress.set",
+      "operationKind": "effect",
+      "confirmation": "required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/lib/wiki/progress.ts → updateProgress",
+      "source": "src/lib/wiki/progress.ts",
+      "exportName": "updateProgress",
+      "applicationCapability": "self.write",
+      "exemption": null,
+      "domain": "wiki",
+      "capabilityIdentity": "wiki.progress.set",
+      "operationKind": "effect",
+      "confirmation": "required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route_handler",
+      "identity": "handler:DELETE:/api/wiki/revalidate",
+      "source": "src/app/api/wiki/revalidate/route.ts",
+      "exportName": "DELETE",
+      "capabilityIdentity": "wiki.external.revalidate",
+      "domain": "wiki",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "external_secret_webhook"
+      }
+    },
+    {
+      "kind": "route_handler",
+      "identity": "handler:GET:/api/documents/[templateId]",
+      "source": "src/app/api/documents/[templateId]/route.ts",
+      "exportName": "GET",
+      "capabilityIdentity": "documents.generate",
+      "domain": "documents",
+      "operationKind": "effect",
+      "applicationCapability": "read",
+      "confirmation": "required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route_handler",
+      "identity": "handler:GET:/api/documents/history/[id]",
+      "source": "src/app/api/documents/history/[id]/route.ts",
+      "exportName": "GET",
+      "capabilityIdentity": "documents.history.download",
+      "domain": "documents",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route_handler",
+      "identity": "handler:GET:/api/wiki/article",
+      "source": "src/app/api/wiki/article/route.ts",
+      "exportName": "GET",
+      "capabilityIdentity": "wiki.article.read",
+      "domain": "wiki",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route_handler",
+      "identity": "handler:POST:/api/wiki/revalidate",
+      "source": "src/app/api/wiki/revalidate/route.ts",
+      "exportName": "POST",
+      "capabilityIdentity": "wiki.external.revalidate",
+      "domain": "wiki",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "external_secret_webhook"
+      }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/documents",
+      "source": "src/app/(dashboard)/documents/page.tsx",
+      "exportName": null,
+      "capabilityIdentity": "documents.templates.list",
+      "domain": "documents",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/documents/history",
+      "source": "src/app/(dashboard)/documents/history/page.tsx",
+      "exportName": null,
+      "capabilityIdentity": "documents.history.list",
+      "domain": "documents",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/wiki",
+      "source": "src/app/(dashboard)/wiki/page.tsx",
+      "exportName": null,
+      "capabilityIdentity": "wiki.navigation.read",
+      "domain": "wiki",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/wiki/[...slug]",
+      "source": "src/app/(dashboard)/wiki/[...slug]/page.tsx",
+      "exportName": null,
+      "capabilityIdentity": "wiki.article.read",
+      "domain": "wiki",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/wiki/progress",
+      "source": "src/app/(dashboard)/wiki/progress/page.tsx",
+      "exportName": null,
+      "capabilityIdentity": "wiki.progress.read",
+      "domain": "wiki",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/documents/history/page.tsx → @/lib/documents/service#listGeneratedDocuments",
+      "source": "src/app/(dashboard)/documents/history/page.tsx",
+      "exportName": "listGeneratedDocuments",
+      "capabilityIdentity": "documents.history.list",
+      "domain": "documents",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/documents/page.tsx → @/lib/documents/merge-context#resolveDocumentMergeContext",
+      "source": "src/app/(dashboard)/documents/page.tsx",
+      "exportName": "resolveDocumentMergeContext",
+      "capabilityIdentity": "documents.templates.list",
+      "domain": "documents",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/wiki/[...slug]/page.tsx → @/lib/wiki/article-data#getArticle",
+      "source": "src/app/(dashboard)/wiki/[...slug]/page.tsx",
+      "exportName": "getArticle",
+      "capabilityIdentity": "wiki.article.read",
+      "domain": "wiki",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/wiki/[...slug]/page.tsx → @/lib/wiki/feedback#getArticleFeedbackForUser",
+      "source": "src/app/(dashboard)/wiki/[...slug]/page.tsx",
+      "exportName": "getArticleFeedbackForUser",
+      "capabilityIdentity": "wiki.article.read",
+      "domain": "wiki",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/wiki/[...slug]/page.tsx → @/lib/wiki/get-article#compileArticle",
+      "source": "src/app/(dashboard)/wiki/[...slug]/page.tsx",
+      "exportName": "compileArticle",
+      "capabilityIdentity": "wiki.article.read",
+      "domain": "wiki",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/wiki/[...slug]/page.tsx → @/lib/wiki/get-articles#getArticleNavigation",
+      "source": "src/app/(dashboard)/wiki/[...slug]/page.tsx",
+      "exportName": "getArticleNavigation",
+      "capabilityIdentity": "wiki.navigation.read",
+      "domain": "wiki",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/wiki/[...slug]/page.tsx → @/lib/wiki/get-articles#getArticlesByPrefix",
+      "source": "src/app/(dashboard)/wiki/[...slug]/page.tsx",
+      "exportName": "getArticlesByPrefix",
+      "capabilityIdentity": "wiki.navigation.read",
+      "domain": "wiki",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/wiki/[...slug]/page.tsx → @/lib/wiki/reads#getArticlesProgress",
+      "source": "src/app/(dashboard)/wiki/[...slug]/page.tsx",
+      "exportName": "getArticlesProgress",
+      "capabilityIdentity": "wiki.progress.read",
+      "domain": "wiki",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/wiki/[...slug]/page.tsx → @/lib/wiki/reads#getBookmarkedSlugs",
+      "source": "src/app/(dashboard)/wiki/[...slug]/page.tsx",
+      "exportName": "getBookmarkedSlugs",
+      "capabilityIdentity": "wiki.navigation.read",
+      "domain": "wiki",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/wiki/[...slug]/page.tsx → @/lib/wiki/reads#isBookmarked",
+      "source": "src/app/(dashboard)/wiki/[...slug]/page.tsx",
+      "exportName": "isBookmarked",
+      "capabilityIdentity": "wiki.navigation.read",
+      "domain": "wiki",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/wiki/layout.tsx → @/lib/wiki/get-articles#getWikiNavigation",
+      "source": "src/app/(dashboard)/wiki/layout.tsx",
+      "exportName": "getWikiNavigation",
+      "capabilityIdentity": "wiki.navigation.read",
+      "domain": "wiki",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/wiki/layout.tsx → @/lib/wiki/reads#getBookmarks",
+      "source": "src/app/(dashboard)/wiki/layout.tsx",
+      "exportName": "getBookmarks",
+      "capabilityIdentity": "wiki.navigation.read",
+      "domain": "wiki",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/wiki/layout.tsx → @/lib/wiki/reads#getRecentlyViewed",
+      "source": "src/app/(dashboard)/wiki/layout.tsx",
+      "exportName": "getRecentlyViewed",
+      "capabilityIdentity": "wiki.progress.read",
+      "domain": "wiki",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/wiki/page.tsx → @/lib/wiki/get-articles#getArticles",
+      "source": "src/app/(dashboard)/wiki/page.tsx",
+      "exportName": "getArticles",
+      "capabilityIdentity": "wiki.navigation.read",
+      "domain": "wiki",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/wiki/page.tsx → @/lib/wiki/reads#getArticlesProgress",
+      "source": "src/app/(dashboard)/wiki/page.tsx",
+      "exportName": "getArticlesProgress",
+      "capabilityIdentity": "wiki.progress.read",
+      "domain": "wiki",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/wiki/page.tsx → @/lib/wiki/reads#getBookmarkedSlugs",
+      "source": "src/app/(dashboard)/wiki/page.tsx",
+      "exportName": "getBookmarkedSlugs",
+      "capabilityIdentity": "wiki.navigation.read",
+      "domain": "wiki",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/wiki/progress/page.tsx → @/lib/wiki/reads#getLastInProgress",
+      "source": "src/app/(dashboard)/wiki/progress/page.tsx",
+      "exportName": "getLastInProgress",
+      "capabilityIdentity": "wiki.progress.read",
+      "domain": "wiki",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/wiki/progress/page.tsx → @/lib/wiki/reads#getProgressStats",
+      "source": "src/app/(dashboard)/wiki/progress/page.tsx",
+      "exportName": "getProgressStats",
+      "capabilityIdentity": "wiki.progress.read",
+      "domain": "wiki",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    }
+  ],
+  "summary": {
+    "actions": 6,
+    "routes": 5,
+    "routeHandlers": 3,
+    "rscReads": 18,
+    "delegatedPeopleFileSurfaces": 4,
+    "excludedExternalWebhooks": 2,
+    "readCapabilities": 7,
+    "effectCapabilities": 4,
+    "unclassified": 0
+  }
+}
