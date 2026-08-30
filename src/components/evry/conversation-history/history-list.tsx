@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { EvryConversationHistoryItem } from "@/lib/evry/conversations/history";
 import { cn } from "@/lib/utils";
-import { EvryLink } from "@/components/evry/navigation-intent";
+import { AuthenticatedLink } from "@/components/authenticated-navigation";
 
 import {
   EVRY_HISTORY_STATE_PRESENTATION,
@@ -189,7 +189,7 @@ export function ConversationHistoryList({
                     key={conversation.id}
                     className="[contain-intrinsic-size:auto_5rem] [content-visibility:auto]"
                   >
-                    <EvryLink
+                    <AuthenticatedLink
                       href={evryHistoryHref({
                         conversationId: conversation.id,
                         search: searchQuery,
@@ -236,7 +236,7 @@ export function ConversationHistoryList({
                           state={conversation.actionableState}
                         />
                       </span>
-                    </EvryLink>
+                    </AuthenticatedLink>
                   </li>
                 );
               })}
@@ -256,7 +256,7 @@ export function ConversationHistoryList({
             </p>
             {searchQuery ? (
               <Button asChild variant="ghost" size="sm" className="mt-3">
-                <EvryLink
+                <AuthenticatedLink
                   href={evryHistoryHref({
                     conversationId: selectedConversationId,
                   })}
@@ -271,7 +271,7 @@ export function ConversationHistoryList({
                 >
                   <X aria-hidden="true" />
                   Clear search
-                </EvryLink>
+                </AuthenticatedLink>
               </Button>
             ) : (
               <Button asChild size="sm">

@@ -39,7 +39,7 @@ import {
 import type { EvryPublicArtifact } from "@/lib/evry/artifacts/public";
 import { formatDateTimeWithZone, formatTime } from "@/lib/datetime";
 import { cn } from "@/lib/utils";
-import { EvryLink } from "@/components/evry/navigation-intent";
+import { AuthenticatedLink } from "@/components/authenticated-navigation";
 
 export const EVRY_ARTIFACT_RENDER_VARIANTS = [
   "context",
@@ -220,12 +220,12 @@ function renderClarification(
                     Choose {choice.label}
                   </Button>
                 ) : (
-                  <EvryLink
+                  <AuthenticatedLink
                     href={choice.sourceLink.href}
                     className={linkClassName}
                   >
                     Open {choice.sourceLink.label}
-                  </EvryLink>
+                  </AuthenticatedLink>
                 )}
               </div>
             </li>
@@ -274,9 +274,12 @@ function renderRead(artifact: ArtifactByVariant["read"]) {
       <ul className="space-y-2">
         {artifact.items.map((item) => (
           <li key={item.id} className="rounded-lg border p-3">
-            <EvryLink href={item.sourceLink.href} className={linkClassName}>
+            <AuthenticatedLink
+              href={item.sourceLink.href}
+              className={linkClassName}
+            >
               {item.label}
-            </EvryLink>
+            </AuthenticatedLink>
             <dl className="mt-2 grid gap-1 text-sm sm:grid-cols-2">
               {item.facts.map((fact) => (
                 <div key={fact.label}>
@@ -364,12 +367,12 @@ function DetailedConfirmation({
                       {target.label}:{" "}
                     </span>
                     {target.sourceLink ? (
-                      <EvryLink
+                      <AuthenticatedLink
                         href={target.sourceLink.href}
                         className={linkClassName}
                       >
                         {target.value}
-                      </EvryLink>
+                      </AuthenticatedLink>
                     ) : (
                       target.value
                     )}
@@ -732,9 +735,12 @@ function renderReceipt(
               <ul className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-sm">
                 {step.sourceLinks.map((link) => (
                   <li key={link.href}>
-                    <EvryLink href={link.href} className={linkClassName}>
+                    <AuthenticatedLink
+                      href={link.href}
+                      className={linkClassName}
+                    >
                       Open {link.label}
-                    </EvryLink>
+                    </AuthenticatedLink>
                   </li>
                 ))}
               </ul>
