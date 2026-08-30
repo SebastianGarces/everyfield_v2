@@ -10,6 +10,12 @@ import {
 } from "@/db/schema";
 import { toCalendarDate, utcOffsetForZonedTime } from "@/lib/datetime";
 import {
+  resolveEvryCommunicationAudience,
+  type EvryCommunicationAudienceSnapshot,
+  type EvryPlannedCommunicationMeeting,
+} from "@/lib/communication/evry-send";
+import { communicationEvryEffectUuid } from "@/lib/communication/evry-effect";
+import {
   buildEvryConfirmationArtifact,
   type EvryDetailedConfirmationArtifactDocument,
 } from "@/lib/evry/artifacts/review";
@@ -19,6 +25,8 @@ import {
 } from "@/lib/evry/artifacts/types";
 import type { EvryClarificationArtifact } from "@/lib/evry/artifacts/types";
 import type { EvryConversationPlanIdentity } from "@/lib/evry/conversations/contract";
+import { resolveMeetingsEvryEffect } from "@/lib/evry/capabilities/meetings/resolver";
+import type { EvryJsonValue, EvryPlanRequestKey } from "@/lib/evry/plans";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
 import {
   resolveEvryPlantDateTimeRequest,
@@ -57,6 +65,7 @@ export type MeetingInvitationPersonFact = Readonly<{
   email: string | null;
   status: string;
   attendedVisionMeeting: boolean;
+  expectedUpdatedAt: string;
 }>;
 
 export type MeetingInvitationReferenceFacts = Readonly<{
@@ -77,6 +86,7 @@ export type MeetingInvitationGuest = Readonly<{
   personId: string;
   label: string;
   email: string;
+  expectedPersonUpdatedAt: string;
 }>;
 
 export type MeetingInvitationExclusion = Readonly<{
@@ -105,6 +115,152 @@ export type MeetingInvitationReferenceResolution =
   | ResolvedMeetingInvitationReference
   | Readonly<{ kind: "clarification"; artifact: EvryClarificationArtifact }>
   | Readonly<{ kind: "unavailable" }>;
+
+export type MeetingInvitationPlanSnapshot = Readonly<{
+  meeting: Readonly<Record<string, EvryJsonValue>>;
+  guests: Readonly<{
+    meetingId: string;
+    targets: readonly Readonly<{
+      attendanceId: string;
+      personId: string;
+      expectedPersonUpdatedAt: string;
+      expectedAttendanceAbsent: true;
+    }>[];
+  }>;
+  communication: Readonly<{
+    communicationId: string;
+    recipientSource: Readonly<{
+      kind: "people";
+      recipientIds: readonly string[];
+    }>;
+    audience: EvryCommunicationAudienceSnapshot;
+  }>;
+}>;
+
+type MeetingInvitationPlanDependencies = Readonly<{
+  resolveMeeting: typeof resolveMeetingsEvryEffect;
+  resolveAudience: typeof resolveEvryCommunicationAudience;
+}>;
+
+function pinnedMeetingDateTime(dateTime: EvryResolvedPlantDateTime): string {
+  const match = /^(\d{1,2}):(\d{2}) (AM|PM)$/.exec(dateTime.localTime);
+  if (!match) throw new Error("Meeting invitation start time is invalid");
+  const hour = (Number(match[1]) % 12) + (match[3] === "PM" ? 12 : 0);
+  return `${dateTime.calendarDate}T${String(hour).padStart(2, "0")}:${match[2]}:00.000Z`;
+}
+
+function sameIds(left: readonly string[], right: readonly string[]) {
+  return (
+    left.length === right.length &&
+    left.every((value, index) => value === right[index])
+  );
+}
+
+/** Resolve the real Meetings and Communication arguments before persistence. */
+export function createMeetingInvitationPlanResolver(
+  dependencies: MeetingInvitationPlanDependencies
+) {
+  return async function plan(input: {
+    actor: EvryPlantActor;
+    resolved: ResolvedMeetingInvitationReference;
+    requestKey: EvryPlanRequestKey;
+    now: Date;
+  }): Promise<MeetingInvitationPlanSnapshot | null> {
+    const location = input.resolved.location;
+    const meeting = await dependencies.resolveMeeting({
+      actor: input.actor,
+      selection: {
+        kind: "effect",
+        exportName: "createMeetingAction",
+        values: {
+          type: "vision_meeting",
+          datetime: pinnedMeetingDateTime(input.resolved.dateTime),
+          timezone: input.resolved.dateTime.timeZone,
+          title: null,
+          locationId: location.id,
+          locationName: location.id ? null : location.name,
+          locationAddress: location.id ? null : location.address,
+          teamId: null,
+          meetingSubtype: null,
+          estimatedAttendance: input.resolved.guests.length,
+          durationMinutes: input.resolved.durationMinutes,
+          notes: null,
+        },
+      },
+      pageContext: null,
+      requestKey: input.requestKey,
+      now: input.now,
+    });
+    if (!meeting || meeting.exportName !== "createMeetingAction") return null;
+    const meetingArguments = meeting.arguments;
+    const plannedMeeting: EvryPlannedCommunicationMeeting = {
+      id: meetingArguments.meetingId,
+      title: meetingArguments.title,
+      type: meetingArguments.type,
+      datetime: new Date(meetingArguments.datetime),
+      locationName: meetingArguments.locationName,
+      locationAddress: meetingArguments.locationAddress,
+      agenda: meetingArguments.agenda,
+    };
+    const recipientIds = input.resolved.guests.map(({ personId }) => personId);
+    const audience = await dependencies.resolveAudience({
+      churchId: input.actor.plantId,
+      recipientIds,
+      subject: input.resolved.subject,
+      body: input.resolved.body,
+      channel: "email",
+      templateId: null,
+      meetingId: meetingArguments.meetingId,
+      plannedMeeting,
+    });
+    if (
+      !audience ||
+      !sameIds(
+        audience.recipients.map(({ personId }) => personId).toSorted(),
+        [...recipientIds].toSorted()
+      )
+    ) {
+      return null;
+    }
+    return Object.freeze({
+      meeting: meetingArguments,
+      guests: Object.freeze({
+        meetingId: meetingArguments.meetingId,
+        targets: Object.freeze(
+          input.resolved.guests.map((guest) =>
+            Object.freeze({
+              attendanceId: communicationEvryEffectUuid(
+                input.requestKey,
+                `meeting-guest:${guest.personId}`
+              ),
+              personId: guest.personId,
+              expectedPersonUpdatedAt: guest.expectedPersonUpdatedAt,
+              expectedAttendanceAbsent: true as const,
+            })
+          )
+        ),
+      }),
+      communication: Object.freeze({
+        communicationId: communicationEvryEffectUuid(
+          input.requestKey,
+          "communication"
+        ),
+        recipientSource: Object.freeze({
+          kind: "people" as const,
+          recipientIds: Object.freeze(recipientIds),
+        }),
+        audience,
+      }),
+    });
+  };
+}
+
+export const resolveMeetingInvitationPlan = createMeetingInvitationPlanResolver(
+  {
+    resolveMeeting: resolveMeetingsEvryEffect,
+    resolveAudience: resolveEvryCommunicationAudience,
+  }
+);
 
 function localTimeAt(instant: Date, timeZone: string): string {
   return new Intl.DateTimeFormat("en-US", {
@@ -394,7 +550,14 @@ function resolveAudience(facts: MeetingInvitationReferenceFacts) {
       continue;
     }
     emails.add(email);
-    guests.push(Object.freeze({ personId: person.id, label, email }));
+    guests.push(
+      Object.freeze({
+        personId: person.id,
+        label,
+        email,
+        expectedPersonUpdatedAt: person.expectedUpdatedAt,
+      })
+    );
   }
   return Object.freeze({
     guests: Object.freeze(guests),
@@ -486,6 +649,7 @@ async function loadProductionFacts(
         lastName: persons.lastName,
         email: persons.email,
         status: persons.status,
+        expectedUpdatedAt: persons.updatedAt,
       })
       .from(persons)
       .where(
@@ -528,6 +692,7 @@ async function loadProductionFacts(
       peopleRows.map((person) =>
         Object.freeze({
           ...person,
+          expectedUpdatedAt: person.expectedUpdatedAt.toISOString(),
           attendedVisionMeeting: prior.has(person.id),
         })
       )
