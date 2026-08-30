@@ -471,6 +471,85 @@ export const evryExecutionAttempts = pgTable(
   ]
 );
 
+/**
+ * The atomic idempotency claim owned by an effect adapter.
+ *
+ * This is deliberately not an execution outcome. An adapter may have durable
+ * domain work followed by an executor-reachable post-commit phase (for
+ * example, best-effort notification reconciliation). Only the executor writes
+ * the terminal step outcome after every required phase has been reached.
+ */
+export const evryExecutionEffectClaims = pgTable(
+  "evry_execution_effect_claims",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    attemptId: uuid("attempt_id").notNull(),
+    planId: uuid("plan_id").notNull(),
+    churchId: uuid("church_id").notNull(),
+    actorUserId: uuid("actor_user_id").notNull(),
+    planFingerprint: varchar("plan_fingerprint", { length: 64 }).notNull(),
+    correlationId: uuid("correlation_id").notNull(),
+    effectKey: varchar("effect_key", { length: 64 }).notNull(),
+    stepId: varchar("step_id", { length: 64 }).notNull(),
+    capabilityIdentity: varchar("capability_identity", {
+      length: 160,
+    }).notNull(),
+    affectedCount: integer("affected_count").default(0).notNull(),
+    excludedCount: integer("excluded_count").default(0).notNull(),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    foreignKey({
+      name: "evry_execution_effect_claims_exact_attempt_fk",
+      columns: [
+        table.attemptId,
+        table.planId,
+        table.churchId,
+        table.actorUserId,
+        table.planFingerprint,
+        table.correlationId,
+      ],
+      foreignColumns: [
+        evryExecutionAttempts.id,
+        evryExecutionAttempts.planId,
+        evryExecutionAttempts.churchId,
+        evryExecutionAttempts.actorUserId,
+        evryExecutionAttempts.planFingerprint,
+        evryExecutionAttempts.correlationId,
+      ],
+    }),
+    uniqueIndex("evry_execution_effect_claims_effect_unique_idx").on(
+      table.churchId,
+      table.effectKey
+    ),
+    uniqueIndex("evry_execution_effect_claims_step_unique_idx").on(
+      table.attemptId,
+      table.stepId
+    ),
+    index("evry_execution_effect_claims_plan_time_idx").on(
+      table.planId,
+      table.claimedAt,
+      table.id
+    ),
+    check(
+      "evry_execution_effect_claims_fingerprint_check",
+      sql`${table.planFingerprint} ~ '^[0-9a-f]{64}$'`
+    ),
+    check(
+      "evry_execution_effect_claims_effect_key_check",
+      sql`${table.effectKey} ~ '^[0-9a-f]{64}$'`
+    ),
+    check(
+      "evry_execution_effect_claims_step_check",
+      sql`${table.stepId} ~ '^[a-z][a-z0-9_.-]{0,63}$' and length(${table.capabilityIdentity}) > 0`
+    ),
+    check(
+      "evry_execution_effect_claims_counts_check",
+      sql`${table.affectedCount} >= 0 and ${table.excludedCount} >= 0`
+    ),
+  ]
+);
+
 /** A closed, redacted result for an attempt or one named plan step. */
 export const evryExecutionOutcomes = pgTable(
   "evry_execution_outcomes",

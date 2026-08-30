@@ -1,10 +1,14 @@
 import { and, eq, sql, type SQL } from "drizzle-orm";
 
 import { db } from "@/db";
-import { evryExecutionOutcomes } from "@/db/schema";
-import { executionStepOutcomeKey } from "@/lib/evry/audit/identity";
+import { evryExecutionEffectClaims } from "@/db/schema";
 import type { EvryEffectInput, EvryEffectResult } from "@/lib/evry/executor";
-import { syncMeetingNotifications } from "@/lib/meetings/notifications";
+import {
+  MEETING_NOTIFICATION_CATEGORY,
+  planMeetingNotifications,
+  reconcileMeetingNotificationIntents,
+  type MeetingNotificationIntent,
+} from "@/lib/meetings/notifications";
 import {
   personHoldsLoginFilter,
   personIsUserInChurch,
@@ -24,7 +28,9 @@ interface CompletedRow extends Record<string, unknown> {
 export type TeamsEffectExecutionDeps = Readonly<{
   findCompletedOutcome: typeof completedOutcome;
   executeStatement: typeof executeStatement;
-  syncMeetingNotifications: typeof syncMeetingNotifications;
+  reconcileMeetingNotifications: typeof reconcileMeetingNotificationIntents;
+  composeMeetingNotificationIntents: typeof composeMeetingNotificationIntents;
+  afterDurableCommit(): void | Promise<void>;
 }>;
 
 function exactTuple(input: EvryEffectInput, identity: string): boolean {
@@ -42,26 +48,30 @@ async function completedOutcome(
 ): Promise<EvryEffectResult | null> {
   const [row] = await db
     .select({
-      affectedCount: evryExecutionOutcomes.affectedCount,
-      excludedCount: evryExecutionOutcomes.excludedCount,
+      affectedCount: evryExecutionEffectClaims.affectedCount,
+      excludedCount: evryExecutionEffectClaims.excludedCount,
     })
-    .from(evryExecutionOutcomes)
+    .from(evryExecutionEffectClaims)
     .where(
       and(
-        eq(evryExecutionOutcomes.attemptId, input.execution.attemptId),
-        eq(evryExecutionOutcomes.planId, input.execution.planId),
-        eq(evryExecutionOutcomes.churchId, input.execution.plantId),
-        eq(evryExecutionOutcomes.actorUserId, input.execution.actorUserId),
-        eq(evryExecutionOutcomes.planFingerprint, input.execution.fingerprint),
-        eq(evryExecutionOutcomes.correlationId, input.execution.correlationId),
-        eq(evryExecutionOutcomes.stepId, input.execution.stepId),
+        eq(evryExecutionEffectClaims.attemptId, input.execution.attemptId),
+        eq(evryExecutionEffectClaims.planId, input.execution.planId),
+        eq(evryExecutionEffectClaims.churchId, input.execution.plantId),
+        eq(evryExecutionEffectClaims.actorUserId, input.execution.actorUserId),
         eq(
-          evryExecutionOutcomes.capabilityIdentity,
+          evryExecutionEffectClaims.planFingerprint,
+          input.execution.fingerprint
+        ),
+        eq(
+          evryExecutionEffectClaims.correlationId,
+          input.execution.correlationId
+        ),
+        eq(evryExecutionEffectClaims.stepId, input.execution.stepId),
+        eq(
+          evryExecutionEffectClaims.capabilityIdentity,
           input.execution.capabilityIdentity
         ),
-        eq(evryExecutionOutcomes.effectKey, input.effectKey),
-        eq(evryExecutionOutcomes.subject, "step"),
-        eq(evryExecutionOutcomes.status, "completed")
+        eq(evryExecutionEffectClaims.effectKey, input.effectKey)
       )
     )
     .limit(1);
@@ -78,11 +88,6 @@ function outcomePrelude(
   input: EvryEffectInput,
   args: TeamsEffectArguments
 ): SQL {
-  const outcomeKey = executionStepOutcomeKey(
-    input.execution.planId,
-    input.execution.fingerprint,
-    input.execution.stepId
-  );
   return sql`
     input_document as materialized (
       select ${JSON.stringify(args)}::jsonb document
@@ -100,19 +105,16 @@ function outcomePrelude(
       from input_document, jsonb_array_elements(document->'mutations') row
     ), existing as materialized (
       select o.affected_count, o.excluded_count
-      from evry_execution_outcomes o
+      from evry_execution_effect_claims o
       where o.attempt_id = ${input.execution.attemptId}::uuid
         and o.plan_id = ${input.execution.planId}::uuid
         and o.church_id = ${input.execution.plantId}::uuid
         and o.actor_user_id = ${input.execution.actorUserId}::uuid
         and o.plan_fingerprint = ${input.execution.fingerprint}
         and o.correlation_id = ${input.execution.correlationId}::uuid
-        and o.outcome_key = ${outcomeKey}
         and o.effect_key = ${input.effectKey}
-        and o.subject = 'step'
         and o.step_id = ${input.execution.stepId}
         and o.capability_identity = ${input.execution.capabilityIdentity}
-        and o.status = 'completed'
     ), eligible as materialized (
       select a.id, a.plan_id, a.church_id, a.actor_user_id,
              a.plan_fingerprint, a.correlation_id
@@ -191,16 +193,14 @@ function outcomePrelude(
              or (m.mode = 'insert' and m.after_state ? 'created_by' and (m.after_state->>'created_by')::uuid <> ${input.execution.actorUserId}::uuid)
         )
     ), claimed as materialized (
-      insert into evry_execution_outcomes (
+      insert into evry_execution_effect_claims (
         attempt_id, plan_id, church_id, actor_user_id, plan_fingerprint,
-        correlation_id, outcome_key, effect_key, subject, step_id,
-        capability_identity, status, result_code, affected_count,
-        excluded_count, occurred_at
+        correlation_id, effect_key, step_id, capability_identity,
+        affected_count, excluded_count, claimed_at
       )
       select e.id, e.plan_id, e.church_id, e.actor_user_id, e.plan_fingerprint,
-             e.correlation_id, ${outcomeKey}, ${input.effectKey}, 'step',
-             ${input.execution.stepId}, ${input.execution.capabilityIdentity},
-             'completed', 'effect_completed',
+             e.correlation_id, ${input.effectKey}, ${input.execution.stepId},
+             ${input.execution.capabilityIdentity},
              (select count(*)::int from mutation_plan), 0, transaction_timestamp()
       from eligible e
       on conflict do nothing
@@ -260,10 +260,137 @@ function isSerializableRetry(error: unknown): boolean {
   return code === "40001" || code === "40P01";
 }
 
-async function syncMeetingAfterCommit(
+function literalNotificationIntent(
+  value: ReturnType<typeof planMeetingNotifications>["notifications"][number]
+): MeetingNotificationIntent | null {
+  if (
+    !value.churchId ||
+    value.category !== MEETING_NOTIFICATION_CATEGORY ||
+    value.entityType !== "meeting" ||
+    !value.entityId ||
+    !value.dedupeKey ||
+    !value.scheduledFor
+  ) {
+    return null;
+  }
+  return {
+    churchId: value.churchId,
+    recipientUserId: value.recipientUserId,
+    category: MEETING_NOTIFICATION_CATEGORY,
+    type: value.type,
+    title: value.title,
+    body: value.body,
+    entityType: value.entityType,
+    entityId: value.entityId,
+    dedupeKey: value.dedupeKey,
+    scheduledFor: value.scheduledFor,
+  };
+}
+
+function composeMeetingNotificationIntents(
+  input: EvryEffectInput,
+  args: TeamsEffectArguments
+): readonly MeetingNotificationIntent[] | null {
+  if (args.operation !== "createMeetingAction") return [];
+  const meeting = args.mutations.find(
+    ({ table, mode }) => table === "church_meetings" && mode === "insert"
+  );
+  const state = meeting?.after;
+  if (!meeting || !state) return null;
+  const teamId = state.team_id;
+  const team = args.expected.find(
+    ({ table, id, state: expected }) =>
+      table === "ministry_teams" && id === teamId && expected !== null
+  )?.state;
+  const coreGroup = args.sets.find(({ kind }) => kind === "core_group_users");
+  const activeTeam = args.sets.find(
+    ({ kind, scopeId }) => kind === "active_team_users" && scopeId === teamId
+  );
+  const datetime = new Date(String(state.datetime));
+  const plannedAt = new Date(String(state.created_at));
+  if (
+    typeof teamId !== "string" ||
+    !team ||
+    typeof team.name !== "string" ||
+    !coreGroup ||
+    !activeTeam ||
+    state.id !== meeting.id ||
+    state.church_id !== input.execution.plantId ||
+    state.type !== "team_meeting" ||
+    state.status !== "planning" ||
+    typeof state.created_by !== "string" ||
+    !Number.isFinite(datetime.getTime()) ||
+    !Number.isFinite(plannedAt.getTime()) ||
+    !(state.title === null || typeof state.title === "string") ||
+    state.meeting_number !== null
+  ) {
+    return null;
+  }
+
+  const plan = planMeetingNotifications(
+    {
+      id: meeting.id,
+      churchId: input.execution.plantId,
+      type: "team_meeting",
+      title: state.title,
+      meetingNumber: null,
+      teamName: team.name,
+      datetime,
+      status: "planning",
+      createdBy: state.created_by,
+    },
+    {
+      coreGroup: coreGroup.ids,
+      reminders: [
+        ...new Set([...activeTeam.ids, input.execution.actorUserId]),
+      ].toSorted(),
+    },
+    plannedAt
+  );
+  const intents = plan.notifications.map(literalNotificationIntent);
+  return intents.some((intent) => intent === null)
+    ? null
+    : (intents as MeetingNotificationIntent[]);
+}
+
+function intentDocument(intent: MeetingNotificationIntent) {
+  return JSON.stringify({
+    ...intent,
+    scheduledFor: intent.scheduledFor.toISOString(),
+  });
+}
+
+function confirmedMeetingIntents(
+  args: TeamsEffectArguments
+): readonly MeetingNotificationIntent[] {
+  return args.notificationIntents.map((intent) => ({
+    ...intent,
+    scheduledFor: new Date(intent.scheduledFor),
+  }));
+}
+
+function notificationIntentsAreCurrent(
   input: EvryEffectInput,
   args: TeamsEffectArguments,
-  synchronize: typeof syncMeetingNotifications
+  compose: typeof composeMeetingNotificationIntents
+): boolean {
+  const current = compose(input, args);
+  if (!current) return false;
+  const confirmed = confirmedMeetingIntents(args);
+  const currentDocuments = current.map(intentDocument).toSorted();
+  const confirmedDocuments = confirmed.map(intentDocument).toSorted();
+  return (
+    currentDocuments.length === confirmedDocuments.length &&
+    currentDocuments.every(
+      (document, index) => document === confirmedDocuments[index]
+    )
+  );
+}
+
+async function reconcileMeetingAfterCommit(
+  input: EvryEffectInput,
+  args: TeamsEffectArguments,
+  reconcile: typeof reconcileMeetingNotificationIntents
 ): Promise<void> {
   if (args.operation !== "createMeetingAction") return;
   const meeting = args.mutations.find(
@@ -271,31 +398,26 @@ async function syncMeetingAfterCommit(
   );
   if (!meeting) return;
   try {
-    // The keyed outcome and meeting/guest rows are already committed. This is
-    // deliberately the same best-effort F11 boundary as meetings/service.ts:
-    // it re-reads facts and audience, gates every recipient, and dedupes each
-    // notification independently. A replay may safely ask it to converge.
-    await synchronize(input.execution.plantId, meeting.id, {
-      mustCancel: false,
-    });
+    await reconcile(
+      input.execution.plantId,
+      meeting.id,
+      confirmedMeetingIntents(args)
+    );
   } catch (error) {
-    // The canonical implementation never throws. Keep this catch at the
-    // adapter seam so a replacement transport cannot retroactively turn a
-    // committed meeting into a refusal or retryable execution.
     if (process.env.EVRY_TEAMS_EFFECT_DEBUG === "1") {
-      console.error("Teams meeting notification sync debug", error);
+      console.error("Teams meeting notification reconciliation debug", error);
     }
   }
 }
 
-async function completedWithNotificationSync(
+async function completedWithNotificationReconciliation(
   result: EvryEffectResult,
   input: EvryEffectInput,
   args: TeamsEffectArguments,
-  synchronize: typeof syncMeetingNotifications
+  reconcile: typeof reconcileMeetingNotificationIntents
 ): Promise<EvryEffectResult> {
   if (result.status === "completed") {
-    await syncMeetingAfterCommit(input, args, synchronize);
+    await reconcileMeetingAfterCommit(input, args, reconcile);
   }
   return result;
 }
@@ -307,8 +429,12 @@ export async function executeTeamsEffect(
 ): Promise<EvryEffectResult> {
   const findCompleted = dependencies.findCompletedOutcome ?? completedOutcome;
   const runStatement = dependencies.executeStatement ?? executeStatement;
-  const synchronize =
-    dependencies.syncMeetingNotifications ?? syncMeetingNotifications;
+  const reconcile =
+    dependencies.reconcileMeetingNotifications ??
+    reconcileMeetingNotificationIntents;
+  const compose =
+    dependencies.composeMeetingNotificationIntents ??
+    composeMeetingNotificationIntents;
   const operation = input.arguments.operation;
   if (
     typeof operation !== "string" ||
@@ -329,49 +455,50 @@ export async function executeTeamsEffect(
   }
   const previous = await findCompleted(input);
   if (previous)
-    return completedWithNotificationSync(previous, input, args, synchronize);
-  try {
-    return await completedWithNotificationSync(
-      await runStatement(input, args),
+    return completedWithNotificationReconciliation(
+      previous,
       input,
       args,
-      synchronize
+      reconcile
     );
+  if (!notificationIntentsAreCurrent(input, args, compose)) {
+    return { status: "refused", excludedCount: 1 };
+  }
+  let durable: EvryEffectResult;
+  try {
+    durable = await runStatement(input, args);
   } catch (error) {
     if (process.env.EVRY_TEAMS_EFFECT_DEBUG === "1") {
       console.error("Teams atomic effect debug", error);
     }
     const replay = await findCompleted(input);
-    if (replay)
-      return completedWithNotificationSync(replay, input, args, synchronize);
-    if (isSerializableRetry(error)) {
+    if (replay) durable = replay;
+    else if (isSerializableRetry(error)) {
       // The first transaction lost a real database serialization race. A new
       // transaction can now prove one of the two closed outcomes: the keyed
       // effect committed, or the exact baseline no longer matches.
       try {
-        return await completedWithNotificationSync(
-          await runStatement(input, args),
-          input,
-          args,
-          synchronize
-        );
+        durable = await runStatement(input, args);
       } catch (retryError) {
         if (process.env.EVRY_TEAMS_EFFECT_DEBUG === "1") {
           console.error("Teams atomic effect retry debug", retryError);
         }
         const retriedReplay = await findCompleted(input);
-        if (retriedReplay)
-          return completedWithNotificationSync(
-            retriedReplay,
-            input,
-            args,
-            synchronize
-          );
-        return { status: "retryable" };
+        if (retriedReplay) durable = retriedReplay;
+        else return { status: "retryable" };
       }
-    }
-    // A transport, driver, or unknown database failure says nothing about the
-    // domain. Keep the step non-durable and retryable.
-    return { status: "retryable" };
+    } else return { status: "retryable" };
   }
+  if (durable.status === "completed") {
+    // This hook exists only for the real executor crash/restart proof. It sits
+    // outside every database catch so an interrupted process leaves the
+    // domain claim durable but cannot accidentally record a terminal step.
+    await dependencies.afterDurableCommit?.();
+  }
+  return completedWithNotificationReconciliation(
+    durable,
+    input,
+    args,
+    reconcile
+  );
 }

@@ -8,6 +8,8 @@ import { db } from "@/db";
 import {
   churches,
   churchMeetings,
+  evryExecutionEffectClaims,
+  evryExecutionOutcomes,
   locations,
   meetingAttendance,
   ministryTeams,
@@ -165,8 +167,15 @@ async function main(): Promise<void> {
     let plannedMeetingInstant: string | null = null;
     let plannedMeetingNotificationCount: number | null = null;
     let plannedMeetingNotificationIntents: readonly {
+      churchId: string;
       recipientUserId: string;
+      category: "meetings";
       type: string;
+      title: string;
+      body: string;
+      entityType: "meeting";
+      entityId: string;
+      dedupeKey: string;
       scheduledFor: string;
     }[] = [];
 
@@ -670,7 +679,11 @@ async function main(): Promise<void> {
     );
 
     const isolatedFailureReports: Array<
-      Awaited<ReturnType<typeof meetingNotifications.syncMeetingNotifications>>
+      Awaited<
+        ReturnType<
+          typeof meetingNotifications.reconcileMeetingNotificationIntents
+        >
+      >
     > = [];
     const failureRegistry = executor.createEvryExecutionCapabilityRegistry(
       TEAMS_EXECUTION_CAPABILITIES.map((registration) =>
@@ -680,32 +693,30 @@ async function main(): Promise<void> {
               planCapability: registration.planCapability,
               executeIfCurrent: (effectInput) =>
                 atomicEffect.executeTeamsEffect(effectInput, {
-                  syncMeetingNotifications: async (
+                  reconcileMeetingNotifications: async (
                     churchId,
                     meetingId,
-                    options
+                    intents
                   ) => {
                     const report =
-                      await meetingNotifications.syncMeetingNotifications(
+                      await meetingNotifications.reconcileMeetingNotificationIntents(
                         churchId,
                         meetingId,
+                        intents,
                         {
-                          ...options,
-                          deps: {
-                            ...meetingNotifications.dbMeetingNotificationDeps,
-                            enqueue: async (notification) => {
-                              if (
-                                notification.recipientUserId ===
-                                ordinaryAccount.id
-                              ) {
-                                throw new Error(
-                                  "isolated recipient enqueue failure"
-                                );
-                              }
-                              return meetingNotifications.dbMeetingNotificationDeps.enqueue(
-                                notification
+                          ...meetingNotifications.dbMeetingNotificationDeps,
+                          enqueue: async (notification) => {
+                            if (
+                              notification.recipientUserId ===
+                              ordinaryAccount.id
+                            ) {
+                              throw new Error(
+                                "isolated recipient enqueue failure"
                               );
-                            },
+                            }
+                            return meetingNotifications.dbMeetingNotificationDeps.enqueue(
+                              notification
+                            );
                           },
                         }
                       );
@@ -758,6 +769,27 @@ async function main(): Promise<void> {
       ].toSorted(),
       "the immutable plan discloses every intended reminder time"
     );
+    assert.ok(
+      plannedMeetingNotificationIntents.every(
+        ({
+          churchId,
+          category,
+          title,
+          body,
+          entityType,
+          entityId,
+          dedupeKey,
+        }) =>
+          churchId === plantId &&
+          category === "meetings" &&
+          title.includes("Best-effort Failure") &&
+          body.includes("Best-effort Failure") &&
+          entityType === "meeting" &&
+          entityId === plannedMeetingNotificationIntents[0]!.entityId &&
+          dedupeKey.includes(entityId)
+      ),
+      "the immutable plan binds literal F11 anchor, copy, entity, and dedupe fields"
+    );
     assert.equal((await response(failurePost, failurePlan)).status, 200);
     assert.deepEqual(isolatedFailureReports, [
       {
@@ -795,21 +827,6 @@ async function main(): Promise<void> {
       3,
       "one recipient's failures did not cost the other recipient"
     );
-    const recoveredNotificationReport =
-      await meetingNotifications.syncMeetingNotifications(
-        plantId,
-        failureMeeting.id,
-        { mustCancel: false }
-      );
-    assert.deepEqual(recoveredNotificationReport, {
-      cancelled: 0,
-      considered: 7,
-      recorded: 7,
-      created: 4,
-      skipped: 0,
-      failed: 0,
-      reason: null,
-    });
     assert.equal(
       (await response(failurePost, failurePlan)).status,
       200,
@@ -842,8 +859,137 @@ async function main(): Promise<void> {
           .from(notifications)
           .where(eq(notifications.entityId, failureMeeting.id))
       ).length,
-      7,
-      "canonical dedupe kept one row per disclosed intent"
+      3,
+      "terminal replay duplicates neither the meeting nor the successful recipient rows"
+    );
+
+    const crashRegistry = executor.createEvryExecutionCapabilityRegistry(
+      TEAMS_EXECUTION_CAPABILITIES.map((registration) =>
+        registration.planCapability.identity ===
+        effectContracts.TEAMS_EFFECT_IDENTITY_BY_OPERATION.createMeetingAction
+          ? executor.defineEvryExecutionCapability({
+              planCapability: registration.planCapability,
+              executeIfCurrent: (effectInput) =>
+                atomicEffect.executeTeamsEffect(effectInput, {
+                  afterDurableCommit: () => {
+                    throw new Error("simulated process interruption");
+                  },
+                }),
+            })
+          : registration
+      )
+    );
+    const crashPost = route.createEvryPlanExecutePost({
+      registry: crashRegistry,
+    });
+    const crashPlan = await approve({
+      kind: "effect",
+      operation: "createMeetingAction",
+      values: {
+        teamId: created[0]!.id,
+        title: "Crash Recovery Meeting",
+        datetime: "2031-02-17T18:30",
+        meetingSubtype: "rehearsal",
+      },
+    });
+    const crashIntentCount = plannedMeetingNotificationIntents.length;
+    assert.equal(crashIntentCount, 7);
+    assert.equal(
+      (await response(crashPost, crashPlan)).status,
+      503,
+      "the interrupted adapter leaves the executor step retryable"
+    );
+    const [crashMeeting] = await db
+      .select()
+      .from(churchMeetings)
+      .where(eq(churchMeetings.title, "Crash Recovery Meeting"));
+    assert.ok(crashMeeting, "the meeting committed before interruption");
+    assert.equal(
+      (
+        await db
+          .select()
+          .from(meetingAttendance)
+          .where(eq(meetingAttendance.meetingId, crashMeeting.id))
+      ).length,
+      1
+    );
+    assert.equal(
+      (
+        await db
+          .select()
+          .from(notifications)
+          .where(eq(notifications.entityId, crashMeeting.id))
+      ).length,
+      0,
+      "interruption occurred before F11 reconciliation"
+    );
+    assert.equal(
+      (
+        await db
+          .select()
+          .from(evryExecutionEffectClaims)
+          .where(eq(evryExecutionEffectClaims.planId, crashPlan.planId))
+      ).length,
+      1,
+      "the atomic domain claim survived"
+    );
+    assert.equal(
+      (
+        await db
+          .select()
+          .from(evryExecutionOutcomes)
+          .where(eq(evryExecutionOutcomes.planId, crashPlan.planId))
+      ).filter(({ subject }) => subject === "step").length,
+      0,
+      "the domain claim is not a terminal executor step"
+    );
+    assert.equal(
+      (await response(route.POST, crashPlan)).status,
+      200,
+      "production executor replay reaches post-commit F11 reconciliation"
+    );
+    assert.equal(
+      (
+        await db
+          .select()
+          .from(churchMeetings)
+          .where(eq(churchMeetings.title, "Crash Recovery Meeting"))
+      ).length,
+      1
+    );
+    assert.equal(
+      (
+        await db
+          .select()
+          .from(meetingAttendance)
+          .where(eq(meetingAttendance.meetingId, crashMeeting.id))
+      ).length,
+      1
+    );
+    assert.equal(
+      (
+        await db
+          .select()
+          .from(notifications)
+          .where(eq(notifications.entityId, crashMeeting.id))
+      ).length,
+      crashIntentCount,
+      "production replay filled every missing literal intent exactly once"
+    );
+    assert.equal(
+      (await response(route.POST, crashPlan)).status,
+      200,
+      "terminal production replay remains stable"
+    );
+    assert.equal(
+      (
+        await db
+          .select()
+          .from(notifications)
+          .where(eq(notifications.entityId, crashMeeting.id))
+      ).length,
+      crashIntentCount,
+      "F11 dedupe prevents replay duplication"
     );
 
     const [historyRole] = await db
