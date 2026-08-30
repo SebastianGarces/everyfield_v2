@@ -16,6 +16,10 @@ export interface ExactTenantTaskInsertOptions {
   beforeInsert?: () => Promise<void>;
 }
 
+export type ExactTenantTaskInsertResult =
+  | { authorized: false; inserted: [] }
+  | { authorized: true; inserted: Task[] };
+
 type SerializedTaskInsert = {
   id: string;
   church_id: string;
@@ -82,16 +86,21 @@ function serializeTaskInsert(value: NewTask, now: Date): SerializedTaskInsert {
  *
  * Preflight reads still provide useful errors and authorize richer domain
  * rules. They are not concurrency guards. This statement repeats the global
- * one-tenancy invariant for the fresh authority, assignee, and completer inside
- * the same `INSERT ... SELECT`, and authorizes the entire proposed set as one unit. A
- * checklist/import therefore cannot land a partial set when one user becomes
- * malformed between planning and persistence.
+ * one-tenancy invariant for the fresh authority and every creator, assignee,
+ * and completer inside the same `INSERT ... SELECT`, and authorizes the entire
+ * proposed set as one unit. A checklist/import therefore cannot land a partial
+ * set when one user becomes malformed between planning and persistence.
+ *
+ * Authorization is separate from insertion cardinality. An authorized
+ * idempotent insert may land no rows because another writer won the same
+ * unique key; an unauthorized insert also lands no rows, but callers must
+ * refuse it rather than mistake it for that benign conflict.
  */
 export async function insertExactTenantTasks(
   values: readonly NewTask[],
   options: ExactTenantTaskInsertOptions
-): Promise<Task[]> {
-  if (values.length === 0) return [];
+): Promise<ExactTenantTaskInsertResult> {
+  if (values.length === 0) return { authorized: true, inserted: [] };
 
   const churchId = values[0]!.churchId;
   if (values.some((value) => value.churchId !== churchId)) {
@@ -105,9 +114,9 @@ export async function insertExactTenantTasks(
   const conflict = options.onConflictDoNothing
     ? sql`on conflict do nothing`
     : sql``;
-  const [, inserted] = await db.batch([
+  const [, outcome] = await db.batch([
     taskStructureLockStatement(churchId),
-    db.execute<{ id: string }>(sql`
+    db.execute<{ authorized: boolean; id: string | null }>(sql`
       with proposed as materialized (
         select *
         from jsonb_to_recordset(${JSON.stringify(proposed)}::jsonb) as p(
@@ -146,6 +155,16 @@ export async function insertExactTenantTasks(
           select 1
           from proposed p
           where (
+            not exists (
+              select 1
+              from users creator
+              where creator.id = p.created_by_id
+                and creator.church_id = p.church_id
+                and creator.sending_church_id is null
+                and creator.sending_network_id is null
+            )
+          )
+          or (
             p.assigned_to_id is not null
             and not exists (
               select 1
@@ -189,20 +208,28 @@ export async function insertExactTenantTasks(
         ${conflict}
         returning id
       )
-      select id from landed
+      select a.allowed as authorized, landed.id
+      from authorized a
+      left join landed on true
     `),
   ]);
 
-  const landed = new Set(inserted.rows.map(({ id }) => id));
-  if (landed.size === 0) return [];
+  const authorized = outcome.rows[0]?.authorized === true;
+  if (!authorized) return { authorized: false, inserted: [] };
+
+  const landed = new Set(
+    outcome.rows.map(({ id }) => id).filter((id): id is string => id !== null)
+  );
+  if (landed.size === 0) return { authorized: true, inserted: [] };
 
   const rows = await db
     .select()
     .from(tasks)
     .where(inArray(tasks.id, [...landed]));
   const byId = new Map(rows.map((row) => [row.id, row]));
-  return proposed
+  const inserted = proposed
     .filter(({ id }) => landed.has(id))
     .map(({ id }) => byId.get(id))
     .filter((row): row is Task => row !== undefined);
+  return { authorized: true, inserted };
 }
