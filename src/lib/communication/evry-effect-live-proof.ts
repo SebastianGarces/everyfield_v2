@@ -11,7 +11,7 @@ import {
   evryActionPlans,
   evryActionPlanStates,
   evryExecutionAttempts,
-  evryExecutionOutcomes,
+  evryExecutionEffectClaims,
   evryPlanConfirmations,
   evryProductAuditEvents,
   messageTemplates,
@@ -1146,7 +1146,7 @@ async function main(): Promise<void> {
     .select({
       communications: sql<number>`count(distinct ${communications.id})::int`,
       recipients: sql<number>`count(distinct ${communicationRecipients.id})::int`,
-      outcomes: sql<number>`count(distinct ${evryExecutionOutcomes.id})::int`,
+      claims: sql<number>`count(distinct ${evryExecutionEffectClaims.id})::int`,
     })
     .from(communications)
     .leftJoin(
@@ -1154,14 +1154,14 @@ async function main(): Promise<void> {
       eq(communicationRecipients.communicationId, communications.id)
     )
     .leftJoin(
-      evryExecutionOutcomes,
-      eq(evryExecutionOutcomes.churchId, communications.churchId)
+      evryExecutionEffectClaims,
+      eq(evryExecutionEffectClaims.churchId, communications.churchId)
     )
     .where(eq(communications.churchId, plant.id));
   assert.ok(counts);
   assert.ok(counts.communications >= 8);
   assert.ok(counts.recipients >= 8);
-  assert.ok(counts.outcomes >= 8);
+  assert.ok(counts.claims >= 8);
 
   const foreignMessage = await db
     .select({ count: sql<number>`count(*)::int` })
