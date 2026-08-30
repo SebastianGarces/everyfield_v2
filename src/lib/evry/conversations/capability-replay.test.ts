@@ -392,3 +392,70 @@ test("missing or malformed replay metadata fails before any replay work", async 
     );
   }
 });
+
+test("an unmatched create persists an assistant clarification", async () => {
+  const store = memoryStore({ throwAfterFirstResultCommit: false });
+  const created = await createEvryConversation({
+    actor: ACTOR,
+    requestKey: CREATE_REQUEST,
+    message: "A request no capability recognizes",
+    pageContext: null,
+    requestPageContext: null,
+    now: NOW,
+    store,
+    async continueCapabilityConversation() {
+      return null;
+    },
+  });
+
+  assert.equal(created.conversation.messages.length, 2);
+  const response = created.conversation.messages.at(-1);
+  assert.equal(response?.author, "assistant");
+  assert.match(response?.body ?? "", /EveryField work/i);
+  assert.deepEqual(
+    response?.artifacts.map(({ document }) => document),
+    [{ kind: "boundary", classification: "ambiguous" }]
+  );
+});
+
+test("an unmatched continuation never leaves a bare user message", async () => {
+  const store = memoryStore({ throwAfterFirstResultCommit: false });
+  await store.create({
+    actorUserId: ACTOR.userId,
+    plantId: ACTOR.plantId,
+    requestKey: CREATE_REQUEST,
+    body: "Start",
+    pageContext: null,
+    requestPageContext: null,
+    createdAt: NOW,
+  });
+
+  const continued = await continueEvryConversation({
+    actor: ACTOR,
+    conversationId: CONVERSATION_ID,
+    requestKey: CONTINUE_REQUEST,
+    message: "Another request no capability recognizes",
+    pageContext: null,
+    requestPageContext: null,
+    now: NOW,
+    store,
+    async continueCapabilityConversation() {
+      return null;
+    },
+    resolveReference() {
+      return { status: "not_applicable" };
+    },
+  });
+
+  assert.ok(continued);
+  assert.deepEqual(
+    continued.resumed.conversation.messages.map(({ author }) => author),
+    ["user", "user", "assistant"]
+  );
+  assert.deepEqual(
+    continued.resumed.conversation.messages
+      .at(-1)
+      ?.artifacts.map(({ document }) => document),
+    [{ kind: "boundary", classification: "ambiguous" }]
+  );
+});

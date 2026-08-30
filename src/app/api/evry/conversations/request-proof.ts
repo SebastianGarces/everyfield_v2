@@ -205,6 +205,7 @@ function newMessage(input: {
   author: "user" | "assistant";
   body: string;
   pageContext: EvryStoredConversationMessage["pageContext"];
+  replayReference?: EvryStoredConversationMessage["replayReference"];
   relevanceKeys: EvryStoredConversationMessage["relevanceKeys"];
   deliveryStatus: "complete" | "interrupted";
   artifacts: readonly unknown[];
@@ -217,6 +218,7 @@ function newMessage(input: {
     author: input.author,
     body: input.body,
     pageContext: input.pageContext,
+    replayReference: input.replayReference ?? null,
     relevanceKeys: input.relevanceKeys,
     deliveryStatus: input.deliveryStatus,
     createdAt: input.createdAt,
@@ -304,6 +306,7 @@ const store = {
       author: input.author,
       body: input.body,
       pageContext: input.pageContext,
+      replayReference: input.replayReference,
       relevanceKeys: input.relevanceKeys,
       deliveryStatus: input.deliveryStatus,
       artifacts: [...input.artifacts],
@@ -333,6 +336,23 @@ async function response(response: Response) {
     cacheControl: response.headers.get("cache-control"),
     body: await response.json(),
   };
+}
+
+type ProofConversationMessage = Readonly<{
+  author: "user" | "assistant";
+  body: string;
+  pageContext: EvryStoredConversationMessage["pageContext"];
+}>;
+
+function messageWithBody(
+  messages: readonly ProofConversationMessage[],
+  body: string
+): ProofConversationMessage {
+  const found = messages.find(
+    (message) => message.author === "user" && message.body === body
+  );
+  assert.ok(found);
+  return found;
 }
 
 async function main(): Promise<void> {
@@ -538,7 +558,19 @@ async function main(): Promise<void> {
     recordId: "task-1",
     label: "Scoped task",
   });
-  assert.deepEqual(events, ["auth", "body", "context", "create"]);
+  assert.equal(created.body.conversation.messages[1].author, "assistant");
+  assert.equal(
+    created.body.conversation.messages[1].artifacts[0].artifact.kind,
+    "boundary"
+  );
+  assert.deepEqual(events, [
+    "auth",
+    "body",
+    "context",
+    "create",
+    "append",
+    "find",
+  ]);
   assert.ok(capturedActor);
   assert.ok(stored);
 
@@ -574,7 +606,7 @@ async function main(): Promise<void> {
     [0, 1, 2, 3]
   );
   assert.equal(createStream[2]?.requestId, firstRequestKey);
-  assert.deepEqual(events, ["auth", "body", "context", "create"]);
+  assert.deepEqual(events, ["auth", "body", "context", "create", "find"]);
 
   pageContextRecordState = "missing";
   sessions = [user()];
@@ -590,12 +622,12 @@ async function main(): Promise<void> {
   );
   assert.equal(replayedCreateAfterDelete.status, 201);
   assert.equal(replayedCreateAfterDelete.body.conversation.id, CONVERSATION_ID);
-  assert.equal(replayedCreateAfterDelete.body.conversation.messages.length, 1);
+  assert.equal(replayedCreateAfterDelete.body.conversation.messages.length, 2);
   assert.equal(
     replayedCreateAfterDelete.body.conversation.messages[0].pageContext.label,
     "Scoped task"
   );
-  assert.deepEqual(events, ["auth", "body", "context", "create"]);
+  assert.deepEqual(events, ["auth", "body", "context", "create", "find"]);
   pageContextRecordState = "available";
 
   contextQueries.length = 0;
@@ -661,10 +693,11 @@ async function main(): Promise<void> {
     )
   );
   assert.equal(forgedContext.status, 200);
-  assert.equal(
-    forgedContext.body.conversation.messages.at(-1).pageContext,
-    null
+  const forgedContextMessage = messageWithBody(
+    forgedContext.body.conversation.messages,
+    "Keep working on this request."
   );
+  assert.equal(forgedContextMessage.pageContext, null);
   assert.deepEqual(events.slice(0, 4), ["auth", "body", "context", "find"]);
 
   const appendRetryKey = randomUUID();
@@ -685,10 +718,11 @@ async function main(): Promise<void> {
     )
   );
   assert.equal(firstAppend.status, 200);
-  assert.equal(
-    firstAppend.body.conversation.messages.at(-1).pageContext.label,
-    "Scoped task"
+  const firstAppendMessage = messageWithBody(
+    firstAppend.body.conversation.messages,
+    appendRetryBody
   );
+  assert.equal(firstAppendMessage.pageContext?.label, "Scoped task");
   const messageCountAfterFirstAppend =
     firstAppend.body.conversation.messages.length;
 
@@ -718,17 +752,15 @@ async function main(): Promise<void> {
     ]),
     [
       ["work", "request_accepted"],
-      ["work", "resolving_references"],
-      ["work", "compiling_response"],
       ["conversation", null],
       ["complete", null],
     ]
   );
   assert.deepEqual(
     continuationStream.map((event) => event.sequence),
-    [0, 1, 2, 3, 4]
+    [0, 1, 2]
   );
-  assert.equal(continuationStream[3]?.requestId, appendRetryKey);
+  assert.equal(continuationStream[1]?.requestId, appendRetryKey);
 
   pageContextRecordState = "renamed";
   sessions = [user()];
@@ -752,8 +784,10 @@ async function main(): Promise<void> {
     messageCountAfterFirstAppend
   );
   assert.equal(
-    replayedAppendAfterRename.body.conversation.messages.at(-1).pageContext
-      .label,
+    messageWithBody(
+      replayedAppendAfterRename.body.conversation.messages,
+      appendRetryBody
+    ).pageContext?.label,
     "Scoped task"
   );
   assert.deepEqual(events.slice(0, 5), [
@@ -761,7 +795,7 @@ async function main(): Promise<void> {
     "body",
     "context",
     "find",
-    "append",
+    "find",
   ]);
   pageContextRecordState = "available";
 
