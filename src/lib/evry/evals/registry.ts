@@ -276,15 +276,28 @@ function launchCapabilityFixture(
 }
 
 function teamsCapabilityFixture(
-  capabilityIdentity: string
+  capabilityIdentity: string,
+  operationKind: string
 ): EvryCapabilityEvalFixture {
-  const evalCase = (layer: EvryCapabilityEvalLayer) => [
-    {
-      id: `${capabilityIdentity}:${layer}`,
-      proofId: "teams-capability-contract",
-      testName: `${capabilityIdentity}:${layer}`,
-    },
-  ];
+  if (operationKind !== "read" && operationKind !== "effect") {
+    throw new Error(
+      `Teams capability ${capabilityIdentity} has an invalid operation kind`
+    );
+  }
+  const evalCase = (layer: EvryCapabilityEvalLayer) => {
+    const live =
+      operationKind === "effect" &&
+      (layer === "execution" || layer === "idempotency" || layer === "errors");
+    return [
+      {
+        id: `${capabilityIdentity}:${layer}`,
+        proofId: live ? "teams-effect-live" : "teams-capability-contract",
+        testName: live
+          ? `${capabilityIdentity}:${layer}:live`
+          : `${capabilityIdentity}:${layer}`,
+      },
+    ];
+  };
   return defineEvryCapabilityEvalFixture({
     capabilityIdentity,
     cases: {
@@ -322,8 +335,8 @@ export const EVRY_CAPABILITY_EVAL_FIXTURES = Object.freeze([
   ...launchInventory.capabilities.map(({ identity, operationKind }) =>
     launchCapabilityFixture(identity, operationKind)
   ),
-  ...teamsInventory.capabilities.map(({ identity }) =>
-    teamsCapabilityFixture(identity)
+  ...teamsInventory.capabilities.map(({ identity, operationKind }) =>
+    teamsCapabilityFixture(identity, operationKind)
   ),
 ]);
 
