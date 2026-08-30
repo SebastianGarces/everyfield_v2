@@ -30,3 +30,21 @@ export {
   type EvryRecipeResolverRegistration,
   type EvryRecipeStepDefinition,
 } from "./schema";
+export {
+  buildMeetingInvitationConfirmation,
+  createMeetingInvitationPlanResolver,
+  createMeetingInvitationReferenceResolver,
+  MEETING_INVITATION_CAPABILITY_IDENTITY,
+  MEETING_INVITATION_RECIPE_IDENTITY,
+  resolveMeetingInvitationPlan,
+  resolveMeetingInvitationReference,
+  type MeetingInvitationExclusion,
+  type MeetingInvitationGuest,
+  type MeetingInvitationLocation,
+  type MeetingInvitationPersonFact,
+  type MeetingInvitationPlanSnapshot,
+  type MeetingInvitationReferenceFacts,
+  type MeetingInvitationReferenceRequest,
+  type MeetingInvitationReferenceResolution,
+  type ResolvedMeetingInvitationReference,
+} from "./meeting-invitation";
