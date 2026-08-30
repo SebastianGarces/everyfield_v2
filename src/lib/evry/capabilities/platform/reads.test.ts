@@ -173,7 +173,7 @@ test("notifications.badge.unread-count:execution:read", async () => {
   assert.doesNotThrow(() => storedEvryReadArtifactDocument(artifact));
 });
 
-test("unread badge failure remains an explicit non-count result", async () => {
+test("notifications.badge.unread-count:errors:read", async () => {
   const artifact = await continuePlatformEvryRead({
     actor,
     selection: { kind: "notification_count" },
@@ -187,6 +187,36 @@ test("unread badge failure remains an explicit non-count result", async () => {
   assert.equal(artifact.counts.returned, 0);
   assert.equal(artifact.counts.excluded, 1);
   assert.match(artifact.title, /unavailable/i);
+});
+
+test("dashboard.summary.get:errors:read", async () => {
+  await assert.rejects(
+    continuePlatformEvryRead({
+      actor,
+      selection: { kind: "dashboard" },
+      dependencies: dependencies({
+        dashboardMetrics: async () => {
+          throw new Error("dashboard unavailable");
+        },
+      }),
+    }),
+    /dashboard unavailable/
+  );
+});
+
+test("notifications.feed.list:errors:read", async () => {
+  await assert.rejects(
+    continuePlatformEvryRead({
+      actor,
+      selection: { kind: "notifications", unreadOnly: false, before: null },
+      dependencies: dependencies({
+        firstNotificationPage: async () => {
+          throw new Error("notification feed unavailable");
+        },
+      }),
+    }),
+    /notification feed unavailable/
+  );
 });
 
 test("legal notification copy stays within the bounded public read artifact", async () => {
@@ -269,7 +299,7 @@ for (const fixture of [
     assert.deepEqual(replay, first);
   });
 
-  test(`${fixture.identity}:errors:read`, async () => {
+  test(`${fixture.identity}:foreign-authorization-refusal:read`, async () => {
     let reads = 0;
     const foreignActor = {
       ...actor,
