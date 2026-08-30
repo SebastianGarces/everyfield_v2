@@ -93,7 +93,8 @@ import { meetingDisplayTitle } from "./labels";
 // ============================================================================
 
 /** The F11 category every row here is filed under (N-005). */
-export const MEETING_NOTIFICATION_CATEGORY: NotificationCategory = "meetings";
+export const MEETING_NOTIFICATION_CATEGORY =
+  "meetings" as const satisfies NotificationCategory;
 
 /**
  * How many days before the start each reminder lands (VM-018, Workflow 2).
@@ -299,6 +300,24 @@ export interface MeetingNotificationPlan {
   notifications: EnqueueNotificationInput[];
   skipped: MeetingNotificationSkip | null;
 }
+
+/**
+ * Every behavior-bearing F11 field confirmed for an Evry-created meeting.
+ * Unlike the general enqueue input, none are optional: recovery must replay
+ * the exact rendered message and dedupe identity the user approved.
+ */
+export type MeetingNotificationIntent = Readonly<{
+  churchId: string;
+  recipientUserId: string;
+  category: typeof MEETING_NOTIFICATION_CATEGORY;
+  type: string;
+  title: string;
+  body: string;
+  entityType: "meeting";
+  entityId: string;
+  dedupeKey: string;
+  scheduledFor: Date;
+}>;
 
 /**
  * What this meeting owes right now. Pure.
@@ -518,6 +537,40 @@ export async function syncMeetingNotifications(
         await resolveMeetingAudience(written, deps),
         options.now ?? new Date()
       ),
+    deps,
+  });
+}
+
+/**
+ * Converge an already-confirmed create plan through F11 without recomposing
+ * copy or dedupe keys. `enqueue` still performs its fresh recipient/tenant
+ * gate and unique-key claim for every item, while the shared sync loop keeps
+ * one recipient's failure from affecting the others.
+ */
+export async function reconcileMeetingNotificationIntents(
+  churchId: string,
+  meetingId: string,
+  intents: readonly MeetingNotificationIntent[],
+  deps: MeetingNotificationDeps = dbMeetingNotificationDeps
+): Promise<MeetingNotifyReport> {
+  if (
+    intents.some(
+      (intent) =>
+        intent.churchId !== churchId ||
+        intent.category !== MEETING_NOTIFICATION_CATEGORY ||
+        intent.entityType !== "meeting" ||
+        intent.entityId !== meetingId
+    )
+  ) {
+    throw new Error(
+      "Meeting notification intent escaped its confirmed subject"
+    );
+  }
+
+  return runNotificationSync<MeetingNotificationReason>({
+    ...meetingSubject(churchId, meetingId),
+    mustCancel: false,
+    plan: () => ({ notifications: [...intents], skipped: null }),
     deps,
   });
 }

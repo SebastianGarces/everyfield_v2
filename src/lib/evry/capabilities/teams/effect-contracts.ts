@@ -1,6 +1,10 @@
 import { z } from "zod";
 
-import { MEETING_NOTIFICATION_TYPES } from "@/lib/meetings/notifications";
+import {
+  MEETING_NOTIFICATION_CATEGORY,
+  MEETING_NOTIFICATION_TYPES,
+} from "@/lib/meetings/notifications";
+import { NOTIFICATION_TITLE_MAX_LENGTH } from "@/lib/notifications/enqueue";
 
 import {
   TEAMS_ACTION_CONTRACTS,
@@ -98,13 +102,27 @@ const mutationSchema = z
   });
 
 const notificationIntentSchema = z.strictObject({
+  churchId: uuid,
   recipientUserId: uuid,
+  category: z.literal(MEETING_NOTIFICATION_CATEGORY),
   type: z
     .string()
     .refine(
       (value) => MEETING_NOTIFICATION_TYPES.includes(value),
       "Unknown meeting notification type"
     ),
+  title: z
+    .string()
+    .min(1)
+    .max(NOTIFICATION_TITLE_MAX_LENGTH)
+    .refine((value) => value.trim().length > 0, "Notification title is blank"),
+  body: z
+    .string()
+    .min(1)
+    .refine((value) => value.trim().length > 0, "Notification body is blank"),
+  entityType: z.literal("meeting"),
+  entityId: uuid,
+  dedupeKey: z.string().min(1).max(255),
   scheduledFor: z.string().datetime(),
 });
 
@@ -343,9 +361,28 @@ const commonSchema = z
           message: "Meeting creation must bind exactly one meeting row",
         });
       }
+      const meetingId = meetingIds[0];
+      const meeting = value.mutations.find(
+        ({ table: tableName, id }) =>
+          tableName === "church_meetings" && id === meetingId
+      );
+      const churchId = meeting?.after?.church_id;
+      if (
+        typeof churchId !== "string" ||
+        value.notificationIntents.some(
+          (intent) =>
+            intent.churchId !== churchId || intent.entityId !== meetingId
+        )
+      ) {
+        context.addIssue({
+          code: "custom",
+          message:
+            "Meeting notification intents must bind the inserted meeting and church",
+        });
+      }
       const intentKeys = value.notificationIntents.map(
-        ({ recipientUserId, type, scheduledFor }) =>
-          `${recipientUserId}:${type}:${scheduledFor}`
+        ({ churchId: anchor, recipientUserId, dedupeKey }) =>
+          `${anchor}:${recipientUserId}:${dedupeKey}`
       );
       if (new Set(intentKeys).size !== intentKeys.length) {
         context.addIssue({
