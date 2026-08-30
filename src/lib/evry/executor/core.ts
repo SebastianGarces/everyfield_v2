@@ -38,6 +38,7 @@ import {
   createEvryExecutionCapabilityRegistry,
   defineEvryExecutionCapability,
   type EvryClaimedEffectInput,
+  type EvryEffectResult,
   type EvryExecutionCapabilityRegistration,
   type EvryExecutionCapabilityRegistry,
 } from "./registry";
@@ -456,22 +457,37 @@ export function createEvryExecutor(boundaries: EvryExecutorBoundaries) {
         stepId: step.id,
         capabilityIdentity: step.capabilityIdentity,
       };
-      let effect = await reconcileClaimedEffect(executionRegistration, {
+      let reconciliation = await reconcileClaimedEffect(executionRegistration, {
         effectKey,
         execution,
         arguments: step.arguments,
       });
+      let resumeStartedEffect = reconciliation?.status === "resume";
+      let effect: EvryEffectResult | null =
+        reconciliation?.status === "resume" ? null : reconciliation;
 
       if (effect === null) {
         const authorization = await boundaries.authorizeCapability(
           step.capabilityIdentity
         );
         if (!authorization) {
-          effect = await reconcileClaimedEffect(executionRegistration, {
-            effectKey,
-            execution,
-            arguments: step.arguments,
-          });
+          if (resumeStartedEffect) {
+            effect = { status: "retryable" } as const;
+          } else {
+            reconciliation = await reconcileClaimedEffect(
+              executionRegistration,
+              {
+                effectKey,
+                execution,
+                arguments: step.arguments,
+              }
+            );
+            resumeStartedEffect = reconciliation?.status === "resume";
+            effect =
+              reconciliation?.status === "resume"
+                ? ({ status: "retryable" } as const)
+                : reconciliation;
+          }
           if (effect === null) {
             results.set(
               step.id,
@@ -488,7 +504,8 @@ export function createEvryExecutor(boundaries: EvryExecutorBoundaries) {
           }
         }
 
-        if (effect === null) {
+        let currentStep = resumeStartedEffect ? step : null;
+        if (effect === null && !resumeStartedEffect) {
           const currentDocument = await boundaries.revalidateStep({
             attempt,
             actorUserId: authorization!.actor.userId,
@@ -505,7 +522,7 @@ export function createEvryExecutor(boundaries: EvryExecutorBoundaries) {
             // The same neutral refusal covers a stale confirmation, expiry,
             // actor, plant, capability registration, or stored arguments.
           }
-          const currentStep = current?.steps.find(({ id }) => id === step.id);
+          currentStep = current?.steps.find(({ id }) => id === step.id) ?? null;
           if (
             !current ||
             !currentStep ||
@@ -517,12 +534,19 @@ export function createEvryExecutor(boundaries: EvryExecutorBoundaries) {
             }) !== canonicalDocument ||
             currentStep.capabilityIdentity !== step.capabilityIdentity
           ) {
-            effect = await reconcileClaimedEffect(executionRegistration, {
-              effectKey,
-              execution,
-              arguments: step.arguments,
-            });
-            if (effect === null) {
+            reconciliation = await reconcileClaimedEffect(
+              executionRegistration,
+              {
+                effectKey,
+                execution,
+                arguments: step.arguments,
+              }
+            );
+            resumeStartedEffect = reconciliation?.status === "resume";
+            effect =
+              reconciliation?.status === "resume" ? null : reconciliation;
+            currentStep = resumeStartedEffect ? step : null;
+            if (effect === null && !resumeStartedEffect) {
               results.set(
                 step.id,
                 publicDurable(
@@ -537,20 +561,20 @@ export function createEvryExecutor(boundaries: EvryExecutorBoundaries) {
               continue;
             }
           }
+        }
 
-          if (effect === null) {
-            try {
-              effect = await executionRegistration.executeIfCurrent({
-                authorization: authorization!,
-                effectKey,
-                execution,
-                arguments: currentStep!.arguments,
-              });
-            } catch {
-              // The adapter may have committed its keyed effect before
-              // transport or process failure. Absence is retryable.
-              effect = { status: "retryable" } as const;
-            }
+        if (effect === null) {
+          try {
+            effect = await executionRegistration.executeIfCurrent({
+              authorization: authorization!,
+              effectKey,
+              execution,
+              arguments: currentStep!.arguments,
+            });
+          } catch {
+            // The adapter may have committed its keyed effect before
+            // transport or process failure. Absence is retryable.
+            effect = { status: "retryable" } as const;
           }
         }
       }
