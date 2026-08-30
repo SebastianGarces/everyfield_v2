@@ -24,6 +24,7 @@ import {
   notifications,
   personActivities,
   persons,
+  sendingChurches,
   sessions,
   tasks,
   users,
@@ -1166,6 +1167,51 @@ async function runEffect(input: {
     effectKey,
     arguments: resolved.arguments,
   };
+  if (resolved.exportName === "createLocationAction") {
+    const [competingTenancy] = await db
+      .insert(sendingChurches)
+      .values({ name: `${SCRATCH} competing tenancy` })
+      .returning({ id: sendingChurches.id });
+    assert.ok(competingTenancy);
+    await db
+      .update(users)
+      .set({ sendingChurchId: competingTenancy.id })
+      .where(eq(users.id, input.actor.userId));
+    let malformedTenancyResult;
+    try {
+      malformedTenancyResult = await input.executeMeetingsEffect(effectInput);
+    } finally {
+      await db
+        .update(users)
+        .set({ sendingChurchId: null })
+        .where(eq(users.id, input.actor.userId));
+    }
+    assert.deepEqual(malformedTenancyResult, {
+      status: "refused",
+      excludedCount: 1,
+    });
+    assert.equal(
+      (
+        await db
+          .select({ id: locations.id })
+          .from(locations)
+          .where(eq(locations.id, resolved.arguments.locationId))
+      ).length,
+      0,
+      "malformed actor tenancy created a location"
+    );
+    assert.equal(
+      (
+        await db
+          .select({ id: evryExecutionOutcomes.id })
+          .from(evryExecutionOutcomes)
+          .where(eq(evryExecutionOutcomes.effectKey, effectKey))
+      ).length,
+      0,
+      "malformed actor tenancy claimed a Meetings outcome"
+    );
+    console.log("PASS meetings:malformed-current-tenancy-refusal");
+  }
   let staleArguments: EvryEffectInput["arguments"];
   if (input.exportName === "createLocationAction") {
     const args = resolved.arguments as Readonly<{ locationId: string }>;

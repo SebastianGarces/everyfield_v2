@@ -106,6 +106,12 @@ function effectPrelude(input: {
       from evry_execution_attempts a
       join evry_action_plan_states s
         on s.plan_id = a.plan_id and s.church_id = a.church_id
+      join users current_actor
+        on current_actor.id = a.actor_user_id
+        and current_actor.church_id = a.church_id
+        and current_actor.sending_church_id is null
+        and current_actor.sending_network_id is null
+        and current_actor.seat in ('owner', 'admin')
       where a.id = ${input.execution.attemptId}::uuid
         and a.plan_id = ${input.execution.planId}::uuid
         and a.church_id = ${input.execution.plantId}::uuid
