@@ -17,6 +17,13 @@ const TASK_READ_IDENTITIES = [
 
 const LIVE = process.env.LIVE_DB_TESTS === "1";
 const run = LIVE ? test : test.skip;
+
+// Measured at 521.36s on the isolated local CI stack. This suite owns a
+// dedicated live-runner phase because the proxy pool is capped at 20; thirty
+// minutes keeps the proof bounded while leaving measured room for the slower
+// two-core hosted runner.
+const TASK_EFFECT_PROOF_TIMEOUT_MS = 30 * 60_000;
+
 let output = "";
 
 before(() => {
@@ -35,7 +42,7 @@ before(() => {
       cwd: process.cwd(),
       env: process.env,
       encoding: "utf8",
-      timeout: 600_000,
+      timeout: TASK_EFFECT_PROOF_TIMEOUT_MS,
     }
   );
   output = `${result.stdout}${result.stderr}`;
