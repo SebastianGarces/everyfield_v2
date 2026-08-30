@@ -65,6 +65,10 @@ import {
 import { mayActOnTaskRow } from "./own-duty";
 import { taskStructureLockStatement } from "./structure-lock";
 import {
+  insertExactTenantTasks,
+  type ExactTenantTaskInsertOptions,
+} from "./write-boundary";
+import {
   nextRecurrenceDueDate,
   parseRecurrenceRule,
   seriesIdOf,
@@ -852,7 +856,8 @@ export async function createTask(
   churchId: string,
   userId: string,
   data: TaskCreateInput,
-  recurrence?: TaskRecurrencePatch
+  recurrence?: TaskRecurrencePatch,
+  options: Pick<ExactTenantTaskInsertOptions, "beforeInsert"> = {}
 ): Promise<Task> {
   const parentTaskId = data.parentTaskId || null;
 
@@ -894,10 +899,11 @@ export async function createTask(
     recurrence
   );
 
-  const [, [task]] = await db.batch([
-    taskStructureLockStatement(churchId),
-    db.insert(tasks).values(values).returning(),
-  ]);
+  const [task] = await insertExactTenantTasks([values], {
+    ...options,
+    authorityUserId: userId,
+  });
+  if (!task) throw new Error(TASK_ASSIGNEE_ERROR);
 
   // The row exists before anything is announced about it (T-018). A task with
   // no assignee or no due date enqueues nothing — the plan says so, not this
@@ -1102,13 +1108,25 @@ export function planRecurrenceChildren(
 export interface RecurrenceDeps {
   /** Ids of open instances already in this series. */
   findOpenInSeries(churchId: string, seriesId: string): Promise<string[]>;
-  insertSuccessor(values: NewTask): Promise<Task | null>;
+  insertSuccessor(
+    values: NewTask,
+    options: Pick<
+      ExactTenantTaskInsertOptions,
+      "authorityUserId" | "beforeInsert"
+    >
+  ): Promise<Task | null>;
   /** The completed instance's checklist, in checklist order. */
   listChildren(
     churchId: string,
     parentTaskId: string
   ): Promise<RecurrenceChild[]>;
-  insertChildren(values: NewTask[]): Promise<void>;
+  insertChildren(
+    values: NewTask[],
+    options: Pick<
+      ExactTenantTaskInsertOptions,
+      "authorityUserId" | "beforeInsert"
+    >
+  ): Promise<void>;
 }
 
 export const defaultRecurrenceDeps: RecurrenceDeps = {
@@ -1130,13 +1148,11 @@ export const defaultRecurrenceDeps: RecurrenceDeps = {
     return open.map((row) => row.id);
   },
 
-  async insertSuccessor(values) {
+  async insertSuccessor(values, options) {
     await assertExactTaskAssignee(values.churchId, values.assignedToId);
-    const [, [next]] = await db.batch([
-      taskStructureLockStatement(values.churchId),
-      db.insert(tasks).values(values).returning(),
-    ]);
-    return next ?? null;
+    const [next] = await insertExactTenantTasks([values], options);
+    if (!next) throw new Error(TASK_ASSIGNEE_ERROR);
+    return next;
   },
 
   async listChildren(churchId, parentTaskId) {
@@ -1162,7 +1178,7 @@ export const defaultRecurrenceDeps: RecurrenceDeps = {
       .orderBy(asc(tasks.createdAt), asc(tasks.id));
   },
 
-  async insertChildren(values) {
+  async insertChildren(values, options) {
     if (values.length === 0) return;
     for (const assigneeId of new Set(
       values
@@ -1171,10 +1187,10 @@ export const defaultRecurrenceDeps: RecurrenceDeps = {
     )) {
       await assertExactTaskAssignee(values[0]!.churchId, assigneeId);
     }
-    await db.batch([
-      taskStructureLockStatement(values[0]!.churchId),
-      db.insert(tasks).values(values),
-    ]);
+    const inserted = await insertExactTenantTasks(values, options);
+    if (inserted.length !== values.length) {
+      throw new Error(TASK_ASSIGNEE_ERROR);
+    }
   },
 };
 
@@ -1201,7 +1217,12 @@ export const defaultRecurrenceDeps: RecurrenceDeps = {
 export async function createNextRecurrence(
   completed: Task,
   completedOn: string,
-  deps: RecurrenceDeps = defaultRecurrenceDeps
+  deps: RecurrenceDeps = defaultRecurrenceDeps,
+  options: {
+    /** Test seams: production never supplies these. */
+    beforeSuccessorInsert?: () => Promise<void>;
+    beforeChildrenInsert?: () => Promise<void>;
+  } = {}
 ): Promise<Task | null> {
   if (!completed.isRecurring) return null;
 
@@ -1218,6 +1239,7 @@ export async function createNextRecurrence(
   if (!nextDueDate) return null;
 
   const seriesId = seriesIdOf(completed);
+  const authorityUserId = completed.completedById ?? completed.createdById;
 
   // ONE open instance at a time. The chain shape already guarantees this (an
   // instance is minted only by completing its predecessor), so this is the
@@ -1226,26 +1248,29 @@ export async function createNextRecurrence(
   const open = await deps.findOpenInSeries(completed.churchId, seriesId);
   if (open.length > 0) return null;
 
-  const next = await deps.insertSuccessor({
-    churchId: completed.churchId,
-    title: completed.title,
-    description: completed.description,
-    status: "not_started",
-    // Carried forward so the next occurrence is the same piece of work:
-    // whoever owns it, how urgent it is, what it is about, and what it hangs
-    // off. Only the schedule moves.
-    priority: completed.priority,
-    dueDate: nextDueDate,
-    dueTime: completed.dueTime,
-    assignedToId: completed.assignedToId,
-    category: completed.category,
-    relatedType: completed.relatedType,
-    relatedId: completed.relatedId,
-    parentTaskId: completed.parentTaskId,
-    isRecurring: true,
-    recurrenceRule: { ...rule, seriesId },
-    createdById: completed.createdById,
-  });
+  const next = await deps.insertSuccessor(
+    {
+      churchId: completed.churchId,
+      title: completed.title,
+      description: completed.description,
+      status: "not_started",
+      // Carried forward so the next occurrence is the same piece of work:
+      // whoever owns it, how urgent it is, what it is about, and what it hangs
+      // off. Only the schedule moves.
+      priority: completed.priority,
+      dueDate: nextDueDate,
+      dueTime: completed.dueTime,
+      assignedToId: completed.assignedToId,
+      category: completed.category,
+      relatedType: completed.relatedType,
+      relatedId: completed.relatedId,
+      parentTaskId: completed.parentTaskId,
+      isRecurring: true,
+      recurrenceRule: { ...rule, seriesId },
+      createdById: completed.createdById,
+    },
+    { authorityUserId, beforeInsert: options.beforeSuccessorInsert }
+  );
 
   if (!next) return null;
 
@@ -1257,7 +1282,8 @@ export async function createNextRecurrence(
     const children = await deps.listChildren(completed.churchId, completed.id);
     if (children.length > 0) {
       await deps.insertChildren(
-        planRecurrenceChildren(children, next, new Date())
+        planRecurrenceChildren(children, next, new Date()),
+        { authorityUserId, beforeInsert: options.beforeChildrenInsert }
       );
     }
   } catch (error) {

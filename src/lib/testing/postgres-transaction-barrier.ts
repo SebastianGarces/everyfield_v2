@@ -83,6 +83,33 @@ export interface PostgresTransactionBarrier {
   release(): Promise<void>;
 }
 
+/** Execute one test-only statement through a separate PostgreSQL connection. */
+export async function runPostgresStatement(statement: string): Promise<void> {
+  const { command, args } = psqlCommand();
+  const process = spawn(command, args, { stdio: "pipe" });
+  let stderr = "";
+  process.stderr.on("data", (chunk: Buffer) => {
+    stderr += chunk.toString("utf8");
+  });
+  process.stdin.end(`${statement}\n\\q\n`);
+
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      process.kill("SIGKILL");
+      reject(new Error("Timed out running the PostgreSQL test statement"));
+    }, WAIT_LIMIT_MS);
+    process.once("exit", (code) => {
+      clearTimeout(timer);
+      if (code === 0) resolve();
+      else reject(new Error(`psql exited ${String(code)}: ${stderr}`));
+    });
+    process.once("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+  });
+}
+
 /**
  * Own the same production plant lock that Task hierarchy/dependency triggers
  * take. Tests start competing production writes while this transaction holds
