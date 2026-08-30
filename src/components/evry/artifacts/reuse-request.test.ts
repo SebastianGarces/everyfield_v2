@@ -79,3 +79,19 @@ test("commit then response loss and full reload recover the exact durable reuse 
   });
   assert.deepEqual(result, { status: "conversation", conversation: durable });
 });
+
+test("a postcondition-rejected reuse remains unavailable on exact-key reload", async () => {
+  let reconnects = 0;
+  const result = await requestEvryRecipeReuse({
+    marker,
+    signal: new AbortController().signal,
+    fetchRequest: async () =>
+      Response.json({ status: "unavailable" }, { status: 404 }),
+    reconnect: async () => {
+      reconnects += 1;
+      throw new Error("a rejected reuse must not enter generic recovery");
+    },
+  });
+  assert.deepEqual(result, { status: "unavailable" });
+  assert.equal(reconnects, 0);
+});

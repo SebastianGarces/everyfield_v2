@@ -132,16 +132,22 @@ const MAX_RESUME_ATTEMPTS = 3;
 type FetchRecovery = (
   requestId: string,
   mode: "read" | "resume",
-  signal: AbortSignal
+  signal: AbortSignal,
+  expectedOperation?: "reuse"
 ) => Promise<unknown>;
 
 async function defaultFetchRecovery(
   requestId: string,
   mode: "read" | "resume",
-  signal: AbortSignal
+  signal: AbortSignal,
+  expectedOperation?: "reuse"
 ): Promise<unknown> {
+  const operationQuery =
+    mode === "read" && expectedOperation
+      ? `?operation=${encodeURIComponent(expectedOperation)}`
+      : "";
   const response = await fetch(
-    `/api/evry/runs/${encodeURIComponent(requestId)}`,
+    `/api/evry/runs/${encodeURIComponent(requestId)}${operationQuery}`,
     mode === "read"
       ? { cache: "no-store", signal }
       : {
@@ -217,6 +223,9 @@ export async function reconnectEvryRun(input: {
   wait?: (delayMs: number, signal: AbortSignal) => Promise<void>;
 }): Promise<EvryRunRecoveryResponse> {
   const fetchRecovery = input.fetchRecovery ?? defaultFetchRecovery;
+  const expectedOperation = isEvryRecipeReuseRecoveryMarker(input.marker)
+    ? "reuse"
+    : undefined;
   const wait = input.wait ?? waitForRecovery;
   const deadline = performance.now() + MAX_OBSERVATION_MS;
   let resumeAttempts = 0;
@@ -243,7 +252,12 @@ export async function reconnectEvryRun(input: {
   while (!input.signal.aborted && performance.now() < deadline) {
     const snapshot = validateSnapshot(
       input.marker,
-      await fetchRecovery(input.marker.requestId, "read", input.signal)
+      await fetchRecovery(
+        input.marker.requestId,
+        "read",
+        input.signal,
+        expectedOperation
+      )
     );
     const changed = acceptSequence(snapshot);
     if (snapshot.status === "resumable") {
@@ -254,7 +268,12 @@ export async function reconnectEvryRun(input: {
       resumeAttempts += 1;
       const resumedSnapshot = validateSnapshot(
         input.marker,
-        await fetchRecovery(input.marker.requestId, "resume", input.signal)
+        await fetchRecovery(
+          input.marker.requestId,
+          "resume",
+          input.signal,
+          expectedOperation
+        )
       );
       const resumedChanged = acceptSequence(resumedSnapshot);
       if (resumedSnapshot.status === "resumable") {

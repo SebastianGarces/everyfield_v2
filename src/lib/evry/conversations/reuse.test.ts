@@ -377,6 +377,75 @@ test("reuse refuses a nonterminal receipt and any returned source identity", asy
   );
 });
 
+test("reuse refuses source plan identity before the continuation append boundary", async () => {
+  let persistentAppends = 0;
+  const registry = createEvryRecipeReuseRegistry([
+    defineEvryRecipeReuse({
+      identity: RECIPE_IDENTITY,
+      recipeRegistry,
+      project: () => ({
+        recipeIdentity: RECIPE_IDENTITY,
+        message: COPIED_INTENT,
+      }),
+    }),
+  ]);
+  const reuse = createCompletedEvryRecipeReuse({
+    store: {
+      ...evryConversationStore,
+      async find() {
+        return source;
+      },
+      async append() {
+        persistentAppends += 1;
+        return source;
+      },
+    },
+    async findPlan() {
+      return storedPlan;
+    },
+    async create(input) {
+      assert.ok(input.store, "reuse supplies its guarded persistence boundary");
+      await input.store.append({
+        messageId: evryConversationMessageIdSchema.parse(
+          "70000000-0000-4000-8000-000000000002"
+        ),
+        conversationId: NEW_CONVERSATION_ID,
+        actorUserId: ACTOR.userId,
+        plantId: ACTOR.plantId,
+        requestKey: REQUEST_KEY,
+        expectedStateVersion: 0,
+        state: initialEvryConversationState(),
+        author: "assistant",
+        body: "Fresh review",
+        pageContext: null,
+        requestPageContext: null,
+        relevanceKeys: [],
+        deliveryStatus: "complete",
+        artifacts: [],
+        idempotencyContext: { status: "none" },
+        replayReference: null,
+        activePlan: { mode: "set", plan: receipt.plan },
+        createdAt: NOW,
+      });
+      return reusedConversation(null);
+    },
+    registry,
+    planRegistry,
+  });
+  assert.deepEqual(
+    await reuse({
+      actor: ACTOR,
+      sourceConversationId: SOURCE_CONVERSATION_ID,
+      resultArtifactId: RESULT_ARTIFACT_ID,
+      recipeIdentity: RECIPE_IDENTITY,
+      requestKey: REQUEST_KEY,
+      now: NOW,
+    }),
+    { status: "unavailable" }
+  );
+  assert.equal(persistentAppends, 0);
+});
+
 test("reuse is neutral for another actor and reaches no plan or create boundary", async () => {
   let planReads = 0;
   let createCalls = 0;

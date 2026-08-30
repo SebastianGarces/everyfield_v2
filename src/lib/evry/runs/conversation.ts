@@ -68,6 +68,8 @@ export async function runPreparedEvryConversationActiveRun(
     const recovered = await boundaries.recover({
       actor: input.actor,
       requestKey: input.requestKey,
+      expectedOperation:
+        input.identity.operation === "reuse" ? "reuse" : undefined,
       now: boundaries.now(),
     });
     if (recovered.status === "durable") {

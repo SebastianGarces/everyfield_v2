@@ -71,6 +71,29 @@ function carriesPlanIdentity(
   );
 }
 
+function appendCarriesPlanIdentity(
+  input: Parameters<EvryConversationStore["append"]>[0],
+  sourcePlan: Readonly<{ planId: string; fingerprint: string }>
+): boolean {
+  if (
+    input.activePlan?.mode === "set" &&
+    (input.activePlan.plan.planId === sourcePlan.planId ||
+      input.activePlan.plan.fingerprint === sourcePlan.fingerprint)
+  ) {
+    return true;
+  }
+  return input.artifacts.some(
+    (document) =>
+      (document.kind === "confirmation" ||
+        document.kind === "progress" ||
+        document.kind === "result") &&
+      (document.plan.planId === sourcePlan.planId ||
+        document.plan.fingerprint === sourcePlan.fingerprint)
+  );
+}
+
+class EvryReuseSourcePlanCrossoverError extends Error {}
+
 export function createCompletedEvryRecipeReuse(
   boundaries: ReuseBoundaries = productionBoundaries
 ) {
@@ -149,15 +172,33 @@ export function createCompletedEvryRecipeReuse(
       document,
     });
     if (!draft) return { status: "unavailable" };
-    const resumed = await boundaries.create({
-      actor: input.actor,
-      requestKey: requestKey.data,
-      message: draft.message,
-      pageContext: null,
-      requestPageContext: null,
-      now: input.now,
-      reportStage: input.reportStage,
+    const guardedStore: EvryConversationStore = Object.freeze({
+      ...boundaries.store,
+      append: async (appendInput) => {
+        if (appendCarriesPlanIdentity(appendInput, receipt.data.plan)) {
+          throw new EvryReuseSourcePlanCrossoverError();
+        }
+        return boundaries.store.append(appendInput);
+      },
     });
+    let resumed: EvryResumedConversation;
+    try {
+      resumed = await boundaries.create({
+        actor: input.actor,
+        requestKey: requestKey.data,
+        message: draft.message,
+        pageContext: null,
+        requestPageContext: null,
+        now: input.now,
+        store: guardedStore,
+        reportStage: input.reportStage,
+      });
+    } catch (error) {
+      if (error instanceof EvryReuseSourcePlanCrossoverError) {
+        return { status: "unavailable" };
+      }
+      throw error;
+    }
     if (
       resumed.conversation.id === source.id ||
       carriesPlanIdentity(resumed, receipt.data.plan)

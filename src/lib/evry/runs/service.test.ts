@@ -144,6 +144,29 @@ function failedExecution() {
   });
 }
 
+function reuseRun(status: "completed" | "failed") {
+  const completedAt = new Date(START.valueOf() + 1_000);
+  return parseEvryActiveRunRecord({
+    id: "60000000-0000-4000-8000-000000000003",
+    churchId: PLANT_ID,
+    actorUserId: USER_ID,
+    requestKey: REQUEST_ID,
+    requestFingerprint: "d".repeat(64),
+    kind: "conversation",
+    operation: "reuse",
+    status,
+    stage: "compiling_response",
+    version: 2,
+    conversationId: status === "completed" ? CONVERSATION_ID : null,
+    planId: null,
+    planFingerprint: null,
+    startedAt: START,
+    changedAt: completedAt,
+    expiresAt: new Date(START.valueOf() + EVRY_ACTIVE_RUN_TTL_MS),
+    completedAt,
+  });
+}
+
 test("an unexpired owner remains the only active run projection", async () => {
   let durableReads = 0;
   const result = await recoverEvryActiveRun({
@@ -285,4 +308,71 @@ test("a failed execution without an exact durable receipt never returns an older
     requestId: REQUEST_ID,
   });
   assert.equal(conversationResumeCount, 0);
+});
+
+test("failed reuse never falls back to its rejected same-key conversation", async () => {
+  let requestFallbackReads = 0;
+  let resumes = 0;
+  const result = await recoverEvryActiveRun({
+    actor,
+    requestKey: REQUEST_ID,
+    expectedOperation: "reuse",
+    now: new Date(START.valueOf() + 2_000),
+    boundaries: {
+      runs: { find: async () => reuseRun("failed") },
+      findConversationByRequest: async () => {
+        requestFallbackReads += 1;
+        return storedConversation();
+      },
+      resume: async () => {
+        resumes += 1;
+        return resumed();
+      },
+    },
+  });
+  assert.deepEqual(result, { status: "unavailable", requestId: REQUEST_ID });
+  assert.equal(requestFallbackReads, 0);
+  assert.equal(resumes, 0);
+});
+
+test("reuse recovery requires its operation row before request-key lookup", async () => {
+  let requestFallbackReads = 0;
+  const result = await recoverEvryActiveRun({
+    actor,
+    requestKey: REQUEST_ID,
+    expectedOperation: "reuse",
+    now: new Date(START.valueOf() + 2_000),
+    boundaries: {
+      runs: { find: async () => null },
+      findConversationByRequest: async () => {
+        requestFallbackReads += 1;
+        return storedConversation();
+      },
+      resume: async () => resumed(),
+    },
+  });
+  assert.deepEqual(result, { status: "unavailable", requestId: REQUEST_ID });
+  assert.equal(requestFallbackReads, 0);
+});
+
+test("completed reuse recovers only the destination bound by its run", async () => {
+  let exactResumeId: string | null = null;
+  const result = await recoverEvryActiveRun({
+    actor,
+    requestKey: REQUEST_ID,
+    expectedOperation: "reuse",
+    now: new Date(START.valueOf() + 2_000),
+    boundaries: {
+      runs: { find: async () => reuseRun("completed") },
+      findConversationByRequest: async () => {
+        throw new Error("completed reuse cannot use request-key fallback");
+      },
+      resume: async ({ conversationId }) => {
+        exactResumeId = conversationId;
+        return resumed();
+      },
+    },
+  });
+  assert.equal(result.status, "durable");
+  assert.equal(exactResumeId, CONVERSATION_ID);
 });

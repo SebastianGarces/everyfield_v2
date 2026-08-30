@@ -214,12 +214,17 @@ export function EvryShell({
   >(null);
   const [pendingRecipeReuse, setPendingRecipeReuse] =
     useState<EvryRecipeReuseRecoveryMarker | null>(null);
+  const [pendingRouteDeparture, setPendingRouteDeparture] = useState(false);
   const [expandedFromPanel, setExpandedFromPanel] = useState(false);
   const launcherRef = useRef<HTMLButtonElement | null>(null);
   const conversationLoadStateRef = useRef(initialEvryConversationLoadState());
   const pendingSubmissionRef = useRef<PendingEvrySubmission | null>(null);
   const pendingPeopleFileRef = useRef<PendingPeopleFileSubmission | null>(null);
   const pendingRecipeReuseRef = useRef(pendingRecipeReuse);
+  const pendingRouteDepartureRef = useRef<Readonly<{
+    pathname: string;
+    search: string;
+  }> | null>(null);
   const mountedConversationIdRef = useRef<string | null>(null);
   const sequencedWorkRef = useRef<EvrySequencedWorkState | null>(null);
   const pendingWorkRequestIdRef = useRef<string | null>(null);
@@ -242,7 +247,8 @@ export function EvryShell({
   const isWorking =
     pendingWorkRequestId !== null ||
     detachedRequestId !== null ||
-    pendingRecipeReuse !== null;
+    pendingRecipeReuse !== null ||
+    pendingRouteDeparture;
 
   const setDraft = useCallback((nextDraft: string) => {
     draftRef.current = nextDraft;
@@ -625,6 +631,81 @@ export function EvryShell({
     [finishWork]
   );
 
+  const fenceRecipeReuseForNavigationIntent = useCallback(() => {
+    const marker = pendingRecipeReuseRef.current;
+    if (!marker) return;
+    pendingRouteDepartureRef.current = marker.sourceLocation;
+    setPendingRouteDeparture(true);
+    if (workAbortRef.current?.requestId === marker.requestId) {
+      workAbortRef.current.controller.abort();
+    }
+    clearPendingRecipeReuse(marker.requestId, 2);
+  }, [clearPendingRecipeReuse]);
+
+  useEffect(() => {
+    if (
+      !enabled ||
+      typeof document === "undefined" ||
+      typeof document.addEventListener !== "function"
+    )
+      return;
+    const potentialNavigation = (event: Event) => {
+      const target = event.target as {
+        closest?(selectors: string): unknown;
+      } | null;
+      if (!target?.closest) return;
+      if (target.closest("a[href],[role='link']")) {
+        fenceRecipeReuseForNavigationIntent();
+        return;
+      }
+      if (target.closest("[data-evry-conversation-surface]")) return;
+      if (
+        target.closest(
+          "button,input,select,textarea,[role='button'],[role='menuitem'],[role='tab']"
+        )
+      ) {
+        fenceRecipeReuseForNavigationIntent();
+      }
+    };
+    const formNavigation = (event: Event) => {
+      const target = event.target as {
+        closest?(selectors: string): unknown;
+      } | null;
+      if (!target?.closest?.("[data-evry-conversation-surface]")) {
+        fenceRecipeReuseForNavigationIntent();
+      }
+    };
+    const historyNavigation = () => fenceRecipeReuseForNavigationIntent();
+    document.addEventListener("click", potentialNavigation, true);
+    document.addEventListener("change", potentialNavigation, true);
+    document.addEventListener("submit", formNavigation, true);
+    if (typeof window.addEventListener === "function") {
+      window.addEventListener("popstate", historyNavigation);
+    }
+    return () => {
+      if (typeof document.removeEventListener === "function") {
+        document.removeEventListener("click", potentialNavigation, true);
+        document.removeEventListener("change", potentialNavigation, true);
+        document.removeEventListener("submit", formNavigation, true);
+      }
+      if (typeof window.removeEventListener === "function") {
+        window.removeEventListener("popstate", historyNavigation);
+      }
+    };
+  }, [enabled, fenceRecipeReuseForNavigationIntent]);
+
+  useEffect(() => {
+    const pending = pendingRouteDepartureRef.current;
+    if (!pending) return;
+    if (
+      routeLocation.pathname !== pending.pathname ||
+      routeLocation.search !== pending.search
+    ) {
+      pendingRouteDepartureRef.current = null;
+      setPendingRouteDeparture(false);
+    }
+  }, [routeLocation]);
+
   const presentRecipeReuseDestination = useCallback(
     (
       marker: EvryRecipeReuseRecoveryMarker,
@@ -732,6 +813,7 @@ export function EvryShell({
     }) => {
       if (
         pendingRecipeReuseRef.current ||
+        pendingRouteDepartureRef.current ||
         pendingWorkRequestIdRef.current ||
         detachedRequestId !== null
       ) {
@@ -819,7 +901,13 @@ export function EvryShell({
   const clearContext = useCallback(() => setActiveContext(null), []);
   const loadConversation = useCallback(
     async (conversationId: string) => {
-      if (isSending || isWorking || pendingRecipeReuseRef.current) return;
+      if (
+        isSending ||
+        isWorking ||
+        pendingRecipeReuseRef.current ||
+        pendingRouteDepartureRef.current
+      )
+        return;
       if (conversation?.id === conversationId) {
         setRequestedConversationId(null);
         return;
@@ -896,7 +984,13 @@ export function EvryShell({
   );
 
   const resetConversation = useCallback(() => {
-    if (isSending || isWorking || pendingRecipeReuseRef.current) return;
+    if (
+      isSending ||
+      isWorking ||
+      pendingRecipeReuseRef.current ||
+      pendingRouteDepartureRef.current
+    )
+      return;
     cancelActiveConversationLoads();
     pendingSubmissionRef.current = null;
     setConversation(null);
@@ -920,6 +1014,7 @@ export function EvryShell({
       isSending ||
       isWorking ||
       pendingRecipeReuseRef.current !== null ||
+      pendingRouteDepartureRef.current !== null ||
       isLoading ||
       requestedConversationId !== null ||
       conversationLoadStateRef.current.latest !== null
@@ -1082,6 +1177,7 @@ export function EvryShell({
         isSending ||
         isWorking ||
         pendingRecipeReuseRef.current !== null ||
+        pendingRouteDepartureRef.current !== null ||
         isLoading ||
         requestedConversationId !== null
       )
