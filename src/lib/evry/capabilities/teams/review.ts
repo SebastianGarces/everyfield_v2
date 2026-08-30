@@ -39,6 +39,7 @@ function planPages(args: TeamsEffectArguments) {
           expectedRows: args.expected.length,
           exactSets: args.sets.length,
           mutationRows: args.mutations.length,
+          notificationIntents: args.notificationIntents.length,
           mutationsByTable: counts,
           disclosure:
             "The stored plan and confirmation fingerprint bind every exact row; the browser preview is capped at 64 pages.",

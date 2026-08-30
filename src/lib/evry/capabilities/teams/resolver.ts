@@ -157,6 +157,11 @@ function finish(input: {
   expected: Snapshot[];
   sets?: SetAssertion[];
   mutations: Mutation[];
+  notificationIntents?: readonly {
+    recipientUserId: string;
+    type: string;
+    scheduledFor: string;
+  }[];
   title: string;
   targets: readonly { label: string; value: string; href?: string | null }[];
   consequences: readonly string[];
@@ -169,6 +174,7 @@ function finish(input: {
     expected: input.expected,
     sets: input.sets ?? [],
     mutations: input.mutations,
+    notificationIntents: input.notificationIntents ?? [],
     disclosure: disclosure(input),
   });
   return Object.freeze({ operation: input.operation, arguments: args });
@@ -1562,34 +1568,10 @@ export async function resolveTeamsEvryEffect(input: {
       },
       now
     );
-    const notificationRows = planned.notifications.map((notification) =>
-      asRaw({
-        id: randomUUID(),
-        anchor_type: "church",
-        church_id: actor.plantId,
-        anchor_org_id: null,
-        recipient_user_id: notification.recipientUserId,
-        category: notification.category,
-        type: notification.type,
-        title: notification.title,
-        body: notification.body,
-        entity_type: notification.entityType ?? null,
-        entity_id: notification.entityId ?? null,
-        dedupe_key: notification.dedupeKey ?? null,
-        scheduled_for: notification.scheduledFor?.toISOString() ?? iso(now),
-        status: "pending",
-        read_at: null,
-        created_at: iso(now),
-        updated_at: iso(now),
-      })
-    );
     const rows: [Table, RawRow][] = [
       ...(locationRow ? [["locations", locationRow] as [Table, RawRow]] : []),
       ["church_meetings", meeting],
       ...guests.map((row) => ["meeting_attendance", row] as [Table, RawRow]),
-      ...notificationRows.map(
-        (row) => ["notifications", row] as [Table, RawRow]
-      ),
     ];
     const expectedPeople = [
       ...new Map(
@@ -1632,6 +1614,11 @@ export async function resolveTeamsEvryEffect(input: {
       mutations: rows.map(([tableName, row]) =>
         mutation(tableName, String(row.id), null, row)
       ),
+      notificationIntents: planned.notifications.map((notification) => ({
+        recipientUserId: notification.recipientUserId,
+        type: notification.type,
+        scheduledFor: (notification.scheduledFor ?? now).toISOString(),
+      })),
       title: "Schedule team meeting",
       targets: [
         {
@@ -1646,11 +1633,18 @@ export async function resolveTeamsEvryEffect(input: {
         },
       ],
       consequences: [
-        `Creates the meeting${locationRow ? ", ad hoc location" : ""}, ${guests.length} roster guest rows, and ${notificationRows.length} notification rows.`,
+        `Creates the meeting${locationRow ? ", ad hoc location" : ""} and ${guests.length} roster guest rows, then best-effort syncs ${planned.notifications.length} disclosed notification intents through F11.`,
         parsed.data.meetingSubtype === "training"
           ? "Classifies the meeting as training for the same exact roster."
           : "Uses the unified Meetings reminder schedule.",
-        "Any roster, audience, target, seat, or row drift refuses the whole statement.",
+        "Any roster, audience, target, seat, or row drift refuses the durable meeting statement; notification delivery eligibility is freshly gated after commit.",
+      ],
+      counts: [
+        { label: "Database rows", count: rows.length },
+        {
+          label: "Notification intents",
+          count: planned.notifications.length,
+        },
       ],
       dateTime: {
         instantUtc: parsed.data.datetime.toISOString(),
