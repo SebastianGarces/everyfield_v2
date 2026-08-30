@@ -3,6 +3,7 @@ import { mock } from "node:test";
 
 const PLANT = "10000000-0000-4000-8000-000000000001";
 const TEAM = "20000000-0000-4000-8000-000000000001";
+const CHILDRENS_TEAM = "20000000-0000-4000-8000-000000000002";
 const ROLE = "30000000-0000-4000-8000-000000000001";
 const PERSON = "40000000-0000-4000-8000-000000000001";
 const PROGRAM = "50000000-0000-4000-8000-000000000001";
@@ -78,7 +79,11 @@ mock.module("@/lib/ministry-teams/service", {
     }),
     getTeam: async (plantId: string, teamId: string) => {
       seenPlants.push(plantId);
-      return teamId === TEAM ? team : null;
+      return teamId === TEAM
+        ? team
+        : teamId === CHILDRENS_TEAM
+          ? { ...team, id: CHILDRENS_TEAM, templateKey: "childrens_ministry" }
+          : null;
     },
     getTeamCountsForPeople: scoped({ [PERSON]: 1 }),
     getAllTeamsHealth: scoped([
@@ -247,6 +252,27 @@ async function main(): Promise<void> {
       uiArtifact: true,
     };
   }
+
+  const detailRegistration =
+    TEAMS_CAPABILITY_REGISTRY.registrationFor("teams.read.detail");
+  assert.ok(detailRegistration?.operationKind === "read");
+  const detailAuthorization = {
+    actor: { userId: PERSON, plantId: PLANT, seat: "member" },
+    registration: detailRegistration,
+  } as Parameters<typeof executeTeamsRead>[0]["authorization"];
+  const worship = await executeTeamsRead({
+    authorization: detailAuthorization,
+    untrustedInput: { kind: "read_detail", teamId: TEAM },
+  });
+  const childrens = await executeTeamsRead({
+    authorization: detailAuthorization,
+    untrustedInput: { kind: "read_detail", teamId: CHILDRENS_TEAM },
+  });
+  assert.ok(worship && childrens);
+  const factLabels = (result: typeof worship) =>
+    result.items.flatMap((item) => item.facts.map(({ label }) => label));
+  assert.equal(factLabels(worship).includes("Background check"), false);
+  assert.equal(factLabels(childrens).includes("Background check"), true);
 
   assert.ok(seenPlants.length > 0);
   assert.ok(seenPlants.every((plantId) => plantId === PLANT));

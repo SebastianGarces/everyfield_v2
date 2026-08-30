@@ -264,6 +264,7 @@
     {
       "identity": "teams.read.responsibilities",
       "surfaceIdentities": [
+        "route:/teams/[teamId]/responsibilities",
         "rsc-read:src/app/(dashboard)/teams/[teamId]/responsibilities/page.tsx → listResponsibilities:returned-rows"
       ],
       "parityCapability": "teams",
@@ -366,13 +367,12 @@
     {
       "identity": "teams.responsibilities.initialize",
       "surfaceIdentities": [
-        "route:/teams/[teamId]/responsibilities",
         "rsc-effect:src/app/(dashboard)/teams/[teamId]/responsibilities/page.tsx → listResponsibilities:first-view-seed"
       ],
       "parityCapability": "teams",
       "domain": "responsibilities",
       "operationKind": "effect",
-      "applicationCapability": "teams.write",
+      "applicationCapability": "read",
       "confirmation": "required",
       "mutationShape": "compound_write",
       "fixtureClasses": [
@@ -850,12 +850,12 @@
       "identity": "route:/teams/[teamId]/responsibilities",
       "source": "src/app/(dashboard)/teams/[teamId]/responsibilities/page.tsx",
       "exportName": null,
-      "capabilityIdentity": "teams.responsibilities.initialize",
+      "capabilityIdentity": "teams.read.responsibilities",
       "domain": "responsibilities",
-      "operationKind": "effect",
-      "applicationCapability": "teams.write",
-      "confirmation": "required",
-      "mutationShape": "compound_write",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
       "classification": { "state": "supported" }
     },
     {
@@ -905,7 +905,7 @@
       "capabilityIdentity": "teams.responsibilities.initialize",
       "domain": "responsibilities",
       "operationKind": "effect",
-      "applicationCapability": "teams.write",
+      "applicationCapability": "read",
       "confirmation": "required",
       "mutationShape": "compound_write",
       "classification": { "state": "supported" }

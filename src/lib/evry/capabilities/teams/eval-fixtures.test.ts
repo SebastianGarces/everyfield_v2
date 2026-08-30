@@ -108,7 +108,8 @@ function selectionFor(identity: string) {
 
 function effectInput(
   identity: string,
-  arguments_: Record<string, unknown>
+  arguments_: Record<string, unknown>,
+  executionPlantId: string = FOREIGN_PLANT
 ): EvryEffectInput {
   const registration = evryCapabilityRegistrationFor(identity);
   assert.ok(registration?.operationKind === "effect");
@@ -122,7 +123,7 @@ function effectInput(
       attemptId: "30000000-0000-4000-8000-000000000001",
       planId: "40000000-0000-4000-8000-000000000001",
       actorUserId: ACTOR.userId,
-      plantId: FOREIGN_PLANT,
+      plantId: executionPlantId,
       fingerprint: "a".repeat(64),
       correlationId: "50000000-0000-4000-8000-000000000001",
       stepId: "teams-fixture-step",
@@ -172,7 +173,7 @@ async function exercise(identity: string, layer: EvryCapabilityEvalLayer) {
     assert.equal(registration.parityCapability, "teams");
     assert.equal(
       registration.applicationCapability,
-      capability.operationKind === "read" ? "read" : "teams.write"
+      capability.applicationCapability
     );
     return;
   }
@@ -192,7 +193,7 @@ async function exercise(identity: string, layer: EvryCapabilityEvalLayer) {
       eligibleEvryCapabilitiesFor(MEMBER_ACTOR).some(
         (candidate) => candidate.identity === identity
       ),
-      capability.operationKind === "read"
+      capability.applicationCapability === "read"
     );
     return;
   }
@@ -321,6 +322,116 @@ test("operation contracts reject a mutation from another Teams domain", () => {
       ],
     })
   );
+});
+
+test("unknown execution failures stay retryable while proved races and replays close", async () => {
+  const fixture = TEAMS_EVAL_FIXTURES.find(
+    ({ operation }) => operation === "createTeamAction"
+  )!;
+  const input = effectInput(fixture.identity, fixture.arguments, ACTOR.plantId);
+  const transport = new Error("connection disappeared");
+  assert.deepEqual(
+    await executeTeamsEffect(input, {
+      findCompletedOutcome: async () => null,
+      executeStatement: async () => {
+        throw transport;
+      },
+    }),
+    { status: "retryable" }
+  );
+
+  let completedReads = 0;
+  assert.deepEqual(
+    await executeTeamsEffect(input, {
+      findCompletedOutcome: async () =>
+        ++completedReads === 1
+          ? null
+          : { status: "completed", affectedCount: 1, excludedCount: 0 },
+      executeStatement: async () => {
+        throw transport;
+      },
+    }),
+    { status: "completed", affectedCount: 1, excludedCount: 0 }
+  );
+
+  let attempts = 0;
+  assert.deepEqual(
+    await executeTeamsEffect(input, {
+      findCompletedOutcome: async () => null,
+      executeStatement: async () => {
+        attempts += 1;
+        if (attempts === 1)
+          throw Object.assign(new Error("serialization"), { code: "40001" });
+        return { status: "refused", excludedCount: 1 };
+      },
+    }),
+    { status: "refused", excludedCount: 1 }
+  );
+  assert.equal(attempts, 2);
+});
+
+test("a legal roster above two thousand rows compiles with bounded browser disclosure", () => {
+  const rows = Array.from({ length: 2_001 }, (_, index) => {
+    const id = `00000000-0000-4000-8000-${(index + 10).toString(16).padStart(12, "0")}`;
+    return {
+      table: "ministry_teams" as const,
+      id,
+      mode: "insert" as const,
+      before: null,
+      after: {
+        id,
+        church_id: "00000000-0000-4000-8000-000000000001",
+        name: `Team ${index + 1}`,
+      },
+    };
+  });
+  const arguments_ = parseTeamsEffectArguments("initializeTeamsAction", {
+    operation: "initializeTeamsAction",
+    expected: rows.map(({ table, id }) => ({ table, id, state: null })),
+    sets: [],
+    mutations: rows,
+    disclosure: {
+      title: "Initialize every legal team row",
+      targets: [{ label: "Plant", value: "Exact plant", href: "/teams" }],
+      counts: [{ label: "Teams", count: rows.length }],
+      changes: [],
+      consequences: ["Creates the exact confirmed set."],
+      reversibility: "reversible",
+      dateTime: null,
+    },
+  });
+  assert.equal(arguments_.mutations.length, 2_001);
+  const fixture = TEAMS_EVAL_FIXTURES.find(
+    ({ operation }) => operation === "initializeTeamsAction"
+  )!;
+  const document = parseEvryActionPlanCandidate({
+    candidate: {
+      steps: [
+        {
+          id: fixture.identity,
+          capabilityIdentity: fixture.identity,
+          arguments: arguments_,
+          dependsOn: [],
+        },
+      ],
+    },
+    registry: TEAMS_PLAN_REGISTRY,
+    eligibleCapabilities: TEAMS_CAPABILITY_REGISTRATIONS,
+  });
+  const review = trustedReviewForEvryPlanDocument({
+    plan: evryConversationPlanIdentitySchema.parse({
+      planId: "00000000-0000-4000-8000-000000000010",
+      fingerprint: "0".repeat(64),
+    }),
+    document,
+    reviewRegistry: TEAMS_REVIEW_REGISTRY,
+  });
+  assert.ok(review);
+  const previews = review.confirmation.steps[0]!.contentPreviews;
+  assert.ok(previews.length <= 64);
+  assert.match(previews[0]!.label, /manifest/i);
+  assert.match(previews[0]!.content, /"mutationRows":2001/);
+  assert.match(previews[0]!.content, /"sha256":"[0-9a-f]{64}"/);
 });
 
 test("multi-row and giant-grapheme plans remain reviewable and lossless", () => {

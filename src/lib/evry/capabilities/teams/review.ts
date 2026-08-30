@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { toCalendarDate, utcOffsetForZonedTime } from "@/lib/datetime";
 import { buildEvryConfirmationArtifact } from "@/lib/evry/artifacts/review";
 import {
@@ -16,9 +18,34 @@ import {
 } from "./effect-contracts";
 
 const MAX_PREVIEW = 4_000;
+const MAX_BROWSER_PREVIEW_PAGES = 64;
 
 function planPages(args: TeamsEffectArguments) {
   const json = JSON.stringify(args);
+  if (json.length > MAX_PREVIEW * MAX_BROWSER_PREVIEW_PAGES) {
+    const counts = Object.fromEntries(
+      [...new Set(args.mutations.map(({ table }) => table))].map((table) => [
+        table,
+        args.mutations.filter((mutation) => mutation.table === table).length,
+      ])
+    );
+    return [
+      {
+        label: "Complete immutable plan manifest",
+        content: JSON.stringify({
+          operation: args.operation,
+          utf16CodeUnits: json.length,
+          sha256: createHash("sha256").update(json).digest("hex"),
+          expectedRows: args.expected.length,
+          exactSets: args.sets.length,
+          mutationRows: args.mutations.length,
+          mutationsByTable: counts,
+          disclosure:
+            "The stored plan and confirmation fingerprint bind every exact row; the browser preview is capped at 64 pages.",
+        }),
+      },
+    ];
+  }
   const pages: string[] = [];
   for (let start = 0; start < json.length; start += MAX_PREVIEW) {
     let end = Math.min(json.length, start + MAX_PREVIEW);

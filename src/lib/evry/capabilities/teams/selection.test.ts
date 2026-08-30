@@ -49,6 +49,13 @@ test("unknown commands, fields, and malformed target IDs are refused", () => {
     null
   );
   assert.equal(selectTeamsEvryRequest("review ministry team not-a-uuid"), null);
+  assert.equal(
+    selectTeamsEvryRequest(
+      "teams create-meeting | teamId=00000000-0000-4000-8000-000000000001|datetime=2031-02-03T18:30|timezone=America/New_York"
+    ),
+    null,
+    "the owning meeting action accepts no request-controlled timezone"
+  );
 });
 
 test("the canonical role-description clear remains expressible", () => {

@@ -147,7 +147,6 @@ const ALLOWED_FIELDS: Readonly<
   createMeetingAction: new Set([
     "teamId",
     "datetime",
-    "timezone",
     "title",
     "locationId",
     "locationName",
