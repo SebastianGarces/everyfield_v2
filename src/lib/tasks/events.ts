@@ -15,6 +15,11 @@ import { meetingFinalizationTaskAssigneeId } from "@/lib/meetings/finalization";
 import { addCalendarDays } from "@/lib/datetime";
 
 import { syncTaskNotificationsFor } from "./notifications";
+import { exactTaskAssigneeJoin, TASK_ASSIGNEE_ERROR } from "./assignees";
+import {
+  insertExactTenantTasks,
+  type ExactTenantTaskInsertOptions,
+} from "./write-boundary";
 
 // ============================================================================
 // Event Types
@@ -258,7 +263,8 @@ export async function handleMeetingAttendanceFinalized(
   meetingId: string,
   meetingType: string,
   churchId: string,
-  attendees: FinalizedAttendee[]
+  attendees: FinalizedAttendee[],
+  options: Pick<ExactTenantTaskInsertOptions, "beforeInsert"> = {}
 ): Promise<void> {
   // Only create follow-up tasks for vision meetings
   if (meetingType !== "vision_meeting") {
@@ -315,7 +321,7 @@ export async function handleMeetingAttendanceFinalized(
   const planter = await db
     .select({ id: users.id })
     .from(users)
-    .where(and(eq(users.churchId, churchId), eq(users.seat, "owner")))
+    .where(and(exactTaskAssigneeJoin(churchId), eq(users.seat, "owner")))
     .limit(1);
   const planterId = meetingFinalizationTaskAssigneeId({
     meetingType,
@@ -456,11 +462,13 @@ export async function handleMeetingAttendanceFinalized(
   // so it covers both indexes rather than one named arbiter. `returning()`
   // yields only the rows that LANDED, which is what the notification sync
   // below needs.
-  const created = await db
-    .insert(tasks)
-    .values(tasksToCreate)
-    .onConflictDoNothing()
-    .returning({ id: tasks.id });
+  const write = await insertExactTenantTasks(tasksToCreate, {
+    ...options,
+    authorityUserId: planterId,
+    onConflictDoNothing: true,
+  });
+  if (!write.authorized) throw new Error(TASK_ASSIGNEE_ERROR);
+  const created = write.inserted;
 
   // T-018. Every generated row carries an assignee (the planter) and a due
   // date, so every one owes a due and an overdue notification — and a

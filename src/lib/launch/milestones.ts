@@ -465,7 +465,15 @@ export function seedLaunchMilestonesStatement(input: {
   );
 
   return sql`
-    with milestone_template as (
+    with exact_actor as materialized (
+      select actor.id
+      from users actor
+      where actor.id = ${input.actorUserId}::uuid
+        and actor.church_id = ${input.churchId}::uuid
+        and actor.sending_church_id is null
+        and actor.sending_network_id is null
+        and actor.seat is not null
+    ), milestone_template as (
       select * from (values ${milestoneValues})
         as t(id, template_key, area, title, description, sort_order)
     ), task_template as (
@@ -478,7 +486,7 @@ export function seedLaunchMilestonesStatement(input: {
       select
         mt.id, ${input.launchId}, ${input.churchId},
         mt.template_key, mt.area, mt.title, mt.description, mt.sort_order
-      from milestone_template mt
+      from milestone_template mt cross join exact_actor
       on conflict (launch_id, template_key) do nothing
       returning id
     ), seeded_tasks as (
@@ -513,17 +521,24 @@ export interface SeedLaunchMilestonesResult {
  * because the seeded tasks need a `created_by_id`, and that is the session's
  * user — never an id that arrived from a client.
  */
-export async function seedLaunchMilestones(input: {
-  launchId: string;
-  churchId: string;
-  actorUserId: string;
-  /** Frozen reviewed rows for Evry; owner callers use the current templates. */
-  rows?: LaunchMilestoneSeedRow[];
-}): Promise<SeedLaunchMilestonesResult> {
+export async function seedLaunchMilestones(
+  input: {
+    launchId: string;
+    churchId: string;
+    actorUserId: string;
+    /** Frozen reviewed rows for Evry; owner callers use the current templates. */
+    rows?: LaunchMilestoneSeedRow[];
+  },
+  options: {
+    /** Test seam: production never supplies this. */
+    beforeSeed?: () => Promise<void>;
+  } = {}
+): Promise<SeedLaunchMilestonesResult> {
   const rows = input.rows ?? planLaunchMilestoneSeedRows();
   if (rows.length === 0) {
     return { milestonesCreated: 0, tasksCreated: 0 };
   }
+  await options.beforeSeed?.();
   const result = await db.execute<{
     milestone_count: number;
     task_count: number;

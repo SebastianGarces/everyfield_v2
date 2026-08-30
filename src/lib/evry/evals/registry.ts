@@ -6,6 +6,10 @@ import {
 import communicationInventory from "@/lib/evry/capabilities/communication/inventory.generated.json";
 import launchInventory from "@/lib/evry/capabilities/launch/inventory.generated.json";
 import { MEETINGS_CAPABILITY_EVAL_FIXTURES } from "@/lib/evry/capabilities/meetings/eval-fixtures";
+import {
+  TASK_CAPABILITY_EVAL_FIXTURES,
+  TASK_EVAL_PROOFS,
+} from "@/lib/evry/capabilities/tasks/eval-fixtures";
 
 import {
   defineEvryCapabilityEvalFixture,
@@ -24,6 +28,7 @@ import {
 const MEETING_INVITATION_RECIPE_IDENTITY = "fixture:meeting.invitation";
 
 export const EVRY_EVAL_PROOFS: readonly EvryEvalProof[] = Object.freeze([
+  ...TASK_EVAL_PROOFS,
   {
     id: "eval-contracts",
     testFile: "src/lib/evry/evals/contracts.test.ts",
@@ -328,6 +333,7 @@ export const EVRY_CAPABILITY_EVAL_FIXTURES = Object.freeze([
   ),
   ...MEETINGS_CAPABILITY_EVAL_FIXTURES,
   ...PEOPLE_CAPABILITY_EVAL_FIXTURES,
+  ...TASK_CAPABILITY_EVAL_FIXTURES,
 ]);
 
 export const EVRY_RECIPE_EVAL_FIXTURES: readonly EvryRecipeEvalFixture[] =

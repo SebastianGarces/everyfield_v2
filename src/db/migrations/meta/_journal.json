@@ -498,6 +498,13 @@
       "when": 1788062098349,
       "tag": "0071_task_recurrence_series_guard",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1788062099349,
+      "tag": "0072_task_structure_serialization",
+      "breakpoints": true
     }
   ]
 }
