@@ -15,6 +15,7 @@ import { churchHasNoPlanter } from "@/lib/onboarding/leadership";
 import { addCalendarDays } from "@/lib/datetime";
 
 import { syncTaskNotificationsFor } from "./notifications";
+import { exactTaskAssigneeJoin } from "./assignees";
 
 // ============================================================================
 // Event Types
@@ -303,7 +304,7 @@ export async function handleMeetingAttendanceFinalized(
     .where(eq(churches.id, churchId))
     .limit(1);
 
-  // 2. Otherwise: infer the planter from the OWNER seat, as before.
+  // 2. Otherwise: infer the planter from an exact plant-only OWNER seat.
   const planter = churchHasNoPlanter({
     leadershipStatus: church?.leadershipStatus,
   })
@@ -311,7 +312,7 @@ export async function handleMeetingAttendanceFinalized(
     : await db
         .select({ id: users.id })
         .from(users)
-        .where(and(eq(users.churchId, churchId), eq(users.seat, "owner")))
+        .where(and(exactTaskAssigneeJoin(churchId), eq(users.seat, "owner")))
         .limit(1);
 
   const planterId = planter[0]?.id;

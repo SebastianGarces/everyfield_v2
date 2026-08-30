@@ -14,7 +14,6 @@ import {
   phaseTransitions,
   taskDependencies,
   tasks,
-  users,
   type Task,
 } from "@/db/schema";
 import { holdsSeatFor } from "@/lib/auth/seat-rules";
@@ -31,6 +30,7 @@ import {
   listFollowUpAssignees,
   OWNED_TASK_CATEGORY,
 } from "@/lib/tasks/follow-up-ownership";
+import { isExactTaskAssignee } from "@/lib/tasks/assignees";
 import {
   planTaskNotifications,
   taskNotificationsDiffer,
@@ -305,12 +305,7 @@ async function validPlantUser(
   plantId: string,
   userId: string
 ): Promise<boolean> {
-  const [row] = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(and(eq(users.id, userId), eq(users.churchId, plantId)))
-    .limit(1);
-  return Boolean(row);
+  return isExactTaskAssignee(plantId, userId);
 }
 
 async function validFollowUpAssignee(

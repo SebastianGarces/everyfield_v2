@@ -28,6 +28,7 @@ import {
   type SQL,
 } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
+import { z } from "zod";
 // Task descriptions are rich text (T-021), sharing COM-017's editor and its
 // sanitiser. `descriptions.ts` owns both halves of that — the write gate and
 // the list surfaces' readable preview — and its header states the rules.
@@ -53,6 +54,7 @@ import {
 import { toCalendarDate } from "@/lib/datetime";
 import { blockedTaskIdsAmong } from "./dependencies";
 import { assertMayOwnFollowUp } from "./follow-up-ownership";
+import { assertExactTaskAssignee, exactTaskAssigneeJoin } from "./assignees";
 import { mayActOnTaskRow } from "./own-duty";
 import { taskStructureLockStatement } from "./structure-lock";
 import {
@@ -90,6 +92,8 @@ export interface ListTasksOptions {
   sortBy?: TaskSortBy;
   sortDir?: "asc" | "desc";
 }
+
+const TASK_LIST_CURSOR_SCHEMA = z.string().uuid();
 
 /** The orders `/tasks` can be read in. */
 export type TaskSortBy =
@@ -241,7 +245,10 @@ export async function getTask(
   const result = await db
     .select(taskWithAssigneeColumns)
     .from(tasks)
-    .leftJoin(users, eq(tasks.assignedToId, users.id))
+    .leftJoin(
+      users,
+      and(eq(tasks.assignedToId, users.id), exactTaskAssigneeJoin(churchId))
+    )
     .where(
       and(
         eq(tasks.churchId, churchId),
@@ -400,6 +407,13 @@ export async function listTasks(
 ): Promise<TaskListResult> {
   const { cursor, limit = 50, sortBy = "due_date", sortDir = "asc" } = options;
 
+  // UUID-typed Postgres parameters reject malformed strings. This untrusted
+  // value comes from both the page URL and the load-more action, so refuse it
+  // before the first query and keep the result distinguishable from page one.
+  if (cursor && !TASK_LIST_CURSOR_SCHEMA.safeParse(cursor).success) {
+    return { tasks: [], total: 0, nextCursor: null, cursorAvailable: false };
+  }
+
   const safeLimit = Math.min(Math.max(1, limit), 100);
 
   const baseConditions = taskListConditions(churchId, options);
@@ -446,7 +460,10 @@ export async function listTasks(
   const result = await db
     .select(taskWithAssigneeColumns)
     .from(tasks)
-    .leftJoin(users, eq(tasks.assignedToId, users.id))
+    .leftJoin(
+      users,
+      and(eq(tasks.assignedToId, users.id), exactTaskAssigneeJoin(churchId))
+    )
     .where(and(...queryConditions))
     .orderBy(orderFn(sortKey.sql), orderFn(tasks.id))
     .limit(safeLimit + 1);
@@ -731,7 +748,10 @@ export async function listSubtasks(
   const result = await db
     .select(taskWithAssigneeColumns)
     .from(tasks)
-    .leftJoin(users, eq(tasks.assignedToId, users.id))
+    .leftJoin(
+      users,
+      and(eq(tasks.assignedToId, users.id), exactTaskAssigneeJoin(churchId))
+    )
     .where(
       and(
         eq(tasks.churchId, churchId),
@@ -812,6 +832,7 @@ export async function createTask(
   // #470 D2 — only a committed member owns a follow-up. Checked on the RESOLVED
   // assignee, so a subtask inheriting its parent's owner is checked too, and
   // before the insert, so a refusal is a refusal rather than a row to undo.
+  await assertExactTaskAssignee(churchId, assignedToId);
   await assertMayOwnFollowUp(churchId, data.category, assignedToId);
 
   const values: NewTask = applyRecurrence(
@@ -876,10 +897,13 @@ export async function updateTask(
   // (#470 D2). Both halves can arrive alone: assigning an ineligible member to
   // a follow-up, and re-categorising an already-assigned task INTO follow-up,
   // are the same violation and an undefined field means "keep what is stored".
+  const resultingAssigneeId =
+    data.assignedToId !== undefined ? data.assignedToId : existing.assignedToId;
+  await assertExactTaskAssignee(churchId, resultingAssigneeId);
   await assertMayOwnFollowUp(
     churchId,
     data.category !== undefined ? data.category : existing.category,
-    data.assignedToId !== undefined ? data.assignedToId : existing.assignedToId
+    resultingAssigneeId
   );
 
   // Editing the schedule of an instance that is already mid-chain must not
@@ -1061,6 +1085,7 @@ export const defaultRecurrenceDeps: RecurrenceDeps = {
   },
 
   async insertSuccessor(values) {
+    await assertExactTaskAssignee(values.churchId, values.assignedToId);
     const [, [next]] = await db.batch([
       taskStructureLockStatement(values.churchId),
       db.insert(tasks).values(values).returning(),
@@ -1093,6 +1118,13 @@ export const defaultRecurrenceDeps: RecurrenceDeps = {
 
   async insertChildren(values) {
     if (values.length === 0) return;
+    for (const assigneeId of new Set(
+      values
+        .map(({ assignedToId }) => assignedToId)
+        .filter((id): id is string => typeof id === "string")
+    )) {
+      await assertExactTaskAssignee(values[0]!.churchId, assigneeId);
+    }
     await db.batch([
       taskStructureLockStatement(values[0]!.churchId),
       db.insert(tasks).values(values),
