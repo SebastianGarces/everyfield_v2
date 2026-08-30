@@ -84,6 +84,18 @@ run(
   }
 );
 
+run("Task list cursors are exact to the complete filter tuple", () => {
+  assert.match(
+    output,
+    /PASS tasks\.read\.list:exact-filter-cursor-availability/
+  );
+});
+
+run("Task list and count selectors preserve closed UI filter tuples", () => {
+  assert.match(output, /PASS tasks\.read\.list:closed-filter-tuple/);
+  assert.match(output, /PASS tasks\.read\.counts:closed-filter-tuple/);
+});
+
 run("Task ownership exposes a follow-up contact with no Task", () => {
   assert.match(
     output,

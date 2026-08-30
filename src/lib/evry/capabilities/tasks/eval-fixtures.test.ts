@@ -95,6 +95,75 @@ test("Task list selection preserves the product view and owning cursor", () => {
   });
 });
 
+test("Task list and count selectors preserve every legal UI filter", () => {
+  const tuple = {
+    view: "all" as const,
+    status: ["in_progress", "blocked"] as const,
+    priority: ["urgent", "high"] as const,
+    category: ["follow_up", "launch_prep"] as const,
+  };
+  assert.deepEqual(
+    selectTaskEvryRead(
+      "Show tasks: view=all; completed=true; status=in_progress,blocked; priority=urgent,high; category=follow_up,launch_prep"
+    ),
+    {
+      kind: "list",
+      ...tuple,
+      status: [...tuple.status],
+      priority: [...tuple.priority],
+      category: [...tuple.category],
+      showCompleted: true,
+      cursor: null,
+    }
+  );
+  assert.deepEqual(
+    selectTaskEvryRead(
+      `Load more tasks: view=all; completed=true; status=in_progress,blocked; priority=urgent,high; category=follow_up,launch_prep; after=${TASK_FIXTURE_ID}`
+    ),
+    {
+      kind: "list",
+      ...tuple,
+      status: [...tuple.status],
+      priority: [...tuple.priority],
+      category: [...tuple.category],
+      showCompleted: true,
+      cursor: TASK_FIXTURE_ID,
+    }
+  );
+  assert.deepEqual(
+    selectTaskEvryRead(
+      "Show task counts: view=all; status=in_progress,blocked; priority=urgent,high; category=follow_up,launch_prep"
+    ),
+    {
+      kind: "counts",
+      ...tuple,
+      status: [...tuple.status],
+      priority: [...tuple.priority],
+      category: [...tuple.category],
+    }
+  );
+  assert.equal(
+    selectTaskEvryRead(
+      "Show tasks: view=assignments; completed=false; status=any; priority=any; category=any"
+    ),
+    null
+  );
+  assert.equal(
+    selectTaskEvryRead(
+      "Show tasks: view=all; completed=false; status=not_a_status; priority=any; category=any"
+    ),
+    null
+  );
+});
+
+test("Task assignments route only through follow-up ownership", () => {
+  assert.deepEqual(selectTaskEvryRead("Show task assignments"), {
+    kind: "follow_up_ownership",
+    section: "open_tasks",
+    cursor: null,
+  });
+});
+
 test("Task ownership selection preserves its typed section and cursor", () => {
   assert.deepEqual(
     selectTaskEvryRead(

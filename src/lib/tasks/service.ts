@@ -175,6 +175,8 @@ export type TaskListRow = WithDescriptionPreview<TaskWithAssignee> & {
 /** `ListTasksResult` over the row type above. */
 export interface TaskListResult extends Omit<ListTasksResult, "tasks"> {
   tasks: TaskListRow[];
+  /** False when the requested cursor is not a row in this exact result set. */
+  cursorAvailable: boolean;
 }
 
 // ============================================================================
@@ -402,14 +404,6 @@ export async function listTasks(
 
   const baseConditions = taskListConditions(churchId, options);
 
-  // Get total count
-  const [countResult] = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(tasks)
-    .where(and(...baseConditions));
-
-  const total = countResult?.count ?? 0;
-
   // THE SORT KEY AND THE CURSOR ARE THE SAME EXPRESSION, from one entry in
   // TASK_SORT_KEYS. The id is the tie-break, in the SAME direction as the key,
   // so `(key, id)` is a total order a row-value comparison can walk.
@@ -417,24 +411,36 @@ export async function listTasks(
   const orderFn = sortDir === "desc" ? desc : asc;
 
   // Cursor-based pagination. The cursor is a task id; its position is the
-  // (key, id) pair, looked up church-scoped so a cursor cannot be aimed across
-  // tenants.
+  // (key, id) pair. The lookup uses the list's EXACT predicates: a foreign,
+  // missing, completed-hidden, or otherwise filtered-out row is not a position
+  // in this result set and must not silently restart it from page one.
   const queryConditions = [...baseConditions];
   if (cursor) {
     const cursorTask = await db
       .select({ sortValue: sortKey.sql })
       .from(tasks)
-      .where(and(eq(tasks.id, cursor), eq(tasks.churchId, churchId)))
+      .where(and(eq(tasks.id, cursor), ...baseConditions))
       .limit(1);
 
-    if (cursorTask[0]) {
-      queryConditions.push(
-        sortDir === "desc"
-          ? sql`(${sortKey.sql}, ${tasks.id}) < (${cursorTask[0].sortValue}, ${cursor})`
-          : sql`(${sortKey.sql}, ${tasks.id}) > (${cursorTask[0].sortValue}, ${cursor})`
-      );
+    if (!cursorTask[0]) {
+      return { tasks: [], total: 0, nextCursor: null, cursorAvailable: false };
     }
+    queryConditions.push(
+      sortDir === "desc"
+        ? sql`(${sortKey.sql}, ${tasks.id}) < (${cursorTask[0].sortValue}, ${cursor})`
+        : sql`(${sortKey.sql}, ${tasks.id}) > (${cursorTask[0].sortValue}, ${cursor})`
+    );
   }
+
+  // Count only after a supplied cursor proves it belongs to this exact result
+  // set. An unavailable cursor returns one neutral shape without doing a
+  // broader census first.
+  const [countResult] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(tasks)
+    .where(and(...baseConditions));
+
+  const total = countResult?.count ?? 0;
 
   // Fetch tasks with assignee info
   const result = await db
@@ -465,6 +471,7 @@ export async function listTasks(
     })),
     total,
     nextCursor,
+    cursorAvailable: true,
   };
 }
 

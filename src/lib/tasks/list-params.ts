@@ -58,6 +58,12 @@ export const TASK_LIST_VIEWS = ["my_tasks", "all", "assignments"] as const;
 
 export type TaskListView = (typeof TASK_LIST_VIEWS)[number];
 
+/** Views backed by the ordinary task list, excluding follow-up ownership. */
+export const TASK_STANDARD_LIST_VIEWS = [
+  "my_tasks",
+  "all",
+] as const satisfies readonly TaskListView[];
+
 /** The params the toggle and the filter selects may write. */
 export type TaskListParamKey =
   | "view"
