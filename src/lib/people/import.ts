@@ -1,6 +1,6 @@
 import { personCreateSchema } from "@/lib/validations/people";
 import { findDuplicateMatches } from "./duplicates";
-import { createPerson } from "./service";
+import { createPerson, getPerson, updatePerson } from "./service";
 import type {
   DuplicateMatches,
   ImportDuplicateMatch,
@@ -339,15 +339,16 @@ export async function parseCsvImport(
  * @param churchId - Church to import into
  * @param userId - User performing the import
  * @param rows - Validated rows to import
- * @param duplicateResolutions - Map of row number to resolution ('skip' | 'create')
+ * @param duplicateResolutions - Map of row number to resolution
  */
 export async function executeBulkImport(
   churchId: string,
   userId: string,
   rows: ImportRow[],
-  duplicateResolutions: Record<number, "skip" | "create">
+  duplicateResolutions: Record<number, "skip" | "create" | "merge">
 ): Promise<ImportSummary> {
   let created = 0;
+  let merged = 0;
   let skipped = 0;
   let errors = 0;
 
@@ -371,6 +372,31 @@ export async function executeBulkImport(
     }
 
     try {
+      if (resolution === "merge") {
+        const match =
+          row.duplicates.exactMatch ?? row.duplicates.potentialMatches[0];
+        const existing = match ? await getPerson(churchId, match.id) : null;
+        if (!existing) {
+          errors++;
+          continue;
+        }
+        await updatePerson(churchId, existing.id, {
+          email: existing.email ?? parseResult.data.email ?? "",
+          phone: existing.phone ?? parseResult.data.phone,
+          addressLine1: existing.addressLine1 ?? parseResult.data.addressLine1,
+          addressLine2: existing.addressLine2 ?? parseResult.data.addressLine2,
+          city: existing.city ?? parseResult.data.city,
+          state: existing.state ?? parseResult.data.state,
+          postalCode: existing.postalCode ?? parseResult.data.postalCode,
+          source: existing.source ?? parseResult.data.source,
+          notes:
+            parseResult.data.notes && existing.notes
+              ? `${existing.notes}\n\n${parseResult.data.notes}`
+              : (existing.notes ?? parseResult.data.notes),
+        });
+        merged++;
+        continue;
+      }
       // The service owns the insert, the person.created emit and the
       // person_created activity (ruling 410-2A) — no duplicated write path.
       await createPerson(churchId, userId, parseResult.data, "bulk_import");
@@ -381,5 +407,5 @@ export async function executeBulkImport(
     }
   }
 
-  return { created, skipped, errors };
+  return { created, merged, skipped, errors };
 }

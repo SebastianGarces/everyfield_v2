@@ -8,6 +8,10 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { CommitmentType } from "@/db/schema";
 import type { PersonForClient } from "@/lib/people/types";
+import {
+  commitmentDocumentRefusal,
+  COMMITMENT_DOCUMENT_ACCEPT,
+} from "@/lib/people/commitment-document";
 import { cn } from "@/lib/utils";
 import {
   AlertTriangle,
@@ -41,14 +45,6 @@ const COMMITMENT_TYPES: {
     label: "Launch Team",
     description: "Commitment to serve on the launch team",
   },
-];
-
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
-const ALLOWED_FILE_TYPES = [
-  "application/pdf",
-  "image/jpeg",
-  "image/jpg",
-  "image/png",
 ];
 
 export function CommitmentForm({ person, onSuccess }: CommitmentFormProps) {
@@ -88,18 +84,9 @@ export function CommitmentForm({ person, onSuccess }: CommitmentFormProps) {
       return;
     }
 
-    // Validate file type
-    if (!ALLOWED_FILE_TYPES.includes(file.type)) {
-      setFileError(
-        "Invalid file type. Only PDF, JPG, and PNG files are allowed."
-      );
-      setSelectedFile(null);
-      return;
-    }
-
-    // Validate file size
-    if (file.size > MAX_FILE_SIZE) {
-      setFileError("File is too large. Maximum size is 10MB.");
+    const refusal = commitmentDocumentRefusal(file);
+    if (refusal) {
+      setFileError(refusal.message);
       setSelectedFile(null);
       return;
     }
@@ -254,7 +241,7 @@ export function CommitmentForm({ person, onSuccess }: CommitmentFormProps) {
               ref={fileInputRef}
               id="document"
               type="file"
-              accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
+              accept={COMMITMENT_DOCUMENT_ACCEPT}
               onChange={handleFileChange}
               disabled={isPending}
               className="sr-only"

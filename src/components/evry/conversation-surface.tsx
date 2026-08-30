@@ -19,6 +19,7 @@ import {
 } from "./suggestions/interaction";
 import { EvryWorkStatus } from "./streaming/work-status";
 import { shouldFollowEvryTranscript } from "./interaction-state";
+import { EvryPeopleFileWorkflow } from "./people-file-workflow";
 
 export function EvryContextChip({
   context,
@@ -245,9 +246,13 @@ export function ConversationSurface({ className }: { className?: string }) {
         <div ref={endRef} />
       </div>
 
+      <div className="bg-background shrink-0 border-t px-4 pt-4 sm:px-5 sm:pt-5">
+        <EvryPeopleFileWorkflow />
+      </div>
+
       <form
         ref={composerRef}
-        className="bg-background shrink-0 space-y-3 border-t p-4 sm:p-5"
+        className="bg-background shrink-0 space-y-3 p-4 sm:p-5"
         onSubmit={(event) => {
           event.preventDefault();
           void sendMessage();

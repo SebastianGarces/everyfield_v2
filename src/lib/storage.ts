@@ -1,6 +1,7 @@
 import {
   DeleteObjectCommand,
   GetObjectCommand,
+  ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
@@ -63,6 +64,43 @@ export async function deleteFile(key: string): Promise<void> {
   });
 
   await s3Client.send(command);
+}
+
+export type StoredFileObject = Readonly<{
+  key: string;
+  lastModified: Date | null;
+}>;
+
+/** List every private object below one closed application prefix. */
+export async function listFileObjects(
+  prefix: string
+): Promise<StoredFileObject[]> {
+  const objects: StoredFileObject[] = [];
+  let continuationToken: string | undefined;
+  do {
+    const result = await s3Client.send(
+      new ListObjectsV2Command({
+        Bucket: BUCKET_NAME,
+        Prefix: prefix,
+        ContinuationToken: continuationToken,
+      })
+    );
+    for (const object of result.Contents ?? [])
+      if (object.Key)
+        objects.push({
+          key: object.Key,
+          lastModified: object.LastModified ?? null,
+        });
+    continuationToken = result.IsTruncated
+      ? result.NextContinuationToken
+      : undefined;
+  } while (continuationToken);
+  return objects;
+}
+
+/** List every private object key below one closed application prefix. */
+export async function listFileKeys(prefix: string): Promise<string[]> {
+  return (await listFileObjects(prefix)).map(({ key }) => key);
 }
 
 // ============================================================================
@@ -169,9 +207,10 @@ export function getExtensionFromMimeType(mimeType: string): string {
 export function personPhotoStorageKey(
   churchId: string,
   personId: string,
-  ext: string
+  ext: string,
+  objectId: string = crypto.randomUUID()
 ): string {
-  return `people/${churchId}/${personId}/${crypto.randomUUID()}.${ext}`;
+  return `people/${churchId}/${personId}/${objectId}.${ext}`;
 }
 
 // ============================================================================
@@ -206,27 +245,17 @@ export function userAvatarStorageKey(userId: string, ext: string): string {
 // Commitment Documents
 // ============================================================================
 
-/**
- * Validate that a file type is allowed for commitment documents.
- */
-export function isAllowedCommitmentFileType(mimeType: string): boolean {
-  const allowedTypes = [
-    "application/pdf",
-    "image/jpeg",
-    "image/jpg",
-    "image/png",
-  ];
-  return allowedTypes.includes(mimeType);
-}
+export {
+  isAllowedCommitmentFileType,
+  isValidCommitmentFileSize,
+  MAX_COMMITMENT_FILE_SIZE,
+} from "@/lib/people/commitment-document";
 
-/**
- * Maximum file size for commitment documents (10MB).
- */
-export const MAX_COMMITMENT_FILE_SIZE = 10 * 1024 * 1024; // 10MB
-
-/**
- * Validate file size for commitment documents.
- */
-export function isValidCommitmentFileSize(size: number): boolean {
-  return size <= MAX_COMMITMENT_FILE_SIZE;
+export function commitmentDocumentStorageKey(
+  churchId: string,
+  personId: string,
+  ext: string,
+  objectId: string = crypto.randomUUID()
+): string {
+  return `commitments/${churchId}/${personId}/${objectId}.${ext}`;
 }

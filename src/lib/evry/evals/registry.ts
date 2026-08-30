@@ -14,6 +14,10 @@ import {
   type EvryEvalProof,
   type EvryRecipeEvalFixture,
 } from "./contracts";
+import {
+  assertPeopleCapabilityEvalRegistryComplete,
+  PEOPLE_CAPABILITY_EVAL_FIXTURES,
+} from "./people-capabilities";
 
 const MEETING_INVITATION_RECIPE_IDENTITY = "fixture:meeting.invitation";
 
@@ -55,10 +59,22 @@ export const EVRY_EVAL_PROOFS: readonly EvryEvalProof[] = Object.freeze([
     safetyGates: [],
   },
   {
+    id: "people-capability-contract",
+    testFile: "src/lib/evry/evals/people-capabilities.test.ts",
+    lane: "deterministic",
+    safetyGates: [],
+  },
+  {
     id: "communication-effect-live",
     testFile: "src/lib/communication/evry-effect-live.test.ts",
     lane: "live_database",
     safetyGates: [],
+  },
+  {
+    id: "people-capability-live-outcomes",
+    testFile: "src/lib/people/evry-effect-live.test.ts",
+    lane: "live_database",
+    safetyGates: ["cross_tenant_access"],
   },
   {
     id: "candidate-plan-probe-contract",
@@ -224,6 +240,7 @@ export const EVRY_CAPABILITY_EVAL_FIXTURES = Object.freeze([
   ...communicationInventory.capabilities.map(({ identity, operationKind }) =>
     communicationCapabilityFixture(identity, operationKind)
   ),
+  ...PEOPLE_CAPABILITY_EVAL_FIXTURES,
 ]);
 
 export const EVRY_RECIPE_EVAL_FIXTURES: readonly EvryRecipeEvalFixture[] =
@@ -254,6 +271,7 @@ function assertUnique(values: readonly string[], subject: string): void {
 }
 
 export function assertEvryEvalRegistryComplete(): void {
+  assertPeopleCapabilityEvalRegistryComplete();
   assertUnique(
     EVRY_EVAL_PROOFS.map(({ id }) => id),
     "proof"
