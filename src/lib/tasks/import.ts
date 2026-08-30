@@ -6,6 +6,7 @@ import type { PhaseNumber } from "@/lib/constants";
 import { addCalendarDays, toCalendarDate } from "@/lib/datetime";
 
 import { normalizeTaskDescription } from "./descriptions";
+import { assertExactTaskAssignee } from "./assignees";
 import { syncTaskNotificationsFor } from "./notifications";
 import {
   UNKNOWN_TEMPLATE_ERROR,
@@ -177,6 +178,8 @@ export interface ImportTaskTemplateInput {
 export async function importTaskTemplate(
   input: ImportTaskTemplateInput
 ): Promise<TemplateImportResult> {
+  await assertExactTaskAssignee(input.churchId, input.userId);
+
   const template = findTaskTemplate(input.templateKey);
   if (!template) {
     throw new Error(UNKNOWN_TEMPLATE_ERROR);

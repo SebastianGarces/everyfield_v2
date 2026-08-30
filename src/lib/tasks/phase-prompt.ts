@@ -8,6 +8,7 @@ import { PHASES, type PhaseNumber } from "@/lib/constants";
 import type { PhaseChangedEvent } from "@/lib/phase-engine/events";
 
 import { importTaskTemplate, planTemplateImport } from "./import";
+import { assertExactTaskAssignee } from "./assignees";
 import { phaseTemplatesFor, taskTemplateSize } from "./templates";
 
 // ============================================================================
@@ -451,6 +452,8 @@ export async function declinePhaseTemplatePrompt(input: {
    *  refused rather than redirected. */
   expectedTransitionId: string;
 }): Promise<DeclinePhaseTemplatePromptResult | null> {
+  await assertExactTaskAssignee(input.churchId, input.userId);
+
   const transition = await getLatestPhaseTransition(input.churchId);
   if (!transition) return null;
 
@@ -519,6 +522,8 @@ export async function declinePhaseTemplatePrompt(input: {
 export async function acceptPhaseTemplatePrompt(
   input: AcceptPhaseTemplatePromptInput
 ): Promise<AcceptPhaseTemplatePromptResult | null> {
+  await assertExactTaskAssignee(input.churchId, input.userId);
+
   const transition = await getLatestPhaseTransition(input.churchId);
   if (!transition) return null;
 
