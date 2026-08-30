@@ -151,7 +151,10 @@ export function createEvryPeopleAttachmentPlanPost({
         actor,
         expectedKind: parsed.data.kind,
       });
-      if (!opened || opened.digest !== parsed.data.attachmentDigest) {
+      if (
+        opened?.version !== 3 ||
+        opened.digest !== parsed.data.attachmentDigest
+      ) {
         await removeRefusedAttachment();
         return NextResponse.json(
           { status: "invalid" },

@@ -38,6 +38,16 @@ export function createEvryPeopleEffectProofStorage(): EvryPeopleEffectProofStora
       });
       return key;
     },
+    async create(key, bytes, contentType) {
+      operations.push({ kind: "store", key });
+      if (objects.has(key)) return "exists";
+      objects.set(key, {
+        body: Buffer.from(bytes),
+        contentType,
+        lastModified,
+      });
+      return "created";
+    },
     async read(key) {
       operations.push({ kind: "read", key });
       const object = objects.get(key);

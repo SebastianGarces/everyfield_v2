@@ -309,7 +309,14 @@ export async function sweepExpiredEvryPeopleAttachments(
   let removed = 0;
   let failed = 0;
   for (const key of keys) {
-    const tail = key.slice(prefix.length);
+    if (!key.startsWith(prefix)) continue;
+    const relative = key.slice(prefix.length);
+    const tail = input.actor
+      ? relative
+      : /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/(.+)$/i.exec(
+          relative
+        )?.[1];
+    if (!tail) continue;
     const expiry =
       /^(\d{13})-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-[0-9a-f]{64}(?:-\d+-of-\d+)?\.[a-z0-9]+$/i.exec(
         tail
@@ -405,7 +412,8 @@ export async function storeEvryPeopleAttachmentChunk(input: {
   bytes: Buffer;
   now?: Date;
   secret?: string;
-  store?: EvryPeopleFileStorage["store"];
+  create?: EvryPeopleFileStorage["create"];
+  read?: EvryPeopleFileStorage["read"];
 }): Promise<boolean> {
   const document = openEvryPeopleAttachmentReference({
     reference: input.reference,
@@ -426,12 +434,20 @@ export async function storeEvryPeopleAttachmentChunk(input: {
   )
     return false;
   const key = chunkStorageKey(document, input.chunkIndex);
-  return (
-    (await (input.store ?? evryPeopleFileStorage().store)(
-      key,
-      input.bytes,
-      "application/octet-stream"
-    )) === key
+  const storage = evryPeopleFileStorage();
+  const created = await (input.create ?? storage.create)(
+    key,
+    input.bytes,
+    "application/octet-stream"
+  );
+  if (created === "created") return true;
+  const existing = await (input.read ?? storage.read)(key);
+  const existingBytes = existing ? Buffer.from(existing.body) : null;
+  return Boolean(
+    existingBytes &&
+    existing?.contentType === "application/octet-stream" &&
+    existingBytes.byteLength === input.bytes.byteLength &&
+    timingSafeEqual(existingBytes, input.bytes)
   );
 }
 
@@ -471,7 +487,7 @@ export async function finalizeEvryPeopleAttachmentUpload(input: {
     now: input.now,
     secret: input.secret,
   });
-  if (!opened) return null;
+  if (opened?.version !== 3) return null;
   const exact = await readExactEvryPeopleAttachment({
     reference: input.reference,
     actor: input.actor,
@@ -510,7 +526,7 @@ export async function stageEvryPeopleAttachment(input: {
   secret?: string;
   loadPerson?: typeof getPerson;
   parseImport?: typeof parseCsvImport;
-  store?: EvryPeopleFileStorage["store"];
+  create?: EvryPeopleFileStorage["create"];
   read?: EvryPeopleFileStorage["read"];
   sweep?: typeof sweepExpiredEvryPeopleAttachments;
 }) {
@@ -543,7 +559,8 @@ export async function stageEvryPeopleAttachment(input: {
       bytes: bytes.subarray(start, start + prepared.chunkBytes),
       now,
       secret: input.secret,
-      store: input.store,
+      create: input.create,
+      read: input.read,
     });
     if (!stored) return null;
   }

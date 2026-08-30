@@ -6,7 +6,9 @@ import { UnauthorizedError } from "@/lib/auth/unauthorized";
 import { EvryConversationIdempotencyError } from "@/lib/evry/conversations/repository";
 import {
   finalizeEvryPeopleAttachmentUpload,
+  openEvryPeopleAttachmentReference,
   prepareEvryPeopleAttachmentUpload,
+  sealEvryPeopleAttachmentReference,
   storeEvryPeopleAttachmentChunk,
 } from "@/lib/evry/capabilities/people/attachments";
 import {
@@ -95,10 +97,12 @@ test("a maximum 10 MiB commitment traverses compact staged and plan contracts be
       storeEvryPeopleAttachmentChunk({
         ...input,
         secret,
-        store: async (key, body, contentType) => {
+        create: async (key, body, contentType) => {
+          if (objects.has(key)) return "exists";
           objects.set(key, { body: Buffer.from(body), contentType });
-          return key;
+          return "created";
         },
+        read: async (key) => objects.get(key) ?? null,
       }),
     finalize: (input) =>
       finalizeEvryPeopleAttachmentUpload({
@@ -221,6 +225,91 @@ test("a maximum 10 MiB commitment traverses compact staged and plan contracts be
   );
 });
 
+test("external staging and plan routes reject legacy inline v2 references", async () => {
+  const actor = {
+    userId: "10000000-0000-4000-8000-000000000001",
+    plantId: "20000000-0000-4000-8000-000000000001",
+    seat: "owner",
+  } as unknown as EvryPlantActor;
+  const secret = "legacy-route-rejection-secret";
+  const bytes = Buffer.from("legacy-inline-photo");
+  const digest = createHash("sha256").update(bytes).digest("hex");
+  const reference = sealEvryPeopleAttachmentReference(
+    {
+      version: 2,
+      kind: "person_photo",
+      actorUserId: actor.userId,
+      plantId: actor.plantId,
+      personId: "30000000-0000-4000-8000-000000000001",
+      digest,
+      contentType: "image/png",
+      size: bytes.length,
+      originalName: "legacy.png",
+      expiresAt: "2099-08-30T12:00:00.000Z",
+      uploadId: "40000000-0000-4000-8000-000000000001",
+      bytesBase64Url: bytes.toString("base64url"),
+    },
+    secret
+  );
+  const finalizeBody = JSON.stringify({
+    action: "finalize",
+    kind: "person_photo",
+    reference,
+  });
+  const stagedResponse = await createEvryPeopleAttachmentPost({
+    requireViewer: async () => actor,
+    authorizeEffect: async () => ({ actor }) as never,
+    finalize: (input) =>
+      finalizeEvryPeopleAttachmentUpload({
+        ...input,
+        secret,
+        read: async () => {
+          throw new Error("v2 must refuse before storage read");
+        },
+      }),
+  })(
+    new Request("https://example.test/api/evry/people/attachments", {
+      method: "POST",
+      body: finalizeBody,
+      headers: {
+        "content-type": "application/json",
+        "content-length": String(Buffer.byteLength(finalizeBody)),
+      },
+    })
+  );
+  assert.equal(stagedResponse.status, 400);
+
+  const planBody = JSON.stringify({
+    kind: "person_photo",
+    reference,
+    attachmentDigest: digest,
+    conversationId: null,
+    requestKey: "50000000-0000-4000-8000-000000000001",
+  });
+  let recoveries = 0;
+  const planResponse = await createEvryPeopleAttachmentPlanPost({
+    requireViewer: async () => actor,
+    openAttachment: (input) =>
+      openEvryPeopleAttachmentReference({ ...input, secret }),
+    removeAttachment: async () => true,
+    recoverReview: async () => {
+      recoveries += 1;
+      return null;
+    },
+  })(
+    new Request("https://example.test/api/evry/people/attachments/plan", {
+      method: "POST",
+      body: planBody,
+      headers: {
+        "content-type": "application/json",
+        "content-length": String(Buffer.byteLength(planBody)),
+      },
+    })
+  );
+  assert.equal(planResponse.status, 400);
+  assert.equal(recoveries, 0);
+});
+
 test("multipart and plan routes reject oversized bodies before parsing", async () => {
   const actor = {
     userId: "10000000-0000-4000-8000-000000000001",
@@ -319,6 +408,7 @@ test("a definitely refused attachment plan removes its exact staged input", asyn
     requireViewer: () => Promise.resolve(actor),
     openAttachment: () =>
       ({
+        version: 3,
         kind: "person_photo",
         digest: "a".repeat(64),
         personId: actor.userId,
@@ -366,7 +456,7 @@ test("a different staged digest cannot recover an old response and is removed", 
   const response = await createEvryPeopleAttachmentPlanPost({
     requireViewer: () => Promise.resolve(actor),
     openAttachment: () =>
-      ({ kind: "people_csv", digest: "b".repeat(64) }) as never,
+      ({ version: 3, kind: "people_csv", digest: "b".repeat(64) }) as never,
     recoverReview: async () => {
       throw new EvryConversationIdempotencyError();
     },
@@ -405,6 +495,7 @@ test("a raw plan request-key race removes the losing staged input", async () => 
     requireViewer: () => Promise.resolve(actor),
     openAttachment: () =>
       ({
+        version: 3,
         kind: "person_photo",
         digest: "c".repeat(64),
         personId: actor.userId,
