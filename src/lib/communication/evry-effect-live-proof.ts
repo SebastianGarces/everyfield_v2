@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import {
@@ -12,10 +12,12 @@ import {
   evryActionPlanStates,
   evryExecutionAttempts,
   evryExecutionEffectClaims,
+  evryExecutionOutcomes,
   evryPlanConfirmations,
   evryProductAuditEvents,
   messageTemplates,
   persons,
+  sendingChurches,
   users,
 } from "@/db/schema";
 import {
@@ -661,6 +663,74 @@ async function main(): Promise<void> {
     body: "<p>Welcome {{first_name}}</p>",
   });
   assert.ok(audience);
+
+  // Authorization was minted while this was one exact plant account. A
+  // competing tenancy appears before execution; neither durable preparation
+  // nor the provider seam may be reached through that stale authorization.
+  const dualTenancyEffect = await seedEffect({
+    churchId: plant.id,
+    actorUserId: owner.id,
+    capabilityIdentity: SEND_MESSAGE,
+    stepId: "send-dual-tenancy",
+  });
+  const dualTenancyMailer = deterministicMailer();
+  const dualTenancyCommunicationId = randomUUID();
+  const [competingTenancy] = await db
+    .insert(sendingChurches)
+    .values({ name: "__Communication competing tenancy__" })
+    .returning({ id: sendingChurches.id });
+  assert.ok(competingTenancy);
+  await db
+    .update(users)
+    .set({ sendingChurchId: competingTenancy.id })
+    .where(eq(users.id, owner.id));
+  let dualTenancyResult;
+  try {
+    dualTenancyResult = await sendFrozenEvryCommunication({
+      effect: dualTenancyEffect,
+      identity: SEND_MESSAGE,
+      communicationId: dualTenancyCommunicationId,
+      audience,
+      mailer: dualTenancyMailer.mailer,
+    });
+  } finally {
+    await db
+      .update(users)
+      .set({ sendingChurchId: null })
+      .where(eq(users.id, owner.id));
+  }
+  assert.deepEqual(dualTenancyResult, {
+    status: "refused",
+    excludedCount: 1,
+  });
+  assert.equal(dualTenancyMailer.calls.length, 0);
+  assert.deepEqual(
+    await Promise.all([
+      db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(communications)
+        .where(eq(communications.id, dualTenancyCommunicationId))
+        .then(([row]) => row?.count ?? -1),
+      db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(communicationRecipients)
+        .where(
+          eq(
+            communicationRecipients.communicationId,
+            dualTenancyCommunicationId
+          )
+        )
+        .then(([row]) => row?.count ?? -1),
+      db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(evryExecutionOutcomes)
+        .where(
+          eq(evryExecutionOutcomes.planId, dualTenancyEffect.execution.planId)
+        )
+        .then(([row]) => row?.count ?? -1),
+    ]),
+    [0, 0, 0]
+  );
   assert.equal(audience.recipients.length, 1);
   assert.equal(
     audience.exclusions.reduce((sum, item) => sum + item.count, 0),
@@ -819,6 +889,100 @@ async function main(): Promise<void> {
     body: "Approved batch",
   });
   assert.ok(raceAudience && raceAudience.recipients.length === 2);
+
+  // Authority loss after a provider acceptance is not a clean refusal: one
+  // irreversible recipient already landed. Preserve the prepared rows and a
+  // retryable result, then prove the same effect converges after authority is
+  // restored without resending the completed recipient.
+  const authorityRaceEffect = await seedEffect({
+    churchId: plant.id,
+    actorUserId: owner.id,
+    capabilityIdentity: SEND_MESSAGE,
+    stepId: "send-authority-race",
+  });
+  const authorityRaceCommunicationId = randomUUID();
+  const authorityRaceCalls: string[] = [];
+  const authorityRaceMailer: EvryCommunicationMailer = {
+    async send(input) {
+      authorityRaceCalls.push(input.to);
+      if (authorityRaceCalls.length === 1) {
+        await db
+          .update(users)
+          .set({ sendingChurchId: competingTenancy.id })
+          .where(eq(users.id, owner.id));
+      }
+      return {
+        status: "accepted",
+        providerId: `authority-race-${input.to}`,
+      };
+    },
+  };
+  const authorityRaceInput = {
+    effect: authorityRaceEffect,
+    identity: SEND_MESSAGE,
+    communicationId: authorityRaceCommunicationId,
+    audience: raceAudience,
+    mailer: authorityRaceMailer,
+  };
+  let authorityRaceResult;
+  try {
+    authorityRaceResult = await sendFrozenEvryCommunication(authorityRaceInput);
+  } finally {
+    await db
+      .update(users)
+      .set({ sendingChurchId: null })
+      .where(eq(users.id, owner.id));
+  }
+  assert.deepEqual(authorityRaceResult, { status: "retryable" });
+  assert.equal(authorityRaceCalls.length, 1);
+  assert.deepEqual(
+    (
+      await db
+        .select({ status: communicationRecipients.status })
+        .from(communicationRecipients)
+        .where(
+          eq(
+            communicationRecipients.communicationId,
+            authorityRaceCommunicationId
+          )
+        )
+    )
+      .map(({ status }) => status)
+      .toSorted(),
+    ["pending", "sent"]
+  );
+  assert.equal(
+    (
+      await db
+        .select({ id: evryExecutionOutcomes.id })
+        .from(evryExecutionOutcomes)
+        .where(
+          eq(evryExecutionOutcomes.planId, authorityRaceEffect.execution.planId)
+        )
+    ).length,
+    0
+  );
+  assert.deepEqual(await sendFrozenEvryCommunication(authorityRaceInput), {
+    status: "completed",
+    affectedCount: 2,
+    excludedCount: 0,
+  });
+  assert.equal(authorityRaceCalls.length, 2);
+  assert.deepEqual(
+    (
+      await db
+        .select({ status: communicationRecipients.status })
+        .from(communicationRecipients)
+        .where(
+          eq(
+            communicationRecipients.communicationId,
+            authorityRaceCommunicationId
+          )
+        )
+    ).map(({ status }) => status),
+    ["sent", "sent"]
+  );
+
   const laterRecipient = raceAudience.recipients[1];
   assert.ok(laterRecipient);
   const raceCalls: string[] = [];
@@ -1146,22 +1310,99 @@ async function main(): Promise<void> {
     .select({
       communications: sql<number>`count(distinct ${communications.id})::int`,
       recipients: sql<number>`count(distinct ${communicationRecipients.id})::int`,
-      claims: sql<number>`count(distinct ${evryExecutionEffectClaims.id})::int`,
     })
     .from(communications)
     .leftJoin(
       communicationRecipients,
       eq(communicationRecipients.communicationId, communications.id)
     )
-    .leftJoin(
-      evryExecutionEffectClaims,
-      eq(evryExecutionEffectClaims.churchId, communications.churchId)
-    )
     .where(eq(communications.churchId, plant.id));
   assert.ok(counts);
   assert.ok(counts.communications >= 8);
   assert.ok(counts.recipients >= 8);
-  assert.ok(counts.claims >= 8);
+
+  const claimedEffects = [
+    createEffect,
+    updateEffect,
+    forkEffect,
+    systemEditEffect,
+    deleteEffect,
+    concurrentEffect,
+    transientEffect,
+    authorityRaceEffect,
+    raceEffect,
+    resendEffect,
+  ] as const;
+  for (const effect of claimedEffects) {
+    const rows = await db
+      .select({
+        attemptId: evryExecutionEffectClaims.attemptId,
+        planId: evryExecutionEffectClaims.planId,
+        churchId: evryExecutionEffectClaims.churchId,
+        actorUserId: evryExecutionEffectClaims.actorUserId,
+        planFingerprint: evryExecutionEffectClaims.planFingerprint,
+        correlationId: evryExecutionEffectClaims.correlationId,
+        effectKey: evryExecutionEffectClaims.effectKey,
+        stepId: evryExecutionEffectClaims.stepId,
+        capabilityIdentity: evryExecutionEffectClaims.capabilityIdentity,
+      })
+      .from(evryExecutionEffectClaims)
+      .where(
+        and(
+          eq(evryExecutionEffectClaims.attemptId, effect.execution.attemptId),
+          eq(evryExecutionEffectClaims.planId, effect.execution.planId),
+          eq(evryExecutionEffectClaims.churchId, effect.execution.plantId),
+          eq(
+            evryExecutionEffectClaims.actorUserId,
+            effect.execution.actorUserId
+          ),
+          eq(
+            evryExecutionEffectClaims.planFingerprint,
+            effect.execution.fingerprint
+          ),
+          eq(
+            evryExecutionEffectClaims.correlationId,
+            effect.execution.correlationId
+          ),
+          eq(evryExecutionEffectClaims.effectKey, effect.effectKey),
+          eq(evryExecutionEffectClaims.stepId, effect.execution.stepId),
+          eq(
+            evryExecutionEffectClaims.capabilityIdentity,
+            effect.execution.capabilityIdentity
+          )
+        )
+      );
+    assert.deepEqual(rows, [
+      {
+        attemptId: effect.execution.attemptId,
+        planId: effect.execution.planId,
+        churchId: effect.execution.plantId,
+        actorUserId: effect.execution.actorUserId,
+        planFingerprint: effect.execution.fingerprint,
+        correlationId: effect.execution.correlationId,
+        effectKey: effect.effectKey,
+        stepId: effect.execution.stepId,
+        capabilityIdentity: effect.execution.capabilityIdentity,
+      },
+    ]);
+  }
+  assert.equal(
+    await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(evryExecutionEffectClaims)
+      .where(eq(evryExecutionEffectClaims.churchId, plant.id))
+      .then(([row]) => row?.count ?? -1),
+    claimedEffects.length
+  );
+  assert.equal(
+    await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(evryExecutionOutcomes)
+      .where(eq(evryExecutionOutcomes.churchId, plant.id))
+      .then(([row]) => row?.count ?? -1),
+    0,
+    "direct adapters claim domain effects; only the executor writes outcomes"
+  );
 
   const foreignMessage = await db
     .select({ count: sql<number>`count(*)::int` })
