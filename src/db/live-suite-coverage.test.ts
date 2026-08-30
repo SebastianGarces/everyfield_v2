@@ -220,7 +220,7 @@ test("every live suite derives its own database, and no two collide", () => {
   );
 });
 
-test("the monolithic effect proofs own the first phase without dropping a live suite", () => {
+test("each monolithic effect proof owns a phase without dropping a live suite", () => {
   assert.deepEqual(DEDICATED_LIVE_SUITES, [
     PEOPLE_EFFECT_LIVE_SUITE,
     DOCUMENTS_WIKI_EFFECT_LIVE_SUITE,
@@ -228,6 +228,10 @@ test("the monolithic effect proofs own the first phase without dropping a live s
   for (const suite of DEDICATED_LIVE_SUITES) {
     assert.equal(PARALLEL_LIVE_SUITES.includes(suite), false);
   }
+  assert.deepEqual(
+    LIVE_SUITE_PHASES.slice(0, DEDICATED_LIVE_SUITES.length),
+    DEDICATED_LIVE_SUITES.map((suite) => [suite])
+  );
 
   const phased = LIVE_SUITE_PHASES.flat();
   assert.deepEqual(phased.toSorted(), [...LIVE_SUITES].toSorted());
