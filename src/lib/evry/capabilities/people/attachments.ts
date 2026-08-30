@@ -8,6 +8,7 @@ import {
 import { z } from "zod";
 
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
+import { MAX_COMMITMENT_FILE_SIZE } from "@/lib/people/commitment-document";
 import { parseCsvImport } from "@/lib/people/import";
 import { getPerson } from "@/lib/people/service";
 import { profilePhotoRefusal } from "@/lib/profile-photo";
@@ -26,19 +27,39 @@ export const EVRY_PEOPLE_IMPORT_MAX_ROWS = 25;
 const CSV_TYPES = new Set(["text/csv", "application/vnd.ms-excel"]);
 export const EVRY_PEOPLE_ATTACHMENT_MAX_AGE_MS = 30 * 60_000;
 
-const referenceDocumentSchema = z.strictObject({
-  version: z.literal(1),
+const referenceMetadataShape = {
   kind: z.enum(["person_photo", "people_csv", "commitment_document"]),
   actorUserId: z.string().uuid(),
   plantId: z.string().uuid(),
   personId: z.string().uuid().nullable(),
-  storageKey: z.string().min(1).max(500),
   digest: z.string().regex(/^[0-9a-f]{64}$/),
   contentType: z.string().min(1).max(100),
-  size: z.number().int().positive(),
+  size: z.number().int().positive().max(MAX_COMMITMENT_FILE_SIZE),
   originalName: z.string().min(1).max(255),
   expiresAt: z.string().datetime(),
+} as const;
+
+const storedReferenceDocumentSchema = z.strictObject({
+  version: z.literal(1),
+  ...referenceMetadataShape,
+  storageKey: z.string().min(1).max(500),
 });
+
+const inlineReferenceDocumentSchema = z.strictObject({
+  version: z.literal(2),
+  ...referenceMetadataShape,
+  uploadId: z.string().uuid(),
+  bytesBase64Url: z
+    .string()
+    .min(1)
+    .max(Math.ceil((MAX_COMMITMENT_FILE_SIZE * 4) / 3))
+    .regex(/^[A-Za-z0-9_-]+$/),
+});
+
+const referenceDocumentSchema = z.discriminatedUnion("version", [
+  storedReferenceDocumentSchema,
+  inlineReferenceDocumentSchema,
+]);
 
 export type EvryPeopleAttachmentReference = z.infer<
   typeof referenceDocumentSchema
@@ -65,9 +86,16 @@ export function sealEvryPeopleAttachmentReference(
   document: EvryPeopleAttachmentReference,
   secret: string = secretFromEnvironment()
 ): string {
-  const payload = Buffer.from(
-    JSON.stringify(referenceDocumentSchema.parse(document))
-  ).toString("base64url");
+  const parsed = referenceDocumentSchema.parse(document);
+  if (parsed.version === 2) {
+    const { bytesBase64Url, ...metadata } = parsed;
+    const metadataPayload = Buffer.from(JSON.stringify(metadata)).toString(
+      "base64url"
+    );
+    const payload = `v2.${metadataPayload}.${bytesBase64Url}`;
+    return `${payload}.${signature(payload, secret).toString("base64url")}`;
+  }
+  const payload = Buffer.from(JSON.stringify(parsed)).toString("base64url");
   return `${payload}.${signature(payload, secret).toString("base64url")}`;
 }
 
@@ -90,6 +118,55 @@ function openScopedEvryPeopleAttachmentReference(input: {
   expectedKind: EvryPeopleAttachmentReference["kind"];
   secret?: string;
 }): EvryPeopleAttachmentReference | null {
+  if (input.reference.startsWith("v2.")) {
+    const [version, metadataPayload, bytesBase64Url, suppliedValue, extra] =
+      input.reference.split(".");
+    if (
+      version !== "v2" ||
+      !metadataPayload ||
+      !bytesBase64Url ||
+      !suppliedValue ||
+      extra
+    )
+      return null;
+    let supplied: Buffer;
+    try {
+      supplied = Buffer.from(suppliedValue, "base64url");
+    } catch {
+      return null;
+    }
+    const signedPayload = `v2.${metadataPayload}.${bytesBase64Url}`;
+    const expected = signature(
+      signedPayload,
+      input.secret ?? secretFromEnvironment()
+    );
+    if (
+      supplied.length !== expected.length ||
+      !timingSafeEqual(supplied, expected)
+    )
+      return null;
+    let raw: unknown;
+    try {
+      raw = {
+        ...JSON.parse(
+          Buffer.from(metadataPayload, "base64url").toString("utf8")
+        ),
+        bytesBase64Url,
+      };
+    } catch {
+      return null;
+    }
+    const parsed = inlineReferenceDocumentSchema.safeParse(raw);
+    if (!parsed.success) return null;
+    const value = parsed.data;
+    if (
+      value.actorUserId !== input.actor.userId ||
+      value.plantId !== input.actor.plantId ||
+      value.kind !== input.expectedKind
+    )
+      return null;
+    return value;
+  }
   const [payload, suppliedValue, extra] = input.reference.split(".");
   if (!payload || !suppliedValue || extra) return null;
   let supplied: Buffer;
@@ -110,7 +187,7 @@ function openScopedEvryPeopleAttachmentReference(input: {
   } catch {
     return null;
   }
-  const parsed = referenceDocumentSchema.safeParse(raw);
+  const parsed = storedReferenceDocumentSchema.safeParse(raw);
   if (!parsed.success) return null;
   const value = parsed.data;
   const prefix = `evry-inputs/${input.actor.plantId}/${input.actor.userId}/`;
@@ -141,7 +218,7 @@ export function evryPeopleStagedAttachmentStorageKey(input: {
   return `${stagedAttachmentPrefix(input.actor)}${input.expiresAt.getTime()}-${uploadId}-${input.digest}.${input.extension}`;
 }
 
-/** Idempotently remove one exact actor/plant-scoped staged attachment. */
+/** Idempotently remove one exact actor/plant-scoped attachment reference. */
 export async function removeEvryPeopleAttachment(input: {
   reference: string;
   actor: Scope;
@@ -151,13 +228,16 @@ export async function removeEvryPeopleAttachment(input: {
 }): Promise<boolean> {
   const document = openScopedEvryPeopleAttachmentReference(input);
   if (!document) return false;
-  await (input.remove ?? evryPeopleFileStorage().remove)(document.storageKey);
+  if (document.version === 1) {
+    await (input.remove ?? evryPeopleFileStorage().remove)(document.storageKey);
+  }
   return true;
 }
 
 /**
- * Sweep expired, unclaimed staged inputs by the expiry embedded in their
- * first-party key. Deletion is idempotent, so an interrupted sweep converges.
+ * Sweep expired legacy staged inputs by the expiry embedded in their first-party
+ * key. V2 previews carry their bytes inline and never create an object to sweep.
+ * Deletion is idempotent, so an interrupted sweep converges.
  */
 export async function sweepExpiredEvryPeopleAttachments(
   input: {
@@ -202,15 +282,6 @@ export async function stageEvryPeopleAttachment(input: {
   sweep?: typeof sweepExpiredEvryPeopleAttachments;
 }) {
   const now = input.now ?? new Date();
-  const sweep =
-    input.sweep ?? (input.store ? null : sweepExpiredEvryPeopleAttachments);
-  if (sweep) {
-    try {
-      await sweep({ actor: input.actor, now });
-    } catch (error) {
-      console.error("[evry:people] staged attachment sweep failed", error);
-    }
-  }
   if (!input.file.name || input.file.name.length > 255 || input.file.size <= 0)
     return null;
   if (input.kind === "person_photo" || input.kind === "commitment_document") {
@@ -249,41 +320,20 @@ export async function stageEvryPeopleAttachment(input: {
     (preview.totalRows === 0 || preview.totalRows > EVRY_PEOPLE_IMPORT_MAX_ROWS)
   )
     return null;
-  const extension =
-    input.kind === "people_csv"
-      ? "csv"
-      : input.file.type === "application/pdf"
-        ? "pdf"
-        : input.file.type === "image/png"
-          ? "png"
-          : input.file.type === "image/webp"
-            ? "webp"
-            : "jpg";
   const expiresAt = new Date(now.getTime() + EVRY_PEOPLE_ATTACHMENT_MAX_AGE_MS);
-  const storageKey = evryPeopleStagedAttachmentStorageKey({
-    actor: input.actor,
-    expiresAt,
-    uploadId: randomUUID(),
-    digest,
-    extension,
-  });
-  await (input.store ?? evryPeopleFileStorage().store)(
-    storageKey,
-    bytes,
-    input.file.type
-  );
   const document = referenceDocumentSchema.parse({
-    version: 1,
+    version: 2,
     kind: input.kind,
     actorUserId: input.actor.userId,
     plantId: input.actor.plantId,
     personId: input.personId,
-    storageKey,
     digest,
     contentType: input.file.type,
     size: bytes.length,
     originalName: input.file.name,
     expiresAt: expiresAt.toISOString(),
+    uploadId: randomUUID(),
+    bytesBase64Url: bytes.toString("base64url"),
   });
   return {
     reference: sealEvryPeopleAttachmentReference(document, input.secret),
@@ -308,6 +358,16 @@ export async function readExactEvryPeopleAttachment(input: {
 }) {
   const document = openEvryPeopleAttachmentReference(input);
   if (!document || document.digest !== input.expectedDigest) return null;
+  if (document.version === 2) {
+    const bytes = Buffer.from(document.bytesBase64Url, "base64url");
+    if (
+      bytes.toString("base64url") !== document.bytesBase64Url ||
+      bytes.byteLength !== document.size ||
+      createHash("sha256").update(bytes).digest("hex") !== document.digest
+    )
+      return null;
+    return { document, bytes };
+  }
   const stored = await (input.read ?? evryPeopleFileStorage().read)(
     document.storageKey
   );

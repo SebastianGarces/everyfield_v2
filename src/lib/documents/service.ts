@@ -14,6 +14,7 @@
 // ============================================================================
 
 import { and, desc, eq, getTableColumns, sql } from "drizzle-orm";
+import { z } from "zod";
 
 import { db } from "@/db";
 import {
@@ -168,7 +169,38 @@ export function encodeGeneratedDocumentCursor(
   ).toString("base64url");
 }
 
-function decodeGeneratedDocumentCursor(
+const generatedDocumentCursorTimestamp = z
+  .string()
+  .regex(/^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,6}))?$/)
+  .refine((value) => {
+    const match =
+      /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,6}))?$/.exec(
+        value
+      );
+    if (!match) return false;
+    const [year, month, day, hour, minute, second] = match
+      .slice(1, 7)
+      .map(Number);
+    if (
+      !year ||
+      month! < 1 ||
+      month! > 12 ||
+      hour! > 23 ||
+      minute! > 59 ||
+      second! > 59
+    )
+      return false;
+    const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+    const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    return day! >= 1 && day! <= days[month! - 1]!;
+  });
+
+const generatedDocumentCursorSchema = z.strictObject({
+  createdAtExact: generatedDocumentCursorTimestamp,
+  id: z.string().uuid(),
+});
+
+export function decodeGeneratedDocumentCursor(
   value: string | null
 ): GeneratedDocumentCursor | null {
   if (value === null) return null;
@@ -176,18 +208,8 @@ function decodeGeneratedDocumentCursor(
     const parsed = JSON.parse(
       Buffer.from(value, "base64url").toString("utf8")
     ) as unknown;
-    if (!parsed || typeof parsed !== "object") return null;
-    const candidate = parsed as Record<string, unknown>;
-    if (
-      typeof candidate.createdAtExact !== "string" ||
-      !/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d{1,6})?$/.test(
-        candidate.createdAtExact
-      ) ||
-      typeof candidate.id !== "string" ||
-      !/^[0-9a-f-]{36}$/.test(candidate.id)
-    )
-      return null;
-    return { createdAtExact: candidate.createdAtExact, id: candidate.id };
+    const cursor = generatedDocumentCursorSchema.safeParse(parsed);
+    return cursor.success ? cursor.data : null;
   } catch {
     return null;
   }

@@ -909,7 +909,7 @@ export function EvryShell({
                 ? "Choose a PDF, JPEG, or PNG file."
                 : reason === "file_too_large"
                   ? "Choose a file that is 10 MB or smaller."
-                  : "Unable to stage this file."
+                  : "Unable to prepare this file."
             );
           }
         }

@@ -70,13 +70,13 @@ export function createEvryPeopleEffectProofStorage(): EvryPeopleEffectProofStora
     },
     assertCleaned() {
       const stores = operations.filter(({ kind }) => kind === "store");
-      const staged = stores.filter(({ key }) => key.startsWith("evry-inputs/"));
+      const staged = operations.filter(
+        ({ kind, key }) =>
+          kind !== "list_keys" && key.startsWith("evry-inputs/")
+      );
       const final = stores.filter(({ key }) => key.startsWith("people/"));
       const removed = new Set(
         operations.filter(({ kind }) => kind === "remove").map(({ key }) => key)
-      );
-      const read = new Set(
-        operations.filter(({ kind }) => kind === "read").map(({ key }) => key)
       );
       const listed = new Set(
         operations
@@ -86,14 +86,10 @@ export function createEvryPeopleEffectProofStorage(): EvryPeopleEffectProofStora
 
       assert.equal(
         staged.length,
-        3,
-        "proof must stage all three CSV/photo inputs"
+        0,
+        "preview must not persist or read an evry-inputs object"
       );
       assert.equal(final.length, 1, "proof must store one final person photo");
-      for (const { key } of staged) {
-        assert.ok(read.has(key), `staged object was never read: ${key}`);
-        assert.ok(removed.has(key), `staged object was never removed: ${key}`);
-      }
       assert.ok(removed.has(final[0]!.key), "final photo was never removed");
       assert.ok(
         [...listed].some((prefix) => prefix.startsWith("evry-inputs/")),

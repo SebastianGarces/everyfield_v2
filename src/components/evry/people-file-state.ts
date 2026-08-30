@@ -1,3 +1,5 @@
+import { EVRY_PEOPLE_ATTACHMENT_REFERENCE_MAX_LENGTH } from "@/lib/evry/capabilities/people/attachment-contract";
+
 function record(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null
     ? (value as Record<string, unknown>)
@@ -137,7 +139,7 @@ export function preparedEvryPeopleFileFromStage(
   return staged?.status === "staged" &&
     typeof staged.reference === "string" &&
     staged.reference.length > 0 &&
-    staged.reference.length <= 4_000 &&
+    staged.reference.length <= EVRY_PEOPLE_ATTACHMENT_REFERENCE_MAX_LENGTH &&
     typeof metadata?.digest === "string" &&
     /^[0-9a-f]{64}$/.test(metadata.digest)
     ? {

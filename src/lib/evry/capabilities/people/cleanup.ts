@@ -10,8 +10,12 @@ import {
   removeEvryPeopleAttachment,
   type EvryPeopleAttachmentReference,
 } from "./attachments";
+import { EVRY_PEOPLE_ATTACHMENT_REFERENCE_MAX_LENGTH } from "./attachment-contract";
 
-const attachmentReferenceSchema = z.string().min(1).max(4_000);
+const attachmentReferenceSchema = z
+  .string()
+  .min(1)
+  .max(EVRY_PEOPLE_ATTACHMENT_REFERENCE_MAX_LENGTH);
 const storedPlanDocumentSchema = z
   .object({
     steps: z.array(
@@ -78,7 +82,7 @@ function cleanupTargetForStep(input: {
 }
 
 /**
- * Remove staged People inputs only after the exact plan reaches a terminal or
+ * Remove legacy staged People inputs only after the exact plan reaches a terminal or
  * unusable state. The exact actor/plant/fingerprint lookup and signed reference
  * check make caller-selected plan bytes unable to target another object.
  */

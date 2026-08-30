@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { isUniqueViolation } from "@/db/errors";
 import { isUnauthorized } from "@/lib/auth/unauthorized";
+import { EVRY_PEOPLE_ATTACHMENT_REFERENCE_MAX_LENGTH } from "@/lib/evry/capabilities/people/attachment-contract";
 import {
   openEvryPeopleAttachmentReference,
   removeEvryPeopleAttachment,
@@ -32,18 +33,23 @@ import { publicEvryConversation } from "../../../conversations/shared";
 
 export const dynamic = "force-dynamic";
 const PRIVATE_HEADERS = { "cache-control": "private, no-store" } as const;
-export const EVRY_PEOPLE_PLAN_MAX_BYTES = 64 * 1024;
+export const EVRY_PEOPLE_PLAN_MAX_BYTES =
+  EVRY_PEOPLE_ATTACHMENT_REFERENCE_MAX_LENGTH + 64 * 1024;
+const attachmentReference = z
+  .string()
+  .min(1)
+  .max(EVRY_PEOPLE_ATTACHMENT_REFERENCE_MAX_LENGTH);
 const bodySchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("person_photo"),
-    reference: z.string().min(1).max(4_000),
+    reference: attachmentReference,
     attachmentDigest: z.string().regex(/^[0-9a-f]{64}$/),
     conversationId: z.string().uuid().nullable(),
     requestKey: z.string().uuid(),
   }),
   z.strictObject({
     kind: z.literal("commitment_document"),
-    reference: z.string().min(1).max(4_000),
+    reference: attachmentReference,
     attachmentDigest: z.string().regex(/^[0-9a-f]{64}$/),
     commitmentType: z.enum(["core_group", "launch_team"]),
     signedDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -54,7 +60,7 @@ const bodySchema = z.discriminatedUnion("kind", [
   }),
   z.strictObject({
     kind: z.literal("people_csv"),
-    reference: z.string().min(1).max(4_000),
+    reference: attachmentReference,
     attachmentDigest: z.string().regex(/^[0-9a-f]{64}$/),
     duplicateResolutions: z.record(
       z.string().regex(/^\d+$/),
@@ -117,7 +123,7 @@ export function createEvryPeopleAttachmentPlanPost({
           });
         } catch (error) {
           console.error(
-            "[evry:people] failed to remove a refused staged attachment",
+            "[evry:people] failed to remove a refused attachment reference",
             error
           );
         }

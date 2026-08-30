@@ -9,6 +9,7 @@ import ts from "typescript";
 
 import type { Capability } from "../../src/lib/auth/seat-rules";
 import { collectActionSurfaces, collectRouteSurfaces } from "./inventory";
+import { generatePeopleCapabilityInventory } from "./people-inventory";
 
 const GENERATED_INVENTORY = path.join(
   "src",
@@ -154,12 +155,44 @@ const RSC_READ_CONTRACTS = {
   resolveDocumentMergeContext: ["documents.templates.list", "documents"],
 } as const;
 
-const DELEGATED_PEOPLE_FILE_SURFACES = [
-  "action:src/app/(dashboard)/people/import-export-actions.ts → exportPeopleAction",
-  "action:src/app/(dashboard)/people/import-export-actions.ts → previewImportAction",
-  "action:src/app/(dashboard)/people/import-export-actions.ts → executeBulkImportAction",
-  "action:src/app/(dashboard)/people/import-export-actions.ts → downloadCsvTemplateAction",
-] as const;
+const DELEGATED_PEOPLE_FILE_SOURCE =
+  "src/app/(dashboard)/people/import-export-actions.ts";
+const DELEGATED_PEOPLE_FILE_SURFACES = {
+  [`action:${DELEGATED_PEOPLE_FILE_SOURCE} → exportPeopleAction`]: {
+    capabilityIdentity: "people.crm.exports.export-people",
+    operationKind: "read",
+    applicationCapability: "read",
+    confirmation: "not_required",
+  },
+  [`action:${DELEGATED_PEOPLE_FILE_SOURCE} → previewImportAction`]: {
+    capabilityIdentity: "people.crm.imports.preview-import",
+    operationKind: "read",
+    applicationCapability: "people.write",
+    confirmation: "not_required",
+  },
+  [`action:${DELEGATED_PEOPLE_FILE_SOURCE} → executeBulkImportAction`]: {
+    capabilityIdentity: "people.crm.imports.execute-bulk-import",
+    operationKind: "effect",
+    applicationCapability: "people.write",
+    confirmation: "required",
+  },
+  [`action:${DELEGATED_PEOPLE_FILE_SOURCE} → downloadCsvTemplateAction`]: {
+    capabilityIdentity: "people.crm.imports.download-csv-template",
+    operationKind: "read",
+    applicationCapability: "read",
+    confirmation: "not_required",
+  },
+} as const satisfies Readonly<
+  Record<
+    string,
+    Readonly<{
+      capabilityIdentity: string;
+      operationKind: OperationKind;
+      applicationCapability: Capability;
+      confirmation: "required" | "not_required";
+    }>
+  >
+>;
 
 const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
@@ -536,29 +569,65 @@ export function generateDocumentsWikiInventory(
       classification: { state: "supported" },
     };
   });
-  const delegated: DocumentsWikiSurface[] = DELEGATED_PEOPLE_FILE_SURFACES.map(
-    (identity) => {
-      const source = identity.slice("action:".length).split(" → ")[0]!;
-      const exportName = identity.split(" → ")[1]!;
-      const surface = collectActionSurfaces().find(
-        (candidate) => candidate.identity === identity
-      );
-      if (!surface)
-        throw new Error(`Delegated People file surface drifted: ${identity}`);
-      return {
-        kind: "delegated",
-        identity,
-        source,
-        exportName,
-        capabilityIdentity: "people.files.delegated",
-        domain: "people_files",
-        operationKind: "delegated",
-        applicationCapability: surface.applicationCapability,
-        confirmation: "delegated",
-        classification: { state: "delegated", owner: "people" },
-      };
-    }
+  const peopleInventory = generatePeopleCapabilityInventory(repoRoot);
+  const delegatedPeopleActions = peopleInventory.entries.filter(
+    ({ kind, source, classification }) =>
+      kind === "action" &&
+      source === DELEGATED_PEOPLE_FILE_SOURCE &&
+      classification.state === "supported"
   );
+  const expectedDelegatedIdentities = Object.keys(
+    DELEGATED_PEOPLE_FILE_SURFACES
+  ).toSorted(compare);
+  if (
+    JSON.stringify(
+      delegatedPeopleActions.map(({ identity }) => identity).toSorted(compare)
+    ) !== JSON.stringify(expectedDelegatedIdentities)
+  ) {
+    throw new Error(
+      "Delegated People file surfaces drifted from the People inventory"
+    );
+  }
+  const delegated: DocumentsWikiSurface[] = Object.entries(
+    DELEGATED_PEOPLE_FILE_SURFACES
+  ).map(([identity, expected]) => {
+    const source = identity.slice("action:".length).split(" → ")[0]!;
+    const exportName = identity.split(" → ")[1]!;
+    const surface = delegatedPeopleActions.find(
+      (candidate) => candidate.identity === identity
+    );
+    const capability = peopleInventory.capabilities.find(
+      (candidate) => candidate.identity === expected.capabilityIdentity
+    );
+    if (
+      !surface ||
+      !capability ||
+      !capability.surfaceIdentities.includes(identity) ||
+      surface.capabilityIdentity !== expected.capabilityIdentity ||
+      surface.operationKind !== expected.operationKind ||
+      surface.applicationCapability !== expected.applicationCapability ||
+      surface.confirmation !== expected.confirmation ||
+      capability.operationKind !== expected.operationKind ||
+      capability.applicationCapability !== expected.applicationCapability ||
+      capability.confirmation !== expected.confirmation
+    ) {
+      throw new Error(
+        `Delegated People file ownership contract drifted: ${identity}`
+      );
+    }
+    return {
+      kind: "delegated",
+      identity,
+      source,
+      exportName,
+      capabilityIdentity: expected.capabilityIdentity,
+      domain: "people_files",
+      operationKind: expected.operationKind,
+      applicationCapability: expected.applicationCapability,
+      confirmation: expected.confirmation,
+      classification: { state: "delegated", owner: "people" },
+    };
+  });
 
   const entries = [
     ...actions,

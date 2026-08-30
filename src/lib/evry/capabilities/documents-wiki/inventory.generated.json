@@ -250,11 +250,11 @@
       "identity": "action:src/app/(dashboard)/people/import-export-actions.ts → downloadCsvTemplateAction",
       "source": "src/app/(dashboard)/people/import-export-actions.ts",
       "exportName": "downloadCsvTemplateAction",
-      "capabilityIdentity": "people.files.delegated",
+      "capabilityIdentity": "people.crm.imports.download-csv-template",
       "domain": "people_files",
-      "operationKind": "delegated",
+      "operationKind": "read",
       "applicationCapability": "read",
-      "confirmation": "delegated",
+      "confirmation": "not_required",
       "classification": { "state": "delegated", "owner": "people" }
     },
     {
@@ -262,11 +262,11 @@
       "identity": "action:src/app/(dashboard)/people/import-export-actions.ts → executeBulkImportAction",
       "source": "src/app/(dashboard)/people/import-export-actions.ts",
       "exportName": "executeBulkImportAction",
-      "capabilityIdentity": "people.files.delegated",
+      "capabilityIdentity": "people.crm.imports.execute-bulk-import",
       "domain": "people_files",
-      "operationKind": "delegated",
+      "operationKind": "effect",
       "applicationCapability": "people.write",
-      "confirmation": "delegated",
+      "confirmation": "required",
       "classification": { "state": "delegated", "owner": "people" }
     },
     {
@@ -274,11 +274,11 @@
       "identity": "action:src/app/(dashboard)/people/import-export-actions.ts → exportPeopleAction",
       "source": "src/app/(dashboard)/people/import-export-actions.ts",
       "exportName": "exportPeopleAction",
-      "capabilityIdentity": "people.files.delegated",
+      "capabilityIdentity": "people.crm.exports.export-people",
       "domain": "people_files",
-      "operationKind": "delegated",
+      "operationKind": "read",
       "applicationCapability": "read",
-      "confirmation": "delegated",
+      "confirmation": "not_required",
       "classification": { "state": "delegated", "owner": "people" }
     },
     {
@@ -286,11 +286,11 @@
       "identity": "action:src/app/(dashboard)/people/import-export-actions.ts → previewImportAction",
       "source": "src/app/(dashboard)/people/import-export-actions.ts",
       "exportName": "previewImportAction",
-      "capabilityIdentity": "people.files.delegated",
+      "capabilityIdentity": "people.crm.imports.preview-import",
       "domain": "people_files",
-      "operationKind": "delegated",
+      "operationKind": "read",
       "applicationCapability": "people.write",
-      "confirmation": "delegated",
+      "confirmation": "not_required",
       "classification": { "state": "delegated", "owner": "people" }
     },
     {

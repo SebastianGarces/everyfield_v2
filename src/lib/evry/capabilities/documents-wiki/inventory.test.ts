@@ -32,16 +32,64 @@ test("generated Documents/wiki inventory is current and a closed bijection", () 
 });
 
 test("People-owned file surfaces are delegated exactly and external webhooks stay excluded", () => {
-  assert.equal(
-    generated.entries.filter(
-      ({ classification }) => classification.state === "delegated"
-    ).length,
-    4
+  const delegated = generated.entries.filter(
+    ({ classification }) => classification.state === "delegated"
   );
   assert.ok(
     generated.entries
       .filter(({ classification }) => classification.state === "delegated")
       .every(({ domain }) => domain === "people_files")
+  );
+  assert.deepEqual(
+    delegated.map(
+      ({
+        identity,
+        capabilityIdentity,
+        operationKind,
+        applicationCapability,
+        confirmation,
+      }) => ({
+        identity,
+        capabilityIdentity,
+        operationKind,
+        applicationCapability,
+        confirmation,
+      })
+    ),
+    [
+      {
+        identity:
+          "action:src/app/(dashboard)/people/import-export-actions.ts → downloadCsvTemplateAction",
+        capabilityIdentity: "people.crm.imports.download-csv-template",
+        operationKind: "read",
+        applicationCapability: "read",
+        confirmation: "not_required",
+      },
+      {
+        identity:
+          "action:src/app/(dashboard)/people/import-export-actions.ts → executeBulkImportAction",
+        capabilityIdentity: "people.crm.imports.execute-bulk-import",
+        operationKind: "effect",
+        applicationCapability: "people.write",
+        confirmation: "required",
+      },
+      {
+        identity:
+          "action:src/app/(dashboard)/people/import-export-actions.ts → exportPeopleAction",
+        capabilityIdentity: "people.crm.exports.export-people",
+        operationKind: "read",
+        applicationCapability: "read",
+        confirmation: "not_required",
+      },
+      {
+        identity:
+          "action:src/app/(dashboard)/people/import-export-actions.ts → previewImportAction",
+        capabilityIdentity: "people.crm.imports.preview-import",
+        operationKind: "read",
+        applicationCapability: "people.write",
+        confirmation: "not_required",
+      },
+    ]
   );
   assert.deepEqual(
     generated.entries

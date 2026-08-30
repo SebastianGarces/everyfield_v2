@@ -6,19 +6,23 @@ import {
   type EvryCapabilityEvalLayer,
 } from "./contracts";
 
-function outcome(identity: string, layer: EvryCapabilityEvalLayer) {
-  return Object.freeze({
-    id: `${identity}:${layer}`,
-    proofId: "documents-wiki-capability-contract",
-    testName: `${identity}:${layer}`,
-  });
-}
+const LIVE_OUTCOME_LAYERS = new Set<EvryCapabilityEvalLayer>([
+  "tenancy",
+  "permission",
+  "execution",
+  "idempotency",
+  "errors",
+  "ui_artifact",
+]);
 
-function live(identity: string, layer: EvryCapabilityEvalLayer) {
+function proofCase(identity: string, layer: EvryCapabilityEvalLayer) {
+  const live = LIVE_OUTCOME_LAYERS.has(layer);
   return Object.freeze({
-    id: `${identity}:${layer}:live-database`,
-    proofId: "documents-wiki-capability-live-outcomes",
-    testName: `${identity}:production-live-outcome`,
+    id: `${identity}:${layer}${live ? ":live-database" : ""}`,
+    proofId: live
+      ? "documents-wiki-capability-live-outcomes"
+      : "documents-wiki-capability-contract",
+    testName: `${identity}:${layer}${live ? ":live" : ""}`,
   });
 }
 
@@ -26,8 +30,7 @@ function fixtureFor(
   capability: (typeof generated.capabilities)[number]
 ): EvryCapabilityEvalFixture {
   const cases = (layer: EvryCapabilityEvalLayer) => [
-    outcome(capability.identity, layer),
-    live(capability.identity, layer),
+    proofCase(capability.identity, layer),
   ];
   return defineEvryCapabilityEvalFixture({
     capabilityIdentity: capability.identity,

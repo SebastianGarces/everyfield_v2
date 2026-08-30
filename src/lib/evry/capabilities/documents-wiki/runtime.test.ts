@@ -94,6 +94,58 @@ const SELECTION_TEXT: Readonly<Record<string, string>> = {
     "Rate wiki article: slug=discovery/calling;rating=helpful",
 };
 
+const EXPECTED_SELECTIONS: Readonly<Record<string, unknown>> = {
+  [DOCUMENTS_WIKI_READ_IDENTITIES.templates]: { kind: "templates" },
+  [DOCUMENTS_WIKI_READ_IDENTITIES.history]: {
+    kind: "history",
+    cursor: null,
+  },
+  [DOCUMENTS_WIKI_READ_IDENTITIES.download]: {
+    kind: "download",
+    documentId: UUID,
+  },
+  [DOCUMENTS_WIKI_READ_IDENTITIES.search]: {
+    kind: "search",
+    query: "healthy church",
+    page: 2,
+  },
+  [DOCUMENTS_WIKI_READ_IDENTITIES.article]: {
+    kind: "article",
+    slug: "discovery/calling",
+    page: 2,
+  },
+  [DOCUMENTS_WIKI_READ_IDENTITIES.navigation]: {
+    kind: "navigation",
+    page: 2,
+  },
+  [DOCUMENTS_WIKI_READ_IDENTITIES.progress]: {
+    kind: "progress",
+    page: 2,
+  },
+  [DOCUMENTS_WIKI_EFFECT_IDENTITIES.generate]: {
+    kind: "generate",
+    templateId: "commitment-card",
+    format: "pdf",
+    provided: { church_name: "Dayspring" },
+  },
+  [DOCUMENTS_WIKI_EFFECT_IDENTITIES.bookmark]: {
+    kind: "bookmark",
+    slug: "discovery/calling",
+    bookmarked: true,
+  },
+  [DOCUMENTS_WIKI_EFFECT_IDENTITIES.progress]: {
+    kind: "progress",
+    slug: "discovery/calling",
+    status: "in_progress",
+    scrollPosition: 0.5,
+  },
+  [DOCUMENTS_WIKI_EFFECT_IDENTITIES.feedback]: {
+    kind: "feedback",
+    slug: "discovery/calling",
+    rating: "helpful",
+  },
+};
+
 function effectDocument(identity: string) {
   const args = EFFECT_ARGUMENTS[identity];
   assert.ok(args);
@@ -113,66 +165,87 @@ function effectDocument(identity: string) {
   });
 }
 
-function selected(identity: string) {
+function selectedIdentity(identity: string): string | null {
   const text = SELECTION_TEXT[identity];
   assert.ok(text);
-  return identity in EFFECT_ARGUMENTS
-    ? selectDocumentsWikiEffect(text)
-    : selectDocumentsWikiRead(text);
+  if (identity in EFFECT_ARGUMENTS) {
+    const selection = selectDocumentsWikiEffect(text);
+    return selection ? DOCUMENTS_WIKI_EFFECT_IDENTITIES[selection.kind] : null;
+  }
+  const selection = selectDocumentsWikiRead(text);
+  return selection ? DOCUMENTS_WIKI_READ_IDENTITIES[selection.kind] : null;
 }
 
-for (const capability of inventory.capabilities) {
+async function exerciseDeterministicLayer(
+  capability: (typeof inventory.capabilities)[number],
+  layer: "policy" | "selection" | "arguments" | "confirmation"
+) {
   const identity = capability.identity;
-  for (const layer of [
-    "policy",
-    "selection",
-    "arguments",
-    "tenancy",
-    "permission",
-    "confirmation",
-    "execution",
-    "idempotency",
-    "errors",
-    "ui_artifact",
-  ] as const) {
-    test(`${identity}:${layer}`, () => {
-      const registration = evryCapabilityRegistrationFor(identity);
-      assert.ok(registration);
+  const registration = evryCapabilityRegistrationFor(identity);
+  assert.ok(registration);
+  const readRegistration = PRODUCTION_EVRY_READ_REGISTRATIONS.find(
+    ({ capabilityIdentity }) => capabilityIdentity === identity
+  );
+  const executionRegistration =
+    PRODUCTION_EVRY_EXECUTION_REGISTRY.registrationFor(identity);
+
+  switch (layer) {
+    case "policy":
       assert.equal(registration.operationKind, capability.operationKind);
-      assert.ok(
-        selected(identity),
-        `${identity} has no executed selector outcome`
+      assert.equal(
+        registration.applicationCapability,
+        capability.applicationCapability
       );
+      assert.equal(registration.parityCapability, capability.parityCapability);
+      return;
+    case "selection":
+      assert.equal(selectedIdentity(identity), identity);
+      assert.deepEqual(
+        identity in EFFECT_ARGUMENTS
+          ? selectDocumentsWikiEffect(SELECTION_TEXT[identity]!)
+          : selectDocumentsWikiRead(SELECTION_TEXT[identity]!),
+        EXPECTED_SELECTIONS[identity]
+      );
+      return;
+    case "arguments":
       if (capability.operationKind === "read") {
-        assert.ok(
-          PRODUCTION_EVRY_READ_REGISTRATIONS.some(
-            ({ capabilityIdentity }) => capabilityIdentity === identity
-          )
-        );
-        assert.deepEqual(selected(identity), selected(identity));
+        assert.ok(readRegistration);
         assert.equal(
-          SELECTION_TEXT[identity]!.includes("foreignPlantId"),
-          false
+          await readRegistration.execute(
+            { literalUserText: SELECTION_TEXT[identity]!, pageContext: null },
+            { foreignPlantId: UUID }
+          ),
+          null
         );
         return;
       }
-      const document = effectDocument(identity);
-      const planRegistration =
-        DOCUMENTS_WIKI_PLAN_REGISTRY.registrationFor(identity);
-      assert.ok(planRegistration);
+      assert.ok(executionRegistration);
       assert.equal(
-        planRegistration.argumentsSchema.safeParse(EFFECT_ARGUMENTS[identity])
-          .success,
+        executionRegistration.planCapability.argumentsSchema.safeParse(
+          EFFECT_ARGUMENTS[identity]
+        ).success,
         true
       );
       assert.equal(
-        planRegistration.argumentsSchema.safeParse({
+        executionRegistration.planCapability.argumentsSchema.safeParse({
           ...EFFECT_ARGUMENTS[identity],
           foreignPlantId: UUID,
         }).success,
         false
       );
-      assert.ok(PRODUCTION_EVRY_EXECUTION_REGISTRY.registrationFor(identity));
+      return;
+    case "confirmation": {
+      if (capability.operationKind === "read") {
+        assert.ok(readRegistration);
+        assert.equal(executionRegistration, null);
+        assert.equal(
+          DOCUMENTS_WIKI_PLAN_REGISTRY.registrationFor(identity),
+          null
+        );
+        return;
+      }
+      assert.ok(executionRegistration);
+      const document = effectDocument(identity);
       const review = trustedReviewForEvryPlanDocument({
         plan: PLAN,
         document,
@@ -197,7 +270,21 @@ for (const capability of inventory.capabilities) {
           document: effectDocument(identity),
         })
       );
-    });
+      return;
+    }
+  }
+}
+
+for (const capability of inventory.capabilities) {
+  const identity = capability.identity;
+  for (const layer of [
+    "policy",
+    "selection",
+    "arguments",
+    "confirmation",
+  ] as const) {
+    test(`${identity}:${layer}`, () =>
+      exerciseDeterministicLayer(capability, layer));
   }
 }
 

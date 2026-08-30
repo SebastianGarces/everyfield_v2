@@ -14,6 +14,8 @@ type Outcome = Readonly<{
   denied: true;
   foreignRefused: true;
   durable: true;
+  errors: true;
+  uiArtifact: true;
 }>;
 let outcomes = new Map<string, Outcome>();
 
@@ -63,22 +65,47 @@ before(() => {
   );
 });
 
+const LIVE_LAYERS = [
+  "tenancy",
+  "permission",
+  "execution",
+  "idempotency",
+  "errors",
+  "ui_artifact",
+] as const;
+
 for (const capability of generated.capabilities) {
-  test(
-    `${capability.identity}:production-live-outcome`,
-    { skip: LIVE_DB ? false : "real Postgres is required" },
-    () => {
-      const outcome = outcomes.get(capability.identity);
-      assert.ok(outcome);
-      assert.deepEqual(outcome, {
-        identity: capability.identity,
-        operationKind: capability.operationKind,
-        allowed: true,
-        replayed: true,
-        denied: true,
-        foreignRefused: true,
-        durable: true,
-      });
-    }
-  );
+  for (const layer of LIVE_LAYERS) {
+    test(
+      `${capability.identity}:${layer}:live`,
+      { skip: LIVE_DB ? false : "real Postgres is required" },
+      () => {
+        const outcome = outcomes.get(capability.identity);
+        assert.ok(outcome);
+        assert.equal(outcome.identity, capability.identity);
+        assert.equal(outcome.operationKind, capability.operationKind);
+        switch (layer) {
+          case "tenancy":
+            assert.equal(outcome.foreignRefused, true);
+            break;
+          case "permission":
+            assert.equal(outcome.denied, true);
+            break;
+          case "execution":
+            assert.equal(outcome.allowed, true);
+            assert.equal(outcome.durable, true);
+            break;
+          case "idempotency":
+            assert.equal(outcome.replayed, true);
+            break;
+          case "errors":
+            assert.equal(outcome.errors, true);
+            break;
+          case "ui_artifact":
+            assert.equal(outcome.uiArtifact, true);
+            break;
+        }
+      }
+    );
+  }
 }

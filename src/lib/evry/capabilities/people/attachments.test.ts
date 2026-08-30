@@ -3,7 +3,6 @@ import { createHash } from "node:crypto";
 import { test } from "node:test";
 
 import {
-  EVRY_PEOPLE_ATTACHMENT_MAX_AGE_MS,
   EVRY_PEOPLE_CSV_MAX_BYTES,
   evryPeopleStagedAttachmentStorageKey,
   openEvryPeopleAttachmentReference,
@@ -91,9 +90,9 @@ test("malformed, oversize, and foreign attachments refuse before storage", async
   assert.equal(stores, 0);
 });
 
-test("CSV staging returns an immutable actor and plant scoped digest reference", async () => {
+test("CSV preview returns immutable inline bytes without writing object storage", async () => {
   const bytes = Buffer.from("First Name *,Last Name *\nAda,Lovelace");
-  const storedEvents: { key: string; bytes: Buffer; type: string }[] = [];
+  let storageWrites = 0;
   const result = await stageEvryPeopleAttachment({
     actor: ACTOR,
     kind: "people_csv",
@@ -107,13 +106,13 @@ test("CSV staging returns an immutable actor and plant scoped digest reference",
       invalidRows: [],
       duplicateRows: [],
     }),
-    store: async (key, body, type) => {
-      storedEvents.push({ key, bytes: body, type });
+    store: async (key) => {
+      storageWrites += 1;
       return key;
     },
   });
-  const stored = storedEvents[0];
-  assert.ok(result && stored);
+  assert.ok(result);
+  assert.equal(storageWrites, 0);
   assert.equal(
     result.metadata.digest,
     createHash("sha256").update(bytes).digest("hex")
@@ -155,23 +154,67 @@ test("CSV staging returns an immutable actor and plant scoped digest reference",
       expectedDigest: result.metadata.digest,
       now: NOW,
       secret: SECRET,
-      read: async (key) =>
-        stored && key === stored.key
-          ? { body: stored.bytes, contentType: stored.type }
-          : null,
+      read: async () => {
+        throw new Error("preview must not read object storage");
+      },
     })
-  );
-  assert.match(
-    stored.key,
-    new RegExp(
-      `^evry-inputs/${ACTOR.plantId}/${ACTOR.userId}/${NOW.getTime() + EVRY_PEOPLE_ATTACHMENT_MAX_AGE_MS}-[0-9a-f-]{36}-[0-9a-f]{64}\\.csv$`
-    )
   );
 });
 
-test("concurrent identical uploads own distinct staged objects", async () => {
+test("photo and commitment previews keep their exact bytes inline without writing object storage", async () => {
+  const cases = [
+    {
+      kind: "person_photo" as const,
+      file: file("photo.png", "image/png", Buffer.from("photo-bytes")),
+    },
+    {
+      kind: "commitment_document" as const,
+      file: file(
+        "commitment.pdf",
+        "application/pdf",
+        Buffer.from("commitment-bytes")
+      ),
+    },
+  ];
+  let storageWrites = 0;
+  for (const candidate of cases) {
+    const result = await stageEvryPeopleAttachment({
+      actor: ACTOR,
+      kind: candidate.kind,
+      personId: ACTOR.userId,
+      file: candidate.file,
+      now: NOW,
+      secret: SECRET,
+      loadPerson: async () => ({}) as never,
+      store: async (key) => {
+        storageWrites += 1;
+        return key;
+      },
+    });
+    assert.ok(result);
+    const exact = await readExactEvryPeopleAttachment({
+      reference: result.reference,
+      actor: ACTOR,
+      expectedKind: candidate.kind,
+      expectedDigest: result.metadata.digest,
+      now: NOW,
+      secret: SECRET,
+      read: async () => {
+        throw new Error("preview must not read object storage");
+      },
+    });
+    assert.ok(exact);
+    assert.deepEqual(
+      exact.bytes,
+      Buffer.from(await candidate.file.arrayBuffer())
+    );
+  }
+  assert.equal(storageWrites, 0);
+});
+
+test("concurrent identical previews own distinct inline references and no staged objects", async () => {
   const bytes = Buffer.from("First Name *,Last Name *\nAda,Lovelace");
-  const stored: string[] = [];
+  let storageWrites = 0;
   const stage = () =>
     stageEvryPeopleAttachment({
       actor: ACTOR,
@@ -187,25 +230,28 @@ test("concurrent identical uploads own distinct staged objects", async () => {
         duplicateRows: [],
       }),
       store: async (key) => {
-        stored.push(key);
+        storageWrites += 1;
         return key;
       },
     });
   const [first, second] = await Promise.all([stage(), stage()]);
   assert.ok(first && second);
-  assert.notEqual(stored[0], stored[1]);
-  const remaining = new Set(stored);
+  assert.notEqual(first.reference, second.reference);
+  assert.equal(storageWrites, 0);
+  let removals = 0;
   assert.equal(
     await removeEvryPeopleAttachment({
       actor: ACTOR,
       reference: first.reference,
       expectedKind: "people_csv",
       secret: SECRET,
-      remove: async (key) => void remaining.delete(key),
+      remove: async () => {
+        removals += 1;
+      },
     }),
     true
   );
-  assert.deepEqual([...remaining], [stored[1]]);
+  assert.equal(removals, 0);
   assert.ok(
     await readExactEvryPeopleAttachment({
       actor: ACTOR,
@@ -214,13 +260,14 @@ test("concurrent identical uploads own distinct staged objects", async () => {
       expectedDigest: second.metadata.digest,
       now: NOW,
       secret: SECRET,
-      read: async (key) =>
-        remaining.has(key) ? { body: bytes, contentType: "text/csv" } : null,
+      read: async () => {
+        throw new Error("preview must not read object storage");
+      },
     })
   );
 });
 
-test("exact staged removal remains actor-scoped after reference expiry", async () => {
+test("inline reference cleanup remains actor-scoped after expiry and performs no object delete", async () => {
   const bytes = Buffer.from("First Name *,Last Name *\nAda,Lovelace");
   const result = await stageEvryPeopleAttachment({
     actor: ACTOR,
@@ -259,7 +306,7 @@ test("exact staged removal remains actor-scoped after reference expiry", async (
     }),
     true
   );
-  assert.equal(removed.length, 1);
+  assert.equal(removed.length, 0);
 });
 
 test("expired unclaimed attachments sweep idempotently and retry failed deletes", async () => {

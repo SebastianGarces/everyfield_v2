@@ -24,7 +24,10 @@ import {
   type EvryEffectCapabilityAuthorization,
   type EvryReadCapabilityAuthorization,
 } from "@/lib/evry/eligibility/capabilities";
-import { storedEvryReadArtifactDocument } from "@/lib/evry/conversations/artifacts";
+import {
+  parseEvryConversationArtifactDocument,
+  storedEvryReadArtifactDocument,
+} from "@/lib/evry/conversations/artifacts";
 import { executionEffectKey } from "@/lib/evry/audit/identity";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
 import { createEvryExecutor } from "@/lib/evry/executor/core";
@@ -49,6 +52,7 @@ import { executeAuthorizedEvryRead } from "@/lib/evry/reads/contract";
 import generated from "./inventory.generated.json";
 import { withEvryDocumentLiveProofStorage } from "./document-storage";
 import {
+  DOCUMENTS_WIKI_EFFECT_IDENTITIES,
   DOCUMENTS_WIKI_PLAN_REGISTRY,
   DOCUMENTS_WIKI_REVIEW_REGISTRY,
   proposeDocumentsWikiEffect,
@@ -103,6 +107,8 @@ const replayOutcomes = new Set<string>();
 const denialOutcomes = new Set<string>();
 const foreignRefusalOutcomes = new Set<string>();
 const durableOutcomes = new Set<string>();
+const errorOutcomes = new Set<string>();
+const uiArtifactOutcomes = new Set<string>();
 
 async function freshReadAuthorization(
   identity: string
@@ -165,6 +171,8 @@ async function prepareEffect(
     registry: DOCUMENTS_WIKI_PLAN_REGISTRY,
   });
   assert.equal(document.steps.length, 1);
+  parseEvryConversationArtifactDocument(proposal.confirmation);
+  uiArtifactOutcomes.add(document.steps[0]!.capabilityIdentity);
   assert.ok(
     await trustedEvryPlanReview({
       actor,
@@ -358,6 +366,7 @@ async function main() {
   );
   assert.equal(driftDocumentResult.status, "refused");
   assert.equal(await getGeneratedDocument(plant.id, driftDocumentId), null);
+  errorOutcomes.add("documents.generate");
   await db
     .update(churches)
     .set({ name: "__Documents wiki proof__" })
@@ -509,10 +518,18 @@ async function main() {
     assert.ok(first?.kind === "read");
     assert.deepEqual(replay, first);
     storedEvryReadArtifactDocument(first);
+    assert.equal(
+      await executeAuthorizedEvryRead(registration, authorization, context, {
+        foreignPlantId: foreignPlant.id,
+      }),
+      null
+    );
     readResults.set(registration.capabilityIdentity, first);
     allowedOutcomes.add(registration.capabilityIdentity);
     replayOutcomes.add(registration.capabilityIdentity);
     durableOutcomes.add(registration.capabilityIdentity);
+    errorOutcomes.add(registration.capabilityIdentity);
+    uiArtifactOutcomes.add(registration.capabilityIdentity);
   }
   assert.match(
     JSON.stringify(readResults.get("documents.history.download")),
@@ -858,39 +875,49 @@ async function main() {
     1
   );
 
-  const driftArticle = await db
-    .insert(wikiArticles)
-    .values({
-      churchId: plant.id,
-      slug: `drift/${randomUUID()}`,
-      title: "Before drift",
-      content: "before",
-      contentType: "guide",
-      status: "published",
-    })
-    .returning({ id: wikiArticles.id, slug: wikiArticles.slug })
-    .then(([row]) => row);
-  assert.ok(driftArticle);
-  const driftPlan = await prepareEffect(actor, {
-    kind: "feedback",
-    slug: driftArticle.slug,
-    rating: "helpful",
-  });
-  await db
-    .update(wikiArticles)
-    .set({
-      title: "After drift",
-      content: "after",
-      updatedAt: new Date(Date.now() + 1_000),
-    })
-    .where(eq(wikiArticles.id, driftArticle.id));
-  const driftResult = await execute({
-    actor,
-    planId: driftPlan.proposal.plan.planId,
-    fingerprint: driftPlan.proposal.plan.fingerprint,
-    registry: PRODUCTION_EVRY_EXECUTION_REGISTRY,
-  });
-  assert.equal(driftResult.status, "refused");
+  for (const kind of ["bookmark", "progress", "feedback"] as const) {
+    const driftArticle = await db
+      .insert(wikiArticles)
+      .values({
+        churchId: plant.id,
+        slug: `drift/${kind}/${randomUUID()}`,
+        title: "Before drift",
+        content: "before",
+        contentType: "guide",
+        status: "published",
+      })
+      .returning({ id: wikiArticles.id, slug: wikiArticles.slug })
+      .then(([row]) => row);
+    assert.ok(driftArticle);
+    const selection: DocumentsWikiEffectSelection =
+      kind === "bookmark"
+        ? { kind, slug: driftArticle.slug, bookmarked: true }
+        : kind === "progress"
+          ? {
+              kind,
+              slug: driftArticle.slug,
+              status: "completed",
+              scrollPosition: 1,
+            }
+          : { kind, slug: driftArticle.slug, rating: "helpful" };
+    const driftPlan = await prepareEffect(actor, selection);
+    await db
+      .update(wikiArticles)
+      .set({
+        title: "After drift",
+        content: "after",
+        updatedAt: new Date(Date.now() + 1_000),
+      })
+      .where(eq(wikiArticles.id, driftArticle.id));
+    const driftResult = await execute({
+      actor,
+      planId: driftPlan.proposal.plan.planId,
+      fingerprint: driftPlan.proposal.plan.fingerprint,
+      registry: PRODUCTION_EVRY_EXECUTION_REGISTRY,
+    });
+    assert.equal(driftResult.status, "refused");
+    errorOutcomes.add(DOCUMENTS_WIKI_EFFECT_IDENTITIES[kind]);
+  }
   assert.equal(
     (
       await db
@@ -899,11 +926,10 @@ async function main() {
         .where(
           and(
             eq(wikiArticleFeedback.churchId, plant.id),
-            eq(wikiArticleFeedback.userId, user.id),
-            eq(wikiArticleFeedback.articleSlug, driftArticle.slug)
+            eq(wikiArticleFeedback.userId, user.id)
           )
         )
-    ).length,
+    ).filter(({ articleSlug }) => articleSlug.startsWith("drift/")).length,
     0
   );
 
@@ -982,6 +1008,8 @@ async function main() {
         "foreign refusal"
       ),
       durable: proven(durableOutcomes, identity, "durable result"),
+      errors: proven(errorOutcomes, identity, "closed error outcome"),
+      uiArtifact: proven(uiArtifactOutcomes, identity, "typed UI artifact"),
     })
   );
   process.stdout.write(

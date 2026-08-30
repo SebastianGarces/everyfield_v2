@@ -25,6 +25,8 @@ import {
   hasDurableEvryCapabilityConversationResult,
 } from "@/lib/evry/capabilities/conversation";
 
+import { EVRY_PEOPLE_ATTACHMENT_REFERENCE_MAX_LENGTH } from "./attachment-contract";
+
 const recoverOnlyPeopleFileContinuation =
   composeEvryCapabilityConversationContinuations([]);
 
@@ -57,7 +59,10 @@ function fileAttachmentFromPlan(
   ) {
     const attachment = z
       .object({
-        attachmentReference: z.string().min(1).max(4_000),
+        attachmentReference: z
+          .string()
+          .min(1)
+          .max(EVRY_PEOPLE_ATTACHMENT_REFERENCE_MAX_LENGTH),
         attachmentDigest: z.string().regex(/^[0-9a-f]{64}$/),
       })
       .safeParse(step.arguments);
@@ -79,7 +84,10 @@ function fileAttachmentFromPlan(
     try {
       const attachment = z
         .object({
-          reference: z.string().min(1).max(4_000),
+          reference: z
+            .string()
+            .min(1)
+            .max(EVRY_PEOPLE_ATTACHMENT_REFERENCE_MAX_LENGTH),
           digest: z.string().regex(/^[0-9a-f]{64}$/),
         })
         .parse(JSON.parse(step.arguments.attachmentJson));
@@ -274,7 +282,7 @@ export async function completeEvryPeopleFileReview(
 }
 
 /**
- * Persist a staged People file review through the same durable conversation
+ * Persist an inline People file review through the same durable conversation
  * append boundary as ordinary Evry turns. The caller-provided request key owns
  * both the user turn and the derived assistant result, so response-loss retry
  * returns the same conversation and exact plan instead of duplicating either.
