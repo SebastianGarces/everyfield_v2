@@ -125,7 +125,10 @@ export function ConversationSurface({ className }: { className?: string }) {
   }, [conversation?.messages.length, latestMessage]);
 
   return (
-    <div className={cn("flex min-h-0 flex-1 flex-col", className)}>
+    <div
+      data-evry-conversation-surface
+      className={cn("flex min-h-0 flex-1 flex-col", className)}
+    >
       <div
         ref={transcriptRef}
         data-slot="evry-transcript"

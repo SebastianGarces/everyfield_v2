@@ -93,16 +93,68 @@ test("reuse owns delayed workspace navigation and ignores completion after depar
   });
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+  const originalDocument = Object.getOwnPropertyDescriptor(
+    globalThis,
+    "document"
+  );
   const storage = memoryStorage();
+  const documentListeners = new Map<string, Set<EventListener>>();
+  const windowListeners = new Map<string, Set<EventListener>>();
+  const addListener = (
+    registry: Map<string, Set<EventListener>>,
+    type: string,
+    listener: EventListenerOrEventListenerObject
+  ) => {
+    if (typeof listener !== "function") return;
+    const registered = registry.get(type) ?? new Set<EventListener>();
+    registered.add(listener);
+    registry.set(type, registered);
+  };
+  const removeListener = (
+    registry: Map<string, Set<EventListener>>,
+    type: string,
+    listener: EventListenerOrEventListenerObject
+  ) => {
+    if (typeof listener === "function") registry.get(type)?.delete(listener);
+  };
   Object.defineProperty(globalThis, "window", {
     configurable: true,
-    value: { sessionStorage: storage },
+    value: {
+      sessionStorage: storage,
+      setTimeout,
+      clearTimeout,
+      addEventListener: (
+        type: string,
+        listener: EventListenerOrEventListenerObject
+      ) => addListener(windowListeners, type, listener),
+      removeEventListener: (
+        type: string,
+        listener: EventListenerOrEventListenerObject
+      ) => removeListener(windowListeners, type, listener),
+    },
+  });
+  Object.defineProperty(globalThis, "document", {
+    configurable: true,
+    value: {
+      getElementById: () => null,
+      addEventListener: (
+        type: string,
+        listener: EventListenerOrEventListenerObject
+      ) => addListener(documentListeners, type, listener),
+      removeEventListener: (
+        type: string,
+        listener: EventListenerOrEventListenerObject
+      ) => removeListener(documentListeners, type, listener),
+    },
   });
   t.after(() => {
     listeners.clear();
     if (originalWindow)
       Object.defineProperty(globalThis, "window", originalWindow);
     else Reflect.deleteProperty(globalThis, "window");
+    if (originalDocument)
+      Object.defineProperty(globalThis, "document", originalDocument);
+    else Reflect.deleteProperty(globalThis, "document");
   });
 
   const first = Promise.withResolvers<Response>();
@@ -195,7 +247,27 @@ test("reuse owns delayed workspace navigation and ignores completion after depar
       recipeIdentity: "meeting.invitation.reference",
     });
   });
-  await act(async () => navigate("/dashboard"));
+  await act(async () => {
+    for (const listener of documentListeners.get("click") ?? []) {
+      listener({
+        target: {
+          closest(selectors: string) {
+            return selectors.includes("data-evry-conversation-surface")
+              ? null
+              : this;
+          },
+        },
+      } as unknown as Event);
+    }
+  });
+  pushes.push("/dashboard");
+  assert.equal(
+    output()["data-blocked"],
+    "true",
+    "source remains blocked while the unrelated navigation is pending"
+  );
+  await act(async () => void (await output()["data-load"](SOURCE_ID)));
+  assert.equal(fetches.length, 2, "pending departure cannot reload source A");
   second.resolve(
     Response.json(
       { status: "created", conversation: conversation(TARGET_ID) },
@@ -203,12 +275,19 @@ test("reuse owns delayed workspace navigation and ignores completion after depar
     )
   );
   await act(async () => void (await started));
-  assert.equal(
-    pushes.length,
-    1,
-    "late completion cannot navigate after route departure"
+  assert.deepEqual(
+    pushes,
+    [`/evry?conversation=${TARGET_ID}`, "/dashboard"],
+    "late completion cannot enqueue B behind an already pending navigation"
   );
   assert.equal(storage.length, 0);
+  assert.equal(
+    output()["data-blocked"],
+    "true",
+    "committed hooks still report A, so source actions stay fenced"
+  );
+  await act(async () => navigate("/dashboard"));
+  assert.equal(output()["data-blocked"], "false");
   await act(async () => mounted.unmount());
 
   const { writeEvryRunRecoveryMarker } =

@@ -24,15 +24,18 @@ async function main() {
   const route = await import("./[requestId]/route");
   events.length = 0;
   const get = route.createEvryRunRecoveryGet({
-    recover: async ({ requestKey }) => {
-      events.push(`read:${requestKey}`);
+    recover: async ({ requestKey, expectedOperation }) => {
+      events.push(`read:${requestKey}:${expectedOperation ?? "any"}`);
       return { status: "unavailable", requestId: requestKey };
     },
   });
-  const response = await get(new Request("https://example.test"), {
-    params: Promise.resolve({ requestId: REQUEST_ID }),
-  });
-  assert.deepEqual(events, ["auth", `read:${REQUEST_ID}`]);
+  const response = await get(
+    new Request("https://example.test?operation=reuse"),
+    {
+      params: Promise.resolve({ requestId: REQUEST_ID }),
+    }
+  );
+  assert.deepEqual(events, ["auth", `read:${REQUEST_ID}:reuse`]);
   assert.equal(response.headers.get("cache-control"), "private, no-store");
   assert.deepEqual(await response.json(), {
     status: "unavailable",
@@ -45,6 +48,14 @@ async function main() {
   });
   assert.deepEqual(events, ["auth"]);
   assert.equal(invalidGet.status, 400);
+
+  events.length = 0;
+  const invalidOperation = await get(
+    new Request("https://example.test?operation=create"),
+    { params: Promise.resolve({ requestId: REQUEST_ID }) }
+  );
+  assert.deepEqual(events, ["auth"]);
+  assert.equal(invalidOperation.status, 400);
 
   const post = route.createEvryRunResumePost({
     resume: async ({ requestKey }) => {

@@ -41,6 +41,7 @@ async function durableConversation(input: {
   requestKey: EvryConversationRequestKey;
   conversationId: string | null;
   trustRunConversation: boolean;
+  allowRequestFallback: boolean;
   now: Date;
   boundaries: EvryRunRecoveryBoundaries;
 }): Promise<EvryResumedConversation | null> {
@@ -51,7 +52,9 @@ async function durableConversation(input: {
       now: input.now,
     });
     if (resumed) return resumed;
+    if (!input.allowRequestFallback) return null;
   }
+  if (!input.allowRequestFallback) return null;
   const conversation = await input.boundaries.findConversationByRequest({
     actorUserId: input.actor.userId,
     plantId: input.actor.plantId,
@@ -73,6 +76,7 @@ async function durableConversation(input: {
 export async function recoverEvryActiveRun(input: {
   actor: EvryPlantActor;
   requestKey: string;
+  expectedOperation?: "reuse";
   now: Date;
   boundaries?: EvryRunRecoveryBoundaries;
 }): Promise<EvryRunRecoveryResponse> {
@@ -82,6 +86,12 @@ export async function recoverEvryActiveRun(input: {
     actor: input.actor,
     requestKey,
   });
+  if (
+    input.expectedOperation === "reuse" &&
+    (!run || run.kind !== "conversation" || run.operation !== "reuse")
+  ) {
+    return { status: "unavailable", requestId: requestKey };
+  }
   if (run?.status === "active" && input.now < run.expiresAt) {
     if (
       run.kind === "execution" &&
@@ -163,6 +173,9 @@ export async function recoverEvryActiveRun(input: {
     requestKey,
     conversationId: run?.conversationId ?? null,
     trustRunConversation: run?.status === "completed",
+    allowRequestFallback: !(
+      run?.kind === "conversation" && run.operation === "reuse"
+    ),
     now: input.now,
     boundaries,
   });

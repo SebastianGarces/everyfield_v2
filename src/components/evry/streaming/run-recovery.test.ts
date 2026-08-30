@@ -491,6 +491,7 @@ test("recovery rejects a resumable execution for a conversation marker", async (
 });
 
 test("reuse recovery rejects an active create run under the retained request key", async () => {
+  const expectedOperations: Array<"reuse" | undefined> = [];
   await assert.rejects(
     reconnectEvryRun({
       marker: {
@@ -508,19 +509,23 @@ test("reuse recovery rejects an active create run under the retained request key
         },
       },
       signal: new AbortController().signal,
-      fetchRecovery: async () => ({
-        status: "active",
-        requestId: REQUEST_ID,
-        kind: "conversation",
-        operation: "create",
-        sequence: 0,
-        stage: "accepted",
-        conversationId: null,
-        expiresAt: "2026-08-29T01:15:00.000Z",
-      }),
+      fetchRecovery: async (_requestId, _mode, _signal, expectedOperation) => {
+        expectedOperations.push(expectedOperation);
+        return {
+          status: "active",
+          requestId: REQUEST_ID,
+          kind: "conversation",
+          operation: "create",
+          sequence: 0,
+          stage: "accepted",
+          conversationId: null,
+          expiresAt: "2026-08-29T01:15:00.000Z",
+        };
+      },
       wait: async () => {},
       onActive: () => {},
     }),
     /changed reuse operation/
   );
+  assert.deepEqual(expectedOperations, ["reuse"]);
 });
