@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { z } from "zod";
 
 import {
@@ -31,13 +33,21 @@ export const launchJournalCursorSchema = z
   .max(512)
   .regex(/^[A-Za-z0-9_-]+$/);
 const decodedLaunchJournalCursorSchema = z.strictObject({
-  at: z.string().datetime(),
-  key: z.string().min(1).max(200),
+  a: z.string().datetime(),
+  k: z.string().min(1).max(200),
+  f: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
 });
 
-function encodeLaunchJournalCursor(row: { at: Date; key: string }): string {
+function encodeLaunchJournalCursor(
+  row: { at: Date; key: string },
+  sourceFingerprint: string
+): string {
   return Buffer.from(
-    JSON.stringify({ at: row.at.toISOString(), key: row.key }),
+    JSON.stringify({
+      a: row.at.toISOString(),
+      k: row.key,
+      f: sourceFingerprint,
+    }),
     "utf8"
   ).toString("base64url");
 }
@@ -68,13 +78,39 @@ export type LaunchJournalPage =
       remaining: number;
     }>
   | Readonly<{
-      status: "invalid_cursor" | "missing_cursor";
+      status: "invalid_cursor" | "missing_cursor" | "stale_cursor";
       rows: readonly [];
       nextCursor: null;
       remaining: 0;
     }>;
 
-/** Stable, lossless cursor paging over the merged append-only history. */
+function launchJournalSourceFingerprint(
+  rows: readonly LaunchJournalPageRow[]
+): string {
+  return createHash("sha256")
+    .update(
+      JSON.stringify(
+        rows.map(({ id, key, label, at, facts }) => ({
+          id,
+          key,
+          label,
+          at: at.toISOString(),
+          facts,
+        }))
+      )
+    )
+    .digest("base64url");
+}
+
+/**
+ * Lossless cursor paging over the merged history.
+ *
+ * Launch events are append-only, but milestone completions are a mutable
+ * projection: reopening removes a completion and completing it again changes
+ * its ordering instant. Every continuation therefore carries the fingerprint
+ * of the exact sorted source it paged. A changed source refuses the cursor and
+ * asks the caller to restart instead of silently skipping or duplicating a row.
+ */
 export function paginateLaunchJournalRows(
   inputRows: readonly LaunchJournalPageRow[],
   limit: number,
@@ -94,11 +130,20 @@ export function paginateLaunchJournalRows(
       remaining: 0,
     };
   }
+  const sourceFingerprint = launchJournalSourceFingerprint(rows);
+  if (decodedCursor && decodedCursor.f !== sourceFingerprint) {
+    return {
+      status: "stale_cursor",
+      rows: [],
+      nextCursor: null,
+      remaining: 0,
+    };
+  }
   const start = decodedCursor
     ? rows.findIndex(
         (row) =>
-          row.at.toISOString() === decodedCursor.at &&
-          row.key === decodedCursor.key
+          row.at.toISOString() === decodedCursor.a &&
+          row.key === decodedCursor.k
       ) + 1
     : 0;
   if (decodedCursor && start === 0) {
@@ -116,7 +161,10 @@ export function paginateLaunchJournalRows(
     rows: visible,
     nextCursor:
       remaining > 0 && visible.length > 0
-        ? encodeLaunchJournalCursor(visible[visible.length - 1]!)
+        ? encodeLaunchJournalCursor(
+            visible[visible.length - 1]!,
+            sourceFingerprint
+          )
         : null,
     remaining,
   };
@@ -320,7 +368,9 @@ export async function readLaunchJournalForPlant(
           reason:
             page.status === "invalid_cursor"
               ? "Invalid history cursor"
-              : "History cursor is no longer available",
+              : page.status === "missing_cursor"
+                ? "History cursor is no longer available"
+                : "Launch history changed; restart without a cursor",
           count: 1,
         },
       ],
