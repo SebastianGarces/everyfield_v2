@@ -23,6 +23,8 @@ import {
   isNull,
   lte,
   ne,
+  not,
+  notExists,
   or,
   sql,
   type SQL,
@@ -54,7 +56,12 @@ import {
 import { toCalendarDate } from "@/lib/datetime";
 import { blockedTaskIdsAmong } from "./dependencies";
 import { assertMayOwnFollowUp } from "./follow-up-ownership";
-import { assertExactTaskAssignee, exactTaskAssigneeJoin } from "./assignees";
+import {
+  assertExactTaskAssignee,
+  exactTaskAssigneeJoin,
+  taskAssigneeIsAvailable,
+  TASK_ASSIGNEE_ERROR,
+} from "./assignees";
 import { mayActOnTaskRow } from "./own-duty";
 import { taskStructureLockStatement } from "./structure-lock";
 import {
@@ -212,7 +219,10 @@ const taskWithAssigneeColumns = {
   priority: tasks.priority,
   dueDate: tasks.dueDate,
   dueTime: tasks.dueTime,
-  assignedToId: tasks.assignedToId,
+  // A malformed/foreign assignee is absent everywhere outside the owning
+  // table. In particular, own-duty checks must never see the raw FK and mistake
+  // it for the current viewer merely because the UUIDs match.
+  assignedToId: users.id,
   category: tasks.category,
   relatedType: tasks.relatedType,
   relatedId: tasks.relatedId,
@@ -229,6 +239,30 @@ const taskWithAssigneeColumns = {
   assigneeName: users.name,
   assigneeEmail: users.email,
 } satisfies Record<keyof TaskWithAssignee, unknown>;
+
+/** Used only to classify a failed atomic write without exposing the raw FK. */
+async function taskHasUnavailableAssignee(
+  churchId: string,
+  taskId: string
+): Promise<boolean> {
+  const [row] = await db
+    .select({ assignedToId: tasks.assignedToId, exactAssigneeId: users.id })
+    .from(tasks)
+    .leftJoin(
+      users,
+      and(eq(tasks.assignedToId, users.id), exactTaskAssigneeJoin(churchId))
+    )
+    .where(
+      and(
+        eq(tasks.churchId, churchId),
+        eq(tasks.id, taskId),
+        isNull(tasks.deletedAt)
+      )
+    )
+    .limit(1);
+
+  return Boolean(row?.assignedToId && !row.exactAssigneeId);
+}
 
 /**
  * Get a single task by ID with assignee info.
@@ -410,7 +444,10 @@ export async function listTasks(
   // UUID-typed Postgres parameters reject malformed strings. This untrusted
   // value comes from both the page URL and the load-more action, so refuse it
   // before the first query and keep the result distinguishable from page one.
-  if (cursor && !TASK_LIST_CURSOR_SCHEMA.safeParse(cursor).success) {
+  if (
+    cursor !== undefined &&
+    !TASK_LIST_CURSOR_SCHEMA.safeParse(cursor).success
+  ) {
     return { tasks: [], total: 0, nextCursor: null, cursorAvailable: false };
   }
 
@@ -957,14 +994,23 @@ export async function updateTask(
         and(
           eq(tasks.churchId, churchId),
           eq(tasks.id, taskId),
-          isNull(tasks.deletedAt)
+          isNull(tasks.deletedAt),
+          taskAssigneeIsAvailable(churchId, tasks.assignedToId),
+          // Protect the RESULTING assignment too. The earlier assertion gives
+          // callers a useful refusal; this correlated condition closes the
+          // window where that user changes tenancy before the UPDATE lands.
+          taskAssigneeIsAvailable(churchId, sql`${resultingAssigneeId}::uuid`)
         )
       )
       .returning(),
   ]);
 
   if (!updated) {
-    throw new Error("Failed to update task");
+    throw new Error(
+      (await taskHasUnavailableAssignee(churchId, taskId))
+        ? TASK_ASSIGNEE_ERROR
+        : "Failed to update task"
+    );
   }
 
   // An edit may have moved the due date, changed the assignee, or closed the
@@ -1333,6 +1379,7 @@ export async function completeTask(
         eq(tasks.churchId, churchId),
         eq(tasks.id, taskId),
         isNull(tasks.deletedAt),
+        taskAssigneeIsAvailable(churchId, tasks.assignedToId),
         ne(tasks.status, "complete")
       )
     )
@@ -1340,7 +1387,11 @@ export async function completeTask(
 
   if (!completed) {
     // The CAS lost: somebody else completed it between the read and the write.
-    throw new Error("Task is already complete");
+    throw new Error(
+      (await taskHasUnavailableAssignee(churchId, taskId))
+        ? TASK_ASSIGNEE_ERROR
+        : "Task is already complete"
+    );
   }
 
   // The subject is resolved: nothing pending about this task may still be
@@ -1408,13 +1459,18 @@ export async function reopenTask(
       and(
         eq(tasks.churchId, churchId),
         eq(tasks.id, taskId),
-        isNull(tasks.deletedAt)
+        isNull(tasks.deletedAt),
+        taskAssigneeIsAvailable(churchId, tasks.assignedToId)
       )
     )
     .returning();
 
   if (!reopened) {
-    throw new Error("Failed to reopen task");
+    throw new Error(
+      (await taskHasUnavailableAssignee(churchId, taskId))
+        ? TASK_ASSIGNEE_ERROR
+        : "Failed to reopen task"
+    );
   }
 
   // Reopen is a re-enqueue, and it works because cancelling RELEASED the dedupe
@@ -1457,6 +1513,18 @@ export async function deleteTask(
   }
 
   const now = new Date();
+  const deleteFamily = alias(tasks, "delete_family");
+  const malformedFamilyMember = db
+    .select({ id: deleteFamily.id })
+    .from(deleteFamily)
+    .where(
+      and(
+        eq(deleteFamily.churchId, churchId),
+        or(eq(deleteFamily.id, taskId), eq(deleteFamily.parentTaskId, taskId)),
+        isNull(deleteFamily.deletedAt),
+        not(taskAssigneeIsAvailable(churchId, deleteFamily.assignedToId))
+      )
+    );
 
   const [, deleted] = await db.batch([
     taskStructureLockStatement(churchId),
@@ -1467,11 +1535,19 @@ export async function deleteTask(
         and(
           eq(tasks.churchId, churchId),
           or(eq(tasks.id, taskId), eq(tasks.parentTaskId, taskId)),
-          isNull(tasks.deletedAt)
+          isNull(tasks.deletedAt),
+          notExists(malformedFamilyMember)
         )
       )
       .returning({ id: tasks.id }),
   ]);
+
+  if (
+    deleted.length === 0 &&
+    (await malformedFamilyMember.limit(1)).length > 0
+  ) {
+    throw new Error(TASK_ASSIGNEE_ERROR);
+  }
 
   // Every row the statement actually touched — the parent AND its checklist
   // items, which are tasks with due dates of their own. The ids come from the
@@ -1702,14 +1778,19 @@ export const defaultBulkTaskDeps: BulkTaskDeps = {
         category: tasks.category,
         relatedType: tasks.relatedType,
         relatedId: tasks.relatedId,
-        assignedToId: tasks.assignedToId,
+        assignedToId: users.id,
       })
       .from(tasks)
+      .leftJoin(
+        users,
+        and(eq(tasks.assignedToId, users.id), exactTaskAssigneeJoin(churchId))
+      )
       .where(
         and(
           eq(tasks.churchId, churchId),
           inArray(tasks.id, taskIds),
-          isNull(tasks.deletedAt)
+          isNull(tasks.deletedAt),
+          taskAssigneeIsAvailable(churchId, tasks.assignedToId)
         )
       );
   },
@@ -1730,6 +1811,7 @@ export const defaultBulkTaskDeps: BulkTaskDeps = {
           eq(tasks.churchId, churchId),
           inArray(tasks.id, taskIds),
           isNull(tasks.deletedAt),
+          taskAssigneeIsAvailable(churchId, tasks.assignedToId),
           ne(tasks.status, "complete")
         )
       )
@@ -1747,6 +1829,7 @@ export const defaultBulkTaskDeps: BulkTaskDeps = {
           eq(tasks.churchId, churchId),
           inArray(tasks.id, taskIds),
           isNull(tasks.deletedAt),
+          taskAssigneeIsAvailable(churchId, tasks.assignedToId),
           // Mirrors the planner's rejectCompleted guard. Belt and braces: if a
           // task is completed between the load and this write, it is reported
           // as a failure rather than quietly given a new due date.
@@ -1783,7 +1866,8 @@ export const defaultBulkTaskDeps: BulkTaskDeps = {
           eq(tasks.churchId, churchId),
           inArray(tasks.id, taskIds),
           eq(tasks.isRecurring, true),
-          isNull(tasks.deletedAt)
+          isNull(tasks.deletedAt),
+          taskAssigneeIsAvailable(churchId, tasks.assignedToId)
         )
       );
 

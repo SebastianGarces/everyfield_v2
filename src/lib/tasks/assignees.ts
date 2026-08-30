@@ -1,4 +1,13 @@
-import { and, eq, isNull, type SQL } from "drizzle-orm";
+import {
+  and,
+  eq,
+  exists,
+  isNull,
+  or,
+  type SQL,
+  type SQLWrapper,
+} from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 
 import { db } from "@/db";
 import { users } from "@/db/schema";
@@ -22,6 +31,37 @@ export function exactTaskAssigneeConditions(plantId: string): SQL[] {
 
 export function exactTaskAssigneeJoin(plantId: string): SQL {
   return and(...exactTaskAssigneeConditions(plantId))!;
+}
+
+/**
+ * A correlated guard for a task row that may be unassigned.
+ *
+ * This belongs in every mutation predicate, rather than in a read followed by
+ * a write: a legacy dual-tenant assignee and an assignee whose tenancy changes
+ * after the read are both unavailable at the instant the write is attempted.
+ */
+export function taskAssigneeIsAvailable(
+  plantId: string,
+  assignedToId: SQLWrapper
+): SQL {
+  const exactAssignee = alias(users, "exact_task_assignee");
+
+  return or(
+    isNull(assignedToId),
+    exists(
+      db
+        .select({ id: exactAssignee.id })
+        .from(exactAssignee)
+        .where(
+          and(
+            eq(exactAssignee.id, assignedToId),
+            eq(exactAssignee.churchId, plantId),
+            isNull(exactAssignee.sendingChurchId),
+            isNull(exactAssignee.sendingNetworkId)
+          )
+        )
+    )
+  )!;
 }
 
 export async function isExactTaskAssignee(
