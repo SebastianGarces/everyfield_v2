@@ -2,18 +2,22 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { EvryStoredConversation } from "@/lib/evry/conversations/repository";
+import { evryConversationPlanIdentitySchema } from "@/lib/evry/conversations/contract";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
 import {
   deriveEvryPlanRequestKey,
   fingerprintEvryActionPlan,
   fingerprintEvryActionPlanIntent,
   parseEvryActionPlanCandidate,
+  parseStoredEvryActionPlan,
 } from "@/lib/evry/plans";
 import type { StoredEvryActionPlan } from "@/lib/evry/plans/repository";
+import { trustedReviewForEvryPlanDocument } from "@/lib/evry/artifacts/trusted-plan-review";
 
 import { createTaskEvryConversationContinuation } from "./conversation";
 import { TASK_ACTION_CONTRACTS } from "./contracts";
 import { TASK_PLAN_REGISTRY } from "./runtime";
+import { TASK_REVIEW_REGISTRY } from "./review";
 import { taskEffectPlanFixture } from "./test-fixtures";
 
 const ACTOR = {
@@ -164,4 +168,84 @@ test("Task request-key recovery refuses a stored plan for another capability", a
     } as never),
     /integrity validation|does not match/
   );
+});
+
+test("Plant insight context reaches ordinary Task resolution and review without supplying effect arguments", async () => {
+  const stored = storedPlan();
+  const plan = evryConversationPlanIdentitySchema.parse({
+    planId: stored.id,
+    fingerprint: stored.fingerprint,
+  });
+  const review = trustedReviewForEvryPlanDocument({
+    plan,
+    document: parseStoredEvryActionPlan({
+      document: stored.document,
+      registry: TASK_PLAN_REGISTRY,
+    }),
+    reviewRegistry: TASK_REVIEW_REGISTRY,
+  });
+  assert.ok(review);
+
+  let resolvedInput:
+    | Readonly<{
+        selection: Readonly<Record<string, unknown>>;
+        pageContext: Readonly<Record<string, unknown>> | null;
+      }>
+    | undefined;
+  const continuation = createTaskEvryConversationContinuation({
+    async findPlanByRequestKey() {
+      return null;
+    },
+    async resolve(input) {
+      resolvedInput = {
+        selection: input.selection,
+        pageContext: input.pageContext,
+      };
+      return {
+        exportName: "createTaskAction",
+        arguments: taskEffectPlanFixture("createTaskAction"),
+      };
+    },
+    async propose(input) {
+      assert.equal(input.resolved.exportName, "createTaskAction");
+      return { plan, confirmation: review.confirmation };
+    },
+  });
+
+  const result = await continuation.continue({
+    actor: ACTOR,
+    conversation: conversation(),
+    userRequestKey: USER_REQUEST_KEY,
+    literalUserText: "create task: title=Clarify volunteer onboarding",
+    pageContext: {
+      kind: "plant_insight",
+      recordId: "60000000-0000-4000-8000-000000000001",
+      label: "Observation: Volunteer onboarding is unclear",
+    },
+    requestPageContext: {
+      kind: "plant_insight",
+      recordId: "60000000-0000-4000-8000-000000000001",
+    },
+    now: CREATED_AT,
+  } as never);
+
+  assert.deepEqual(resolvedInput, {
+    selection: {
+      kind: "effect",
+      exportName: "createTaskAction",
+      values: { title: "Clarify volunteer onboarding" },
+    },
+    pageContext: {
+      kind: "plant_insight",
+      recordId: "60000000-0000-4000-8000-000000000001",
+      label: "Observation: Volunteer onboarding is unclear",
+    },
+  });
+  assert.equal(
+    JSON.stringify(resolvedInput?.selection).includes("60000000"),
+    false,
+    "the source id must not become a Task effect argument"
+  );
+  assert.equal(result?.activePlan?.mode, "set");
+  assert.equal(result?.artifacts[0]?.kind, "confirmation");
 });

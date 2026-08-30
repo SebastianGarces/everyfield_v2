@@ -30,6 +30,8 @@ import type { InsightFeedbackRating } from "@/db/schema";
 import type { AssessedInsight } from "@/lib/phase-engine/assessment";
 import { getCurrentSession } from "@/lib/auth";
 import { getPublishedArticleRefs } from "@/lib/wiki/get-articles";
+import { isPositive } from "@/components/phase-engine/focus-presentation";
+import { InsightToEvryAction } from "@/components/evry/insight-handoff-action";
 
 /** The current user's prior feedback for an insight, if any. */
 export interface InsightFeedbackState {
@@ -77,6 +79,11 @@ export async function InsightCard({
       insight={insight}
       articleRefs={articleRefs}
       evidence={evidence}
+      actionSlot={
+        isPositive(insight) ? null : (
+          <InsightToEvryAction insightId={insight.id} title={insight.title} />
+        )
+      }
       feedbackSlot={
         <InsightFeedback
           insightId={insight.id}

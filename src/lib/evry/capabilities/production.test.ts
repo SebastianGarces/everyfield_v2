@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import communicationInventory from "@/lib/evry/capabilities/communication/inventory.generated.json";
+import plantIntelligenceInventory from "@/lib/evry/capabilities/plant-intelligence/inventory.generated.json";
 import taskInventory from "@/lib/evry/capabilities/tasks/inventory.generated.json";
 import { parseEvryActionPlanCandidate } from "@/lib/evry/plans";
 
 import { continueCommunicationEvryConversation } from "./communication/conversation";
+import { continuePlantIntelligenceEvryConversation } from "./plant-intelligence/conversation";
 import {
   PRODUCTION_EVRY_EXECUTION_REGISTRY,
   PRODUCTION_EVRY_PLAN_REGISTRY,
@@ -19,9 +21,10 @@ import {
   taskEffectPlanFixture,
 } from "./tasks/test-fixtures";
 
-test("production composes every Communication and Task effect exactly once", () => {
+test("production composes every Communication, Plant Intelligence, and Task effect exactly once", () => {
   for (const capability of [
     ...communicationInventory.capabilities,
+    ...plantIntelligenceInventory.capabilities,
     ...taskInventory.capabilities,
   ]) {
     const execution = PRODUCTION_EVRY_EXECUTION_REGISTRY.registrationFor(
@@ -57,7 +60,7 @@ test("every Task effect has its trusted review in the production registry", () =
   }
 });
 
-test("Task and Communication selection remain disjoint in production", () => {
+test("Task, Plant Intelligence, and Communication selection remain disjoint in production", () => {
   for (const text of [
     ...Object.values(TASK_EFFECT_SELECTION_FIXTURES),
     "Show the pending phase checklist prompt",
@@ -71,6 +74,11 @@ test("Task and Communication selection remain disjoint in production", () => {
     assert.equal(continueTaskEvryConversation.matches(input), true, text);
     assert.equal(
       continueCommunicationEvryConversation.matches(input),
+      false,
+      text
+    );
+    assert.equal(
+      continuePlantIntelligenceEvryConversation.matches(input),
       false,
       text
     );
