@@ -11,7 +11,9 @@ export type TeamsEvryReadSelection =
   | Readonly<{ kind: "read_training"; teamId: string }>
   | Readonly<{ kind: "read_meetings"; teamId: string }>
   | Readonly<{ kind: "read_responsibilities"; teamId: string }>
-  | Readonly<{ kind: "read_candidates"; query: string }>;
+  | Readonly<{ kind: "read_candidates"; query: string }>
+  | Readonly<{ kind: "read_person_assignments"; personId: string }>
+  | Readonly<{ kind: "read_person_training"; personId: string }>;
 
 export type TeamsEvryEffectSelection = Readonly<{
   kind: "effect";
@@ -263,6 +265,16 @@ export function selectTeamsEvryRequest(
     if (target[2]?.toLowerCase() === "responsibilities")
       return { kind: "read_responsibilities", teamId };
     return { kind: "read_detail", teamId };
+  }
+  const person =
+    /^review ministry (?:team assignments|training) for person\s+([0-9a-f-]{36})$/i.exec(
+      normalized
+    );
+  if (person?.[1] && uuid.safeParse(person[1]).success) {
+    const personId = person[1].toLowerCase();
+    return /^review ministry training/i.test(normalized)
+      ? { kind: "read_person_training", personId }
+      : { kind: "read_person_assignments", personId };
   }
   return effectSelection(value);
 }

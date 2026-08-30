@@ -11,7 +11,7 @@ test("generated Teams inventory is current, closed, and confirmation-complete", 
   assert.deepEqual(actual, generated);
   assert.equal(actual.summary.actions, 20);
   assert.equal(actual.summary.routes, 7);
-  assert.equal(actual.summary.rscOperations, 16);
+  assert.equal(actual.summary.rscOperations, 19);
   assert.equal(actual.summary.unclassified, 0);
   const supported = actual.entries.filter(
     ({ classification }) => classification.state === "supported"
@@ -77,4 +77,29 @@ test("the responsibility route remains a Member read while first-view seeding is
   assert.equal(seed?.operationKind, "effect");
   assert.equal(seed?.applicationCapability, "read");
   assert.equal(seed?.confirmation, "required");
+});
+
+test("person profile and meeting-create Teams reads remain inventoried", () => {
+  const expected = new Map([
+    [
+      "rsc-operation:src/app/(dashboard)/people/[id]/teams/page.tsx → getPersonTeams",
+      "teams.read.person-assignments",
+    ],
+    [
+      "rsc-operation:src/app/(dashboard)/people/[id]/teams/page.tsx → getPersonTraining",
+      "teams.read.person-training",
+    ],
+    [
+      "rsc-operation:src/app/(dashboard)/meetings/new/page.tsx → listTeams",
+      "teams.read.list",
+    ],
+  ]);
+  for (const [identity, capabilityIdentity] of expected) {
+    const entry = generated.entries.find(
+      (candidate) => candidate.identity === identity
+    );
+    assert.equal(entry?.capabilityIdentity, capabilityIdentity);
+    assert.equal(entry?.operationKind, "read");
+    assert.equal(entry?.confirmation, "not_required");
+  }
 });

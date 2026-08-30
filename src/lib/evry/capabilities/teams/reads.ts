@@ -6,6 +6,8 @@ import {
   getStaffingSummary,
   getTeam,
   getTeamCountsForPeople,
+  getPersonTeams,
+  getPersonTraining,
   getTrainingMatrix,
   listStoredResponsibilities,
   listTeams,
@@ -42,6 +44,14 @@ const inputSchema = z.discriminatedUnion("kind", [
     kind: z.literal("read_candidates"),
     query: z.string().trim().min(1).max(255),
   }),
+  z.strictObject({
+    kind: z.literal("read_person_assignments"),
+    personId: z.string().uuid(),
+  }),
+  z.strictObject({
+    kind: z.literal("read_person_training"),
+    personId: z.string().uuid(),
+  }),
 ]);
 
 type Input = z.infer<typeof inputSchema>;
@@ -54,6 +64,8 @@ const IDENTITY_BY_KIND = {
   read_meetings: "teams.read.meetings",
   read_responsibilities: "teams.read.responsibilities",
   read_candidates: "teams.read.candidates",
+  read_person_assignments: "teams.read.person-assignments",
+  read_person_training: "teams.read.person-training",
 } as const;
 
 function exactAuthorization(
@@ -280,6 +292,65 @@ export async function executeTeamsRead(input: {
         trustedEvryApplicationSourceLink({
           label: "Open people",
           href: "/people",
+        }),
+      ],
+    });
+  }
+  if (request.kind === "read_person_assignments") {
+    const rows = await getPersonTeams(plantId, request.personId);
+    return artifact({
+      title: "Ministry team assignments",
+      filters: [{ label: "Person", value: request.personId }],
+      counts: { matched: rows.length, returned: rows.length, excluded: 0 },
+      exclusions: [],
+      items: rows.map((row) => ({
+        id: row.membershipId,
+        label: row.teamName,
+        facts: [
+          { label: "Role", value: row.roleName },
+          { label: "Status", value: row.status },
+          { label: "Start date", value: row.startDate ?? "Not set" },
+        ],
+        sourceLink: trustedEvryApplicationSourceLink({
+          label: "Open team",
+          href: `/teams/${row.teamId}`,
+        }),
+      })),
+      sourceLinks: [
+        trustedEvryApplicationSourceLink({
+          label: "Open person team assignments",
+          href: `/people/${request.personId}/teams`,
+        }),
+      ],
+    });
+  }
+  if (request.kind === "read_person_training") {
+    const rows = await getPersonTraining(plantId, request.personId);
+    return artifact({
+      title: "Ministry training progress",
+      filters: [{ label: "Person", value: request.personId }],
+      counts: { matched: rows.length, returned: rows.length, excluded: 0 },
+      exclusions: [],
+      items: rows.map((row) => ({
+        id: row.programId,
+        label: row.programName,
+        facts: [
+          { label: "Team", value: row.teamName ?? "Church-wide" },
+          { label: "Required", value: row.isRequired ? "Yes" : "No" },
+          {
+            label: "Completed at",
+            value: row.completedAt?.toISOString() ?? "Incomplete",
+          },
+        ],
+        sourceLink: trustedEvryApplicationSourceLink({
+          label: "Open person training",
+          href: `/people/${request.personId}/teams`,
+        }),
+      })),
+      sourceLinks: [
+        trustedEvryApplicationSourceLink({
+          label: "Open person training",
+          href: `/people/${request.personId}/teams`,
         }),
       ],
     });

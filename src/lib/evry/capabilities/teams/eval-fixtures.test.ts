@@ -21,7 +21,10 @@ import { TEAMS_CAPABILITY_REGISTRATIONS } from "./registrations";
 import { TEAMS_EVAL_FIXTURES } from "./eval-fixtures";
 import { parseEvryActionPlanCandidate } from "@/lib/evry/plans";
 import { parseTeamsEffectArguments } from "./effect-contracts";
-import { executeTeamsEffect } from "./atomic-effect";
+import {
+  executeTeamsEffect,
+  reconcileClaimedTeamsEffect,
+} from "./atomic-effect";
 import {
   TEAMS_EXECUTION_REGISTRY,
   TEAMS_PLAN_REGISTRY,
@@ -90,6 +93,10 @@ const READ_SELECTIONS: Readonly<Record<string, string>> = {
   "teams.read.responsibilities":
     "review ministry team 20000000-0000-4000-8000-000000000001 responsibilities",
   "teams.read.candidates": "search team candidates | Ada",
+  "teams.read.person-assignments":
+    "review ministry team assignments for person 40000000-0000-4000-8000-000000000001",
+  "teams.read.person-training":
+    "review ministry training for person 40000000-0000-4000-8000-000000000001",
 };
 
 function selectionFor(identity: string) {
@@ -512,7 +519,7 @@ test("unknown execution failures stay retryable while proved races and replays c
   assert.equal(attempts, 2);
 });
 
-test("a completed meeting effect reconciles confirmed F11 intents after the durable statement and claim recovery", async () => {
+test("a completed meeting effect remains retryable until confirmed F11 intents converge", async () => {
   const fixture = TEAMS_EVAL_FIXTURES.find(
     ({ operation }) => operation === "createMeetingAction"
   )!;
@@ -535,8 +542,8 @@ test("a completed meeting effect reconciles confirmed F11 intents after the dura
       composeMeetingNotificationIntents: () => [],
       reconcileMeetingNotifications: reconcile,
     }),
-    completed,
-    "a notification transport failure cannot change the committed meeting result"
+    { status: "retryable" },
+    "a notification failure must prevent a terminal execution outcome"
   );
   assert.deepEqual(
     await executeTeamsEffect(input, {
@@ -546,13 +553,64 @@ test("a completed meeting effect reconciles confirmed F11 intents after the dura
       },
       reconcileMeetingNotifications: reconcile,
     }),
-    completed,
-    "claim recovery converges only the best-effort notification side"
+    { status: "retryable" },
+    "claim recovery must remain open while an owed notification still fails"
   );
   assert.deepEqual(syncCalls, [
     `${ACTOR.plantId}:00000000-0000-4000-8000-000000000002`,
     `${ACTOR.plantId}:00000000-0000-4000-8000-000000000002`,
   ]);
+});
+
+test("a durable Teams claim reconciles before current authority is consulted", async () => {
+  const fixture = TEAMS_EVAL_FIXTURES.find(
+    ({ operation }) => operation === "createMeetingAction"
+  )!;
+  const authorized = effectInput(
+    fixture.identity,
+    fixture.arguments,
+    ACTOR.plantId
+  );
+  const claimed = {
+    effectKey: authorized.effectKey,
+    execution: authorized.execution,
+    arguments: authorized.arguments,
+  };
+  const completed = {
+    status: "completed" as const,
+    affectedCount: 2,
+    excludedCount: 0,
+  };
+  let reconciliations = 0;
+
+  assert.deepEqual(
+    await reconcileClaimedTeamsEffect(claimed, {
+      findCompletedOutcome: async () => completed,
+      reconcileMeetingNotifications: async () => {
+        reconciliations += 1;
+        return {
+          considered: 0,
+          recorded: 0,
+          created: 0,
+          skipped: 0,
+          failed: 0,
+          cancelled: 0,
+          reason: null,
+        };
+      },
+    }),
+    completed
+  );
+  assert.equal(reconciliations, 1);
+  assert.equal("authorization" in claimed, false);
+  assert.deepEqual(
+    await reconcileClaimedTeamsEffect(claimed, {
+      findCompletedOutcome: async () => {
+        throw new Error("claim store unavailable");
+      },
+    }),
+    { status: "retryable" }
+  );
 });
 
 test("a process interruption after the domain claim escapes before reconciliation or terminal step", async () => {

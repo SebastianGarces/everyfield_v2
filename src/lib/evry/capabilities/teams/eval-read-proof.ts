@@ -61,10 +61,12 @@ const team = {
 } as const;
 
 const seenPlants: string[] = [];
+let forceReadFailure = false;
 const scoped =
   <Arguments extends unknown[], Result>(result: Result) =>
   async (plantId: string, ..._arguments: Arguments): Promise<Result> => {
     seenPlants.push(plantId);
+    if (forceReadFailure) throw new Error("forced Teams read service failure");
     return result;
   };
 
@@ -79,6 +81,8 @@ mock.module("@/lib/ministry-teams/service", {
     }),
     getTeam: async (plantId: string, teamId: string) => {
       seenPlants.push(plantId);
+      if (forceReadFailure)
+        throw new Error("forced Teams read service failure");
       return teamId === TEAM
         ? team
         : teamId === CHILDRENS_TEAM
@@ -86,6 +90,41 @@ mock.module("@/lib/ministry-teams/service", {
           : null;
     },
     getTeamCountsForPeople: scoped({ [PERSON]: 1 }),
+    getPersonTeams: async (plantId: string, personId: string) => {
+      seenPlants.push(plantId);
+      if (forceReadFailure)
+        throw new Error("forced Teams read service failure");
+      return personId === PERSON
+        ? [
+            {
+              membershipId: "80000000-0000-4000-8000-000000000001",
+              teamId: TEAM,
+              teamName: "Worship",
+              roleId: ROLE,
+              roleName: "Leader",
+              status: "active",
+              startDate: "2030-01-01",
+            },
+          ]
+        : [];
+    },
+    getPersonTraining: async (plantId: string, personId: string) => {
+      seenPlants.push(plantId);
+      if (forceReadFailure)
+        throw new Error("forced Teams read service failure");
+      return personId === PERSON
+        ? [
+            {
+              programId: PROGRAM,
+              programName: "Safety",
+              teamId: TEAM,
+              teamName: "Worship",
+              isRequired: true,
+              completedAt: new Date("2030-01-02T00:00:00.000Z"),
+            },
+          ]
+        : [];
+    },
     getAllTeamsHealth: scoped([
       {
         teamId: TEAM,
@@ -190,6 +229,14 @@ async function main(): Promise<void> {
       { kind: "read_responsibilities", teamId: TEAM },
     ],
     ["teams.read.candidates", { kind: "read_candidates", query: "Ada" }],
+    [
+      "teams.read.person-assignments",
+      { kind: "read_person_assignments", personId: PERSON },
+    ],
+    [
+      "teams.read.person-training",
+      { kind: "read_person_training", personId: PERSON },
+    ],
   ] as const;
 
   const outcomes: Record<string, Record<string, boolean>> = {};
@@ -241,6 +288,23 @@ async function main(): Promise<void> {
         }),
         null
       );
+    }
+    if ("personId" in selection) {
+      const foreignPerson = await executeTeamsRead({
+        authorization,
+        untrustedInput: { ...selection, personId: FOREIGN },
+      });
+      assert.ok(foreignPerson);
+      assert.equal(foreignPerson.counts.returned, 0);
+    }
+    forceReadFailure = true;
+    try {
+      await assert.rejects(
+        executeTeamsRead({ authorization, untrustedInput: selection }),
+        /forced Teams read service failure/
+      );
+    } finally {
+      forceReadFailure = false;
     }
     outcomes[identity] = {
       arguments: true,

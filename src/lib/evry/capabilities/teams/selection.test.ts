@@ -58,6 +58,20 @@ test("unknown commands, fields, and malformed target IDs are refused", () => {
   );
 });
 
+test("person team assignments and training have closed read selections", () => {
+  const personId = "40000000-0000-4000-8000-000000000001";
+  assert.deepEqual(
+    selectTeamsEvryRequest(
+      `review ministry team assignments for person ${personId}`
+    ),
+    { kind: "read_person_assignments", personId }
+  );
+  assert.deepEqual(
+    selectTeamsEvryRequest(`review ministry training for person ${personId}`),
+    { kind: "read_person_training", personId }
+  );
+});
+
 test("the canonical role-description clear remains expressible", () => {
   const selected = selectTeamsEvryRequest(
     "teams update-role | roleId=00000000-0000-4000-8000-000000000001|description="
