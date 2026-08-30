@@ -29,21 +29,11 @@
 // It is read before the write, so a replayed `task.completed` — the same task
 // completed, the event re-emitted — adds nothing.
 //
-// That read is a guard against REPLAY, not against CONCURRENCY: two emissions
-// in flight at once would both miss it. The real guard would be a partial
-// unique index on (church_id, external_id), which needs a migration and is out
-// of this unit's scope.
-//
-// ACCEPTED RESIDUAL, and it is REACHABLE. Nothing stands in for that index.
-// `completeTask` (`src/lib/tasks/service.ts`) is a read-then-write, not a
-// compare-and-set — its UPDATE matches on church + id + `deleted_at IS NULL`
-// and does NOT re-assert `status <> 'complete'` — so two simultaneous
-// completions of one task, which is what a double-clicked Complete button
-// sends, both emit `task.completed` and both write an entry. (`completeMany`
-// does carry `ne(status, 'complete')` and is safe; the single-task path is the
-// hole.) The cost is a duplicate row in one person's log, never a missing or
-// cross-tenant one, which is why it is accepted rather than migrated for.
-// `memory/invariants.md` → Transactions / Atomicity records the same.
+// That read avoids routine replay work. Keyed Evry completions also derive both
+// row ids from their immutable effect key, insert with primary-key conflict
+// arbitration, then verify the exact stored pair. Concurrent reconciliation
+// therefore converges without either inventing a duplicate or mistaking a
+// hostile pre-existing row for its own durable consequence.
 //
 // TENANCY
 //
@@ -63,6 +53,7 @@ import {
 import { persons } from "@/db/schema/people";
 import { tasks } from "@/db/schema/tasks";
 import { formatDateTime } from "@/lib/datetime";
+import { createHash } from "node:crypto";
 
 // ---------------------------------------------------------------------------
 // The shape of a logged entry
@@ -100,6 +91,23 @@ export interface CompletedTaskEvent {
   relatedId: string | null;
   completedById: string;
   timestamp: Date;
+  occurrenceKey?: string;
+}
+
+function occurrenceUuid(key: string, purpose: string): string {
+  const value = createHash("sha256")
+    .update("task-completion-log-v1\0")
+    .update(key)
+    .update("\0")
+    .update(purpose)
+    .digest("hex")
+    .slice(0, 32)
+    .split("");
+  value[12] = "4";
+  value[16] = ((Number.parseInt(value[16] ?? "0", 16) & 0x3) | 0x8).toString(
+    16
+  );
+  return `${value.slice(0, 8).join("")}-${value.slice(8, 12).join("")}-${value.slice(12, 16).join("")}-${value.slice(16, 20).join("")}-${value.slice(20).join("")}`;
 }
 
 /**
@@ -207,35 +215,87 @@ export interface TaskLogEntry {
  */
 export function taskLogEntryStatements(entry: TaskLogEntry) {
   return [
-    db.insert(communications).values({
-      id: entry.entryId,
-      churchId: entry.churchId,
-      subject: entry.taskTitle,
-      body: taskEntryBody(
-        entry.taskTitle,
-        entry.taskCategory,
-        entry.completedAt
-      ),
-      // `channel` is left at its default: no channel was used, and widening the
-      // channel enum would widen the compose form's input surface with it. The
-      // entry's kind lives in `status`.
-      status: LOGGED_ENTRY_STATUS,
-      sentAt: entry.completedAt,
-      recipientCount: 1,
-      createdById: entry.completedById,
-    }),
-    db.insert(communicationRecipients).values({
-      id: entry.recipientId,
-      churchId: entry.churchId,
-      communicationId: entry.entryId,
-      personId: entry.personId,
-      email: entry.personEmail,
-      // The contact was made — that is what completing the task asserts — so
-      // the recipient row is `sent`, with no delivery metadata behind it.
-      status: "sent",
-      externalId: taskEntryReference(entry.taskId),
-    }),
+    db
+      .insert(communications)
+      .values({
+        id: entry.entryId,
+        churchId: entry.churchId,
+        subject: entry.taskTitle,
+        body: taskEntryBody(
+          entry.taskTitle,
+          entry.taskCategory,
+          entry.completedAt
+        ),
+        // `channel` is left at its default: no channel was used, and widening the
+        // channel enum would widen the compose form's input surface with it. The
+        // entry's kind lives in `status`.
+        status: LOGGED_ENTRY_STATUS,
+        sentAt: entry.completedAt,
+        recipientCount: 1,
+        createdById: entry.completedById,
+      })
+      .onConflictDoNothing({ target: communications.id }),
+    db
+      .insert(communicationRecipients)
+      .values({
+        id: entry.recipientId,
+        churchId: entry.churchId,
+        communicationId: entry.entryId,
+        personId: entry.personId,
+        email: entry.personEmail,
+        // The contact was made — that is what completing the task asserts — so
+        // the recipient row is `sent`, with no delivery metadata behind it.
+        status: "sent",
+        externalId: taskEntryReference(entry.taskId),
+      })
+      .onConflictDoNothing({ target: communicationRecipients.id }),
   ] as const;
+}
+
+async function exactTaskLogEntryExists(entry: TaskLogEntry): Promise<boolean> {
+  const [stored] = await db
+    .select({
+      entryChurchId: communications.churchId,
+      subject: communications.subject,
+      body: communications.body,
+      entryStatus: communications.status,
+      sentAt: communications.sentAt,
+      recipientCount: communications.recipientCount,
+      createdById: communications.createdById,
+      recipientChurchId: communicationRecipients.churchId,
+      communicationId: communicationRecipients.communicationId,
+      personId: communicationRecipients.personId,
+      email: communicationRecipients.email,
+      recipientStatus: communicationRecipients.status,
+      externalId: communicationRecipients.externalId,
+    })
+    .from(communications)
+    .innerJoin(
+      communicationRecipients,
+      and(
+        eq(communicationRecipients.id, entry.recipientId),
+        eq(communicationRecipients.communicationId, communications.id)
+      )
+    )
+    .where(eq(communications.id, entry.entryId))
+    .limit(1);
+  return Boolean(
+    stored &&
+    stored.entryChurchId === entry.churchId &&
+    stored.subject === entry.taskTitle &&
+    stored.body ===
+      taskEntryBody(entry.taskTitle, entry.taskCategory, entry.completedAt) &&
+    stored.entryStatus === LOGGED_ENTRY_STATUS &&
+    stored.sentAt?.getTime() === entry.completedAt.getTime() &&
+    stored.recipientCount === 1 &&
+    stored.createdById === entry.completedById &&
+    stored.recipientChurchId === entry.churchId &&
+    stored.communicationId === entry.entryId &&
+    stored.personId === entry.personId &&
+    stored.email === entry.personEmail &&
+    stored.recipientStatus === "sent" &&
+    stored.externalId === taskEntryReference(entry.taskId)
+  );
 }
 
 /** What `logCompletedTaskContact` did, for logging and for the tests. */
@@ -273,20 +333,26 @@ export async function logCompletedTaskContact(
   // instant the first attempt did; the event's timestamp is the fallback.
   const completedAt = task.completedAt ?? event.timestamp;
 
-  await db.batch(
-    taskLogEntryStatements({
-      entryId: crypto.randomUUID(),
-      recipientId: crypto.randomUUID(),
-      churchId: event.churchId,
-      personId: person.id,
-      personEmail: person.email,
-      taskId: event.taskId,
-      taskTitle: task.title,
-      taskCategory: task.category,
-      completedAt,
-      completedById: event.completedById,
-    })
-  );
+  const entry = {
+    entryId: event.occurrenceKey
+      ? occurrenceUuid(event.occurrenceKey, "entry")
+      : crypto.randomUUID(),
+    recipientId: event.occurrenceKey
+      ? occurrenceUuid(event.occurrenceKey, "recipient")
+      : crypto.randomUUID(),
+    churchId: event.churchId,
+    personId: person.id,
+    personEmail: person.email,
+    taskId: event.taskId,
+    taskTitle: task.title,
+    taskCategory: task.category,
+    completedAt,
+    completedById: event.completedById,
+  } satisfies TaskLogEntry;
+  await db.batch(taskLogEntryStatements(entry));
+  if (event.occurrenceKey && !(await exactTaskLogEntryExists(entry))) {
+    throw new Error("The keyed task contact log does not match its effect");
+  }
 
   return "logged";
 }
@@ -294,12 +360,10 @@ export async function logCompletedTaskContact(
 /**
  * The bus adapter (COM-020), mounted in `src/lib/events/subscriptions.ts`.
  *
- * Best-effort by design. `task.completed` is also what marks a plant dirty for
- * re-assessment (PE-010), and a communication log entry is not worth risking
- * that: failures are swallowed and logged here, so this handler can never
- * reject. The bus already isolates handlers with `Promise.allSettled`, but a
- * strict emitter would see this rejection, and the log entry is never a reason
- * to tell a caller its task did not complete.
+ * Ordinary owner flows remain best-effort: a communication log entry does not
+ * roll back a completed task. A keyed Evry completion is different—the task is
+ * already durably claimed, the ids below are deterministic, and the strict
+ * emitter keeps the executor retryable until this owed projection converges.
  */
 export async function handleTaskCompletedForCommunicationLog(
   event: CompletedTaskEvent
@@ -317,5 +381,6 @@ export async function handleTaskCompletedForCommunicationLog(
       `[COMM] Failed to log completed task ${event.taskId} to the communication log:`,
       error
     );
+    if (event.occurrenceKey) throw error;
   }
 }

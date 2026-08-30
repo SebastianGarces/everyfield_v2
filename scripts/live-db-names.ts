@@ -62,6 +62,7 @@ export const LIVE_SUITES = [
   "src/lib/evry/audit/audit-live.test.ts",
   "src/lib/evry/conversations/conversations-live.test.ts",
   "src/lib/evry/executor/executor-live.test.ts",
+  "src/lib/evry/capabilities/launch/effect-live.test.ts",
   "src/lib/evry/recipes/recipe-live.test.ts",
   "src/lib/evry/runs/runs-live.test.ts",
   "src/lib/ministry-teams/leader-sync-live.test.ts",
