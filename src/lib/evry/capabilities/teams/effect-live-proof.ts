@@ -396,12 +396,7 @@ async function main(): Promise<void> {
         await db
           .select()
           .from(evryExecutionEffectClaims)
-          .where(
-            eq(
-              evryExecutionEffectClaims.planId,
-              dualTenancyPlan.planId
-            )
-          )
+          .where(eq(evryExecutionEffectClaims.planId, dualTenancyPlan.planId))
       ).length,
       0,
       "malformed tenancy cannot claim an exact Teams effect"

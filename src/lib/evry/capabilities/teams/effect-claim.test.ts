@@ -24,8 +24,10 @@ test("Teams atomic effects fail closed when the actor names two tenancies", () =
   );
 });
 
-test("0070 binds effect claims to an exact plan step and makes them append-only", () => {
-  const migration = source("src/db/migrations/0070_woozy_sharon_ventura.sql");
+test("canonical 0070 binds effect claims to an exact plan step and makes them append-only", () => {
+  const migration = source(
+    "src/db/migrations/0070_evry_execution_effect_claims.sql"
+  );
   assert.match(
     migration,
     /FOREIGN KEY \("attempt_id","plan_id","church_id","actor_user_id","plan_fingerprint","correlation_id"\)/
@@ -44,6 +46,6 @@ test("0070 binds effect claims to an exact plan step and makes them append-only"
   );
   assert.match(
     migration,
-    /DELETE FROM drizzle\.__drizzle_migrations WHERE created_at = 1788059440428/
+    /evry_execution_outcomes_claim_consistency[\s\S]*unreconciled effect claim/
   );
 });
