@@ -31,6 +31,7 @@ export interface TaskListPage {
   tasks: TaskListRow[];
   total: number;
   nextCursor: string | null;
+  cursorAvailable: boolean;
   /** `personId` → latest note, for the person-related cards on THIS page. */
   personNotes: Record<string, string>;
 }
@@ -118,6 +119,7 @@ export async function readTaskListPage(
     tasks: result.tasks,
     total: result.total,
     nextCursor: result.nextCursor,
+    cursorAvailable: result.cursorAvailable,
     personNotes,
   };
 }

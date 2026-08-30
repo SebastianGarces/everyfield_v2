@@ -162,6 +162,16 @@ test("seeded tasks are launch_prep tasks, created by the session's user", () => 
   );
 });
 
+test("readiness seeding rechecks the actor's exact plant tenancy in its write", () => {
+  const statement = seedSql();
+  assert.match(statement, /from users actor/);
+  assert.match(statement, /actor\.church_id = \$\d+::uuid/);
+  assert.match(statement, /actor\.sending_church_id is null/);
+  assert.match(statement, /actor\.sending_network_id is null/);
+  assert.match(statement, /actor\.seat is not null/);
+  assert.match(statement, /from milestone_template mt cross join exact_actor/);
+});
+
 test("seeded tasks carry NO due date", () => {
   // Ruled in the module header: derived due dates either go stale the moment
   // the launch moves, or the move rewrites tasks the planter has since edited.

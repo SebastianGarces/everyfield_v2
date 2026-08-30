@@ -1,0 +1,935 @@
+{
+  "schemaVersion": 1,
+  "generatedBy": "pnpm evry:tasks-inventory",
+  "authoritativeSources": {
+    "actions": "src/lib/auth/capability-map.ts",
+    "routes": "src/app/(dashboard)/tasks/**/page.tsx",
+    "rscReads": "AST-discovered awaited operations in the Task RSC import graph"
+  },
+  "capabilities": [
+    {
+      "identity": "tasks.bulk.complete",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/tasks/actions.ts → bulkCompleteTasksAction"
+      ],
+      "parityCapability": "tasks",
+      "domain": "lifecycle",
+      "operationKind": "effect",
+      "applicationCapability": "tasks.own",
+      "confirmation": "required",
+      "mutationShape": "bulk_write"
+    },
+    {
+      "identity": "tasks.bulk.reschedule",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/tasks/actions.ts → bulkRescheduleTasksAction"
+      ],
+      "parityCapability": "tasks",
+      "domain": "lifecycle",
+      "operationKind": "effect",
+      "applicationCapability": "tasks.write",
+      "confirmation": "required",
+      "mutationShape": "bulk_write"
+    },
+    {
+      "identity": "tasks.checklist.add",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/tasks/actions.ts → addSubtaskAction"
+      ],
+      "parityCapability": "tasks",
+      "domain": "checklist",
+      "operationKind": "effect",
+      "applicationCapability": "tasks.own",
+      "confirmation": "required",
+      "mutationShape": "compound_write"
+    },
+    {
+      "identity": "tasks.checklist.completion",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/tasks/actions.ts → setSubtaskCompletionAction"
+      ],
+      "parityCapability": "tasks",
+      "domain": "checklist",
+      "operationKind": "effect",
+      "applicationCapability": "tasks.own",
+      "confirmation": "required",
+      "mutationShape": "compound_write"
+    },
+    {
+      "identity": "tasks.create",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/tasks/actions.ts → createTaskAction"
+      ],
+      "parityCapability": "tasks",
+      "domain": "lifecycle",
+      "operationKind": "effect",
+      "applicationCapability": "tasks.write",
+      "confirmation": "required",
+      "mutationShape": "compound_write"
+    },
+    {
+      "identity": "tasks.follow-up.assign",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/tasks/follow-up-actions.ts → assignFollowUpAction"
+      ],
+      "parityCapability": "tasks",
+      "domain": "follow_up",
+      "operationKind": "effect",
+      "applicationCapability": "tasks.write",
+      "confirmation": "required",
+      "mutationShape": "compound_write"
+    },
+    {
+      "identity": "tasks.follow-up.create-and-assign",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/tasks/follow-up-actions.ts → createAndAssignFollowUpAction"
+      ],
+      "parityCapability": "tasks",
+      "domain": "follow_up",
+      "operationKind": "effect",
+      "applicationCapability": "tasks.write",
+      "confirmation": "required",
+      "mutationShape": "compound_write"
+    },
+    {
+      "identity": "tasks.follow-up.handoff",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/tasks/follow-up-actions.ts → handOffFollowUpsAction"
+      ],
+      "parityCapability": "tasks",
+      "domain": "follow_up",
+      "operationKind": "effect",
+      "applicationCapability": "tasks.write",
+      "confirmation": "required",
+      "mutationShape": "bulk_write"
+    },
+    {
+      "identity": "tasks.lifecycle.complete",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/tasks/actions.ts → completeTaskAction"
+      ],
+      "parityCapability": "tasks",
+      "domain": "lifecycle",
+      "operationKind": "effect",
+      "applicationCapability": "tasks.own",
+      "confirmation": "required",
+      "mutationShape": "compound_write"
+    },
+    {
+      "identity": "tasks.lifecycle.delete",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/tasks/actions.ts → deleteTaskAction"
+      ],
+      "parityCapability": "tasks",
+      "domain": "lifecycle",
+      "operationKind": "effect",
+      "applicationCapability": "tasks.write",
+      "confirmation": "required",
+      "mutationShape": "compound_write"
+    },
+    {
+      "identity": "tasks.lifecycle.reopen",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/tasks/actions.ts → reopenTaskAction"
+      ],
+      "parityCapability": "tasks",
+      "domain": "lifecycle",
+      "operationKind": "effect",
+      "applicationCapability": "tasks.own",
+      "confirmation": "required",
+      "mutationShape": "compound_write"
+    },
+    {
+      "identity": "tasks.lifecycle.status",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/tasks/actions.ts → updateTaskStatusAction"
+      ],
+      "parityCapability": "tasks",
+      "domain": "lifecycle",
+      "operationKind": "effect",
+      "applicationCapability": "tasks.own",
+      "confirmation": "required",
+      "mutationShape": "compound_write"
+    },
+    {
+      "identity": "tasks.lifecycle.update",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/tasks/actions.ts → updateTaskAction"
+      ],
+      "parityCapability": "tasks",
+      "domain": "lifecycle",
+      "operationKind": "effect",
+      "applicationCapability": "tasks.write",
+      "confirmation": "required",
+      "mutationShape": "compound_write"
+    },
+    {
+      "identity": "tasks.phase-template.dismiss",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/tasks/phase-prompt-actions.ts → dismissPhaseTemplatePromptAction"
+      ],
+      "parityCapability": "tasks",
+      "domain": "phase_template",
+      "operationKind": "effect",
+      "applicationCapability": "phase.signal",
+      "confirmation": "required",
+      "mutationShape": "single_create"
+    },
+    {
+      "identity": "tasks.phase-template.import",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/tasks/phase-prompt-actions.ts → importPhaseTemplatesAction"
+      ],
+      "parityCapability": "tasks",
+      "domain": "phase_template",
+      "operationKind": "effect",
+      "applicationCapability": "tasks.write",
+      "confirmation": "required",
+      "mutationShape": "compound_write"
+    },
+    {
+      "identity": "tasks.quick-create",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/tasks/actions.ts → quickAddTaskAction"
+      ],
+      "parityCapability": "tasks",
+      "domain": "lifecycle",
+      "operationKind": "effect",
+      "applicationCapability": "tasks.write",
+      "confirmation": "required",
+      "mutationShape": "compound_write"
+    },
+    {
+      "identity": "tasks.read.counts",
+      "surfaceIdentities": [
+        "read-operation:src/app/(dashboard)/tasks/page.tsx → getTaskCounts"
+      ],
+      "parityCapability": "tasks",
+      "domain": "list",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null
+    },
+    {
+      "identity": "tasks.read.detail",
+      "surfaceIdentities": [
+        "read-operation:src/app/(dashboard)/tasks/[id]/page.tsx → db.select",
+        "read-operation:src/app/(dashboard)/tasks/[id]/page.tsx → getTask",
+        "read-operation:src/app/(dashboard)/tasks/[id]/page.tsx → listFollowUpAssignees",
+        "read-operation:src/app/(dashboard)/tasks/[id]/page.tsx → listPrerequisiteCandidates",
+        "read-operation:src/app/(dashboard)/tasks/[id]/page.tsx → listSubtasks",
+        "read-operation:src/app/(dashboard)/tasks/[id]/page.tsx → listTaskPrerequisites",
+        "route:/tasks/[id]"
+      ],
+      "parityCapability": "tasks",
+      "domain": "detail",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null
+    },
+    {
+      "identity": "tasks.read.follow-up-ownership",
+      "surfaceIdentities": [
+        "read-operation:src/app/(dashboard)/tasks/page.tsx → listFollowUpAssignees",
+        "read-operation:src/app/(dashboard)/tasks/page.tsx → listFollowUpContacts",
+        "read-operation:src/app/(dashboard)/tasks/page.tsx → listOpenFollowUpTasks"
+      ],
+      "parityCapability": "tasks",
+      "domain": "list",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null
+    },
+    {
+      "identity": "tasks.read.list",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/tasks/actions.ts → loadMoreTasksAction",
+        "read-operation:src/app/(dashboard)/tasks/page.tsx → readTaskListPage",
+        "route:/tasks"
+      ],
+      "parityCapability": "tasks",
+      "domain": "list",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null
+    },
+    {
+      "identity": "tasks.read.phase-template-prompt",
+      "surfaceIdentities": [
+        "read-operation:src/components/tasks/phase-template-prompt.tsx → readPhaseTemplatePrompt"
+      ],
+      "parityCapability": "tasks",
+      "domain": "phase_template",
+      "operationKind": "read",
+      "applicationCapability": "phase.signal",
+      "confirmation": "not_required",
+      "mutationShape": null
+    },
+    {
+      "identity": "tasks.read.planning-options",
+      "surfaceIdentities": [
+        "read-operation:src/app/(dashboard)/tasks/new/page.tsx → db.select",
+        "read-operation:src/app/(dashboard)/tasks/new/page.tsx → listFollowUpAssignees",
+        "read-operation:src/app/(dashboard)/tasks/new/page.tsx → listPrerequisiteCandidates",
+        "route:/tasks/new"
+      ],
+      "parityCapability": "tasks",
+      "domain": "planning",
+      "operationKind": "read",
+      "applicationCapability": "tasks.write",
+      "confirmation": "not_required",
+      "mutationShape": null
+    },
+    {
+      "identity": "tasks.read.templates",
+      "surfaceIdentities": [
+        "read-operation:src/app/(dashboard)/tasks/templates/page.tsx → getCurrentUserChurch",
+        "route:/tasks/templates"
+      ],
+      "parityCapability": "tasks",
+      "domain": "templates",
+      "operationKind": "read",
+      "applicationCapability": "tasks.write",
+      "confirmation": "not_required",
+      "mutationShape": null
+    },
+    {
+      "identity": "tasks.template.import",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/tasks/actions.ts → importTaskTemplateAction"
+      ],
+      "parityCapability": "tasks",
+      "domain": "template",
+      "operationKind": "effect",
+      "applicationCapability": "tasks.write",
+      "confirmation": "required",
+      "mutationShape": "bulk_write"
+    }
+  ],
+  "entries": [
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/tasks/actions.ts → addSubtaskAction",
+      "source": "src/app/(dashboard)/tasks/actions.ts",
+      "exportName": "addSubtaskAction",
+      "capabilityIdentity": "tasks.checklist.add",
+      "domain": "checklist",
+      "operationKind": "effect",
+      "applicationCapability": "tasks.own",
+      "confirmation": "required",
+      "mutationShape": "compound_write",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/tasks/actions.ts → bulkCompleteTasksAction",
+      "source": "src/app/(dashboard)/tasks/actions.ts",
+      "exportName": "bulkCompleteTasksAction",
+      "capabilityIdentity": "tasks.bulk.complete",
+      "domain": "lifecycle",
+      "operationKind": "effect",
+      "applicationCapability": "tasks.own",
+      "confirmation": "required",
+      "mutationShape": "bulk_write",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/tasks/actions.ts → bulkRescheduleTasksAction",
+      "source": "src/app/(dashboard)/tasks/actions.ts",
+      "exportName": "bulkRescheduleTasksAction",
+      "capabilityIdentity": "tasks.bulk.reschedule",
+      "domain": "lifecycle",
+      "operationKind": "effect",
+      "applicationCapability": "tasks.write",
+      "confirmation": "required",
+      "mutationShape": "bulk_write",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/tasks/actions.ts → completeTaskAction",
+      "source": "src/app/(dashboard)/tasks/actions.ts",
+      "exportName": "completeTaskAction",
+      "capabilityIdentity": "tasks.lifecycle.complete",
+      "domain": "lifecycle",
+      "operationKind": "effect",
+      "applicationCapability": "tasks.own",
+      "confirmation": "required",
+      "mutationShape": "compound_write",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/tasks/actions.ts → createTaskAction",
+      "source": "src/app/(dashboard)/tasks/actions.ts",
+      "exportName": "createTaskAction",
+      "capabilityIdentity": "tasks.create",
+      "domain": "lifecycle",
+      "operationKind": "effect",
+      "applicationCapability": "tasks.write",
+      "confirmation": "required",
+      "mutationShape": "compound_write",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/tasks/actions.ts → deleteTaskAction",
+      "source": "src/app/(dashboard)/tasks/actions.ts",
+      "exportName": "deleteTaskAction",
+      "capabilityIdentity": "tasks.lifecycle.delete",
+      "domain": "lifecycle",
+      "operationKind": "effect",
+      "applicationCapability": "tasks.write",
+      "confirmation": "required",
+      "mutationShape": "compound_write",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/tasks/actions.ts → importTaskTemplateAction",
+      "source": "src/app/(dashboard)/tasks/actions.ts",
+      "exportName": "importTaskTemplateAction",
+      "capabilityIdentity": "tasks.template.import",
+      "domain": "template",
+      "operationKind": "effect",
+      "applicationCapability": "tasks.write",
+      "confirmation": "required",
+      "mutationShape": "bulk_write",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/tasks/actions.ts → loadMoreTasksAction",
+      "source": "src/app/(dashboard)/tasks/actions.ts",
+      "exportName": "loadMoreTasksAction",
+      "capabilityIdentity": "tasks.read.list",
+      "domain": "list",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/tasks/actions.ts → quickAddTaskAction",
+      "source": "src/app/(dashboard)/tasks/actions.ts",
+      "exportName": "quickAddTaskAction",
+      "capabilityIdentity": "tasks.quick-create",
+      "domain": "lifecycle",
+      "operationKind": "effect",
+      "applicationCapability": "tasks.write",
+      "confirmation": "required",
+      "mutationShape": "compound_write",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/tasks/actions.ts → reopenTaskAction",
+      "source": "src/app/(dashboard)/tasks/actions.ts",
+      "exportName": "reopenTaskAction",
+      "capabilityIdentity": "tasks.lifecycle.reopen",
+      "domain": "lifecycle",
+      "operationKind": "effect",
+      "applicationCapability": "tasks.own",
+      "confirmation": "required",
+      "mutationShape": "compound_write",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/tasks/actions.ts → setSubtaskCompletionAction",
+      "source": "src/app/(dashboard)/tasks/actions.ts",
+      "exportName": "setSubtaskCompletionAction",
+      "capabilityIdentity": "tasks.checklist.completion",
+      "domain": "checklist",
+      "operationKind": "effect",
+      "applicationCapability": "tasks.own",
+      "confirmation": "required",
+      "mutationShape": "compound_write",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/tasks/actions.ts → updateTaskAction",
+      "source": "src/app/(dashboard)/tasks/actions.ts",
+      "exportName": "updateTaskAction",
+      "capabilityIdentity": "tasks.lifecycle.update",
+      "domain": "lifecycle",
+      "operationKind": "effect",
+      "applicationCapability": "tasks.write",
+      "confirmation": "required",
+      "mutationShape": "compound_write",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/tasks/actions.ts → updateTaskStatusAction",
+      "source": "src/app/(dashboard)/tasks/actions.ts",
+      "exportName": "updateTaskStatusAction",
+      "capabilityIdentity": "tasks.lifecycle.status",
+      "domain": "lifecycle",
+      "operationKind": "effect",
+      "applicationCapability": "tasks.own",
+      "confirmation": "required",
+      "mutationShape": "compound_write",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/tasks/follow-up-actions.ts → assignFollowUpAction",
+      "source": "src/app/(dashboard)/tasks/follow-up-actions.ts",
+      "exportName": "assignFollowUpAction",
+      "capabilityIdentity": "tasks.follow-up.assign",
+      "domain": "follow_up",
+      "operationKind": "effect",
+      "applicationCapability": "tasks.write",
+      "confirmation": "required",
+      "mutationShape": "compound_write",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/tasks/follow-up-actions.ts → createAndAssignFollowUpAction",
+      "source": "src/app/(dashboard)/tasks/follow-up-actions.ts",
+      "exportName": "createAndAssignFollowUpAction",
+      "capabilityIdentity": "tasks.follow-up.create-and-assign",
+      "domain": "follow_up",
+      "operationKind": "effect",
+      "applicationCapability": "tasks.write",
+      "confirmation": "required",
+      "mutationShape": "compound_write",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/tasks/follow-up-actions.ts → handOffFollowUpsAction",
+      "source": "src/app/(dashboard)/tasks/follow-up-actions.ts",
+      "exportName": "handOffFollowUpsAction",
+      "capabilityIdentity": "tasks.follow-up.handoff",
+      "domain": "follow_up",
+      "operationKind": "effect",
+      "applicationCapability": "tasks.write",
+      "confirmation": "required",
+      "mutationShape": "bulk_write",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/tasks/phase-prompt-actions.ts → dismissPhaseTemplatePromptAction",
+      "source": "src/app/(dashboard)/tasks/phase-prompt-actions.ts",
+      "exportName": "dismissPhaseTemplatePromptAction",
+      "capabilityIdentity": "tasks.phase-template.dismiss",
+      "domain": "phase_template",
+      "operationKind": "effect",
+      "applicationCapability": "phase.signal",
+      "confirmation": "required",
+      "mutationShape": "single_create",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/tasks/phase-prompt-actions.ts → importPhaseTemplatesAction",
+      "source": "src/app/(dashboard)/tasks/phase-prompt-actions.ts",
+      "exportName": "importPhaseTemplatesAction",
+      "capabilityIdentity": "tasks.phase-template.import",
+      "domain": "phase_template",
+      "operationKind": "effect",
+      "applicationCapability": "tasks.write",
+      "confirmation": "required",
+      "mutationShape": "compound_write",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "read-operation:src/app/(dashboard)/tasks/[id]/page.tsx → db.select",
+      "source": "src/app/(dashboard)/tasks/[id]/page.tsx",
+      "exportName": "db.select",
+      "capabilityIdentity": "tasks.read.detail",
+      "domain": "detail",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "read-operation:src/app/(dashboard)/tasks/[id]/page.tsx → exactTaskAssigneeJoin",
+      "source": "src/app/(dashboard)/tasks/[id]/page.tsx",
+      "exportName": "exactTaskAssigneeJoin",
+      "capabilityIdentity": null,
+      "domain": "boundary",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "mutationShape": null,
+      "classification": { "state": "excluded", "reason": "shared_boundary" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "read-operation:src/app/(dashboard)/tasks/[id]/page.tsx → getTask",
+      "source": "src/app/(dashboard)/tasks/[id]/page.tsx",
+      "exportName": "getTask",
+      "capabilityIdentity": "tasks.read.detail",
+      "domain": "detail",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "read-operation:src/app/(dashboard)/tasks/[id]/page.tsx → listFollowUpAssignees",
+      "source": "src/app/(dashboard)/tasks/[id]/page.tsx",
+      "exportName": "listFollowUpAssignees",
+      "capabilityIdentity": "tasks.read.detail",
+      "domain": "detail",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "read-operation:src/app/(dashboard)/tasks/[id]/page.tsx → listPrerequisiteCandidates",
+      "source": "src/app/(dashboard)/tasks/[id]/page.tsx",
+      "exportName": "listPrerequisiteCandidates",
+      "capabilityIdentity": "tasks.read.detail",
+      "domain": "detail",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "read-operation:src/app/(dashboard)/tasks/[id]/page.tsx → listSubtasks",
+      "source": "src/app/(dashboard)/tasks/[id]/page.tsx",
+      "exportName": "listSubtasks",
+      "capabilityIdentity": "tasks.read.detail",
+      "domain": "detail",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "read-operation:src/app/(dashboard)/tasks/[id]/page.tsx → listTaskPrerequisites",
+      "source": "src/app/(dashboard)/tasks/[id]/page.tsx",
+      "exportName": "listTaskPrerequisites",
+      "capabilityIdentity": "tasks.read.detail",
+      "domain": "detail",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "read-operation:src/app/(dashboard)/tasks/[id]/page.tsx → verifySession",
+      "source": "src/app/(dashboard)/tasks/[id]/page.tsx",
+      "exportName": "verifySession",
+      "capabilityIdentity": null,
+      "domain": "boundary",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "mutationShape": null,
+      "classification": { "state": "excluded", "reason": "shared_boundary" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "read-operation:src/app/(dashboard)/tasks/new/page.tsx → db.select",
+      "source": "src/app/(dashboard)/tasks/new/page.tsx",
+      "exportName": "db.select",
+      "capabilityIdentity": "tasks.read.planning-options",
+      "domain": "planning",
+      "operationKind": "read",
+      "applicationCapability": "tasks.write",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "read-operation:src/app/(dashboard)/tasks/new/page.tsx → exactTaskAssigneeJoin",
+      "source": "src/app/(dashboard)/tasks/new/page.tsx",
+      "exportName": "exactTaskAssigneeJoin",
+      "capabilityIdentity": null,
+      "domain": "boundary",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "mutationShape": null,
+      "classification": { "state": "excluded", "reason": "shared_boundary" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "read-operation:src/app/(dashboard)/tasks/new/page.tsx → listFollowUpAssignees",
+      "source": "src/app/(dashboard)/tasks/new/page.tsx",
+      "exportName": "listFollowUpAssignees",
+      "capabilityIdentity": "tasks.read.planning-options",
+      "domain": "planning",
+      "operationKind": "read",
+      "applicationCapability": "tasks.write",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "read-operation:src/app/(dashboard)/tasks/new/page.tsx → listPrerequisiteCandidates",
+      "source": "src/app/(dashboard)/tasks/new/page.tsx",
+      "exportName": "listPrerequisiteCandidates",
+      "capabilityIdentity": "tasks.read.planning-options",
+      "domain": "planning",
+      "operationKind": "read",
+      "applicationCapability": "tasks.write",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "read-operation:src/app/(dashboard)/tasks/new/page.tsx → verifySession",
+      "source": "src/app/(dashboard)/tasks/new/page.tsx",
+      "exportName": "verifySession",
+      "capabilityIdentity": null,
+      "domain": "boundary",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "mutationShape": null,
+      "classification": { "state": "excluded", "reason": "shared_boundary" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "read-operation:src/app/(dashboard)/tasks/page.tsx → getTaskCounts",
+      "source": "src/app/(dashboard)/tasks/page.tsx",
+      "exportName": "getTaskCounts",
+      "capabilityIdentity": "tasks.read.counts",
+      "domain": "list",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "read-operation:src/app/(dashboard)/tasks/page.tsx → listFollowUpAssignees",
+      "source": "src/app/(dashboard)/tasks/page.tsx",
+      "exportName": "listFollowUpAssignees",
+      "capabilityIdentity": "tasks.read.follow-up-ownership",
+      "domain": "list",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "read-operation:src/app/(dashboard)/tasks/page.tsx → listFollowUpContacts",
+      "source": "src/app/(dashboard)/tasks/page.tsx",
+      "exportName": "listFollowUpContacts",
+      "capabilityIdentity": "tasks.read.follow-up-ownership",
+      "domain": "list",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "read-operation:src/app/(dashboard)/tasks/page.tsx → listOpenFollowUpTasks",
+      "source": "src/app/(dashboard)/tasks/page.tsx",
+      "exportName": "listOpenFollowUpTasks",
+      "capabilityIdentity": "tasks.read.follow-up-ownership",
+      "domain": "list",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "read-operation:src/app/(dashboard)/tasks/page.tsx → readTaskListPage",
+      "source": "src/app/(dashboard)/tasks/page.tsx",
+      "exportName": "readTaskListPage",
+      "capabilityIdentity": "tasks.read.list",
+      "domain": "list",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "read-operation:src/app/(dashboard)/tasks/page.tsx → taskListScope",
+      "source": "src/app/(dashboard)/tasks/page.tsx",
+      "exportName": "taskListScope",
+      "capabilityIdentity": null,
+      "domain": "boundary",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "mutationShape": null,
+      "classification": { "state": "excluded", "reason": "shared_boundary" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "read-operation:src/app/(dashboard)/tasks/page.tsx → verifySession",
+      "source": "src/app/(dashboard)/tasks/page.tsx",
+      "exportName": "verifySession",
+      "capabilityIdentity": null,
+      "domain": "boundary",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "mutationShape": null,
+      "classification": { "state": "excluded", "reason": "shared_boundary" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "read-operation:src/app/(dashboard)/tasks/templates/page.tsx → getCurrentUserChurch",
+      "source": "src/app/(dashboard)/tasks/templates/page.tsx",
+      "exportName": "getCurrentUserChurch",
+      "capabilityIdentity": "tasks.read.templates",
+      "domain": "templates",
+      "operationKind": "read",
+      "applicationCapability": "tasks.write",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "read-operation:src/app/(dashboard)/tasks/templates/page.tsx → verifySession",
+      "source": "src/app/(dashboard)/tasks/templates/page.tsx",
+      "exportName": "verifySession",
+      "capabilityIdentity": null,
+      "domain": "boundary",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "mutationShape": null,
+      "classification": { "state": "excluded", "reason": "shared_boundary" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "read-operation:src/components/tasks/phase-template-prompt.tsx → cookies",
+      "source": "src/components/tasks/phase-template-prompt.tsx",
+      "exportName": "cookies",
+      "capabilityIdentity": null,
+      "domain": "boundary",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "mutationShape": null,
+      "classification": { "state": "excluded", "reason": "shared_boundary" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "read-operation:src/components/tasks/phase-template-prompt.tsx → getCurrentSession",
+      "source": "src/components/tasks/phase-template-prompt.tsx",
+      "exportName": "getCurrentSession",
+      "capabilityIdentity": null,
+      "domain": "boundary",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "mutationShape": null,
+      "classification": { "state": "excluded", "reason": "shared_boundary" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "read-operation:src/components/tasks/phase-template-prompt.tsx → readPhaseTemplatePrompt",
+      "source": "src/components/tasks/phase-template-prompt.tsx",
+      "exportName": "readPhaseTemplatePrompt",
+      "capabilityIdentity": "tasks.read.phase-template-prompt",
+      "domain": "phase_template",
+      "operationKind": "read",
+      "applicationCapability": "phase.signal",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/tasks",
+      "source": "src/app/(dashboard)/tasks/page.tsx",
+      "exportName": null,
+      "capabilityIdentity": "tasks.read.list",
+      "domain": "list",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/tasks/[id]",
+      "source": "src/app/(dashboard)/tasks/[id]/page.tsx",
+      "exportName": null,
+      "capabilityIdentity": "tasks.read.detail",
+      "domain": "detail",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/tasks/new",
+      "source": "src/app/(dashboard)/tasks/new/page.tsx",
+      "exportName": null,
+      "capabilityIdentity": "tasks.read.planning-options",
+      "domain": "planning",
+      "operationKind": "read",
+      "applicationCapability": "tasks.write",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/tasks/templates",
+      "source": "src/app/(dashboard)/tasks/templates/page.tsx",
+      "exportName": null,
+      "capabilityIdentity": "tasks.read.templates",
+      "domain": "templates",
+      "operationKind": "read",
+      "applicationCapability": "tasks.write",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    }
+  ],
+  "summary": {
+    "actions": 18,
+    "routes": 4,
+    "rscReads": 25,
+    "exclusions": 9,
+    "readCapabilities": 7,
+    "effectCapabilities": 17,
+    "unclassified": 0
+  }
+}

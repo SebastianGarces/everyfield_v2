@@ -2,6 +2,7 @@ import { db } from "@/db";
 import { taskDependencies, tasks, type TaskStatus } from "@/db/schema";
 import { and, eq, inArray, isNull, ne, notInArray, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
+import { taskStructureLockStatement } from "./structure-lock";
 
 // ============================================================================
 // Task dependencies (T-015)
@@ -285,6 +286,7 @@ export async function setTaskPrerequisites(
       )
     );
   await db.batch([
+    taskStructureLockStatement(churchId),
     ...(uniqueIds.length > 0
       ? [buildAddDependencyStatement(churchId, taskId, uniqueIds)]
       : []),
