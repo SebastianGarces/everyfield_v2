@@ -206,6 +206,9 @@ function executionRegistryForRecipe(input: {
     registrations.push(
       defineEvryExecutionCapability({
         planCapability: registration.planCapability,
+        ...(registration.reconcileClaimed
+          ? { reconcileClaimed: registration.reconcileClaimed }
+          : {}),
         async executeIfCurrent(effectInput) {
           const result = await registration.executeIfCurrent(effectInput);
           if (
@@ -409,52 +412,7 @@ export function createEvryExecutor(boundaries: EvryExecutorBoundaries) {
       const executionRegistration = registry.registrationFor(
         step.capabilityIdentity
       );
-      const authorization = await boundaries.authorizeCapability(
-        step.capabilityIdentity
-      );
-      if (!executionRegistration || !authorization) {
-        results.set(
-          step.id,
-          publicDurable(
-            await persistRefusal(
-              boundaries,
-              attempt,
-              step.id,
-              step.capabilityIdentity
-            )
-          )
-        );
-        continue;
-      }
-
-      const currentDocument = await boundaries.revalidateStep({
-        attempt,
-        actorUserId: authorization.actor.userId,
-        plantId: authorization.actor.plantId,
-        checkedAt: boundaries.now(),
-      });
-      let current: EvryActionPlanDocument | null = null;
-      try {
-        current = parseStoredEvryActionPlan({
-          document: currentDocument,
-          registry: registry.planRegistry,
-        });
-      } catch {
-        // The same neutral refusal covers a stale confirmation, expiry, actor,
-        // plant, capability registration, or stored argument contract.
-      }
-      const currentStep = current?.steps.find(({ id }) => id === step.id);
-      if (
-        !current ||
-        !currentStep ||
-        canonicalEvryPlanJson({
-          actorUserId: exact.actorUserId,
-          plantId: exact.plantId,
-          expiresAt: exact.expiresAt,
-          document: current,
-        }) !== canonicalDocument ||
-        currentStep.capabilityIdentity !== step.capabilityIdentity
-      ) {
+      if (!executionRegistration) {
         results.set(
           step.id,
           publicDurable(
@@ -474,28 +432,119 @@ export function createEvryExecutor(boundaries: EvryExecutorBoundaries) {
         exact.fingerprint,
         step.id
       );
-      let effect;
-      try {
-        effect = await executionRegistration.executeIfCurrent({
-          authorization,
-          effectKey,
-          execution: {
-            attemptId: attempt.id,
-            planId: attempt.planId,
-            actorUserId: attempt.actorUserId,
-            plantId: attempt.plantId,
-            fingerprint: attempt.fingerprint,
-            correlationId: attempt.correlationId,
-            stepId: step.id,
-            capabilityIdentity: step.capabilityIdentity,
-          },
-          arguments: currentStep.arguments,
-        });
-      } catch {
-        // The adapter may have committed its keyed effect before transport or
-        // process failure. Absence of a closed result is therefore retryable,
-        // never evidence of a terminal failure.
-        effect = { status: "retryable" } as const;
+      const execution = {
+        attemptId: attempt.id,
+        planId: attempt.planId,
+        actorUserId: attempt.actorUserId,
+        plantId: attempt.plantId,
+        fingerprint: attempt.fingerprint,
+        correlationId: attempt.correlationId,
+        stepId: step.id,
+        capabilityIdentity: step.capabilityIdentity,
+      };
+      let effect = executionRegistration.reconcileClaimed
+        ? await executionRegistration.reconcileClaimed({
+            effectKey,
+            execution,
+            arguments: step.arguments,
+          })
+        : null;
+
+      if (effect === null) {
+        const authorization = await boundaries.authorizeCapability(
+          step.capabilityIdentity
+        );
+        if (!authorization) {
+          effect = executionRegistration.reconcileClaimed
+            ? await executionRegistration.reconcileClaimed({
+                effectKey,
+                execution,
+                arguments: step.arguments,
+              })
+            : null;
+          if (effect === null) {
+            results.set(
+              step.id,
+              publicDurable(
+                await persistRefusal(
+                  boundaries,
+                  attempt,
+                  step.id,
+                  step.capabilityIdentity
+                )
+              )
+            );
+            continue;
+          }
+        }
+
+        if (effect === null) {
+          const currentDocument = await boundaries.revalidateStep({
+            attempt,
+            actorUserId: authorization!.actor.userId,
+            plantId: authorization!.actor.plantId,
+            checkedAt: boundaries.now(),
+          });
+          let current: EvryActionPlanDocument | null = null;
+          try {
+            current = parseStoredEvryActionPlan({
+              document: currentDocument,
+              registry: registry.planRegistry,
+            });
+          } catch {
+            // The same neutral refusal covers a stale confirmation, expiry,
+            // actor, plant, capability registration, or stored arguments.
+          }
+          const currentStep = current?.steps.find(({ id }) => id === step.id);
+          if (
+            !current ||
+            !currentStep ||
+            canonicalEvryPlanJson({
+              actorUserId: exact.actorUserId,
+              plantId: exact.plantId,
+              expiresAt: exact.expiresAt,
+              document: current,
+            }) !== canonicalDocument ||
+            currentStep.capabilityIdentity !== step.capabilityIdentity
+          ) {
+            effect = executionRegistration.reconcileClaimed
+              ? await executionRegistration.reconcileClaimed({
+                  effectKey,
+                  execution,
+                  arguments: step.arguments,
+                })
+              : null;
+            if (effect === null) {
+              results.set(
+                step.id,
+                publicDurable(
+                  await persistRefusal(
+                    boundaries,
+                    attempt,
+                    step.id,
+                    step.capabilityIdentity
+                  )
+                )
+              );
+              continue;
+            }
+          }
+
+          if (effect === null) {
+            try {
+              effect = await executionRegistration.executeIfCurrent({
+                authorization: authorization!,
+                effectKey,
+                execution,
+                arguments: currentStep!.arguments,
+              });
+            } catch {
+              // The adapter may have committed its keyed effect before
+              // transport or process failure. Absence is retryable.
+              effect = { status: "retryable" } as const;
+            }
+          }
+        }
       }
 
       if (effect.status === "retryable") {

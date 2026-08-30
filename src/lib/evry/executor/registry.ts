@@ -55,6 +55,10 @@ export type EvryEffectInput = Readonly<{
   arguments: Readonly<Record<string, EvryJsonValue>>;
 }>;
 
+export type EvryClaimedEffectInput = Readonly<
+  Omit<EvryEffectInput, "authorization">
+>;
+
 export type EvryExecutionCapabilityRegistration = Readonly<{
   planCapability: EvryPlanCapabilityRegistration;
   /**
@@ -64,6 +68,15 @@ export type EvryExecutionCapabilityRegistration = Readonly<{
    * the applied effect changed the target. Raw errors must not cross here.
    */
   executeIfCurrent(input: EvryEffectInput): Promise<EvryEffectResult>;
+  /**
+   * Reconcile a domain mutation that is already durably claimed. This runs
+   * before fresh authorization because revoking later authority cannot turn an
+   * already-committed mutation into a truthful refusal. `null` means no exact
+   * claim exists and the ordinary authorized path must run.
+   */
+  reconcileClaimed?(
+    input: EvryClaimedEffectInput
+  ): Promise<EvryEffectResult | null>;
   [EVRY_EXECUTION_CAPABILITY]: true;
 }>;
 
@@ -76,6 +89,9 @@ export type EvryExecutionCapabilityRegistry = Readonly<{
 export function defineEvryExecutionCapability(input: {
   planCapability: EvryPlanCapabilityRegistration;
   executeIfCurrent(input: EvryEffectInput): Promise<EvryEffectResult>;
+  reconcileClaimed?(
+    input: EvryClaimedEffectInput
+  ): Promise<EvryEffectResult | null>;
 }): EvryExecutionCapabilityRegistration {
   if (!isEvryEffectCapabilityIdentity(input.planCapability.identity)) {
     throw new Error(
@@ -89,6 +105,14 @@ export function defineEvryExecutionCapability(input: {
         await input.executeIfCurrent(effectInput)
       );
     },
+    ...(input.reconcileClaimed
+      ? {
+          async reconcileClaimed(effectInput: EvryClaimedEffectInput) {
+            const result = await input.reconcileClaimed!(effectInput);
+            return result === null ? null : effectResultSchema.parse(result);
+          },
+        }
+      : {}),
     [EVRY_EXECUTION_CAPABILITY]: true as const,
   });
 }

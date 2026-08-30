@@ -44,7 +44,6 @@ import { emitTaskCompleted } from "./events";
 // question is asked. Each call swallows its own failures, so a notification can
 // never fail the write it follows.
 import {
-  cancelTaskNotifications,
   cancelTaskNotificationsFor,
   syncTaskNotifications,
   syncTaskNotificationsFor,
@@ -1255,6 +1254,17 @@ export function completeTaskStatement(input: {
   expectedStatus?: TaskStatus;
   expectedAssignedToId?: string | null;
   expectedIsRecurring?: boolean;
+  expectedDescription?: string | null;
+  expectedPriority?: TaskPriority;
+  expectedDueDate?: string | null;
+  expectedDueTime?: string | null;
+  expectedCategory?: TaskCategory | null;
+  expectedRelatedType?: string | null;
+  expectedRelatedId?: string | null;
+  expectedParentTaskId?: string | null;
+  expectedRecurrenceRule?: unknown;
+  expectedCompletionEvent?: string | null;
+  expectedCreatedById?: string;
   expectedUpdatedAt?: Date;
   launchMilestoneId?: string;
   /** Trusted outer write gate used by the Evry exact-effect transaction. */
@@ -1270,6 +1280,16 @@ export function completeTaskStatement(input: {
       and t.deleted_at is null
       and t.status <> 'complete'
       ${input.expectedTitle ? sql`and t.title = ${input.expectedTitle}` : sql``}
+      ${
+        input.expectedDescription === undefined
+          ? sql``
+          : sql`and t.description is not distinct from ${input.expectedDescription}`
+      }
+      ${
+        input.expectedPriority
+          ? sql`and t.priority = ${input.expectedPriority}`
+          : sql``
+      }
       ${input.expectedStatus ? sql`and t.status = ${input.expectedStatus}` : sql``}
       ${
         input.expectedAssignedToId === undefined
@@ -1282,6 +1302,57 @@ export function completeTaskStatement(input: {
         input.expectedIsRecurring === undefined
           ? sql``
           : sql`and t.is_recurring = ${input.expectedIsRecurring}`
+      }
+      ${
+        input.expectedDueDate === undefined
+          ? sql``
+          : sql`and t.due_date is not distinct from ${input.expectedDueDate}::date`
+      }
+      ${
+        input.expectedDueTime === undefined
+          ? sql``
+          : sql`and t.due_time is not distinct from ${input.expectedDueTime}::time`
+      }
+      ${
+        input.expectedCategory === undefined
+          ? sql``
+          : sql`and t.category is not distinct from ${input.expectedCategory}::varchar`
+      }
+      ${
+        input.expectedRelatedType === undefined
+          ? sql``
+          : sql`and t.related_type is not distinct from ${input.expectedRelatedType}::varchar`
+      }
+      ${
+        input.expectedRelatedId === undefined
+          ? sql``
+          : input.expectedRelatedId === null
+            ? sql`and t.related_id is null`
+            : sql`and t.related_id = ${input.expectedRelatedId}::uuid`
+      }
+      ${
+        input.expectedParentTaskId === undefined
+          ? sql``
+          : input.expectedParentTaskId === null
+            ? sql`and t.parent_task_id is null`
+            : sql`and t.parent_task_id = ${input.expectedParentTaskId}::uuid`
+      }
+      ${
+        input.expectedRecurrenceRule === undefined
+          ? sql``
+          : input.expectedRecurrenceRule === null
+            ? sql`and t.recurrence_rule is null`
+            : sql`and t.recurrence_rule is not distinct from ${JSON.stringify(input.expectedRecurrenceRule)}::jsonb`
+      }
+      ${
+        input.expectedCreatedById
+          ? sql`and t.created_by_id = ${input.expectedCreatedById}::uuid`
+          : sql``
+      }
+      ${
+        input.expectedCompletionEvent === undefined
+          ? sql``
+          : sql`and t.completion_event is not distinct from ${input.expectedCompletionEvent}`
       }
       and ${input.writeEligibility ?? sql`true`}
       ${
@@ -1310,6 +1381,17 @@ export function reopenTaskStatement(input: {
   expectedStatus?: TaskStatus;
   expectedAssignedToId?: string | null;
   expectedIsRecurring?: boolean;
+  expectedDescription?: string | null;
+  expectedPriority?: TaskPriority;
+  expectedDueDate?: string | null;
+  expectedDueTime?: string | null;
+  expectedCategory?: TaskCategory | null;
+  expectedRelatedType?: string | null;
+  expectedRelatedId?: string | null;
+  expectedParentTaskId?: string | null;
+  expectedRecurrenceRule?: unknown;
+  expectedCompletionEvent?: string | null;
+  expectedCreatedById?: string;
   expectedUpdatedAt?: Date;
   launchMilestoneId?: string;
   /** Trusted outer write gate used by the Evry exact-effect transaction. */
@@ -1324,6 +1406,16 @@ export function reopenTaskStatement(input: {
       and t.deleted_at is null
       and t.status = 'complete'
       ${input.expectedTitle ? sql`and t.title = ${input.expectedTitle}` : sql``}
+      ${
+        input.expectedDescription === undefined
+          ? sql``
+          : sql`and t.description is not distinct from ${input.expectedDescription}`
+      }
+      ${
+        input.expectedPriority
+          ? sql`and t.priority = ${input.expectedPriority}`
+          : sql``
+      }
       ${input.expectedStatus ? sql`and t.status = ${input.expectedStatus}` : sql``}
       ${
         input.expectedAssignedToId === undefined
@@ -1336,6 +1428,57 @@ export function reopenTaskStatement(input: {
         input.expectedIsRecurring === undefined
           ? sql``
           : sql`and t.is_recurring = ${input.expectedIsRecurring}`
+      }
+      ${
+        input.expectedDueDate === undefined
+          ? sql``
+          : sql`and t.due_date is not distinct from ${input.expectedDueDate}::date`
+      }
+      ${
+        input.expectedDueTime === undefined
+          ? sql``
+          : sql`and t.due_time is not distinct from ${input.expectedDueTime}::time`
+      }
+      ${
+        input.expectedCategory === undefined
+          ? sql``
+          : sql`and t.category is not distinct from ${input.expectedCategory}::varchar`
+      }
+      ${
+        input.expectedRelatedType === undefined
+          ? sql``
+          : sql`and t.related_type is not distinct from ${input.expectedRelatedType}::varchar`
+      }
+      ${
+        input.expectedRelatedId === undefined
+          ? sql``
+          : input.expectedRelatedId === null
+            ? sql`and t.related_id is null`
+            : sql`and t.related_id = ${input.expectedRelatedId}::uuid`
+      }
+      ${
+        input.expectedParentTaskId === undefined
+          ? sql``
+          : input.expectedParentTaskId === null
+            ? sql`and t.parent_task_id is null`
+            : sql`and t.parent_task_id = ${input.expectedParentTaskId}::uuid`
+      }
+      ${
+        input.expectedRecurrenceRule === undefined
+          ? sql``
+          : input.expectedRecurrenceRule === null
+            ? sql`and t.recurrence_rule is null`
+            : sql`and t.recurrence_rule is not distinct from ${JSON.stringify(input.expectedRecurrenceRule)}::jsonb`
+      }
+      ${
+        input.expectedCreatedById
+          ? sql`and t.created_by_id = ${input.expectedCreatedById}::uuid`
+          : sql``
+      }
+      ${
+        input.expectedCompletionEvent === undefined
+          ? sql``
+          : sql`and t.completion_event is not distinct from ${input.expectedCompletionEvent}`
       }
       and ${input.writeEligibility ?? sql`true`}
       ${
@@ -1370,17 +1513,28 @@ async function reconcileTaskCompletionEffects(
     Task,
     "id" | "churchId" | "category" | "relatedType" | "relatedId"
   >,
-  completedById: string
+  completedById: string,
+  completedAt?: Date,
+  occurrenceKey?: string
 ): Promise<void> {
-  await cancelTaskNotifications(completed.churchId, completed.id);
   await emitTaskCompleted(
     completed.id,
     completed.churchId,
     completed.category,
     completed.relatedType,
     completed.relatedId,
-    completedById
+    completedById,
+    completedAt,
+    occurrenceKey
   );
+  // Reconcile from the live projection, not from the historical completion.
+  // A crash retry after a later reopen must restore the reopened task's rows,
+  // never cancel them using stale completion facts.
+  await syncTaskNotificationsFor(completed.churchId, [completed.id], {
+    mustCancel: true,
+    now: completedAt,
+    failureMode: occurrenceKey ? "required" : "best_effort",
+  });
 }
 
 /** Exact completion effects for a reviewed task that cannot recur. */
@@ -1389,19 +1543,163 @@ export async function reconcileNonRecurringCompletedTaskAfterWrite(
     Task,
     "id" | "churchId" | "category" | "relatedType" | "relatedId" | "isRecurring"
   >,
-  completedById: string
+  completedById: string,
+  completedAt?: Date
 ): Promise<void> {
   if (completed.isRecurring) {
     throw new Error("Recurring task completion needs a successor-aware plan");
   }
-  await reconcileTaskCompletionEffects(completed, completedById);
+  await reconcileTaskCompletionEffects(completed, completedById, completedAt);
+}
+
+export type ReviewedRecurringTaskRow = Pick<
+  Task,
+  | "id"
+  | "churchId"
+  | "title"
+  | "description"
+  | "status"
+  | "priority"
+  | "dueDate"
+  | "dueTime"
+  | "assignedToId"
+  | "category"
+  | "relatedType"
+  | "relatedId"
+  | "parentTaskId"
+  | "isRecurring"
+  | "recurrenceRule"
+  | "createdById"
+  | "createdAt"
+>;
+
+export type ReviewedTaskRecurrencePlan = Readonly<{
+  successor: ReviewedRecurringTaskRow;
+  children: readonly ReviewedRecurringTaskRow[];
+}>;
+
+function sameReviewedRecurringTask(
+  current: ReviewedRecurringTaskRow,
+  reviewed: ReviewedRecurringTaskRow
+): boolean {
+  return (
+    current.id === reviewed.id &&
+    current.churchId === reviewed.churchId &&
+    current.title === reviewed.title &&
+    current.description === reviewed.description &&
+    current.status === reviewed.status &&
+    current.priority === reviewed.priority &&
+    current.dueDate === reviewed.dueDate &&
+    current.dueTime === reviewed.dueTime &&
+    current.assignedToId === reviewed.assignedToId &&
+    current.category === reviewed.category &&
+    current.relatedType === reviewed.relatedType &&
+    current.relatedId === reviewed.relatedId &&
+    current.parentTaskId === reviewed.parentTaskId &&
+    current.isRecurring === reviewed.isRecurring &&
+    JSON.stringify(current.recurrenceRule) ===
+      JSON.stringify(reviewed.recurrenceRule) &&
+    current.createdById === reviewed.createdById &&
+    current.createdAt.getTime() === reviewed.createdAt.getTime()
+  );
+}
+
+async function reconcileReviewedRecurrence(
+  completed: Task,
+  reviewed: ReviewedTaskRecurrencePlan,
+  occurrenceKey?: string
+): Promise<Task> {
+  await db
+    .insert(tasks)
+    .values(reviewed.successor)
+    // The exact same reviewed successor races on both its primary key and the
+    // recurrence-series arbiter. PostgreSQL is free to report either unique
+    // index first, so targeting only the primary key makes an otherwise
+    // identical replay intermittently throw on the series index. Suppress any
+    // unique collision, then prove the stored row below is the exact reviewed
+    // successor; a different-series winner therefore still fails closed.
+    .onConflictDoNothing();
+
+  const [successor] = await db
+    .select()
+    .from(tasks)
+    .where(
+      and(
+        eq(tasks.id, reviewed.successor.id),
+        eq(tasks.churchId, completed.churchId),
+        isNull(tasks.deletedAt)
+      )
+    )
+    .limit(1);
+  if (!successor || !sameReviewedRecurringTask(successor, reviewed.successor)) {
+    throw new Error("Reviewed recurring successor no longer matches");
+  }
+
+  if (reviewed.children.length > 0) {
+    await db
+      .insert(tasks)
+      .values([...reviewed.children])
+      .onConflictDoNothing({ target: tasks.id });
+    const storedChildren = await db
+      .select()
+      .from(tasks)
+      .where(
+        and(
+          eq(tasks.churchId, completed.churchId),
+          inArray(
+            tasks.id,
+            reviewed.children.map(({ id }) => id)
+          ),
+          isNull(tasks.deletedAt)
+        )
+      );
+    const byId = new Map(storedChildren.map((row) => [row.id, row]));
+    if (
+      reviewed.children.some((child) => {
+        const stored = byId.get(child.id);
+        return !stored || !sameReviewedRecurringTask(stored, child);
+      })
+    ) {
+      throw new Error("Reviewed recurring checklist no longer matches");
+    }
+  }
+
+  await syncTaskNotifications(successor, {
+    mustCancel: false,
+    failureMode: occurrenceKey ? "required" : "best_effort",
+  });
+  return successor;
 }
 
 export async function reconcileCompletedTaskAfterWrite(
   completed: Task,
-  completedById: string
+  completedById: string,
+  reviewedRecurrence?: ReviewedTaskRecurrencePlan | null,
+  reviewedCompletedAt?: Date,
+  occurrenceKey?: string
 ): Promise<Task | null> {
-  await reconcileTaskCompletionEffects(completed, completedById);
+  await reconcileTaskCompletionEffects(
+    completed,
+    completedById,
+    reviewedCompletedAt,
+    occurrenceKey
+  );
+
+  if (reviewedRecurrence !== undefined) {
+    if (!completed.isRecurring) {
+      if (reviewedRecurrence !== null) {
+        throw new Error("A non-recurring task cannot have a successor plan");
+      }
+      return null;
+    }
+    return reviewedRecurrence
+      ? reconcileReviewedRecurrence(
+          completed,
+          reviewedRecurrence,
+          occurrenceKey
+        )
+      : null;
+  }
 
   try {
     return await createNextRecurrence(

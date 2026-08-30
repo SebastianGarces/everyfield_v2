@@ -68,6 +68,14 @@ function scheduleStoredPlan(): StoredEvryActionPlan {
             targetDate: "2026-09-06",
             postpone: false,
             note: "Exact day",
+            consequences: {
+              launchId: LAUNCH_ID,
+              changedAt: CREATED_AT.toISOString(),
+              plantName: "Dayspring",
+              readiness: [],
+              notifications: [],
+              notificationExclusions: [],
+            },
           },
           dependsOn: [],
         },
@@ -263,4 +271,25 @@ test("literal Launch content preserves compatibility characters and boundary whi
       note: "  ①  ",
     }
   );
+});
+
+test("only the exact bare null token means database null", () => {
+  const values = [
+    { wire: "null", expected: null },
+    { wire: "NULL", expected: "NULL" },
+    { wire: "NuLl", expected: "NuLl" },
+    { wire: " null", expected: " null" },
+    { wire: "null ", expected: "null " },
+    { wire: '"null"', expected: "null" },
+    { wire: '"\\u006eull"', expected: "null" },
+    { wire: "null🧪", expected: "null🧪" },
+  ] as const;
+  for (const value of values) {
+    const selected = selectLaunchEvryEffect(
+      `record launch outcome|attendance=1|decisions=0|notes=${value.wire}|capture=null`
+    );
+    assert.ok(selected?.kind === "record_outcome", value.wire);
+    assert.equal(selected.outcome.outcomeNotes, value.expected, value.wire);
+    assert.equal(selected.outcome.captureTheDay, null, value.wire);
+  }
 });

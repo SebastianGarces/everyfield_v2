@@ -31,7 +31,16 @@
 // descriptions; the dates are the planter's.
 // ============================================================================
 
-import { and, desc, eq, isNotNull, isNull, sql, type SQL } from "drizzle-orm";
+import {
+  and,
+  desc,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  sql,
+  type SQL,
+} from "drizzle-orm";
 
 import { db } from "@/db";
 import type { User } from "@/db/schema";
@@ -243,7 +252,7 @@ export const LAUNCH_MILESTONE_TEMPLATES: readonly LaunchMilestoneTemplate[] = [
 // Seeding
 // ----------------------------------------------------------------------------
 
-interface SeedMilestoneRow {
+export interface LaunchMilestoneSeedRow {
   milestoneId: string;
   templateKey: string;
   area: LaunchMilestoneArea;
@@ -262,9 +271,9 @@ interface SeedMilestoneRow {
  * accident. Known ids make the whole seed one statement whose join rows are
  * decided before it runs.
  */
-function planSeedRows(
+export function planLaunchMilestoneSeedRows(
   templates: readonly LaunchMilestoneTemplate[] = LAUNCH_MILESTONE_TEMPLATES
-): SeedMilestoneRow[] {
+): LaunchMilestoneSeedRow[] {
   return templates.map((template, index) => ({
     milestoneId: crypto.randomUUID(),
     templateKey: template.templateKey,
@@ -293,6 +302,123 @@ function planSeedRows(
   }));
 }
 
+/** Resolve only the immutable template rows one schedule still needs to add. */
+export async function planMissingLaunchMilestoneSeedRows(input: {
+  launchId: string;
+  churchId: string;
+}): Promise<LaunchMilestoneSeedRow[]> {
+  const existing = await db
+    .select({ templateKey: launchMilestones.templateKey })
+    .from(launchMilestones)
+    .where(
+      and(
+        eq(launchMilestones.launchId, input.launchId),
+        eq(launchMilestones.churchId, input.churchId)
+      )
+    );
+  const existingKeys = new Set(existing.map(({ templateKey }) => templateKey));
+  return planLaunchMilestoneSeedRows(
+    LAUNCH_MILESTONE_TEMPLATES.filter(
+      ({ templateKey }) => !existingKeys.has(templateKey)
+    )
+  );
+}
+
+/**
+ * Prove that every reviewed seed row exists byte-for-byte after replay. A
+ * template-key conflict with a different owner-written row is not silently
+ * accepted as the confirmed effect.
+ */
+export async function assertLaunchMilestoneSeedRows(input: {
+  launchId: string;
+  churchId: string;
+  actorUserId: string;
+  rows: readonly LaunchMilestoneSeedRow[];
+}): Promise<void> {
+  if (input.rows.length === 0) return;
+  const milestoneRows = await db
+    .select({
+      id: launchMilestones.id,
+      templateKey: launchMilestones.templateKey,
+      area: launchMilestones.area,
+      title: launchMilestones.title,
+      description: launchMilestones.description,
+      sortOrder: launchMilestones.sortOrder,
+    })
+    .from(launchMilestones)
+    .where(
+      and(
+        eq(launchMilestones.launchId, input.launchId),
+        eq(launchMilestones.churchId, input.churchId),
+        inArray(
+          launchMilestones.id,
+          input.rows.map(({ milestoneId }) => milestoneId)
+        )
+      )
+    );
+  const taskRows = await db
+    .select({
+      milestoneId: launchMilestoneTasks.milestoneId,
+      id: tasks.id,
+      title: tasks.title,
+      description: tasks.description,
+      category: tasks.category,
+      createdById: tasks.createdById,
+    })
+    .from(launchMilestoneTasks)
+    .innerJoin(
+      tasks,
+      and(
+        eq(tasks.id, launchMilestoneTasks.taskId),
+        eq(tasks.churchId, input.churchId),
+        isNull(tasks.deletedAt)
+      )
+    )
+    .where(
+      and(
+        eq(launchMilestoneTasks.churchId, input.churchId),
+        inArray(
+          launchMilestoneTasks.milestoneId,
+          input.rows.map(({ milestoneId }) => milestoneId)
+        )
+      )
+    );
+  const actual = input.rows.map((reviewed) => {
+    const milestone = milestoneRows.find(
+      ({ id }) => id === reviewed.milestoneId
+    );
+    return {
+      milestone,
+      tasks: taskRows
+        .filter(({ milestoneId }) => milestoneId === reviewed.milestoneId)
+        .map(({ milestoneId: _milestoneId, ...task }) => task)
+        .sort((left, right) => left.id.localeCompare(right.id)),
+    };
+  });
+  const expected = input.rows.map((reviewed) => ({
+    milestone: {
+      id: reviewed.milestoneId,
+      templateKey: reviewed.templateKey,
+      area: reviewed.area,
+      title: reviewed.title,
+      description: reviewed.description,
+      sortOrder: reviewed.sortOrder,
+    },
+    tasks: reviewed.tasks
+      .map((task) => ({
+        id: task.taskId,
+        title: task.title,
+        description: task.description,
+        category: "launch_prep" as const,
+        createdById: input.actorUserId,
+      }))
+      .sort((left, right) => left.id.localeCompare(right.id)),
+  }));
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+    throw new Error("Reviewed Launch readiness rows did not converge exactly");
+  }
+}
+
 /**
  * Seed the Playbook set for a launch — milestones, their `launch_prep` tasks,
  * and the join rows — in ONE statement.
@@ -316,7 +442,7 @@ export function seedLaunchMilestonesStatement(input: {
   launchId: string;
   churchId: string;
   actorUserId: string;
-  rows: SeedMilestoneRow[];
+  rows: LaunchMilestoneSeedRow[];
 }): SQL {
   const milestoneValues = sql.join(
     input.rows.map(
@@ -391,11 +517,22 @@ export async function seedLaunchMilestones(input: {
   launchId: string;
   churchId: string;
   actorUserId: string;
+  /** Frozen reviewed rows for Evry; owner callers use the current templates. */
+  rows?: LaunchMilestoneSeedRow[];
 }): Promise<SeedLaunchMilestonesResult> {
+  const rows = input.rows ?? planLaunchMilestoneSeedRows();
+  if (rows.length === 0) {
+    return { milestonesCreated: 0, tasksCreated: 0 };
+  }
   const result = await db.execute<{
     milestone_count: number;
     task_count: number;
-  }>(seedLaunchMilestonesStatement({ ...input, rows: planSeedRows() }));
+  }>(
+    seedLaunchMilestonesStatement({
+      ...input,
+      rows,
+    })
+  );
 
   const row = result.rows[0];
   return {

@@ -94,6 +94,7 @@ type HarnessOptions = Readonly<{
   finalDependencies?: readonly string[];
   throwAfterCommitStep?: string;
   initiallyExpired?: boolean;
+  claimDuringAuthorizationRefusal?: boolean;
 }>;
 
 function createHarness(options: HarnessOptions = {}) {
@@ -116,10 +117,16 @@ function createHarness(options: HarnessOptions = {}) {
   let nowTick = 0;
   let clockOffsetMs = 0;
   let targetCurrent = options.stale !== "target";
+  let lastEffectKey: EvryAuditKey | null = null;
 
   const registry = createEvryExecutionCapabilityRegistry([
     defineEvryExecutionCapability({
       planCapability,
+      async reconcileClaimed(input) {
+        checks.push("claim");
+        lastEffectKey = input.effectKey;
+        return effectClaims.get(input.effectKey) ?? null;
+      },
       async executeIfCurrent(input) {
         const targetId = String(input.arguments.targetId);
         checks.push(`target:${targetId}`);
@@ -192,6 +199,15 @@ function createHarness(options: HarnessOptions = {}) {
   const boundaries: EvryExecutorBoundaries = {
     async authorizeCapability() {
       checks.push("capability");
+      if (options.claimDuringAuthorizationRefusal) {
+        assert.ok(lastEffectKey);
+        effectClaims.set(lastEffectKey, {
+          status: "completed",
+          affectedCount: 1,
+          excludedCount: 0,
+        });
+        return null;
+      }
       if (options.stale === "capability") return null;
       if (options.stale === "actor") {
         return authorization({
@@ -473,6 +489,9 @@ test("a throw after keyed commit retries and recovers one completed effect", asy
   assert.equal(interrupted.status, "retryable");
   assert.equal(harness.durable.size, 0);
   assert.equal(harness.stats().finishes, 0);
+  const authorizationsBeforeRecovery = harness.checks.filter(
+    (check) => check === "capability"
+  ).length;
 
   harness.staleTarget();
   const recovered = await harness.execute(harness.input);
@@ -480,6 +499,20 @@ test("a throw after keyed commit retries and recovers one completed effect", asy
   assert.equal(harness.effectCalls.get("target-1"), 1);
   assert.equal(harness.durable.size, 1);
   assert.equal(harness.stats().finishes, 1);
+  assert.equal(
+    harness.checks.filter((check) => check === "capability").length,
+    authorizationsBeforeRecovery,
+    "an exact domain claim must reconcile before mutable authorization"
+  );
+});
+
+test("a claim committed during authorization is rechecked before refusal", async () => {
+  const harness = createHarness({ claimDuringAuthorizationRefusal: true });
+  const result = await harness.execute(harness.input);
+  assert.equal(result.status, "completed");
+  assert.equal(result.steps[0]?.status, "completed");
+  assert.equal(harness.effectCalls.size, 0);
+  assert.equal(harness.checks.filter((check) => check === "claim").length, 2);
 });
 
 test("terminal replay returns immutable plan order despite reverse commit order", async () => {

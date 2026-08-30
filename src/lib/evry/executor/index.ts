@@ -9,6 +9,7 @@ export {
 export {
   createEvryExecutionCapabilityRegistry,
   defineEvryExecutionCapability,
+  type EvryClaimedEffectInput,
   type EvryEffectInput,
   type EvryEffectResult,
   type EvryExecutionCapabilityRegistration,

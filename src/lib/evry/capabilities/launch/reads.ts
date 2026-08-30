@@ -25,6 +25,102 @@ const link = trustedEvryApplicationSourceLink({
 });
 
 const noInput = {};
+export const launchJournalCursorSchema = z
+  .string()
+  .min(1)
+  .max(512)
+  .regex(/^[A-Za-z0-9_-]+$/);
+const decodedLaunchJournalCursorSchema = z.strictObject({
+  at: z.string().datetime(),
+  key: z.string().min(1).max(200),
+});
+
+function encodeLaunchJournalCursor(row: { at: Date; key: string }): string {
+  return Buffer.from(
+    JSON.stringify({ at: row.at.toISOString(), key: row.key }),
+    "utf8"
+  ).toString("base64url");
+}
+
+function decodeLaunchJournalCursor(value: string) {
+  try {
+    return decodedLaunchJournalCursorSchema.parse(
+      JSON.parse(Buffer.from(value, "base64url").toString("utf8"))
+    );
+  } catch {
+    return null;
+  }
+}
+
+export type LaunchJournalPageRow = Readonly<{
+  id: string;
+  key: string;
+  label: string;
+  at: Date;
+  facts: readonly Readonly<{ label: string; value: string }>[];
+}>;
+
+export type LaunchJournalPage =
+  | Readonly<{
+      status: "available";
+      rows: readonly LaunchJournalPageRow[];
+      nextCursor: string | null;
+      remaining: number;
+    }>
+  | Readonly<{
+      status: "invalid_cursor" | "missing_cursor";
+      rows: readonly [];
+      nextCursor: null;
+      remaining: 0;
+    }>;
+
+/** Stable, lossless cursor paging over the merged append-only history. */
+export function paginateLaunchJournalRows(
+  inputRows: readonly LaunchJournalPageRow[],
+  limit: number,
+  cursor: string | null
+): LaunchJournalPage {
+  const rows = [...inputRows].sort(
+    (left, right) =>
+      right.at.getTime() - left.at.getTime() ||
+      right.key.localeCompare(left.key)
+  );
+  const decodedCursor = cursor ? decodeLaunchJournalCursor(cursor) : null;
+  if (cursor && !decodedCursor) {
+    return {
+      status: "invalid_cursor",
+      rows: [],
+      nextCursor: null,
+      remaining: 0,
+    };
+  }
+  const start = decodedCursor
+    ? rows.findIndex(
+        (row) =>
+          row.at.toISOString() === decodedCursor.at &&
+          row.key === decodedCursor.key
+      ) + 1
+    : 0;
+  if (decodedCursor && start === 0) {
+    return {
+      status: "missing_cursor",
+      rows: [],
+      nextCursor: null,
+      remaining: 0,
+    };
+  }
+  const visible = rows.slice(start, start + limit);
+  const remaining = Math.max(0, rows.length - start - visible.length);
+  return {
+    status: "available",
+    rows: visible,
+    nextCursor:
+      remaining > 0 && visible.length > 0
+        ? encodeLaunchJournalCursor(visible[visible.length - 1]!)
+        : null,
+    remaining,
+  };
+}
 
 /** Split by UTF-16 storage units without tearing an astral code point. */
 function displayChunks(value: string | null, maximum = 3_800): string[] {
@@ -170,7 +266,8 @@ export const LAUNCH_READINESS_READ = defineEvryReadRegistration({
 /** Bounded plant-scoped journal projection shared by adapter and PG proof. */
 export async function readLaunchJournalForPlant(
   plantId: string,
-  limit: number
+  limit: number,
+  cursor: string | null = null
 ) {
   const launch = await getLaunchForChurch(plantId);
   if (!launch) {
@@ -186,9 +283,10 @@ export async function readLaunchJournalForPlant(
     getLaunchJournalEntries(launch.id, plantId),
     getLaunchMilestoneHistory(launch.id, plantId),
   ]);
-  const rows = [
+  const rows: LaunchJournalPageRow[] = [
     ...journal.map((entry) => ({
       id: entry.id,
+      key: `journal:${entry.id}`,
       label:
         entry.previousStatus === "completed"
           ? "Outcome corrected"
@@ -203,6 +301,7 @@ export async function readLaunchJournalForPlant(
     })),
     ...milestones.map((entry) => ({
       id: entry.milestoneId,
+      key: `milestone:${entry.milestoneId}`,
       label: `Milestone completed: ${entry.title}`,
       at: entry.completedAt,
       facts: [
@@ -210,22 +309,38 @@ export async function readLaunchJournalForPlant(
         { label: "By", value: entry.actorName ?? "Former team member" },
       ],
     })),
-  ].sort((left, right) => right.at.getTime() - left.at.getTime());
-  const visible = rows.slice(0, limit);
+  ];
+  const page = paginateLaunchJournalRows(rows, limit, cursor);
+  if (page.status !== "available") {
+    return buildEvryReadArtifact({
+      title: "Launch history",
+      filters: [{ label: "Plant", value: "Current plant" }],
+      exclusions: [
+        {
+          reason:
+            page.status === "invalid_cursor"
+              ? "Invalid history cursor"
+              : "History cursor is no longer available",
+          count: 1,
+        },
+      ],
+      items: [],
+      sourceLinks: [link],
+    });
+  }
   return buildEvryReadArtifact({
     title: "Launch history",
     filters: [{ label: "Plant", value: "Current plant" }],
-    exclusions:
-      rows.length > visible.length
-        ? [
-            {
-              reason: "Older history not shown",
-              count: rows.length - visible.length,
-            },
-          ]
-        : [],
-    items: visible.map((entry) => ({
-      id: entry.id,
+    exclusions: page.nextCursor
+      ? [
+          {
+            reason: `Older history available after cursor ${page.nextCursor}`,
+            count: page.remaining,
+          },
+        ]
+      : [],
+    items: page.rows.map((entry) => ({
+      id: entry.key,
       label: entry.label,
       facts: [...entry.facts, { label: "When", value: entry.at.toISOString() }],
       sourceLink: link,
@@ -237,9 +352,12 @@ export async function readLaunchJournalForPlant(
 export const LAUNCH_JOURNAL_READ = defineEvryReadRegistration({
   id: "launch.journal",
   capabilityIdentity: LAUNCH_READ_IDENTITIES.journal,
-  inputShape: { limit: z.number().int().min(1).max(100) },
-  run: ({ authorization }, { limit }) =>
-    readLaunchJournalForPlant(authorization.actor.plantId, limit),
+  inputShape: {
+    limit: z.number().int().min(1).max(100),
+    cursor: launchJournalCursorSchema.nullable(),
+  },
+  run: ({ authorization }, { limit, cursor }) =>
+    readLaunchJournalForPlant(authorization.actor.plantId, limit, cursor),
 });
 
 export const LAUNCH_READ_REGISTRATIONS = [
@@ -263,7 +381,20 @@ export function selectLaunchEvryRead(literalUserText: string) {
     return { readId: "launch.readiness", input: {} };
   }
   if (/^(?:show|read) (?:the )?launch (?:history|journal)[.!?]*$/i.test(text)) {
-    return { readId: "launch.journal", input: { limit: 100 } };
+    return { readId: "launch.journal", input: { limit: 100, cursor: null } };
+  }
+  const older =
+    /^(?:show|read) (?:the )?launch (?:history|journal) after ([A-Za-z0-9_-]+)[.!?]*$/i.exec(
+      text
+    );
+  if (older?.[1]) {
+    const cursor = launchJournalCursorSchema.safeParse(older[1]);
+    if (cursor.success) {
+      return {
+        readId: "launch.journal",
+        input: { limit: 100, cursor: cursor.data },
+      };
+    }
   }
   return null;
 }

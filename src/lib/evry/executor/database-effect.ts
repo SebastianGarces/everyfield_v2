@@ -2,16 +2,12 @@ import { and, eq, sql, type SQL } from "drizzle-orm";
 
 import { db } from "@/db";
 import { isUniqueViolation } from "@/db/errors";
-import { evryExecutionOutcomes } from "@/db/schema";
-import {
-  executionStepOutcomeKey,
-  type EvryAuditKey,
-} from "@/lib/evry/audit/identity";
+import { evryExecutionEffectClaims } from "@/db/schema";
+import { type EvryAuditKey } from "@/lib/evry/audit/identity";
 import type { EvryEffectInput, EvryEffectResult } from "./registry";
 
-const EFFECT_UNIQUE = "evry_execution_outcomes_effect_unique_idx";
-const STEP_UNIQUE = "evry_execution_outcomes_step_unique_idx";
-const OUTCOME_KEY_UNIQUE = "evry_execution_outcomes_key_unique_idx";
+const EFFECT_UNIQUE = "evry_execution_effect_claims_effect_unique_idx";
+const STEP_UNIQUE = "evry_execution_effect_claims_step_unique_idx";
 
 interface CompletedEffectRow extends Record<string, unknown> {
   affected_count: number;
@@ -24,31 +20,35 @@ export type EvryDatabaseEffectClaim = Readonly<{
   disposition: "claimed" | "replayed" | "unclaimed";
 }>;
 
-async function exactCompletedOutcome(
+export async function findExactEvryDatabaseEffectClaim(
   input: Pick<EvryEffectInput, "execution" | "effectKey">
 ): Promise<EvryEffectResult | null> {
   const [row] = await db
     .select({
-      affectedCount: evryExecutionOutcomes.affectedCount,
-      excludedCount: evryExecutionOutcomes.excludedCount,
+      affectedCount: evryExecutionEffectClaims.affectedCount,
+      excludedCount: evryExecutionEffectClaims.excludedCount,
     })
-    .from(evryExecutionOutcomes)
+    .from(evryExecutionEffectClaims)
     .where(
       and(
-        eq(evryExecutionOutcomes.attemptId, input.execution.attemptId),
-        eq(evryExecutionOutcomes.planId, input.execution.planId),
-        eq(evryExecutionOutcomes.churchId, input.execution.plantId),
-        eq(evryExecutionOutcomes.actorUserId, input.execution.actorUserId),
-        eq(evryExecutionOutcomes.planFingerprint, input.execution.fingerprint),
-        eq(evryExecutionOutcomes.correlationId, input.execution.correlationId),
-        eq(evryExecutionOutcomes.stepId, input.execution.stepId),
+        eq(evryExecutionEffectClaims.attemptId, input.execution.attemptId),
+        eq(evryExecutionEffectClaims.planId, input.execution.planId),
+        eq(evryExecutionEffectClaims.churchId, input.execution.plantId),
+        eq(evryExecutionEffectClaims.actorUserId, input.execution.actorUserId),
         eq(
-          evryExecutionOutcomes.capabilityIdentity,
+          evryExecutionEffectClaims.planFingerprint,
+          input.execution.fingerprint
+        ),
+        eq(
+          evryExecutionEffectClaims.correlationId,
+          input.execution.correlationId
+        ),
+        eq(evryExecutionEffectClaims.stepId, input.execution.stepId),
+        eq(
+          evryExecutionEffectClaims.capabilityIdentity,
           input.execution.capabilityIdentity
         ),
-        eq(evryExecutionOutcomes.effectKey, input.effectKey),
-        eq(evryExecutionOutcomes.subject, "step"),
-        eq(evryExecutionOutcomes.status, "completed")
+        eq(evryExecutionEffectClaims.effectKey, input.effectKey)
       )
     )
     .limit(1);
@@ -62,10 +62,14 @@ async function exactCompletedOutcome(
 }
 
 /**
- * Claim one exact database effect and its executor outcome in the same SQL
- * statement. The mutation must select through `eligible` and expose
- * `affected_count` / `excluded_count`; owner modules remain responsible for
- * constructing the mutation and its source predicates.
+ * Claim one exact database effect in the same SQL statement as its domain
+ * mutation. This claim is intentionally separate from the terminal executor
+ * outcome: the adapter may still owe replay-safe reconciliation, and the core
+ * records the step outcome only after the adapter returns completed.
+ *
+ * The mutation must select through `eligible` and expose `affected_count` /
+ * `excluded_count`; owner modules remain responsible for constructing the
+ * mutation and its source predicates.
  */
 export async function claimEvryDatabaseEffectDecision(input: {
   execution: EvryEffectInput["execution"];
@@ -75,32 +79,24 @@ export async function claimEvryDatabaseEffectDecision(input: {
   mutation: SQL;
   targetIsCurrent(): Promise<boolean>;
 }): Promise<EvryDatabaseEffectClaim> {
-  const replay = await exactCompletedOutcome(input);
+  const replay = await findExactEvryDatabaseEffectClaim(input);
   if (replay) return { result: replay, disposition: "replayed" };
 
-  const outcomeKey = executionStepOutcomeKey(
-    input.execution.planId,
-    input.execution.fingerprint,
-    input.execution.stepId
-  );
   let result: Awaited<ReturnType<typeof db.execute<CompletedEffectRow>>>;
   try {
     result = await db.execute<CompletedEffectRow>(sql`
       with existing as materialized (
-        select o.affected_count, o.excluded_count
-        from evry_execution_outcomes o
-        where o.attempt_id = ${input.execution.attemptId}::uuid
-          and o.plan_id = ${input.execution.planId}::uuid
-          and o.church_id = ${input.execution.plantId}::uuid
-          and o.actor_user_id = ${input.execution.actorUserId}::uuid
-          and o.plan_fingerprint = ${input.execution.fingerprint}
-          and o.correlation_id = ${input.execution.correlationId}::uuid
-          and o.outcome_key = ${outcomeKey}
-          and o.effect_key = ${input.effectKey}
-          and o.subject = 'step'
-          and o.step_id = ${input.execution.stepId}
-          and o.capability_identity = ${input.execution.capabilityIdentity}
-          and o.status = 'completed'
+        select c.affected_count, c.excluded_count
+        from evry_execution_effect_claims c
+        where c.attempt_id = ${input.execution.attemptId}::uuid
+          and c.plan_id = ${input.execution.planId}::uuid
+          and c.church_id = ${input.execution.plantId}::uuid
+          and c.actor_user_id = ${input.execution.actorUserId}::uuid
+          and c.plan_fingerprint = ${input.execution.fingerprint}
+          and c.correlation_id = ${input.execution.correlationId}::uuid
+          and c.effect_key = ${input.effectKey}
+          and c.step_id = ${input.execution.stepId}
+          and c.capability_identity = ${input.execution.capabilityIdentity}
       ), eligible as materialized (
         select a.id, a.plan_id, a.church_id, a.actor_user_id,
                a.plan_fingerprint, a.correlation_id
@@ -118,17 +114,15 @@ export async function claimEvryDatabaseEffectDecision(input: {
       )${input.mutationCtes ? sql`, ${input.mutationCtes}` : sql``}, mutation as materialized (
         ${input.mutation}
       ), claimed as (
-        insert into evry_execution_outcomes (
+        insert into evry_execution_effect_claims (
           attempt_id, plan_id, church_id, actor_user_id, plan_fingerprint,
-          correlation_id, outcome_key, effect_key, subject, step_id,
-          capability_identity, status, result_code, affected_count,
-          excluded_count, occurred_at
+          correlation_id, effect_key, step_id, capability_identity,
+          affected_count, excluded_count, claimed_at
         )
         select
           e.id, e.plan_id, e.church_id, e.actor_user_id, e.plan_fingerprint,
-          e.correlation_id, ${outcomeKey}, ${input.effectKey}, 'step',
-          ${input.execution.stepId}, ${input.execution.capabilityIdentity},
-          'completed', 'effect_completed', m.affected_count,
+          e.correlation_id, ${input.effectKey}, ${input.execution.stepId},
+          ${input.execution.capabilityIdentity}, m.affected_count,
           m.excluded_count, transaction_timestamp()
         from eligible e
         cross join mutation m
@@ -142,12 +136,11 @@ export async function claimEvryDatabaseEffectDecision(input: {
   } catch (error) {
     if (
       !isUniqueViolation(error, EFFECT_UNIQUE) &&
-      !isUniqueViolation(error, STEP_UNIQUE) &&
-      !isUniqueViolation(error, OUTCOME_KEY_UNIQUE)
+      !isUniqueViolation(error, STEP_UNIQUE)
     ) {
       throw error;
     }
-    const recovered = await exactCompletedOutcome(input);
+    const recovered = await findExactEvryDatabaseEffectClaim(input);
     return recovered
       ? { result: recovered, disposition: "replayed" }
       : { result: { status: "retryable" }, disposition: "unclaimed" };
@@ -164,7 +157,7 @@ export async function claimEvryDatabaseEffectDecision(input: {
       disposition: row.newly_claimed ? "claimed" : "replayed",
     };
   }
-  const completed = await exactCompletedOutcome(input);
+  const completed = await findExactEvryDatabaseEffectClaim(input);
   if (completed) return { result: completed, disposition: "replayed" };
   return {
     result: (await input.targetIsCurrent())

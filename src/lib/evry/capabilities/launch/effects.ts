@@ -3,9 +3,12 @@ import { z } from "zod";
 
 import { db } from "@/db";
 import {
+  churches,
   launchMilestones,
   launchMilestoneTasks,
+  launchMilestoneAreas,
   taskCategories,
+  taskPriorities,
   taskRelatedTypes,
   taskStatuses,
   tasks,
@@ -28,11 +31,13 @@ import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
 import {
   createEvryExecutionCapabilityRegistry,
   defineEvryExecutionCapability,
+  type EvryClaimedEffectInput,
   type EvryEffectInput,
 } from "@/lib/evry/executor";
 import {
   claimEvryDatabaseEffect,
   claimEvryDatabaseEffectDecision,
+  findExactEvryDatabaseEffectClaim,
 } from "@/lib/evry/executor/database-effect";
 import {
   parseEvryActionPlanCandidate,
@@ -43,10 +48,24 @@ import { defineEvryPlanCapability } from "@/lib/evry/plans/registry";
 import {
   completeLaunchMilestoneStatement,
   getLaunchReadiness,
-  LAUNCH_MILESTONE_TEMPLATES,
+  assertLaunchMilestoneSeedRows,
+  planMissingLaunchMilestoneSeedRows,
+  planLaunchMilestoneSeedRows,
   reopenLaunchMilestoneStatement,
   seedLaunchMilestones,
 } from "@/lib/launch/milestones";
+import { churchAnchor } from "@/lib/notifications/anchor";
+import {
+  dbEnqueueDeps,
+  enqueue,
+  enqueueNotificationSchema,
+  type EnqueueNotificationInput,
+} from "@/lib/notifications/enqueue";
+import {
+  listOversightRecipientsForChurch,
+  type OversightAudience,
+} from "@/lib/notifications/oversight-audience";
+import { composeMilestone } from "@/lib/notifications/oversight";
 import {
   canEditOutcome,
   canRecordOutcome,
@@ -59,16 +78,22 @@ import {
   launchNoteSchema,
   launchTargetDateSchema,
 } from "@/lib/launch/validation";
-import {
-  reconcileLaunchDateChangedAfterWrite,
-  setLaunchDateEffectMutation,
-} from "@/lib/launch/service";
+import { setLaunchDateEffectMutation } from "@/lib/launch/service";
 import {
   completeTaskStatement,
-  reconcileNonRecurringCompletedTaskAfterWrite,
   reconcileReopenedTaskAfterWrite,
+  reconcileCompletedTaskAfterWrite,
   reopenTaskStatement,
+  type ReviewedRecurringTaskRow,
+  type ReviewedTaskRecurrencePlan,
 } from "@/lib/tasks/service";
+import {
+  nextRecurrenceDueDate,
+  parseRecurrenceRule,
+  seriesIdOf,
+} from "@/lib/tasks/recurrence";
+import { toCalendarDate } from "@/lib/datetime";
+import { mayActOnTaskRow } from "@/lib/tasks/own-duty";
 
 export const LAUNCH_EFFECT_IDENTITIES = {
   schedule: "launch.schedule",
@@ -108,11 +133,48 @@ export const launchMilestoneSnapshotSchema = z.strictObject({
   openTaskCount: z.number().int().min(0),
   updatedAt: z.string().datetime(),
 });
+const launchSeedTaskSchema = z.strictObject({
+  taskId: z.string().uuid(),
+  title: z.string().min(1).max(500),
+  description: z.string().nullable(),
+});
+const launchSeedMilestoneSchema = z.strictObject({
+  milestoneId: z.string().uuid(),
+  templateKey: z.string().min(1).max(160),
+  area: z.enum(launchMilestoneAreas),
+  title: z.string().min(1).max(500),
+  description: z.string().min(1).max(10_000),
+  sortOrder: z.number().int().min(0),
+  tasks: z.array(launchSeedTaskSchema).max(100),
+});
+const launchNotificationSchema = z.strictObject({
+  recipientUserId: z.string().uuid(),
+  category: z.literal("milestones"),
+  type: z.literal("oversight.milestone.launch_date_changed"),
+  title: z.string().min(1).max(255),
+  body: z.string().min(1).max(10_000),
+  dedupeKey: z.string().min(1).max(255),
+  scheduledFor: z.string().datetime(),
+});
+const launchNotificationExclusionSchema = z.strictObject({
+  reason: z.enum(["outside_church", "oversight_privacy", "misprovisioned"]),
+  count: z.number().int().min(1).max(100),
+});
+const launchScheduleConsequencesSchema = z.strictObject({
+  launchId: z.string().uuid(),
+  changedAt: z.string().datetime(),
+  plantName: z.string().min(1).max(255),
+  readiness: z.array(launchSeedMilestoneSchema).max(32),
+  notifications: z.array(launchNotificationSchema).max(100),
+  notificationExclusions: z.array(launchNotificationExclusionSchema).max(3),
+});
 export const launchTaskSnapshotSchema = z.strictObject({
   id: z.string().uuid(),
   milestoneId: z.string().uuid(),
   title: z.string().min(1).max(500),
+  description: z.string().nullable(),
   status: z.enum(taskStatuses),
+  priority: z.enum(taskPriorities),
   assignedToId: z.string().uuid().nullable(),
   dueDate: z
     .string()
@@ -125,8 +187,65 @@ export const launchTaskSnapshotSchema = z.strictObject({
   category: z.enum(taskCategories).nullable(),
   relatedType: z.enum(taskRelatedTypes).nullable(),
   relatedId: z.string().uuid().nullable(),
+  parentTaskId: z.string().uuid().nullable(),
   isRecurring: z.boolean(),
+  recurrenceRule: z.unknown().nullable(),
+  completionEvent: z.string().max(100).nullable(),
+  createdById: z.string().uuid(),
+  createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
+});
+const reviewedRecurringTaskSchema = z.strictObject({
+  id: z.string().uuid(),
+  churchId: z.string().uuid(),
+  title: z.string().min(1).max(500),
+  description: z.string().nullable(),
+  status: z.literal("not_started"),
+  priority: z.enum(taskPriorities),
+  dueDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .nullable(),
+  dueTime: z
+    .string()
+    .regex(/^\d{2}:\d{2}:\d{2}$/)
+    .nullable(),
+  assignedToId: z.string().uuid().nullable(),
+  category: z.enum(taskCategories).nullable(),
+  relatedType: z.enum(taskRelatedTypes).nullable(),
+  relatedId: z.string().uuid().nullable(),
+  parentTaskId: z.string().uuid().nullable(),
+  isRecurring: z.boolean(),
+  recurrenceRule: z.unknown().nullable(),
+  createdById: z.string().uuid(),
+  createdAt: z.string().datetime(),
+});
+const reviewedRecurrenceSourceTaskSchema = reviewedRecurringTaskSchema.extend({
+  // The source checklist is an exact reviewed snapshot. Its current state is
+  // evidence, not the state of the fresh checklist copy, which always starts
+  // not_started. A completed source item is therefore valid and must remain
+  // bound for execution-time drift detection.
+  status: z.enum(taskStatuses),
+  updatedAt: z.string().datetime(),
+});
+const reviewedTaskCompletionSchema = z.strictObject({
+  completedAt: z.string().datetime(),
+  recurrence: z
+    .discriminatedUnion("disposition", [
+      z.strictObject({
+        disposition: z.literal("existing"),
+        seriesId: z.string().uuid(),
+        successorId: z.string().uuid(),
+      }),
+      z.strictObject({
+        disposition: z.literal("create"),
+        seriesId: z.string().uuid(),
+        sourceChildren: z.array(reviewedRecurrenceSourceTaskSchema).max(100),
+        successor: reviewedRecurringTaskSchema,
+        children: z.array(reviewedRecurringTaskSchema).max(100),
+      }),
+    ])
+    .nullable(),
 });
 const outcomeShape = {
   attendanceCount: z.number().int().min(0).max(1_000_000).nullable(),
@@ -142,6 +261,7 @@ export const launchScheduleArgumentsSchema = z.strictObject({
   targetDate: launchTargetDateSchema,
   postpone: z.boolean(),
   note: launchNoteSchema,
+  consequences: launchScheduleConsequencesSchema,
 });
 export const launchMilestoneArgumentsSchema = z.strictObject({
   expected: launchMilestoneSnapshotSchema,
@@ -149,6 +269,7 @@ export const launchMilestoneArgumentsSchema = z.strictObject({
 export const launchTaskArgumentsSchema = z.strictObject({
   expected: launchTaskSnapshotSchema,
   complete: z.boolean(),
+  completion: reviewedTaskCompletionSchema.nullable(),
 });
 export const launchOutcomeArgumentsSchema = z.strictObject({
   expected: launchSnapshotSchema,
@@ -212,21 +333,28 @@ function splitOutcomeFields(text: string): string[] | null {
   const fields: string[] = [];
   let current = "";
   let escaped = false;
+  let quoted = false;
   for (const character of text) {
     if (escaped) {
-      if (character !== "|" && character !== "\\") return null;
-      current += character;
+      if (quoted) current += `\\${character}`;
+      else {
+        if (character !== "|" && character !== "\\") return null;
+        current += character;
+      }
       escaped = false;
     } else if (character === "\\") {
       escaped = true;
-    } else if (character === "|") {
+    } else if (character === '"') {
+      quoted = !quoted;
+      current += character;
+    } else if (character === "|" && !quoted) {
       fields.push(current);
       current = "";
     } else {
       current += character;
     }
   }
-  if (escaped) return null;
+  if (escaped || quoted) return null;
   fields.push(current);
   return fields;
 }
@@ -256,25 +384,29 @@ function parsedOutcome(text: string) {
     return null;
   const count = (key: string) => {
     const value = fields.get(key);
-    if (value === undefined || value.trim().toLowerCase() === "null")
-      return null;
+    if (value === undefined || value === "null") return null;
     return /^\d{1,7}$/.test(value.trim()) ? Number(value.trim()) : Number.NaN;
+  };
+  const nullableLiteral = (key: string): unknown => {
+    const value = fields.get(key);
+    if (value === undefined || value === "null") return null;
+    if (value.startsWith('"') || value.endsWith('"')) {
+      try {
+        const parsed: unknown = JSON.parse(value);
+        return typeof parsed === "string" ? parsed : {};
+      } catch {
+        return {};
+      }
+    }
+    return value;
   };
   const attendanceCount = count("attendance");
   const decisionsCount = count("decisions");
   const parsed = z.strictObject(outcomeShape).safeParse({
     attendanceCount,
     decisionsCount,
-    outcomeNotes:
-      fields.get("notes") === undefined ||
-      fields.get("notes")?.trim().toLowerCase() === "null"
-        ? null
-        : fields.get("notes"),
-    captureTheDay:
-      fields.get("capture") === undefined ||
-      fields.get("capture")?.trim().toLowerCase() === "null"
-        ? null
-        : fields.get("capture"),
+    outcomeNotes: nullableLiteral("notes"),
+    captureTheDay: nullableLiteral("capture"),
   });
   return parsed.success
     ? {
@@ -348,6 +480,129 @@ function launchSnapshot(launch: LaunchRecord) {
   });
 }
 
+type LaunchScheduleConsequences = z.infer<
+  typeof launchScheduleConsequencesSchema
+>;
+
+function seedTemplateShape(rows: LaunchScheduleConsequences["readiness"]) {
+  return rows.map(({ milestoneId: _milestoneId, tasks: taskRows, ...row }) => ({
+    ...row,
+    tasks: taskRows.map(({ taskId: _taskId, ...task }) => task),
+  }));
+}
+
+function groupedNotificationExclusions(input: {
+  audience: OversightAudience;
+  skipped: readonly ("outside_church" | "oversight_privacy")[];
+}) {
+  const counts = new Map<string, number>();
+  if (input.audience.misprovisioned.length > 0) {
+    counts.set("misprovisioned", input.audience.misprovisioned.length);
+  }
+  for (const reason of input.skipped) {
+    counts.set(reason, (counts.get(reason) ?? 0) + 1);
+  }
+  return [...counts.entries()].map(([reason, count]) => ({ reason, count }));
+}
+
+async function resolveScheduleConsequences(input: {
+  plantId: string;
+  targetDate: string;
+  changedAt: Date;
+  launchId?: string;
+  readiness?: LaunchScheduleConsequences["readiness"];
+}): Promise<LaunchScheduleConsequences | null> {
+  const [plant] = await db
+    .select({ name: churches.name })
+    .from(churches)
+    .where(eq(churches.id, input.plantId))
+    .limit(1);
+  if (!plant) return null;
+  const audience = await listOversightRecipientsForChurch(input.plantId);
+  if (audience.recipients.length > 100) return null;
+  const notifications: LaunchScheduleConsequences["notifications"] = [];
+  const skipped: ("outside_church" | "oversight_privacy")[] = [];
+  for (const recipient of audience.recipients) {
+    const composed = composeMilestone(
+      {
+        anchor: churchAnchor(input.plantId),
+        subject: plant.name,
+        kind: "launch_date_changed",
+        occurrence: `${input.targetDate}@${input.changedAt.toISOString()}`,
+        detail: `They are aiming to launch on ${input.targetDate}.`,
+      },
+      recipient.id
+    );
+    const permitted = await dbEnqueueDeps.recipientMayBeNotified({
+      anchor: churchAnchor(input.plantId),
+      recipientUserId: recipient.id,
+      category: composed.category,
+      type: composed.type,
+    });
+    if (!permitted.allowed) {
+      skipped.push(permitted.reason);
+      continue;
+    }
+    notifications.push(
+      launchNotificationSchema.parse({
+        recipientUserId: recipient.id,
+        category: composed.category,
+        type: composed.type,
+        title: composed.title,
+        body: composed.body,
+        dedupeKey: composed.dedupeKey,
+        scheduledFor: input.changedAt.toISOString(),
+      })
+    );
+  }
+  return launchScheduleConsequencesSchema.parse({
+    launchId: input.launchId ?? crypto.randomUUID(),
+    changedAt: input.changedAt.toISOString(),
+    plantName: plant.name,
+    readiness:
+      input.readiness ??
+      (input.launchId
+        ? await planMissingLaunchMilestoneSeedRows({
+            launchId: input.launchId,
+            churchId: input.plantId,
+          })
+        : planLaunchMilestoneSeedRows()),
+    notifications,
+    notificationExclusions: groupedNotificationExclusions({
+      audience,
+      skipped,
+    }),
+  });
+}
+
+async function scheduleConsequencesAreCurrent(input: {
+  plantId: string;
+  targetDate: string;
+  reviewed: LaunchScheduleConsequences;
+}): Promise<boolean> {
+  const currentTemplateRows = await planMissingLaunchMilestoneSeedRows({
+    launchId: input.reviewed.launchId,
+    churchId: input.plantId,
+  });
+  if (
+    JSON.stringify(seedTemplateShape(input.reviewed.readiness)) !==
+    JSON.stringify(seedTemplateShape(currentTemplateRows))
+  ) {
+    return false;
+  }
+  const current = await resolveScheduleConsequences({
+    plantId: input.plantId,
+    targetDate: input.targetDate,
+    changedAt: new Date(input.reviewed.changedAt),
+    launchId: input.reviewed.launchId,
+    readiness: input.reviewed.readiness,
+  });
+  return (
+    current !== null &&
+    JSON.stringify(current) === JSON.stringify(input.reviewed)
+  );
+}
+
 async function milestoneSnapshot(plantId: string, milestoneId: string) {
   const [row] = await db
     .select({
@@ -383,14 +638,21 @@ async function taskSnapshot(plantId: string, taskId: string) {
       id: tasks.id,
       milestoneId: launchMilestoneTasks.milestoneId,
       title: tasks.title,
+      description: tasks.description,
       status: tasks.status,
+      priority: tasks.priority,
       assignedToId: tasks.assignedToId,
       dueDate: tasks.dueDate,
       dueTime: tasks.dueTime,
       category: tasks.category,
       relatedType: tasks.relatedType,
       relatedId: tasks.relatedId,
+      parentTaskId: tasks.parentTaskId,
       isRecurring: tasks.isRecurring,
+      recurrenceRule: tasks.recurrenceRule,
+      completionEvent: tasks.completionEvent,
+      createdById: tasks.createdById,
+      createdAt: tasks.createdAt,
       updatedAt: tasks.updatedAt,
     })
     .from(tasks)
@@ -412,9 +674,163 @@ async function taskSnapshot(plantId: string, taskId: string) {
   return row
     ? launchTaskSnapshotSchema.parse({
         ...row,
+        createdAt: row.createdAt.toISOString(),
         updatedAt: row.updatedAt.toISOString(),
       })
     : null;
+}
+
+async function reviewedTaskCompletion(
+  plantId: string,
+  expected: z.infer<typeof launchTaskSnapshotSchema>
+) {
+  const completedAt = new Date();
+  if (!expected.isRecurring) {
+    return reviewedTaskCompletionSchema.parse({
+      completedAt: completedAt.toISOString(),
+      recurrence: null,
+    });
+  }
+  const rule = parseRecurrenceRule(expected.recurrenceRule);
+  if (!rule) return null;
+  const nextDueDate = nextRecurrenceDueDate(
+    rule,
+    expected.dueDate,
+    toCalendarDate(completedAt)
+  );
+  if (!nextDueDate) {
+    return reviewedTaskCompletionSchema.parse({
+      completedAt: completedAt.toISOString(),
+      recurrence: null,
+    });
+  }
+  const seriesId = seriesIdOf({
+    id: expected.id,
+    recurrenceRule: expected.recurrenceRule,
+  });
+  const open = await findOtherOpenRecurringInstance(plantId, expected);
+  if (open) {
+    return reviewedTaskCompletionSchema.parse({
+      completedAt: completedAt.toISOString(),
+      recurrence: {
+        disposition: "existing",
+        seriesId,
+        successorId: open,
+      },
+    });
+  }
+  const sourceChildren = await db
+    .select({
+      id: tasks.id,
+      churchId: tasks.churchId,
+      title: tasks.title,
+      description: tasks.description,
+      status: tasks.status,
+      priority: tasks.priority,
+      dueDate: tasks.dueDate,
+      dueTime: tasks.dueTime,
+      assignedToId: tasks.assignedToId,
+      category: tasks.category,
+      relatedType: tasks.relatedType,
+      relatedId: tasks.relatedId,
+      parentTaskId: tasks.parentTaskId,
+      isRecurring: tasks.isRecurring,
+      recurrenceRule: tasks.recurrenceRule,
+      createdById: tasks.createdById,
+      createdAt: tasks.createdAt,
+      updatedAt: tasks.updatedAt,
+    })
+    .from(tasks)
+    .where(
+      and(
+        eq(tasks.churchId, plantId),
+        eq(tasks.parentTaskId, expected.id),
+        isNull(tasks.deletedAt)
+      )
+    )
+    .orderBy(tasks.createdAt, tasks.id);
+  const successorId = crypto.randomUUID();
+  const successor = {
+    id: successorId,
+    churchId: plantId,
+    title: expected.title,
+    description: expected.description,
+    status: "not_started" as const,
+    priority: expected.priority,
+    dueDate: nextDueDate,
+    dueTime: expected.dueTime,
+    assignedToId: expected.assignedToId,
+    category: expected.category,
+    relatedType: expected.relatedType,
+    relatedId: expected.relatedId,
+    parentTaskId: expected.parentTaskId,
+    isRecurring: true,
+    recurrenceRule: { ...rule, seriesId },
+    createdById: expected.createdById,
+    createdAt: completedAt.toISOString(),
+  };
+  const children = sourceChildren.map((child, index) => ({
+    id: crypto.randomUUID(),
+    churchId: plantId,
+    title: child.title,
+    description: child.description,
+    status: "not_started" as const,
+    priority: child.priority,
+    dueDate: null,
+    dueTime: child.dueTime,
+    assignedToId: child.assignedToId,
+    category: child.category,
+    relatedType: child.relatedType,
+    relatedId: child.relatedId,
+    parentTaskId: successorId,
+    isRecurring: false,
+    recurrenceRule: null,
+    createdById: expected.createdById,
+    createdAt: new Date(completedAt.getTime() + index + 1).toISOString(),
+  }));
+  return reviewedTaskCompletionSchema.parse({
+    completedAt: completedAt.toISOString(),
+    recurrence: {
+      disposition: "create",
+      seriesId,
+      sourceChildren: sourceChildren.map((child) => ({
+        ...child,
+        createdAt: child.createdAt.toISOString(),
+        updatedAt: child.updatedAt.toISOString(),
+      })),
+      successor,
+      children,
+    },
+  });
+}
+
+async function findOtherOpenRecurringInstance(
+  plantId: string,
+  task: Pick<
+    z.infer<typeof launchTaskSnapshotSchema>,
+    "id" | "isRecurring" | "recurrenceRule"
+  >
+): Promise<string | null> {
+  if (!task.isRecurring) return null;
+  const seriesId = seriesIdOf({
+    id: task.id,
+    recurrenceRule: task.recurrenceRule,
+  });
+  const [open] = await db
+    .select({ id: tasks.id })
+    .from(tasks)
+    .where(
+      and(
+        eq(tasks.churchId, plantId),
+        sql`${tasks.id} <> ${task.id}::uuid`,
+        eq(tasks.isRecurring, true),
+        sql`${tasks.status} <> 'complete'`,
+        isNull(tasks.deletedAt),
+        sql`${tasks.recurrenceRule} ->> 'seriesId' = ${seriesId}`
+      )
+    )
+    .limit(1);
+  return open?.id ?? null;
 }
 
 function identityFor(selection: LaunchEvryEffectSelection) {
@@ -449,11 +865,19 @@ export async function resolveLaunchEvryArguments(
       ) {
         return null;
       }
+      const consequences = await resolveScheduleConsequences({
+        plantId: actor.plantId,
+        targetDate: selection.targetDate,
+        changedAt: new Date(),
+        launchId: launch?.id,
+      });
+      if (!consequences) return null;
       return launchScheduleArgumentsSchema.parse({
         expected: launch ? launchSnapshot(launch) : null,
         targetDate: selection.targetDate,
         postpone: selection.postpone,
         note: selection.note,
+        consequences,
       });
     }
     case "complete_milestone":
@@ -484,16 +908,22 @@ export async function resolveLaunchEvryArguments(
       if (expected && (expected.status === "complete") === selection.complete) {
         return null;
       }
-      // A recurring completion can mint a successor and copy checklist rows.
-      // That is a different, multi-record effect and is not hidden inside this
-      // one-task Launch toggle.
-      if (expected?.isRecurring) return null;
-      return expected
-        ? launchTaskArgumentsSchema.parse({
-            expected,
-            complete: selection.complete,
-          })
+      if (!expected) return null;
+      if (
+        !selection.complete &&
+        (await findOtherOpenRecurringInstance(actor.plantId, expected))
+      ) {
+        return null;
+      }
+      const completion = selection.complete
+        ? await reviewedTaskCompletion(actor.plantId, expected)
         : null;
+      if (selection.complete && !completion) return null;
+      return launchTaskArgumentsSchema.parse({
+        expected,
+        complete: selection.complete,
+        completion,
+      });
     }
     case "record_outcome": {
       if (!launch || !canRecordOutcome(launch)) return null;
@@ -545,14 +975,22 @@ function sameTaskAfterChange(
     current.id === expected.id &&
     current.milestoneId === expected.milestoneId &&
     current.title === expected.title &&
+    current.description === expected.description &&
     current.status === (complete ? "complete" : "not_started") &&
+    current.priority === expected.priority &&
     current.assignedToId === expected.assignedToId &&
     current.dueDate === expected.dueDate &&
     current.dueTime === expected.dueTime &&
     current.category === expected.category &&
     current.relatedType === expected.relatedType &&
     current.relatedId === expected.relatedId &&
-    !current.isRecurring
+    current.parentTaskId === expected.parentTaskId &&
+    current.isRecurring === expected.isRecurring &&
+    JSON.stringify(current.recurrenceRule) ===
+      JSON.stringify(expected.recurrenceRule) &&
+    current.completionEvent === expected.completionEvent &&
+    current.createdById === expected.createdById &&
+    current.createdAt === expected.createdAt
   );
 }
 
@@ -563,20 +1001,345 @@ function exactWriteEligibility(actor: EvryPlantActor): SQL {
     join users u
       on u.id = e.actor_user_id
      and u.church_id = e.church_id
+     and u.sending_church_id is null
+     and u.sending_network_id is null
     where e.church_id = ${actor.plantId}::uuid
       and e.actor_user_id = ${actor.userId}::uuid
       and u.seat = ${actor.seat}
   )`;
 }
 
-/** Distinguish source contention from a seat/tenant revocation after a miss. */
-async function actorSeatStillCurrent(actor: EvryPlantActor): Promise<boolean> {
+/** Fresh seat plus the tasks.own subject rule, evaluated on the locked row. */
+function exactTaskWriteEligibility(actor: EvryPlantActor): SQL {
+  return sql`exists (
+    select 1
+    from eligible e
+    join users u
+      on u.id = e.actor_user_id
+     and u.church_id = e.church_id
+     and u.sending_church_id is null
+     and u.sending_network_id is null
+    where e.church_id = ${actor.plantId}::uuid
+      and e.actor_user_id = ${actor.userId}::uuid
+      and u.seat = ${actor.seat}
+      and (u.seat in ('owner', 'admin') or (u.seat = 'member' and t.assigned_to_id = u.id))
+  )`;
+}
+
+/** Reopening cannot put an older recurring instance beside its successor. */
+function exactTaskReopenWriteEligibility(actor: EvryPlantActor): SQL {
+  return sql`${exactTaskWriteEligibility(actor)} and (
+    not t.is_recurring or not exists (
+      select 1 from tasks other
+      where other.church_id = t.church_id
+        and other.id <> t.id
+        and other.is_recurring
+        and other.status <> 'complete'
+        and other.deleted_at is null
+        and coalesce(other.recurrence_rule ->> 'seriesId', other.id::text)
+          = coalesce(t.recurrence_rule ->> 'seriesId', t.id::text)
+    )
+  )`;
+}
+
+/** Distinguish source contention from a fresh seat/tenant revocation. */
+async function actorStillAuthorized(
+  actor: EvryPlantActor,
+  applicationCapability: "launch.schedule" | "launch.milestone"
+): Promise<boolean> {
   const [current] = await db
     .select({ seat: users.seat })
     .from(users)
-    .where(and(eq(users.id, actor.userId), eq(users.churchId, actor.plantId)))
+    .where(
+      and(
+        eq(users.id, actor.userId),
+        eq(users.churchId, actor.plantId),
+        isNull(users.sendingChurchId),
+        isNull(users.sendingNetworkId)
+      )
+    )
     .limit(1);
-  return current?.seat === actor.seat;
+  if (!current?.seat) return false;
+  return evryActorHoldsApplicationCapability(
+    { plantId: actor.plantId, seat: current.seat },
+    applicationCapability
+  );
+}
+
+async function taskActorStillAuthorized(
+  actor: EvryPlantActor,
+  assignedToId: string | null
+): Promise<boolean> {
+  const [current] = await db
+    .select({ seat: users.seat })
+    .from(users)
+    .where(
+      and(
+        eq(users.id, actor.userId),
+        eq(users.churchId, actor.plantId),
+        isNull(users.sendingChurchId),
+        isNull(users.sendingNetworkId)
+      )
+    )
+    .limit(1);
+  if (!current?.seat) return false;
+  const currentActor = { plantId: actor.plantId, seat: current.seat };
+  return (
+    evryActorHoldsApplicationCapability(currentActor, "tasks.own") &&
+    mayActOnTaskRow({
+      canWrite: evryActorHoldsApplicationCapability(
+        currentActor,
+        "tasks.write"
+      ),
+      assignedToId,
+      viewerId: actor.userId,
+    })
+  );
+}
+
+function serviceRecurrencePlan(
+  completion: z.infer<typeof reviewedTaskCompletionSchema>
+): ReviewedTaskRecurrencePlan | null {
+  if (
+    !completion.recurrence ||
+    completion.recurrence.disposition === "existing"
+  ) {
+    return null;
+  }
+  const row = (
+    value: z.infer<typeof reviewedRecurringTaskSchema>
+  ): ReviewedRecurringTaskRow => ({
+    ...value,
+    createdAt: new Date(value.createdAt),
+  });
+  return {
+    successor: row(completion.recurrence.successor),
+    children: completion.recurrence.children.map(row),
+  };
+}
+
+async function reviewedRecurrenceIsCurrent(input: {
+  plantId: string;
+  expected: z.infer<typeof launchTaskSnapshotSchema>;
+  completion: z.infer<typeof reviewedTaskCompletionSchema>;
+}): Promise<boolean> {
+  if (!input.expected.isRecurring) return input.completion.recurrence === null;
+  const rule = parseRecurrenceRule(input.expected.recurrenceRule);
+  if (!rule) return false;
+  const expectedDueDate = nextRecurrenceDueDate(
+    rule,
+    input.expected.dueDate,
+    toCalendarDate(new Date(input.completion.completedAt))
+  );
+  if (!expectedDueDate) return input.completion.recurrence === null;
+  const seriesId = seriesIdOf({
+    id: input.expected.id,
+    recurrenceRule: input.expected.recurrenceRule,
+  });
+  const open = await db
+    .select({ id: tasks.id })
+    .from(tasks)
+    .where(
+      and(
+        eq(tasks.churchId, input.plantId),
+        sql`${tasks.id} <> ${input.expected.id}::uuid`,
+        eq(tasks.isRecurring, true),
+        sql`${tasks.status} <> 'complete'`,
+        isNull(tasks.deletedAt),
+        sql`${tasks.recurrenceRule} ->> 'seriesId' = ${seriesId}`
+      )
+    )
+    .orderBy(tasks.id);
+  if (input.completion.recurrence?.disposition === "existing") {
+    return (
+      input.completion.recurrence.seriesId === seriesId &&
+      open.length === 1 &&
+      open[0]?.id === input.completion.recurrence.successorId
+    );
+  }
+  if (!input.completion.recurrence || open.length > 0) return false;
+  if (
+    input.completion.recurrence.seriesId !== seriesId ||
+    input.completion.recurrence.successor.dueDate !== expectedDueDate
+  ) {
+    return false;
+  }
+  const currentChildren = await db
+    .select({
+      id: tasks.id,
+      churchId: tasks.churchId,
+      title: tasks.title,
+      description: tasks.description,
+      status: tasks.status,
+      priority: tasks.priority,
+      dueDate: tasks.dueDate,
+      dueTime: tasks.dueTime,
+      assignedToId: tasks.assignedToId,
+      category: tasks.category,
+      relatedType: tasks.relatedType,
+      relatedId: tasks.relatedId,
+      parentTaskId: tasks.parentTaskId,
+      isRecurring: tasks.isRecurring,
+      recurrenceRule: tasks.recurrenceRule,
+      createdById: tasks.createdById,
+      createdAt: tasks.createdAt,
+      updatedAt: tasks.updatedAt,
+    })
+    .from(tasks)
+    .where(
+      and(
+        eq(tasks.churchId, input.plantId),
+        eq(tasks.parentTaskId, input.expected.id),
+        isNull(tasks.deletedAt)
+      )
+    )
+    .orderBy(tasks.createdAt, tasks.id);
+  return (
+    JSON.stringify(
+      currentChildren.map((child) => ({
+        ...child,
+        createdAt: child.createdAt.toISOString(),
+        updatedAt: child.updatedAt.toISOString(),
+      }))
+    ) === JSON.stringify(input.completion.recurrence.sourceChildren)
+  );
+}
+
+async function reconcileFrozenSchedule(input: {
+  plantId: string;
+  actorUserId: string;
+  expectedLaunchId: string | null;
+  targetDate: string;
+  consequences: LaunchScheduleConsequences;
+}): Promise<void> {
+  const stored = await getLaunchForChurch(input.plantId);
+  if (
+    !stored ||
+    (input.expectedLaunchId !== null && stored.id !== input.expectedLaunchId) ||
+    stored.targetDate !== input.targetDate
+  ) {
+    throw new Error("Claimed Launch schedule no longer matches its write");
+  }
+  await seedLaunchMilestones({
+    launchId: stored.id,
+    churchId: input.plantId,
+    actorUserId: input.actorUserId,
+    rows: input.consequences.readiness,
+  });
+  await assertLaunchMilestoneSeedRows({
+    launchId: stored.id,
+    churchId: input.plantId,
+    actorUserId: input.actorUserId,
+    rows: input.consequences.readiness,
+  });
+  for (const notification of input.consequences.notifications) {
+    const result = await enqueue(
+      enqueueNotificationSchema.parse({
+        churchId: input.plantId,
+        ...notification,
+        scheduledFor: new Date(notification.scheduledFor),
+      }) as EnqueueNotificationInput
+    );
+    if (result.status !== "recorded") {
+      throw new Error("Reviewed Launch notification is no longer permitted");
+    }
+  }
+}
+
+async function reconcileFrozenTaskCompletion(input: {
+  plantId: string;
+  actorUserId: string;
+  expected: z.infer<typeof launchTaskSnapshotSchema>;
+  completion: z.infer<typeof reviewedTaskCompletionSchema>;
+  effectKey: string;
+}): Promise<void> {
+  const completedAt = new Date(input.completion.completedAt);
+  await reconcileCompletedTaskAfterWrite(
+    {
+      id: input.expected.id,
+      churchId: input.plantId,
+      title: input.expected.title,
+      description: input.expected.description,
+      status: "complete",
+      priority: input.expected.priority,
+      dueDate: input.expected.dueDate,
+      dueTime: input.expected.dueTime,
+      assignedToId: input.expected.assignedToId,
+      category: input.expected.category,
+      relatedType: input.expected.relatedType,
+      relatedId: input.expected.relatedId,
+      parentTaskId: input.expected.parentTaskId,
+      isRecurring: input.expected.isRecurring,
+      recurrenceRule: input.expected.recurrenceRule,
+      completionEvent: input.expected.completionEvent,
+      completedAt,
+      completedById: input.actorUserId,
+      createdById: input.expected.createdById,
+      createdAt: new Date(input.expected.createdAt),
+      updatedAt: completedAt,
+      deletedAt: null,
+    },
+    input.actorUserId,
+    serviceRecurrencePlan(input.completion),
+    completedAt,
+    input.effectKey
+  );
+}
+
+async function reconcileClaimedLaunchEffect(
+  input: EvryClaimedEffectInput,
+  identity: string,
+  result: NonNullable<
+    Awaited<ReturnType<typeof findExactEvryDatabaseEffectClaim>>
+  >
+) {
+  if (identity === LAUNCH_EFFECT_IDENTITIES.schedule) {
+    const parsed = launchScheduleArgumentsSchema.parse(input.arguments);
+    await reconcileFrozenSchedule({
+      plantId: input.execution.plantId,
+      actorUserId: input.execution.actorUserId,
+      expectedLaunchId: parsed.expected?.id ?? parsed.consequences.launchId,
+      targetDate: parsed.targetDate,
+      consequences: parsed.consequences,
+    });
+  } else if (identity === LAUNCH_EFFECT_IDENTITIES.setTaskCompletion) {
+    const parsed = launchTaskArgumentsSchema.parse(input.arguments);
+    if (parsed.complete && parsed.completion) {
+      await reconcileFrozenTaskCompletion({
+        plantId: input.execution.plantId,
+        actorUserId: input.execution.actorUserId,
+        expected: parsed.expected,
+        completion: parsed.completion,
+        effectKey: input.effectKey,
+      });
+    } else if (!parsed.complete) {
+      const current = await taskSnapshot(
+        input.execution.plantId,
+        parsed.expected.id
+      );
+      if (current && sameTaskAfterChange(current, parsed.expected, false)) {
+        await reconcileReopenedTaskAfterWrite(
+          {
+            id: current.id,
+            churchId: input.execution.plantId,
+            title: current.title,
+            status: current.status,
+            dueDate: current.dueDate,
+            dueTime: current.dueTime,
+            assignedToId: current.assignedToId,
+            deletedAt: null,
+          },
+          true
+        );
+      }
+    }
+  } else if (
+    identity === LAUNCH_EFFECT_IDENTITIES.recordOutcome ||
+    identity === LAUNCH_EFFECT_IDENTITIES.correctOutcome
+  ) {
+    await reconcileLaunchOutcomeAfterWrite(input.execution.plantId);
+  }
+  return result;
 }
 
 async function claimLaunchEffect(input: EvryEffectInput, identity: string) {
@@ -587,12 +1350,26 @@ async function claimLaunchEffect(input: EvryEffectInput, identity: string) {
     const parsed = launchScheduleArgumentsSchema.safeParse(input.arguments);
     if (!parsed.success)
       return { status: "refused" as const, excludedCount: 1 };
+    if (
+      !(await scheduleConsequencesAreCurrent({
+        plantId: actor.plantId,
+        targetDate: parsed.data.targetDate,
+        reviewed: parsed.data.consequences,
+      }))
+    ) {
+      return { status: "refused" as const, excludedCount: 1 };
+    }
     const mutation = setLaunchDateEffectMutation({
       churchId: actor.plantId,
       actorUserId: actor.userId,
       targetDate: parsed.data.targetDate,
       postpone: parsed.data.postpone,
       note: parsed.data.note,
+      changedAt: new Date(parsed.data.consequences.changedAt),
+      launchId:
+        parsed.data.expected === null
+          ? parsed.data.consequences.launchId
+          : undefined,
       expected: parsed.data.expected
         ? {
             id: parsed.data.expected.id,
@@ -609,40 +1386,25 @@ async function claimLaunchEffect(input: EvryEffectInput, identity: string) {
       mutationCtes: mutation.ctes,
       mutation: mutation.result,
       async targetIsCurrent() {
-        if (!(await actorSeatStillCurrent(actor))) return false;
+        if (!(await actorStillAuthorized(actor, "launch.schedule")))
+          return false;
         const current = await getLaunchForChurch(actor.plantId);
         return parsed.data.expected
           ? Boolean(current && sameLaunch(parsed.data.expected, current))
           : current === null;
       },
     });
-    if (claim.result.status === "completed") {
-      const stored = await getLaunchForChurch(actor.plantId);
-      const writtenStatus =
-        parsed.data.postpone && parsed.data.expected
-          ? "postponed"
-          : "scheduled";
-      if (
-        stored &&
-        (!parsed.data.expected || stored.id === parsed.data.expected.id) &&
-        stored.targetDate === parsed.data.targetDate &&
-        stored.status === writtenStatus
-      ) {
-        if (claim.disposition === "claimed") {
-          await reconcileLaunchDateChangedAfterWrite({
-            churchId: actor.plantId,
-            launchDate: parsed.data.targetDate,
-            changedAt: stored.updatedAt,
-          });
-        }
-        await seedLaunchMilestones({
-          launchId: stored.id,
-          churchId: actor.plantId,
-          actorUserId: actor.userId,
-        });
-      }
-    }
-    return claim.result;
+    return claim.result.status === "completed"
+      ? await reconcileClaimedLaunchEffect(
+          {
+            effectKey: input.effectKey,
+            execution: input.execution,
+            arguments: input.arguments,
+          },
+          identity,
+          claim.result
+        )
+      : claim.result;
   }
 
   if (
@@ -679,7 +1441,8 @@ async function claimLaunchEffect(input: EvryEffectInput, identity: string) {
       effectKey: input.effectKey,
       mutation: statement,
       async targetIsCurrent() {
-        if (!(await actorSeatStillCurrent(actor))) return false;
+        if (!(await actorStillAuthorized(actor, "launch.milestone")))
+          return false;
         const current = await milestoneSnapshot(
           actor.plantId,
           parsed.data.expected.id
@@ -697,37 +1460,72 @@ async function claimLaunchEffect(input: EvryEffectInput, identity: string) {
     if (!parsed.success)
       return { status: "refused" as const, excludedCount: 1 };
     const expected = parsed.data.expected;
+    if (parsed.data.complete !== (parsed.data.completion !== null)) {
+      return { status: "refused" as const, excludedCount: 1 };
+    }
+    if (
+      parsed.data.complete &&
+      parsed.data.completion &&
+      !(await reviewedRecurrenceIsCurrent({
+        plantId: actor.plantId,
+        expected,
+        completion: parsed.data.completion,
+      }))
+    ) {
+      return { status: "refused" as const, excludedCount: 1 };
+    }
+    if (
+      !parsed.data.complete &&
+      (await findOtherOpenRecurringInstance(actor.plantId, expected))
+    ) {
+      return { status: "refused" as const, excludedCount: 1 };
+    }
+    const completedAt = parsed.data.completion
+      ? new Date(parsed.data.completion.completedAt)
+      : new Date();
+    const taskWriteEligibility = parsed.data.complete
+      ? exactTaskWriteEligibility(actor)
+      : exactTaskReopenWriteEligibility(actor);
+    const commonExpected = {
+      expectedTitle: expected.title,
+      expectedStatus: expected.status,
+      expectedAssignedToId: expected.assignedToId,
+      expectedIsRecurring: expected.isRecurring,
+      expectedDescription: expected.description,
+      expectedPriority: expected.priority,
+      expectedDueDate: expected.dueDate,
+      expectedDueTime: expected.dueTime,
+      expectedCategory: expected.category,
+      expectedRelatedType: expected.relatedType,
+      expectedRelatedId: expected.relatedId,
+      expectedParentTaskId: expected.parentTaskId,
+      expectedRecurrenceRule: expected.recurrenceRule,
+      expectedCompletionEvent: expected.completionEvent,
+      expectedCreatedById: expected.createdById,
+      expectedUpdatedAt: new Date(expected.updatedAt),
+      launchMilestoneId: expected.milestoneId,
+      writeEligibility: taskWriteEligibility,
+    };
     const statement = parsed.data.complete
       ? completeTaskStatement({
           churchId: actor.plantId,
           taskId: expected.id,
           actorUserId: actor.userId,
-          completedAt: new Date(),
-          expectedTitle: expected.title,
-          expectedStatus: expected.status,
-          expectedAssignedToId: expected.assignedToId,
-          expectedIsRecurring: false,
-          expectedUpdatedAt: new Date(expected.updatedAt),
-          launchMilestoneId: expected.milestoneId,
-          writeEligibility,
+          completedAt,
+          ...commonExpected,
         })
       : reopenTaskStatement({
           churchId: actor.plantId,
           taskId: expected.id,
-          expectedTitle: expected.title,
-          expectedStatus: expected.status,
-          expectedAssignedToId: expected.assignedToId,
-          expectedIsRecurring: false,
-          expectedUpdatedAt: new Date(expected.updatedAt),
-          launchMilestoneId: expected.milestoneId,
-          writeEligibility,
+          ...commonExpected,
         });
     const claim = await claimEvryDatabaseEffectDecision({
       execution: input.execution,
       effectKey: input.effectKey,
       mutation: statement,
       async targetIsCurrent() {
-        if (!(await actorSeatStillCurrent(actor))) return false;
+        if (!(await taskActorStillAuthorized(actor, expected.assignedToId)))
+          return false;
         const current = await taskSnapshot(actor.plantId, expected.id);
         return (
           current !== null &&
@@ -735,42 +1533,17 @@ async function claimLaunchEffect(input: EvryEffectInput, identity: string) {
         );
       },
     });
-    if (claim.result.status === "completed") {
-      const current = await taskSnapshot(actor.plantId, expected.id);
-      if (
-        current &&
-        sameTaskAfterChange(current, expected, parsed.data.complete)
-      ) {
-        if (parsed.data.complete) {
-          await reconcileNonRecurringCompletedTaskAfterWrite(
-            {
-              id: expected.id,
-              churchId: actor.plantId,
-              category: expected.category,
-              relatedType: expected.relatedType,
-              relatedId: expected.relatedId,
-              isRecurring: false,
-            },
-            actor.userId
-          );
-        } else {
-          await reconcileReopenedTaskAfterWrite(
-            {
-              id: expected.id,
-              churchId: actor.plantId,
-              title: expected.title,
-              status: "not_started",
-              dueDate: expected.dueDate,
-              dueTime: expected.dueTime,
-              assignedToId: expected.assignedToId,
-              deletedAt: null,
-            },
-            true
-          );
-        }
-      }
-    }
-    return claim.result;
+    return claim.result.status === "completed"
+      ? await reconcileClaimedLaunchEffect(
+          {
+            effectKey: input.effectKey,
+            execution: input.execution,
+            arguments: input.arguments,
+          },
+          identity,
+          claim.result
+        )
+      : claim.result;
   }
 
   if (
@@ -812,15 +1585,22 @@ async function claimLaunchEffect(input: EvryEffectInput, identity: string) {
     mutationCtes: mutation.ctes,
     mutation: mutation.result,
     async targetIsCurrent() {
-      if (!(await actorSeatStillCurrent(actor))) return false;
+      if (!(await actorStillAuthorized(actor, "launch.schedule"))) return false;
       const current = await getLaunchForChurch(actor.plantId);
       return Boolean(current && sameLaunch(expected, current));
     },
   });
-  if (claim.result.status === "completed") {
-    await reconcileLaunchOutcomeAfterWrite(actor.plantId);
-  }
-  return claim.result;
+  return claim.result.status === "completed"
+    ? await reconcileClaimedLaunchEffect(
+        {
+          effectKey: input.effectKey,
+          execution: input.execution,
+          arguments: input.arguments,
+        },
+        identity,
+        claim.result
+      )
+    : claim.result;
 }
 
 async function executeLaunchEffect(input: EvryEffectInput, identity: string) {
@@ -833,6 +1613,15 @@ export const LAUNCH_EVRY_EXECUTIONS = Object.entries(PLAN_BY_IDENTITY).map(
   ([identity, planCapability]) =>
     defineEvryExecutionCapability({
       planCapability,
+      async reconcileClaimed(input) {
+        try {
+          const claim = await findExactEvryDatabaseEffectClaim(input);
+          if (!claim) return null;
+          return await reconcileClaimedLaunchEffect(input, identity, claim);
+        } catch {
+          return { status: "retryable" };
+        }
+      },
       executeIfCurrent: (input) => executeLaunchEffect(input, identity),
     })
 );
@@ -858,6 +1647,14 @@ function reviewFor(identity: string) {
       let title = "Update Launch Sunday";
       let actionLabel = "Confirm change";
       let target = "Launch Sunday";
+      let resolvedTargets:
+        | {
+            label: string;
+            value: string;
+            sourceLink: { label: string; href: string };
+          }[]
+        | null = null;
+      let exclusions: { reason: string; count: number }[] = [];
       let beforeAfter: {
         label: string;
         before: string;
@@ -900,30 +1697,42 @@ function reviewFor(identity: string) {
             count: 1,
           },
         ];
-        contentPreviews = args.note
-          ? [
-              {
-                label: "Journal note",
-                content: html(args.note),
-                format: "rich_text",
-              },
-            ]
-          : [];
-        const readinessTaskCount = LAUNCH_MILESTONE_TEMPLATES.reduce(
+        contentPreviews = [
+          ...(args.note
+            ? [
+                {
+                  label: "Journal note",
+                  content: html(args.note),
+                  format: "rich_text" as const,
+                },
+              ]
+            : []),
+          {
+            label: "Exact readiness rows",
+            content: html(JSON.stringify(args.consequences.readiness, null, 2)),
+            format: "rich_text",
+          },
+          ...args.consequences.notifications.map((notification, index) => ({
+            label: `Exact oversight notification ${index + 1}`,
+            content: html(JSON.stringify(notification, null, 2)),
+            format: "rich_text" as const,
+          })),
+        ];
+        const readinessTaskCount = args.consequences.readiness.reduce(
           (total, milestone) => total + milestone.tasks.length,
           0
         );
         consequences = [
           "This changes the Launch Sunday date and status and appends one permanent journal entry.",
-          `This idempotently ensures all ${LAUNCH_MILESTONE_TEMPLATES.length} Launch Playbook milestones and ${readinessTaskCount} readiness tasks exist; existing rows are not duplicated or overwritten.`,
-          "Oversight recipients may receive a best-effort date-change notification after the durable write.",
+          `This idempotently ensures the ${args.consequences.readiness.length} exact reviewed Launch Playbook milestones and ${readinessTaskCount} exact readiness tasks exist; existing rows are not duplicated or overwritten.`,
+          `${args.consequences.notifications.length} exact reviewed oversight notification(s) are queued after the durable write; audience and privacy are rechecked before the write.`,
         ];
         counts = [
           { label: "Launch records to change", count: 1 },
           { label: "Journal entries to append", count: 1 },
           {
             label: "Required milestones after the change",
-            count: LAUNCH_MILESTONE_TEMPLATES.length,
+            count: args.consequences.readiness.length,
           },
           {
             label: "Required readiness tasks after the change",
@@ -931,6 +1740,26 @@ function reviewFor(identity: string) {
           },
         ];
         reversibility = "irreversible";
+        resolvedTargets = [
+          {
+            label: "Launch record",
+            value: args.expected?.id ?? args.consequences.launchId,
+            sourceLink: { label: "Open Launch Sunday", href: "/launch" },
+          },
+          ...args.consequences.readiness.map((row) => ({
+            label: "Readiness milestone",
+            value: `${row.milestoneId}: ${row.title}`,
+            sourceLink: { label: "Open Launch Sunday", href: "/launch" },
+          })),
+          ...args.consequences.notifications.map((row) => ({
+            label: "Oversight recipient",
+            value: row.recipientUserId,
+            sourceLink: { label: "Open Launch Sunday", href: "/launch" },
+          })),
+        ];
+        exclusions = args.consequences.notificationExclusions.map(
+          ({ reason, count }) => ({ reason, count })
+        );
       } else if (
         identity === LAUNCH_EFFECT_IDENTITIES.completeMilestone ||
         identity === LAUNCH_EFFECT_IDENTITIES.reopenMilestone
@@ -941,6 +1770,13 @@ function reviewFor(identity: string) {
         title = `${complete ? "Complete" : "Reopen"} launch milestone`;
         actionLabel = complete ? "Complete milestone" : "Reopen milestone";
         target = args.expected.title;
+        resolvedTargets = [
+          {
+            label: "Launch milestone",
+            value: `${args.expected.id}: ${args.expected.title}`,
+            sourceLink: { label: "Open Launch Sunday", href: "/launch" },
+          },
+        ];
         beforeAfter = [
           {
             label: "Milestone",
@@ -954,6 +1790,12 @@ function reviewFor(identity: string) {
         title = `${args.complete ? "Complete" : "Reopen"} launch task`;
         actionLabel = args.complete ? "Complete task" : "Reopen task";
         target = args.expected.title;
+        const reviewedTaskTarget = {
+          label: "Launch task",
+          value: `${args.expected.id}: ${args.expected.title}`,
+          sourceLink: { label: "Open Launch Sunday", href: "/launch" },
+        };
+        resolvedTargets = [reviewedTaskTarget];
         beforeAfter = [
           {
             label: "Task",
@@ -970,19 +1812,78 @@ function reviewFor(identity: string) {
         ];
         consequences = args.complete
           ? [
-              "This completes exactly this non-recurring task, cancels its pending task notifications, emits its completion event, and marks the plant for a fresh assessment.",
-              "It does not create a recurring successor or change any other task.",
+              "This completes exactly this task, reconciles its pending notifications, emits its completion event, and marks the plant for a fresh assessment.",
+              args.completion?.recurrence?.disposition === "create"
+                ? `It creates the exact reviewed recurring successor and ${args.completion.recurrence.children.length} exact fresh checklist item(s).`
+                : args.completion?.recurrence?.disposition === "existing"
+                  ? `The series already has the exact open successor ${args.completion.recurrence.successorId}; this creates no duplicate.`
+                  : "It creates no recurring successor.",
             ]
           : [
-              "This reopens exactly this non-recurring task and re-enqueues the notifications owed by its current assignment and due date.",
+              args.expected.isRecurring
+                ? "This reopens exactly this recurring task only if its series still has no other open instance, then re-enqueues the notifications owed by its current assignment and due date."
+                : "This reopens exactly this non-recurring task and re-enqueues the notifications owed by its current assignment and due date.",
               "It does not create another task or change any other task.",
             ];
-        counts = [{ label: "Task records to change", count: 1 }];
+        counts = [
+          { label: "Task records to change", count: 1 },
+          ...(args.completion?.recurrence?.disposition === "create"
+            ? [
+                { label: "Successor tasks to create", count: 1 },
+                {
+                  label: "Successor checklist items to create",
+                  count: args.completion.recurrence.children.length,
+                },
+              ]
+            : []),
+        ];
+        contentPreviews = args.completion?.recurrence
+          ? [
+              {
+                label: "Exact recurring successor and checklist",
+                content: html(
+                  JSON.stringify(args.completion.recurrence, null, 2)
+                ),
+                format: "rich_text",
+              },
+            ]
+          : [];
+        if (args.completion?.recurrence?.disposition === "create") {
+          resolvedTargets = [
+            reviewedTaskTarget,
+            {
+              label: "Recurring successor",
+              value: args.completion.recurrence.successor.id,
+              sourceLink: { label: "Open Launch Sunday", href: "/launch" },
+            },
+            ...args.completion.recurrence.children.map((child) => ({
+              label: "Successor checklist item",
+              value: `${child.id}: ${child.title}`,
+              sourceLink: { label: "Open Launch Sunday", href: "/launch" },
+            })),
+          ];
+        } else if (args.completion?.recurrence?.disposition === "existing") {
+          resolvedTargets = [
+            reviewedTaskTarget,
+            {
+              label: "Existing recurring successor",
+              value: args.completion.recurrence.successorId,
+              sourceLink: { label: "Open Launch Sunday", href: "/launch" },
+            },
+          ];
+        }
       } else {
         const args = launchOutcomeArgumentsSchema.parse(step.arguments);
         const correction = identity === LAUNCH_EFFECT_IDENTITIES.correctOutcome;
         title = correction ? "Correct launch outcome" : "Record launch outcome";
         actionLabel = correction ? "Save correction" : "Record outcome";
+        resolvedTargets = [
+          {
+            label: "Launch record",
+            value: args.expected.id,
+            sourceLink: { label: "Open Launch Sunday", href: "/launch" },
+          },
+        ];
         beforeAfter = [
           ...(correction
             ? []
@@ -1076,7 +1977,7 @@ function reviewFor(identity: string) {
             title,
             effectKind: "other",
             reversibility,
-            resolvedTargets: [
+            resolvedTargets: resolvedTargets ?? [
               {
                 label: "Target",
                 value: target,
@@ -1084,7 +1985,7 @@ function reviewFor(identity: string) {
               },
             ],
             counts,
-            exclusions: [],
+            exclusions,
             dateTime: null,
             contentPreviews,
             beforeAfter,
