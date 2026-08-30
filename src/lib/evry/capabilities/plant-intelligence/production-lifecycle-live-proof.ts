@@ -12,7 +12,13 @@ function required(name: string): string {
 
 const plantId = required("EVRY_PI_PROOF_PLANT_ID");
 const actorUserId = required("EVRY_PI_PROOF_ACTOR_ID");
-const sessionUser = {
+let sessionUser: {
+  id: string;
+  churchId: string;
+  sendingChurchId: string | null;
+  sendingNetworkId: string | null;
+  seat: UserSeat;
+} = {
   id: actorUserId,
   churchId: plantId,
   sendingChurchId: null,
@@ -102,6 +108,20 @@ async function main() {
       null
     );
     readOutcomes.add(`${identity}:errors`);
+
+    sessionUser = {
+      ...sessionUser,
+      sendingChurchId: randomUUID(),
+    };
+    await assert.rejects(
+      () => reads.executePlantIntelligenceEvryRead(selected),
+      /Evry is unavailable for this account/
+    );
+    sessionUser = {
+      ...sessionUser,
+      sendingChurchId: null,
+    };
+    readOutcomes.add(`${identity}:tenancy`);
   }
 
   const createRoute = await import("@/app/api/evry/conversations/route");

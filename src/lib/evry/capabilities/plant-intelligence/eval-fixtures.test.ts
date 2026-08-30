@@ -185,17 +185,6 @@ function deterministicProof(identity: string, layer: string) {
       assert.ok(selected);
       assert.equal(Object.hasOwn(selected.input, "plantId"), false);
     }
-  } else if (layer === "tenancy") {
-    if (effectCommand)
-      assert.equal(Object.hasOwn(argumentsFor(identity), "plantId"), false);
-    else
-      assert.equal(
-        Object.hasOwn(
-          selectPlantIntelligenceEvryRead(readCommand!)!.input,
-          "plantId"
-        ),
-        false
-      );
   } else if (layer === "permission") {
     assert.equal(
       eligibleEvryCapabilitiesFor(OWNER).some(
@@ -251,7 +240,8 @@ function deterministicProof(identity: string, layer: string) {
 
 for (const capability of inventory.capabilities) {
   for (const layer of EVRY_CAPABILITY_EVAL_LAYERS) {
-    if (["execution", "idempotency", "errors"].includes(layer)) continue;
+    if (["tenancy", "execution", "idempotency", "errors"].includes(layer))
+      continue;
     test(`${capability.identity}:${layer}`, () =>
       deterministicProof(capability.identity, layer));
   }

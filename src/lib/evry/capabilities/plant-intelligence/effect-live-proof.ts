@@ -20,6 +20,7 @@ import {
   plantAssessments,
   plantInsights,
   plantSignals,
+  sendingChurches,
   users,
   wikiArticles,
 } from "@/db/schema";
@@ -74,7 +75,7 @@ const liveExecutionRegistry = createEvryExecutionCapabilityRegistry(
 
 function record(
   identity: string,
-  layer: "execution" | "idempotency" | "errors"
+  layer: "execution" | "idempotency" | "errors" | "tenancy"
 ) {
   effectOutcomes.add(`${identity}:${layer}`);
 }
@@ -213,6 +214,14 @@ function appendUnique(target: Set<string>, ids: readonly string[]) {
   }
 }
 
+function currentWeekStart(): string {
+  const weekStart = new Date();
+  weekStart.setUTCDate(
+    weekStart.getUTCDate() - ((weekStart.getUTCDay() + 6) % 7)
+  );
+  return weekStart.toISOString().slice(0, 10);
+}
+
 async function main() {
   const [plant, foreignPlant] = await Promise.all([
     db
@@ -268,6 +277,11 @@ async function main() {
       .returning({ id: users.id }),
   ]).then((rows) => rows.map(([row]) => row));
   assert.ok(owner && admin && member && foreignOwner);
+  const [competingSendingChurch] = await db
+    .insert(sendingChurches)
+    .values({ name: "__Competing Plant Intelligence tenancy__" })
+    .returning({ id: sendingChurches.id });
+  assert.ok(competingSendingChurch);
 
   const [assessment, foreignAssessment] = await Promise.all([
     db
@@ -357,6 +371,159 @@ async function main() {
     null,
     "a caller-supplied assessment id is never a cross-plant page-context selector"
   );
+
+  // Each step was authorized and confirmed while the actor held an exact plant
+  // tenancy. A second tenancy appears before the atomic adapter runs. Every SQL
+  // gate and its fallback projection must now refuse, without a domain write or
+  // durable claim.
+  const raceWeek = currentWeekStart();
+  const postAuthorizationTenancyRace = [
+    await seedEffect({
+      churchId: plant.id,
+      actorUserId: owner.id,
+      actorSeat: "owner",
+      capabilityIdentity: identities.transitionPhase,
+      arguments: transitionArgumentsSchema.parse({
+        expected: { currentPhase: 1 },
+        toPhase: 6,
+        reason: "Must not survive a competing tenancy",
+      }),
+    }),
+    await seedEffect({
+      churchId: plant.id,
+      actorUserId: owner.id,
+      actorSeat: "owner",
+      capabilityIdentity: identities.acknowledgeAssessment,
+      arguments: acknowledgeArgumentsSchema.parse({
+        expected: {
+          id: assessment.id,
+          generatedAt: assessment.generatedAt.toISOString(),
+          planterSeenAt: null,
+        },
+      }),
+    }),
+    await seedEffect({
+      churchId: plant.id,
+      actorUserId: owner.id,
+      actorSeat: "owner",
+      capabilityIdentity: identities.setAttestation,
+      arguments: attestationArgumentsSchema.parse({
+        signalKey: "systems_tested",
+        expected: null,
+        value: "Must not be stored",
+      }),
+    }),
+    await seedEffect({
+      churchId: plant.id,
+      actorUserId: owner.id,
+      actorSeat: "owner",
+      capabilityIdentity: identities.submitFeedback,
+      arguments: feedbackArgumentsSchema.parse({
+        insight: {
+          id: insight.id,
+          assessmentId: assessment.id,
+          rubricVersion: assessment.rubricVersion,
+          title: insight.title,
+        },
+        expected: null,
+        rating: "not_useful",
+        comment: "Must not be stored",
+      }),
+    }),
+    await seedEffect({
+      churchId: plant.id,
+      actorUserId: owner.id,
+      actorSeat: "owner",
+      capabilityIdentity: identities.saveCheckin,
+      arguments: checkinArgumentsSchema.parse({
+        weekStart: raceWeek,
+        expected: null,
+        spiritually: "steady",
+        marriageFamily: "steady",
+        financially: "steady",
+        pace: "steady",
+        note: "Must not be stored",
+      }),
+    }),
+  ];
+  await db
+    .update(users)
+    .set({ sendingChurchId: competingSendingChurch.id })
+    .where(eq(users.id, owner.id));
+  const tenancyRaceResults = await Promise.all(
+    postAuthorizationTenancyRace.map(execute)
+  );
+  await db
+    .update(users)
+    .set({ sendingChurchId: null })
+    .where(eq(users.id, owner.id));
+  assert.deepEqual(
+    tenancyRaceResults,
+    Array.from({ length: 5 }, () => ({
+      status: "refused",
+      excludedCount: 1,
+    }))
+  );
+  const [phaseAfterTenancyRace] = await db
+    .select({ currentPhase: churches.currentPhase })
+    .from(churches)
+    .where(eq(churches.id, plant.id));
+  const [assessmentAfterTenancyRace] = await db
+    .select({ planterSeenAt: plantAssessments.planterSeenAt })
+    .from(plantAssessments)
+    .where(eq(plantAssessments.id, assessment.id));
+  assert.equal(phaseAfterTenancyRace?.currentPhase, 1);
+  assert.equal(assessmentAfterTenancyRace?.planterSeenAt, null);
+  assert.equal(
+    (
+      await db
+        .select()
+        .from(phaseTransitions)
+        .where(eq(phaseTransitions.churchId, plant.id))
+    ).length,
+    0
+  );
+  assert.equal(
+    (
+      await db
+        .select()
+        .from(plantSignals)
+        .where(eq(plantSignals.churchId, plant.id))
+    ).length,
+    0
+  );
+  assert.equal(
+    (
+      await db
+        .select()
+        .from(insightFeedback)
+        .where(eq(insightFeedback.userId, owner.id))
+    ).length,
+    0
+  );
+  assert.equal(
+    (
+      await db
+        .select()
+        .from(planterCheckins)
+        .where(eq(planterCheckins.churchId, plant.id))
+    ).length,
+    0
+  );
+  for (const input of postAuthorizationTenancyRace) {
+    assert.equal(
+      (
+        await db
+          .select()
+          .from(evryExecutionOutcomes)
+          .where(eq(evryExecutionOutcomes.planId, input.execution.planId))
+      ).length,
+      0,
+      `malformed tenancy claimed ${input.execution.capabilityIdentity}`
+    );
+    record(input.execution.capabilityIdentity, "tenancy");
+  }
+  assert.equal(refreshes.length, 0);
 
   const transitionInput = await seedEffect({
     churchId: plant.id,
@@ -767,11 +934,7 @@ async function main() {
   });
   record(identities.submitFeedback, "errors");
 
-  const weekStart = new Date();
-  weekStart.setUTCDate(
-    weekStart.getUTCDate() - ((weekStart.getUTCDay() + 6) % 7)
-  );
-  const week = weekStart.toISOString().slice(0, 10);
+  const week = currentWeekStart();
   const checkinInput = await seedEffect({
     churchId: plant.id,
     actorUserId: admin.id,
@@ -1236,7 +1399,7 @@ async function main() {
     effectOutcomes.add(outcome as string);
   }
 
-  assert.equal(effectOutcomes.size, 33);
+  assert.equal(effectOutcomes.size, 44);
   console.log("Plant Intelligence effect live proof passed");
   console.log(
     `EVRY_PLANT_INTELLIGENCE_EFFECT_OUTCOMES=${JSON.stringify([...effectOutcomes].sort())}`

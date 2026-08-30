@@ -9,6 +9,7 @@ import {
 } from "@/lib/evry/evals/contracts";
 
 const LIVE_LAYERS = new Set<EvryCapabilityEvalLayer>([
+  "tenancy",
   "execution",
   "idempotency",
   "errors",
