@@ -452,9 +452,12 @@ export async function resolveMeetingGuestBatchAfterCreate(input: {
   targets: readonly Readonly<{
     attendanceId: string;
     personId: string;
+    label: string;
+    email: string;
     expectedPersonUpdatedAt: string;
     expectedAttendanceAbsent: true;
   }>[];
+  exclusions: MeetingGuestBatchArguments["exclusions"];
   requestKey: EvryPlanRequestKey;
   now: Date;
 }): Promise<MeetingGuestBatchArguments | null> {
@@ -554,6 +557,7 @@ export async function resolveMeetingGuestBatchAfterCreate(input: {
     meetingId: input.create.meetingId,
     dependencyStepId: input.dependencyStepId,
     targets: input.targets,
+    exclusions: input.exclusions,
     expectedCoreGroupUserIds: [...expectedCoreGroupUserIds].toSorted(),
     expectedReminderUserIds,
     notificationTargets,

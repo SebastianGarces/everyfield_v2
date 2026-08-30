@@ -1,5 +1,10 @@
 import { z } from "zod";
 
+import { buildEvryConfirmationArtifact } from "@/lib/evry/artifacts/review";
+import {
+  createEvryArtifactReviewRegistry,
+  defineEvryArtifactReview,
+} from "@/lib/evry/artifacts/trusted-plan-review";
 import { EVRY_PEOPLE_READ_PROBE_IDENTITY } from "@/lib/evry/eligibility/capabilities";
 import type { EvryReadCapabilityAuthorization } from "@/lib/evry/eligibility/capabilities";
 import {
@@ -8,7 +13,11 @@ import {
   type EvryEffectInput,
   type EvryEffectResult,
 } from "@/lib/evry/executor";
-import { defineEvryPlanCapability } from "@/lib/evry/plans";
+import {
+  defineEvryPlanCapability,
+  type EvryActionPlanDocument,
+} from "@/lib/evry/plans";
+import type { EvryConversationPlanIdentity } from "@/lib/evry/conversations/contract";
 
 import {
   createEvryRecipeRegistry,
@@ -240,4 +249,70 @@ export function createFixtureRecipeRegistry(
     ],
     definitions,
   });
+}
+
+export function createFixtureRecipeReviewRegistry(
+  registry: EvryRecipeRegistry
+) {
+  return createEvryArtifactReviewRegistry([
+    defineEvryArtifactReview({
+      source: { kind: "recipe", identity: RECIPE_IDENTITY, registry },
+      build(input: {
+        plan: EvryConversationPlanIdentity;
+        document: EvryActionPlanDocument;
+      }) {
+        return buildEvryConfirmationArtifact({
+          kind: "confirmation",
+          artifactVersion: 1,
+          plan: input.plan,
+          title: input.document.confirmation?.title ?? "",
+          actionLabel: input.document.confirmation?.actionLabel ?? "",
+          steps: input.document.steps.map((step) => ({
+            stepId: step.id,
+            title: step.disclosure?.title ?? "",
+            effectKind:
+              step.capabilityIdentity === SEND_MESSAGE_IDENTITY
+                ? ("communication" as const)
+                : ("other" as const),
+            reversibility:
+              step.capabilityIdentity === SEND_MESSAGE_IDENTITY
+                ? ("irreversible" as const)
+                : ("reversible" as const),
+            resolvedTargets:
+              step.disclosure?.items.map(({ label, value }) => ({
+                label,
+                value,
+                sourceLink: null,
+              })) ?? [],
+            counts: [{ label: "Effects", count: 1 }],
+            exclusions: [],
+            dateTime: null,
+            contentPreviews:
+              step.capabilityIdentity === SEND_MESSAGE_IDENTITY
+                ? [
+                    {
+                      label: "Message",
+                      content: String(step.arguments.body ?? ""),
+                    },
+                  ]
+                : [],
+            beforeAfter:
+              step.capabilityIdentity === SEND_MESSAGE_IDENTITY
+                ? [
+                    {
+                      label: "Delivery",
+                      before: "Not sent",
+                      after: "Sent",
+                      count: 1,
+                    },
+                  ]
+                : [],
+          })),
+          consequences: input.document.steps.flatMap(
+            (step) => step.disclosure?.consequences ?? []
+          ),
+        });
+      },
+    }),
+  ]);
 }

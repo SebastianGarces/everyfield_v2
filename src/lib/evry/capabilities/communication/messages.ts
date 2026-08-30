@@ -125,11 +125,12 @@ const sourceMessageSchema = z.strictObject({
   recipientCount: z.number().int().nonnegative().nullable(),
 });
 
-const sendArgumentsSchema = z.strictObject({
+export const COMMUNICATION_MESSAGE_SEND_ARGUMENT_SCHEMA = z.strictObject({
   communicationId: z.string().uuid(),
   recipientSource: resolvedRecipientSourceSchema,
   audience: audienceSchema,
 });
+const sendArgumentsSchema = COMMUNICATION_MESSAGE_SEND_ARGUMENT_SCHEMA;
 
 const resendArgumentsSchema = z.strictObject({
   source: sourceMessageSchema,

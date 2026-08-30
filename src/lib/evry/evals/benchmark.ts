@@ -1245,16 +1245,22 @@ export async function runEvryModelBenchmark(input: {
   );
   const recipeResults = EVRY_RECIPE_EVAL_FIXTURES.flatMap((fixture) =>
     Object.entries(fixture.cases).flatMap(([layer, evalCases]) =>
-      evalCases.map(
-        (evalCase): EvryRegisteredEvalCaseResult => ({
+      evalCases.map((evalCase): EvryRegisteredEvalCaseResult => {
+        const proof = proofResultById.get(evalCase.proofId);
+        const namedCase = evalCase.testName
+          ? proof?.cases.find(({ name }) => name === evalCase.testName)
+          : null;
+        return {
           subjectIdentity: fixture.recipeIdentity,
           layer,
           caseId: evalCase.id,
           proofId: evalCase.proofId,
           testName: evalCase.testName ?? null,
-          passed: proofResultById.get(evalCase.proofId)?.passed === true,
-        })
-      )
+          passed:
+            proof?.passed === true &&
+            (evalCase.testName === undefined || namedCase?.passed === true),
+        };
+      })
     )
   );
   const allEvalGatesPassed = [...capabilityResults, ...recipeResults].every(

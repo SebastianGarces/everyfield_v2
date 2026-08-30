@@ -57,12 +57,14 @@ test("production composes every Communication, Launch, Meetings, People, and Tas
     .toSorted();
   const reviewIdentities = PRODUCTION_EVRY_ARTIFACT_REVIEWS.flatMap(
     ({ source }) =>
-      source.kind === "generic"
-        ? [...source.capabilityIdentities]
-        : [source.identity]
+      source.kind === "generic" ? [...source.capabilityIdentities] : []
   ).toSorted();
+  const recipeIdentities = PRODUCTION_EVRY_ARTIFACT_REVIEWS.flatMap(
+    ({ source }) => (source.kind === "recipe" ? [source.identity] : [])
+  );
 
   assert.deepEqual(reviewIdentities, effectIdentities);
+  assert.deepEqual(recipeIdentities, ["meeting.invitation.reference"]);
 });
 
 test("production continuation selection keeps installed families disjoint", () => {
@@ -83,6 +85,12 @@ test("production continuation selection keeps installed families disjoint", () =
     "communication",
   ]);
   assert.deepEqual(matching("show meeting analytics"), ["meetings"]);
+  assert.deepEqual(
+    matching(
+      "Create a meeting for August 5 at 10 AM at the church location. Invite the core team and add prospects who have not visited a Vision Meeting. Draft an email invitation and send it to them."
+    ),
+    ["meeting.invitation.reference"]
+  );
   assert.deepEqual(matching("schedule launch for 2026-09-06 | Exact day"), [
     "launch",
   ]);

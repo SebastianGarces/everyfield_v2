@@ -866,6 +866,8 @@ function notificationTargetsCurrent(input: {
           union select distinct u.id
           from persons p join users u
             on u.church_id = ${input.plantId}::uuid
+           and u.sending_church_id is null
+           and u.sending_network_id is null
            and lower(u.email) = lower(p.email)
           where p.church_id = ${input.plantId}::uuid
             and p.id in (
@@ -881,6 +883,8 @@ function notificationTargetsCurrent(input: {
           from meeting_attendance a
           join persons p on p.id = a.person_id and p.church_id = a.church_id
           join users u on u.church_id = a.church_id
+            and u.sending_church_id is null
+            and u.sending_network_id is null
             and lower(u.email) = lower(p.email)
           where a.meeting_id = ${input.meetingId}::uuid
             and a.church_id = ${input.plantId}::uuid
@@ -890,6 +894,8 @@ function notificationTargetsCurrent(input: {
           union select u.id
           from persons p join users u
             on u.church_id = ${input.plantId}::uuid
+           and u.sending_church_id is null
+           and u.sending_network_id is null
            and lower(u.email) = lower(p.email)
           where p.id = ${input.audience.kind === "batch" ? null : (input.audience.addPersonId ?? null)}::uuid
             and p.church_id = ${input.plantId}::uuid
@@ -897,6 +903,8 @@ function notificationTargetsCurrent(input: {
           union select distinct u.id
           from persons p join users u
             on u.church_id = ${input.plantId}::uuid
+           and u.sending_church_id is null
+           and u.sending_network_id is null
            and lower(u.email) = lower(p.email)
           where p.id in (
             select value::uuid from jsonb_array_elements_text(
@@ -908,12 +916,16 @@ function notificationTargetsCurrent(input: {
           union select u.id
           from users u
           where u.church_id = ${input.plantId}::uuid
+            and u.sending_church_id is null
+            and u.sending_network_id is null
             and ${input.audience.kind === "batch" ? null : (input.audience.addEmail ?? null)}::text is not null
             and lower(u.email) = lower(${input.audience.kind === "batch" ? null : (input.audience.addEmail ?? null)}::text)`;
   return sql`not exists (
     select u.id
     from persons p join users u
       on u.church_id = ${input.plantId}::uuid
+     and u.sending_church_id is null
+     and u.sending_network_id is null
      and lower(u.email) = lower(p.email)
     where p.church_id = ${input.plantId}::uuid
       and p.deleted_at is null and p.email is not null
@@ -926,6 +938,8 @@ function notificationTargetsCurrent(input: {
     except select u.id
     from persons p join users u
       on u.church_id = ${input.plantId}::uuid
+     and u.sending_church_id is null
+     and u.sending_network_id is null
      and lower(u.email) = lower(p.email)
     where p.church_id = ${input.plantId}::uuid
       and p.deleted_at is null and p.email is not null
@@ -968,6 +982,8 @@ function notificationTargetsCurrent(input: {
     left join users u
       on u.id = (t->>'recipientUserId')::uuid
      and u.church_id = ${input.plantId}::uuid
+     and u.sending_church_id is null
+     and u.sending_network_id is null
     where u.id is null
       or t->>'category' <> 'meetings'
       or t->>'entityType' <> 'meeting'
@@ -1957,6 +1973,8 @@ function taskNotificationTargetsCurrent(input: {
     left join users u
       on u.id = (t->>'recipientUserId')::uuid
      and u.church_id = ${input.plantId}::uuid
+     and u.sending_church_id is null
+     and u.sending_network_id is null
     where b is null
       or u.id is null
       or t->>'category' <> 'tasks'
