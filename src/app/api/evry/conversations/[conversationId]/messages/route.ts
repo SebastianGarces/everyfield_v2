@@ -79,10 +79,8 @@ export function createEvryConversationMessagePost({
       }
 
       const requestPageContext = parsed.data.pageContext ?? null;
-      const pageContext = await resolvePageContext({
-        actor,
-        pageContext: requestPageContext,
-      });
+      const resolveRequestPageContext = () =>
+        resolvePageContext({ actor, pageContext: requestPageContext });
 
       if (wantsEvryConversationStream(request)) {
         const startedAt = now();
@@ -110,7 +108,7 @@ export function createEvryConversationMessagePost({
               conversationId: params.data.conversationId,
               requestKey: parsed.data.requestKey,
               message: parsed.data.message,
-              pageContext,
+              resolvePageContext: resolveRequestPageContext,
               requestPageContext,
               now: startedAt,
               reportStage,
@@ -136,7 +134,7 @@ export function createEvryConversationMessagePost({
         conversationId: params.data.conversationId,
         requestKey: parsed.data.requestKey,
         message: parsed.data.message,
-        pageContext,
+        resolvePageContext: resolveRequestPageContext,
         requestPageContext,
         now: now(),
       });
