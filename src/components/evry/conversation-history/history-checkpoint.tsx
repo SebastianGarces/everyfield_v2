@@ -9,9 +9,11 @@ import type { EvryHistoryCheckpoint } from "./history-presentation";
 
 export function ConversationHistoryCheckpoint({
   checkpoint,
+  disabled,
   onRebuild,
 }: {
   checkpoint: EvryHistoryCheckpoint;
+  disabled: boolean;
   onRebuild: () => void;
 }) {
   return (
@@ -29,6 +31,7 @@ export function ConversationHistoryCheckpoint({
             type="button"
             variant="outline"
             size="sm"
+            disabled={disabled}
             onClick={onRebuild}
             className="cursor-pointer active:scale-[0.96]"
           >

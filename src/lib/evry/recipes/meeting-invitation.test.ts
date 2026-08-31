@@ -169,7 +169,7 @@ test("the canonical FRD request enters the ordinary recipe continuation and asks
     sourceText: "August 5 at 10 AM",
     durationMinutes: undefined,
     subject: "You're invited to Vision Meeting",
-    body: "Join us for Vision Meeting at our church location. We look forward to seeing you.",
+    body: "Hi {{first_name}},\n\nJoin us for Vision Meeting at our church location. We look forward to seeing you.",
   });
   let createCalls = 0;
   const continuation = createMeetingInvitationConversationContinuation({
@@ -916,43 +916,14 @@ test("the exact planner reviews the 100-recipient and 511-character-name boundar
     document: boundaryCompiled.document,
   });
   assert.equal(boundaryArtifact.steps[1]?.counts[0]?.count, 100);
-  assert.equal(boundaryArtifact.steps[1]?.contentPreviews.length, 100);
-  assert.equal(
-    boundaryArtifact.steps[1]?.contentPreviews[0]?.content,
-    JSON.stringify(boundarySnapshot.guests.targets[0])
-  );
-  assert.equal(
-    boundaryArtifact.steps[1]?.contentPreviews[99]?.content,
-    JSON.stringify(boundarySnapshot.guests.targets[99])
-  );
-  assert.equal(boundaryArtifact.steps[2]?.contentPreviews.length, 300);
-  assert.deepEqual(boundaryArtifact.steps[2]?.contentPreviews.slice(0, 3), [
+  assert.deepEqual(boundaryArtifact.steps[1]?.contentPreviews, []);
+  assert.deepEqual(boundaryArtifact.steps[2]?.contentPreviews, [
     {
-      label: "Recipient 1 identity",
-      content: JSON.stringify({
-        personId: peopleBoundary[0]!.personId,
-        label: peopleBoundary[0]!.label,
-        email: peopleBoundary[0]!.email,
-      }),
-    },
-    { label: "Recipient 1 subject", content: BASE_REQUEST.subject },
-    { label: "Recipient 1 message", content: BASE_REQUEST.body },
-  ]);
-  assert.deepEqual(boundaryArtifact.steps[2]?.contentPreviews.slice(-3), [
-    {
-      label: "Recipient 100 identity",
-      content: JSON.stringify({
-        personId: peopleBoundary[99]!.personId,
-        label: "Person 100",
-        email: "person-100@example.test",
-      }),
-    },
-    {
-      label: "Recipient 100 subject",
+      label: "Subject",
       content: BASE_REQUEST.subject,
     },
     {
-      label: "Recipient 100 message",
+      label: "Message",
       content: BASE_REQUEST.body,
     },
   ]);

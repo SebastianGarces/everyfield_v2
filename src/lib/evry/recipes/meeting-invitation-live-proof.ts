@@ -108,7 +108,7 @@ async function seedScenario(modules: Modules, label: string) {
     .insert(churches)
     .values({
       name: `__evry invitation ${label}__`,
-      timeZone: "UTC",
+      timeZone: "America/New_York",
       streetAddress: "1 Exact Plan Way",
       city: "Albany",
       stateRegion: "NY",

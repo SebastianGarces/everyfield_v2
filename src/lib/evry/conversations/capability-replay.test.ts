@@ -215,6 +215,75 @@ function lostResponseContinuation(calls: {
   ]);
 }
 
+test("self-contained capability requests bypass unrelated pronoun clarification", async () => {
+  const store = memoryStore({ throwAfterFirstResultCommit: false });
+  await store.create({
+    actorUserId: ACTOR.userId,
+    plantId: ACTOR.plantId,
+    requestKey: CREATE_REQUEST,
+    body: "Start",
+    pageContext: null,
+    requestPageContext: null,
+    createdAt: NOW,
+  });
+  let referenceReads = 0;
+  const continueCapabilityConversation =
+    composeEvryCapabilityConversationContinuations([
+      {
+        identity: "self-contained-action",
+        referencePolicy: "self_contained",
+        matches({ literalUserText }) {
+          return literalUserText.includes("send it to them");
+        },
+        async continue() {
+          return {
+            body: "Review the self-contained action.",
+            artifacts: [
+              storedEvryClarificationArtifactDocument({
+                kind: "clarification",
+                mode: "missing",
+                entityType: "confirmation",
+                prompt: "Confirm the action.",
+              }),
+            ],
+          };
+        },
+      },
+    ]);
+
+  const result = await continueEvryConversation({
+    actor: ACTOR,
+    conversationId: CONVERSATION_ID,
+    requestKey: CONTINUE_REQUEST,
+    message: "Draft the invitation and send it to them",
+    pageContext: null,
+    requestPageContext: null,
+    now: NOW,
+    store,
+    continueCapabilityConversation,
+    resolveReference() {
+      referenceReads += 1;
+      return {
+        status: "clarification" as const,
+        reason: "missing" as const,
+        artifact: {
+          kind: "clarification" as const,
+          mode: "missing" as const,
+          entityType: "record",
+          prompt: "Which EveryField record do you mean?",
+        },
+      };
+    },
+  });
+
+  assert.equal(referenceReads, 0);
+  assert.equal(result?.reference.status, "not_applicable");
+  assert.equal(
+    result?.resumed.conversation.messages.at(-1)?.body,
+    "Review the self-contained action."
+  );
+});
+
 test("create replay recovers the committed capability result before source work", async () => {
   const loss = { throwAfterFirstResultCommit: true };
   const store = memoryStore(loss);

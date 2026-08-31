@@ -118,6 +118,7 @@ type EvryShellValue = Readonly<{
   resumeWatching: () => void;
   returnToPage: () => void;
   sendMessage: () => Promise<void>;
+  sendMessageText: (message: string) => Promise<void>;
   setDraft: (draft: string) => void;
   stopWatching: () => void;
   updateWork: (
@@ -254,6 +255,7 @@ export function EvryShell({
   const routeLocationRef = useRef(routeLocation);
   routeLocationRef.current = routeLocation;
   const draftRef = useRef(draft);
+  const messageOverrideRef = useRef<string | null>(null);
   const isWorking =
     pendingWorkRequestId !== null ||
     detachedRequestId !== null ||
@@ -1074,7 +1076,8 @@ export function EvryShell({
   ]);
 
   const sendMessage = useCallback(async () => {
-    const message = evrySubmissionMessage(draft);
+    const message = evrySubmissionMessage(messageOverrideRef.current ?? draft);
+    messageOverrideRef.current = null;
     const mountedConversationId = mountedConversationIdRef.current;
     const loadedConversationId = conversation?.id ?? null;
     if (
@@ -1243,6 +1246,14 @@ export function EvryShell({
     recoverMarker,
     updateWork,
   ]);
+
+  const sendMessageText = useCallback(
+    async (message: string) => {
+      messageOverrideRef.current = message;
+      await sendMessage();
+    },
+    [sendMessage]
+  );
 
   const submitPeopleFile = useCallback(
     async (
@@ -1453,6 +1464,7 @@ export function EvryShell({
       resumeWatching,
       returnToPage,
       sendMessage,
+      sendMessageText,
       setDraft,
       stopWatching,
       updateWork,
@@ -1491,6 +1503,7 @@ export function EvryShell({
       resumeWatching,
       returnToPage,
       sendMessage,
+      sendMessageText,
       setDraft,
       stopWatching,
       startRecipeReuse,

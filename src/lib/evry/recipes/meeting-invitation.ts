@@ -395,11 +395,10 @@ export function meetingInvitationRecipeDefinition() {
         arguments: inputBindings(meetingKeys, "plan", ["meeting"]),
         dependsOn: [],
         disclosure: {
-          title: "Create Vision Meeting",
+          title: "Create the meeting",
           items: disclosureItems(meetingKeys),
           consequences: [
-            "Creates one Vision Meeting in the plant calendar.",
-            "Schedules the exact meeting notifications shown in this review.",
+            "Creates one Vision Meeting in the plant calendar and schedules its reminders.",
           ],
         },
         failurePolicy: { retry: "same_plan" },
@@ -410,11 +409,10 @@ export function meetingInvitationRecipeDefinition() {
         arguments: inputBindings(GUEST_BATCH_KEYS, "plan", ["guests"]),
         dependsOn: ["create-meeting"],
         disclosure: {
-          title: "Add resolved guests",
+          title: "Add guests to the meeting",
           items: disclosureItems(GUEST_BATCH_KEYS),
           consequences: [
-            "Adds the exact resolved people to the guest list.",
-            "Schedules the exact guest notifications shown in this review.",
+            "Adds the selected people to the guest list and schedules their reminders.",
           ],
         },
         failurePolicy: { retry: "same_plan" },
@@ -425,7 +423,7 @@ export function meetingInvitationRecipeDefinition() {
         arguments: inputBindings(COMMUNICATION_KEYS, "plan", ["communication"]),
         dependsOn: ["add-guests"],
         disclosure: {
-          title: "Send the invitation",
+          title: "Send invitation emails",
           items: disclosureItems(COMMUNICATION_KEYS),
           consequences: ["Sends the approved invitation emails immediately."],
         },
@@ -620,21 +618,10 @@ export function buildMeetingInvitationConfirmation(input: {
         effectKind: "meeting",
         reversibility: "reversible",
         resolvedTargets: persistedTargets(createStep),
-        counts: [
-          { label: "Meetings created", count: 1 },
-          {
-            label: "Meeting notifications scheduled",
-            count: meeting.notificationTargets.length,
-          },
-        ],
+        counts: [{ label: "Meetings to create", count: 1 }],
         exclusions: [],
         dateTime: persistedMeetingDateTime(meeting),
-        contentPreviews: meeting.notificationTargets.map(
-          (notification, index) => ({
-            label: `Meeting notification ${index + 1}`,
-            content: JSON.stringify(notification),
-          })
-        ),
+        contentPreviews: [],
         beforeAfter: [],
       },
       {
@@ -643,25 +630,10 @@ export function buildMeetingInvitationConfirmation(input: {
         effectKind: "other",
         reversibility: "reversible",
         resolvedTargets: persistedTargets(guestStep),
-        counts: [
-          { label: "Guests added", count: guests.targets.length },
-          {
-            label: "Guest notifications scheduled",
-            count: guests.notificationTargets.length,
-          },
-        ],
+        counts: [{ label: "Guests to add", count: guests.targets.length }],
         exclusions: exclusionCounts(guests.exclusions),
         dateTime: null,
-        contentPreviews: [
-          ...guests.targets.map((target, index) => ({
-            label: `Guest ${index + 1}`,
-            content: JSON.stringify(target),
-          })),
-          ...guests.notificationTargets.map((notification, index) => ({
-            label: `Guest notification ${index + 1}`,
-            content: JSON.stringify(notification),
-          })),
-        ],
+        contentPreviews: [],
         beforeAfter: [],
       },
       {
@@ -672,37 +644,27 @@ export function buildMeetingInvitationConfirmation(input: {
         resolvedTargets: persistedTargets(sendStep),
         counts: [
           {
-            label: "Invitation emails sent",
+            label: "Invitation emails to send",
             count: communication.audience.recipients.length,
           },
         ],
         exclusions: communication.audience.exclusions,
         dateTime: null,
-        contentPreviews: communication.audience.recipients.flatMap(
-          (recipient, index) => [
-            {
-              label: `Recipient ${index + 1} identity`,
-              content: JSON.stringify({
-                personId: recipient.personId,
-                label: recipient.label,
-                email: recipient.email,
-              }),
-            },
-            {
-              label: `Recipient ${index + 1} subject`,
-              content: recipient.subject,
-            },
-            {
-              label: `Recipient ${index + 1} message`,
-              content: recipient.bodyText,
-            },
-          ]
-        ),
+        contentPreviews: [
+          {
+            label: "Subject",
+            content: communication.audience.subject,
+          },
+          {
+            label: "Message",
+            content: communication.audience.body,
+          },
+        ],
         beforeAfter: [
           {
             label: "Invitation delivery",
             before: "Not sent",
-            after: "Sent immediately",
+            after: "Will send immediately after confirmation",
             count: communication.audience.recipients.length,
           },
         ],

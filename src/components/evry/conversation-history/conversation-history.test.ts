@@ -44,8 +44,10 @@ test("a stale checkpoint offers rebuild and never an active confirm control", ()
   );
   assert.match(
     workspace,
-    /Rebuild this plan with current records and permissions\./
+    /messages\.find\(\(\{ author \}\) => author === "user"\)/
   );
+  assert.match(workspace, /void sendMessageText\(rebuildMessage\)/);
+  assert.match(checkpoint, /disabled=\{disabled\}/);
 });
 
 test("conversation changes are blocked while send, load, or direct selection owns the workspace", () => {

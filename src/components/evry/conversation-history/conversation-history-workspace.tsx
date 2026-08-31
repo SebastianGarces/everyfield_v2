@@ -49,7 +49,7 @@ export function ConversationHistoryWorkspace({
     isWorking,
     loadConversation,
     resetConversation,
-    setDraft,
+    sendMessageText,
   } = useEvryShell();
   const [routeConversationId, setRouteConversationId] =
     useState(conversationId);
@@ -134,6 +134,9 @@ export function ConversationHistoryWorkspace({
   const checkpoint = selectedConversation
     ? latestEvryHistoryCheckpoint(selectedConversation)
     : null;
+  const rebuildMessage =
+    selectedConversation?.messages.find(({ author }) => author === "user")
+      ?.body ?? null;
   const canUseSelectedComposer = canUseEvryHistoryComposer({
     navigationPending: isConversationNavigationPending,
     selectedConversationId,
@@ -346,11 +349,10 @@ export function ConversationHistoryWorkspace({
             {checkpoint ? (
               <ConversationHistoryCheckpoint
                 checkpoint={checkpoint}
+                disabled={blocked || rebuildMessage === null}
                 onRebuild={() => {
-                  setDraft(
-                    "Rebuild this plan with current records and permissions."
-                  );
-                  document.getElementById("evry-message")?.focus();
+                  if (rebuildMessage === null) return;
+                  void sendMessageText(rebuildMessage);
                 }}
               />
             ) : null}

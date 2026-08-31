@@ -7,6 +7,7 @@ import type {
 import {
   evryCapabilityConversationResultIdentity,
   hasDurableEvryCapabilityConversationResult,
+  type EvryCapabilityConversationRunner,
 } from "@/lib/evry/capabilities/conversation";
 import { continueProductionEvryCapabilityConversation } from "@/lib/evry/capabilities/production";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
@@ -172,7 +173,7 @@ export async function createEvryConversation(input: {
   requestPageContext: EvryPageContext | null;
   now: Date;
   store?: EvryConversationStore;
-  continueCapabilityConversation?: typeof continueProductionEvryCapabilityConversation;
+  continueCapabilityConversation?: EvryCapabilityConversationRunner;
   reportStage?: (stage: EvryConversationStreamStage) => void | Promise<void>;
 }): Promise<EvryResumedConversation> {
   const requestKey = evryConversationRequestKeySchema.parse(input.requestKey);
@@ -394,7 +395,7 @@ export async function continueEvryConversation(
     requestPageContext: EvryPageContext | null;
     now: Date;
     store?: EvryConversationStore;
-    continueCapabilityConversation?: typeof continueProductionEvryCapabilityConversation;
+    continueCapabilityConversation?: EvryCapabilityConversationRunner;
     resolveReference?: typeof resolveEvryConversationReference;
     revalidatePlan?: EvryConversationPlanResumeRevalidator;
     reportStage?: (stage: EvryConversationStreamStage) => void | Promise<void>;
@@ -457,13 +458,28 @@ export async function continueEvryConversation(
     : (input.pageContext ?? null);
 
   await input.reportStage?.("resolving_references");
-  const reference = (
-    input.resolveReference ?? resolveEvryConversationReference
-  )({
-    text: input.message,
-    state: current.state,
-    now: input.now,
-  });
+  const capabilityContinuation =
+    input.continueCapabilityConversation ??
+    continueProductionEvryCapabilityConversation;
+  const matchesBeforeReferences =
+    "matchesBeforeReferences" in capabilityContinuation &&
+    typeof capabilityContinuation.matchesBeforeReferences === "function" &&
+    capabilityContinuation.matchesBeforeReferences({
+      actor: input.actor,
+      conversation: current,
+      userRequestKey: requestKey.data,
+      literalUserText: input.message,
+      pageContext,
+      requestPageContext: input.requestPageContext,
+      now: input.now,
+    });
+  const reference = matchesBeforeReferences
+    ? ({ status: "not_applicable" } as const)
+    : (input.resolveReference ?? resolveEvryConversationReference)({
+        text: input.message,
+        state: current.state,
+        now: input.now,
+      });
   const relevanceKeys =
     reference.status === "resolved" ? reference.relevanceKeys : [];
   const idempotencyContext: EvryConversationMessageIdempotencyContext =
@@ -532,10 +548,7 @@ export async function continueEvryConversation(
       knownConversation: appended,
     });
   } else {
-    const continued = await (
-      input.continueCapabilityConversation ??
-      continueProductionEvryCapabilityConversation
-    )({
+    const continued = await capabilityContinuation({
       actor: input.actor,
       conversation: appended,
       userRequestKey: requestKey.data,

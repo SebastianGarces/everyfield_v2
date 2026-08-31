@@ -642,34 +642,23 @@ function reviewStep(
     ],
     exclusions: audience.exclusions,
     dateTime: null,
-    contentPreviews: audience.recipients.flatMap((recipient, index) => {
-      const recipientLabel = preview(
-        `${index + 1}. ${recipient.label} · ${recipient.email}`,
-        `Recipient ${index + 1}`,
-        120
-      );
-      return [
-        {
-          label: preview(`Subject — ${recipientLabel}`, "Subject", 160),
-          content: preview(recipient.subject, "(No subject)"),
-          format: "plain_text" as const,
-        },
-        {
-          label: preview(
-            `Rendered message — ${recipientLabel}`,
-            "Message",
-            160
-          ),
-          content: recipient.bodyHtml,
-          format: "rich_text" as const,
-        },
-      ];
-    }),
+    contentPreviews: [
+      {
+        label: "Subject",
+        content: preview(audience.subject, "(No subject)"),
+        format: "plain_text" as const,
+      },
+      {
+        label: "Message",
+        content: audience.body,
+        format: "plain_text" as const,
+      },
+    ],
     beforeAfter: [
       {
         label: input.resend ? "Resend delivery" : "Email delivery",
         before: "Not sent",
-        after: "Sent immediately",
+        after: "Will send immediately after confirmation",
         count: audience.recipients.length,
       },
     ],
