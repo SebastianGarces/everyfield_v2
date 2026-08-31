@@ -3,6 +3,10 @@ import { withSentryConfig } from "@sentry/nextjs";
 
 const nextConfig: NextConfig = {
   /* config options here */
+  // Local QA links use both host spellings. Next otherwise serves the page at
+  // 127.0.0.1 but rejects its development chunks, leaving client-only screens
+  // permanently waiting for hydration.
+  allowedDevOrigins: ["127.0.0.1", "localhost"],
   // The neon driver owns process-wide transport configuration. Keeping one
   // server instance lets isolated live proofs replace only its HTTP endpoint
   // without adding a production database seam to `src/db`.
