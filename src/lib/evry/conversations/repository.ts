@@ -327,7 +327,7 @@ async function findEvryConversationRecordAttempt(
   );
   if (!conversationId.success) return null;
 
-  const [row] = await db
+  const conversationQuery = db
     .select({ conversation: evryConversations, state: evryConversationStates })
     .from(evryConversations)
     .innerJoin(
@@ -346,9 +346,7 @@ async function findEvryConversationRecordAttempt(
       )
     )
     .limit(1);
-  if (!row) return null;
-
-  const messageRows = await db
+  const messageQuery = db
     .select()
     .from(evryConversationMessages)
     .where(
@@ -359,9 +357,7 @@ async function findEvryConversationRecordAttempt(
       )
     )
     .orderBy(asc(evryConversationMessages.sequence));
-  // Keep this after the message read: under READ COMMITTED, an artifact read
-  // that starts first can otherwise miss artifacts for a just-committed message.
-  const artifactRows = await db
+  const artifactQuery = db
     .select()
     .from(evryConversationArtifacts)
     .where(
@@ -375,6 +371,17 @@ async function findEvryConversationRecordAttempt(
       asc(evryConversationArtifacts.messageId),
       asc(evryConversationArtifacts.ordinal)
     );
+
+  // Neon's batch is one ordered transaction and one HTTP round trip. The
+  // message read still precedes the artifact read, preserving the consistency
+  // rule below without making every history click pay for three requests.
+  const [conversationRows, messageRows, artifactRows] = await db.batch([
+    conversationQuery,
+    messageQuery,
+    artifactQuery,
+  ]);
+  const row = conversationRows[0];
+  if (!row) return null;
 
   const artifactsByMessage = new Map<
     string,
@@ -599,13 +606,31 @@ export async function createEvryConversationRecord(input: {
     return replay;
   }
 
-  const created = await findEvryConversationRecord({
-    conversationId,
+  const message = parseMessageRow({
+    id: messageId,
+    requestKey: input.requestKey,
+    sequence: 0,
+    author: "user",
+    body,
+    bodyFingerprint: bodyFingerprint(body),
+    pageContext: messageContext,
+    relevanceKeys: [],
+    deliveryStatus: "complete",
+    createdAt: input.createdAt,
+    artifacts: [],
+  });
+  return Object.freeze({
+    id: conversationId,
     actorUserId: input.actorUserId,
     plantId: input.plantId,
+    title: automaticTitle(body),
+    createdAt: input.createdAt,
+    lastActivityAt: input.createdAt,
+    activePlan: null,
+    stateVersion: 0,
+    state,
+    messages: Object.freeze([message]),
   });
-  if (!created) throw new EvryConversationStorageError();
-  return created;
 }
 
 interface AppendedMessageRow extends Record<string, unknown> {
@@ -680,6 +705,8 @@ export async function appendEvryConversationRecord(input: {
   replayReference: EvryConversationReplayReference | null;
   activePlan?: ActivePlanMutation;
   createdAt: Date;
+  /** Snapshot whose exact version is guarded by the write's state CAS. */
+  knownConversation?: EvryStoredConversation;
 }): Promise<EvryStoredConversation> {
   const body = bodySchema.parse(input.body);
   const fingerprint = bodyFingerprint(body);
@@ -853,6 +880,57 @@ export async function appendEvryConversationRecord(input: {
     const replay = await exactReplay();
     if (replay) return replay;
     throw new EvryConversationStateConflictError();
+  }
+
+  const known = input.knownConversation;
+  if (
+    known &&
+    known.id === input.conversationId &&
+    known.actorUserId === input.actorUserId &&
+    known.plantId === input.plantId &&
+    known.stateVersion === expectedStateVersion &&
+    known.messages.length === expectedStateVersion + 1
+  ) {
+    const storedArtifacts = Object.freeze(
+      artifacts.map(({ id, ordinal, kind, document }) =>
+        Object.freeze({
+          id,
+          ordinal,
+          kind,
+          document,
+          artifact: hydrateStoredEvryConversationArtifact(document),
+        })
+      )
+    );
+    const message = parseMessageRow({
+      id: messageId,
+      requestKey,
+      sequence: expectedStateVersion + 1,
+      author,
+      body,
+      bodyFingerprint: fingerprint,
+      pageContext: messageContext,
+      relevanceKeys,
+      deliveryStatus,
+      createdAt: input.createdAt,
+      artifacts: storedArtifacts,
+    });
+    return Object.freeze({
+      ...known,
+      lastActivityAt:
+        known.lastActivityAt > input.createdAt
+          ? known.lastActivityAt
+          : input.createdAt,
+      activePlan:
+        normalizedActivePlan.mode === "preserve"
+          ? known.activePlan
+          : normalizedActivePlan.mode === "clear"
+            ? null
+            : normalizedActivePlan.plan,
+      stateVersion: expectedStateVersion + 1,
+      state: parsedState,
+      messages: Object.freeze([...known.messages, message]),
+    });
   }
 
   const appended = await findEvryConversationRecord(input);

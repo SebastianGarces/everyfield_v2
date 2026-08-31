@@ -104,8 +104,10 @@ export function ConversationSurface({ className }: { className?: string }) {
       )?.id ?? null;
 
   useEffect(() => {
-    if (conversation) acknowledgeConversationMounted(conversation.id);
-  }, [acknowledgeConversationMounted, conversation]);
+    const conversationId = conversation?.id ?? null;
+    acknowledgeConversationMounted(conversationId);
+    return () => acknowledgeConversationMounted(null);
+  }, [acknowledgeConversationMounted, conversation?.id]);
 
   useEffect(() => {
     const transcript = transcriptRef.current;
@@ -132,114 +134,92 @@ export function ConversationSurface({ className }: { className?: string }) {
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5 sm:px-5"
         aria-busy={isLoading}
       >
-        {isLoading ? (
-          <div className="text-muted-foreground flex min-h-32 items-center justify-center gap-2 text-sm">
-            <LoaderCircle
-              aria-hidden="true"
-              className="size-4 animate-spin motion-reduce:animate-none"
-            />
-            Opening conversation…
-          </div>
-        ) : conversation?.messages.length ? (
-          <div className="space-y-6">
-            <ol
-              role="log"
-              aria-label="Conversation messages"
-              aria-live="off"
-              aria-relevant="additions text"
-              className="space-y-4"
-            >
-              {conversation.messages.map((message) => (
-                <li
-                  key={message.id}
-                  className={cn(
-                    "flex",
-                    message.author === "user" ? "justify-end" : "justify-start"
-                  )}
-                >
-                  <div
+        <div className="mx-auto w-full max-w-3xl">
+          {isLoading ? (
+            <div className="text-muted-foreground flex min-h-32 items-center justify-center gap-2 text-sm">
+              <LoaderCircle
+                aria-hidden="true"
+                className="size-4 animate-spin motion-reduce:animate-none"
+              />
+              Opening conversation…
+            </div>
+          ) : conversation?.messages.length ? (
+            <div className="space-y-6">
+              <ol
+                role="log"
+                aria-label="Conversation messages"
+                aria-live="off"
+                aria-relevant="additions text"
+                className="space-y-4"
+              >
+                {conversation.messages.map((message) => (
+                  <li
+                    key={message.id}
                     className={cn(
-                      "max-w-[92%] space-y-3 [overflow-wrap:anywhere] sm:max-w-[88%]",
-                      message.author === "user" && "flex flex-col items-end"
+                      "flex",
+                      message.author === "user"
+                        ? "justify-end"
+                        : "justify-start"
                     )}
                   >
                     <div
                       className={cn(
-                        "rounded-xl px-3.5 py-2.5 text-sm leading-relaxed",
-                        message.author === "user"
-                          ? "bg-primary text-primary-foreground"
-                          : "bg-muted text-foreground"
+                        "max-w-[92%] space-y-3 [overflow-wrap:anywhere] sm:max-w-[88%]",
+                        message.author === "user" && "flex flex-col items-end"
                       )}
                     >
-                      <p className="whitespace-pre-wrap">
-                        <span className="sr-only">
-                          {message.author === "user" ? "You" : "Evry"}:{" "}
-                        </span>
-                        {message.body}
-                      </p>
+                      <div
+                        className={cn(
+                          "rounded-xl px-3.5 py-2.5 text-sm leading-relaxed",
+                          message.author === "user"
+                            ? "bg-primary text-primary-foreground"
+                            : "bg-muted text-foreground"
+                        )}
+                      >
+                        <p className="whitespace-pre-wrap">
+                          <span className="sr-only">
+                            {message.author === "user" ? "You" : "Evry"}:{" "}
+                          </span>
+                          {message.body}
+                        </p>
+                      </div>
+
+                      {message.pageContext ? (
+                        <EvryArtifactRenderer
+                          model={{
+                            variant: "context",
+                            artifact: {
+                              sourceKind: message.pageContext.kind,
+                              recordId: message.pageContext.recordId,
+                              label: message.pageContext.label,
+                            },
+                          }}
+                        />
+                      ) : null}
+
+                      {message.artifacts.map(({ id, artifact }) => (
+                        <EvryProductionArtifact
+                          key={id}
+                          artifact={artifact}
+                          activePlan={conversation.activePlan}
+                          artifactId={id}
+                          conversationId={conversation.id}
+                          conversationStateVersion={conversation.stateVersion}
+                          interactive={id === activeArtifactId}
+                          messageId={message.id}
+                          onEdit={(confirmation) => {
+                            setDraft("Revise this plan: " + confirmation.title);
+                            requestAnimationFrame(() =>
+                              document.getElementById("evry-message")?.focus()
+                            );
+                          }}
+                        />
+                      ))}
                     </div>
-
-                    {message.pageContext ? (
-                      <EvryArtifactRenderer
-                        model={{
-                          variant: "context",
-                          artifact: {
-                            sourceKind: message.pageContext.kind,
-                            recordId: message.pageContext.recordId,
-                            label: message.pageContext.label,
-                          },
-                        }}
-                      />
-                    ) : null}
-
-                    {message.artifacts.map(({ id, artifact }) => (
-                      <EvryProductionArtifact
-                        key={id}
-                        artifact={artifact}
-                        activePlan={conversation.activePlan}
-                        artifactId={id}
-                        conversationId={conversation.id}
-                        conversationStateVersion={conversation.stateVersion}
-                        interactive={id === activeArtifactId}
-                        messageId={message.id}
-                        onEdit={(confirmation) => {
-                          setDraft("Revise this plan: " + confirmation.title);
-                          requestAnimationFrame(() =>
-                            document.getElementById("evry-message")?.focus()
-                          );
-                        }}
-                      />
-                    ))}
-                  </div>
-                </li>
-              ))}
-            </ol>
-            {showSuggestions ? (
-              <EvrySuggestionList
-                suggestions={suggestions}
-                onSelect={(suggestion) =>
-                  populateComposerFromSuggestion(suggestion, setDraft, () =>
-                    document.getElementById("evry-message")?.focus()
-                  )
-                }
-              />
-            ) : null}
-          </div>
-        ) : (
-          <div className="mx-auto flex min-h-48 max-w-sm flex-col items-center justify-center text-center">
-            <div className="bg-muted mb-4 grid size-10 place-items-center rounded-full">
-              <Send
-                aria-hidden="true"
-                className="text-muted-foreground size-4"
-              />
-            </div>
-            <h2 className="font-semibold">Start with an EveryField task</h2>
-            <p className="text-muted-foreground mt-1 text-sm leading-relaxed text-pretty">
-              Ask Evry to help with people, meetings, teams, tasks, or your
-              launch.
-            </p>
-            {showSuggestions ? (
-              <div className="mt-6 w-full">
+                  </li>
+                ))}
+              </ol>
+              {showSuggestions ? (
                 <EvrySuggestionList
                   suggestions={suggestions}
                   onSelect={(suggestion) =>
@@ -248,20 +228,48 @@ export function ConversationSurface({ className }: { className?: string }) {
                     )
                   }
                 />
+              ) : null}
+            </div>
+          ) : (
+            <div className="mx-auto flex min-h-48 max-w-sm flex-col items-center justify-center text-center">
+              <div className="bg-muted mb-4 grid size-10 place-items-center rounded-full">
+                <Send
+                  aria-hidden="true"
+                  className="text-muted-foreground size-4"
+                />
               </div>
-            ) : null}
-          </div>
-        )}
-        <div ref={endRef} />
+              <h2 className="font-semibold">Start with an EveryField task</h2>
+              <p className="text-muted-foreground mt-1 text-sm leading-relaxed text-pretty">
+                Ask Evry to help with people, meetings, teams, tasks, or your
+                launch.
+              </p>
+              {showSuggestions ? (
+                <div className="mt-6 w-full">
+                  <EvrySuggestionList
+                    suggestions={suggestions}
+                    onSelect={(suggestion) =>
+                      populateComposerFromSuggestion(suggestion, setDraft, () =>
+                        document.getElementById("evry-message")?.focus()
+                      )
+                    }
+                  />
+                </div>
+              ) : null}
+            </div>
+          )}
+          <div ref={endRef} />
+        </div>
       </div>
 
       <div className="bg-background shrink-0 border-t px-4 pt-4 sm:px-5 sm:pt-5">
-        <EvryPeopleFileWorkflow />
+        <div className="mx-auto w-full max-w-3xl">
+          <EvryPeopleFileWorkflow />
+        </div>
       </div>
 
       <form
         ref={composerRef}
-        className="bg-background shrink-0 space-y-3 p-4 sm:p-5"
+        className="bg-background mx-auto w-full max-w-3xl shrink-0 space-y-3 p-4 sm:p-5"
         onSubmit={(event) => {
           event.preventDefault();
           void sendMessage();

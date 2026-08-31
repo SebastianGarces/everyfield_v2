@@ -278,7 +278,17 @@ test("real shell state survives stale route remounts for first and repeated New 
     "document"
   );
   const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
-  const mockHistory = { state: null };
+  const pushedHrefs: string[] = [];
+  const location = { search: `?conversation=${CONVERSATION_A_ID}` };
+  const listeners = new Map<string, Set<() => void>>();
+  const mockHistory = {
+    state: null,
+    pushState(_state: unknown, _unused: string, href?: string | URL | null) {
+      const nextHref = href === undefined || href === null ? "" : String(href);
+      pushedHrefs.push(nextHref);
+      location.search = new URL(nextHref, "http://localhost").search;
+    },
+  };
   let replacedHref: string | null = null;
   function MockHistory() {}
   MockHistory.prototype.replaceState = (
@@ -299,7 +309,19 @@ test("real shell state survives stale route remounts for first and repeated New 
   });
   Object.defineProperty(globalThis, "window", {
     configurable: true,
-    value: { History: MockHistory, history: mockHistory },
+    value: {
+      History: MockHistory,
+      history: mockHistory,
+      location,
+      addEventListener(type: string, listener: () => void) {
+        const registered = listeners.get(type) ?? new Set();
+        registered.add(listener);
+        listeners.set(type, registered);
+      },
+      removeEventListener(type: string, listener: () => void) {
+        listeners.get(type)?.delete(listener);
+      },
+    },
   });
   t.after(() => {
     if (originalDocument) {
@@ -428,8 +450,7 @@ test("real shell state survives stale route remounts for first and repeated New 
       focus: () => {},
       scrollIntoView: () => {},
     };
-    assert.equal(activate(control), false);
-    mountedRenderer.update(documentTree("new-1", null, true));
+    assert.equal(activate(control), true);
   });
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -464,8 +485,7 @@ test("real shell state survives stale route remounts for first and repeated New 
   await act(async () => {
     const repeatedNew = newLink(mountedRenderer);
     assert.equal(repeatedNew.props.href, "/evry?new=1");
-    assert.equal(activate(repeatedNew), false);
-    mountedRenderer.update(documentTree("new-2", null, true));
+    assert.equal(activate(repeatedNew), true);
   });
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -480,7 +500,6 @@ test("real shell state survives stale route remounts for first and repeated New 
       node.props["aria-label"] === "Back to conversations"
   );
   await act(async () => backButton.props.onClick());
-  await act(async () => route.commit(null, false));
   assert.equal(activeElementId(), "evry-history-heading");
 
   const row = mountedRenderer.root.find(
@@ -491,7 +510,6 @@ test("real shell state survives stale route remounts for first and repeated New 
   await act(async () => {
     activate(row);
   });
-  await act(async () => route.commit(CONVERSATION_A_ID, false));
   const openingStatus = mountedRenderer.root.findByProps({
     id: "evry-conversation-status",
   });
@@ -513,7 +531,9 @@ test("real shell state survives stale route remounts for first and repeated New 
   assert.equal(conversationLoads, 2);
   assert.equal(renderedText(mountedRenderer, "First request"), true);
   assert.equal(activeElementId(), "evry-conversation-heading");
-  assert.deepEqual(route.pushes, [
+  assert.deepEqual(pushedHrefs, [
+    "/evry?new=1",
+    "/evry?new=1",
     "/evry",
     `/evry?conversation=${CONVERSATION_A_ID}`,
   ]);

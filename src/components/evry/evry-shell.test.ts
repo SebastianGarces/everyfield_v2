@@ -124,7 +124,7 @@ test("expand and browser Back retain provider state and reopen the panel", () =>
   );
 });
 
-test("New is an explicit native-navigation mode with no current-tab mutation", () => {
+test("New keeps modifier navigation and uses a shallow current-tab transition", () => {
   assert.match(evryPage, /params\.new === "1"/);
   assert.match(evryPage, /newConversation=\{newConversation\}/);
   assert.match(
@@ -135,7 +135,8 @@ test("New is an explicit native-navigation mode with no current-tab mutation", (
     historyList,
     /<a[\s\S]*href=\{newConversationHref\}[\s\S]*event\.metaKey[\s\S]*event\.ctrlKey[\s\S]*event\.shiftKey[\s\S]*event\.altKey/
   );
-  assert.doesNotMatch(historyList, /onStartNew/);
+  assert.match(historyList, /event\.preventDefault\(\);[\s\S]*onNew\(\)/);
+  assert.match(historyWorkspace, /window\.history\.pushState/);
 });
 
 test("workspace URL sync cannot compete with App Router navigation and loads use the latest-attempt gate", () => {
@@ -148,11 +149,15 @@ test("workspace URL sync cannot compete with App Router navigation and loads use
   assert.doesNotMatch(historyWorkspace, /previousConversationIdRef/);
   assert.match(
     historyWorkspace,
-    /evryHistoryConversationIdToLoad\([\s\S]*isCreatingNew: ownsNewConversation,[\s\S]*navigationPending: isConversationNavigationPending/
+    /ownsNewConversation \|\|[\s\S]*routeConversationId === null \|\|[\s\S]*routeConversationId === conversation\?\.id/
   );
   assert.match(
     historyWorkspace,
-    /\}, \[conversation\?\.id, conversationId, searchQuery\]\);/
+    /\}, \[conversation\?\.id, routeConversationId, searchQuery\]\);/
+  );
+  assert.match(
+    historyWorkspace,
+    /setRouteConversationId\(nextConversationId\)[\s\S]*loadConversation\(nextConversationId\)/
   );
   assert.doesNotMatch(shell, /router\.replace|window\.history\.replaceState/);
   assert.match(
@@ -203,6 +208,18 @@ test("the mounted workspace owns query sync and send preserves in-flight edits",
   assert.match(
     interaction,
     /currentDraft === submittedDraft \? "" : currentDraft/
+  );
+  assert.match(
+    shell,
+    /mountedConversationIdRef = useRef<string \| null>\(null\)/
+  );
+  assert.match(
+    shell,
+    /mountedConversationId !== loadedConversationId[\s\S]*This conversation changed before the message was sent/
+  );
+  assert.match(
+    shell,
+    /pendingEvrySubmissionFor\([\s\S]*conversationId: mountedConversationId,[\s\S]*writeEvryRunRecoveryMarker\([\s\S]*conversationId: mountedConversationId/
   );
 });
 
@@ -311,7 +328,7 @@ test("conversation writes authenticate first and continuation replay precedes co
   const createResolution = createRoute.indexOf(
     "const pageContext = await resolvePageContext"
   );
-  const createWrite = createRoute.indexOf("await create({");
+  const createWrite = createRoute.indexOf("create({");
   assert.ok(
     createAuth >= 0 &&
       createBody > createAuth &&
@@ -326,7 +343,7 @@ test("conversation writes authenticate first and continuation replay precedes co
   const deferredResolution = appendRoute.indexOf(
     "const resolveRequestPageContext = () =>"
   );
-  const appendWrite = appendRoute.indexOf("await continueConversation({");
+  const appendWrite = appendRoute.indexOf("continueConversation({");
   assert.ok(
     appendAuth >= 0 &&
       appendBody > appendAuth &&

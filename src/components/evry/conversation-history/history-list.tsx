@@ -42,6 +42,7 @@ export function ConversationHistoryList({
   blocked,
   conversations,
   headingRef,
+  onNew,
   onSelect,
   newConversationHref,
   searchQuery,
@@ -51,6 +52,7 @@ export function ConversationHistoryList({
   conversations: readonly EvryConversationHistoryItem[];
   headingRef: RefObject<HTMLHeadingElement | null>;
   newConversationHref: string;
+  onNew: () => void;
   onSelect: (conversationId: string) => void;
   searchQuery: string | null;
   selectedConversationId: string | null;
@@ -96,6 +98,8 @@ export function ConversationHistoryList({
                 ) {
                   return;
                 }
+                event.preventDefault();
+                onNew();
               }}
               data-testid="evry-history-new"
               className={cn(
@@ -291,6 +295,8 @@ export function ConversationHistoryList({
                     ) {
                       return;
                     }
+                    event.preventDefault();
+                    onNew();
                   }}
                   className={cn(
                     "mt-3 cursor-pointer active:scale-[0.96]",

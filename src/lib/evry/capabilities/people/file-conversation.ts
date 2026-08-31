@@ -268,6 +268,7 @@ export async function completeEvryPeopleFileReview(
     activePlan: { mode: "set", plan: input.plan },
     now: input.now,
     store: input.store,
+    knownConversation: input.resumed.conversation,
   });
   return resumeEvryConversation({
     actor: input.actor,

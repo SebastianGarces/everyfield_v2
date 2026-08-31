@@ -154,6 +154,7 @@ test("composition evaluates every pure matcher then shared code appends one resu
     replayReference: null,
     activePlan: { mode: "preserve" },
     createdAt: new Date("2026-08-29T12:00:00.000Z"),
+    knownConversation: conversation(),
   });
 });
 
