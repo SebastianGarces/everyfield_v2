@@ -175,7 +175,7 @@ function proposalFromStored(stored: StoredEvryActionPlan) {
     throw new Error("Stored meeting invitation plan has no trusted review");
   }
   return {
-    body: "Review this exact meeting, guest list, notifications, and invitation send before anything is written.",
+    body: "Review the meeting, guest list, and invitation before Evry creates or sends anything.",
     artifacts: [parseEvryConversationArtifactDocument(review.confirmation)],
     activePlan: { mode: "set" as const, plan },
   };
@@ -187,6 +187,7 @@ export function createMeetingInvitationConversationContinuation(
 ): EvryCapabilityConversationContinuation {
   return {
     identity: MEETING_INVITATION_RECIPE_IDENTITY,
+    referencePolicy: "self_contained",
     matches(input) {
       return meetingInvitationRequestForConversation(input) !== null;
     },

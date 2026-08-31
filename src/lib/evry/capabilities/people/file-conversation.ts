@@ -23,13 +23,14 @@ import {
   composeEvryCapabilityConversationContinuations,
   evryCapabilityConversationResultIdentity,
   hasDurableEvryCapabilityConversationResult,
+  type EvryCapabilityConversationRunner,
 } from "@/lib/evry/capabilities/conversation";
 
 const recoverDurablePeopleFileContinuation =
   composeEvryCapabilityConversationContinuations([]);
 
 /** Keep the staged turn open until the caller appends its exact file review. */
-const recoverOnlyPeopleFileContinuation: typeof recoverDurablePeopleFileContinuation =
+const recoverOnlyPeopleFileContinuation: EvryCapabilityConversationRunner =
   async (input) =>
     (await recoverDurablePeopleFileContinuation(input)) ?? input.conversation;
 

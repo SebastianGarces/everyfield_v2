@@ -2,7 +2,7 @@
 
 import {
   AlertCircle,
-  ArrowRight,
+  CalendarDays,
   CheckCircle2,
   CircleDashed,
   CircleX,
@@ -10,12 +10,14 @@ import {
   FileText,
   ListChecks,
   LoaderCircle,
+  Mail,
   MapPin,
   MinusCircle,
   RotateCcw,
   Settings2,
   ShieldAlert,
   ShieldX,
+  UsersRound,
 } from "lucide-react";
 import { useId, type ReactNode } from "react";
 
@@ -37,7 +39,12 @@ import {
   type EvryDetailedReceiptArtifactDocument,
 } from "@/lib/evry/artifacts/review";
 import type { EvryPublicArtifact } from "@/lib/evry/artifacts/public";
-import { formatDateTimeWithZone, formatTime } from "@/lib/datetime";
+import {
+  formatDate,
+  formatDateTime,
+  formatTime,
+  formatTimeZoneName,
+} from "@/lib/datetime";
 import { cn } from "@/lib/utils";
 import { AuthenticatedLink } from "@/components/authenticated-navigation";
 
@@ -156,7 +163,13 @@ function ArtifactFrame({
         </CardHeader>
         <CardContent className="space-y-4 px-4 sm:px-5">{children}</CardContent>
         {footer ? (
-          <CardFooter className="flex flex-wrap justify-end gap-2 border-t px-4 pt-4 sm:px-5">
+          <CardFooter
+            className={cn(
+              "flex flex-col gap-2 border-t px-4 pt-4 sm:flex-row sm:flex-wrap sm:justify-end sm:px-5",
+              variant === "confirmation" &&
+                "bg-card/95 sticky bottom-0 z-10 supports-[backdrop-filter]:backdrop-blur"
+            )}
+          >
             {footer}
           </CardFooter>
         ) : null}
@@ -308,14 +321,68 @@ function dateTimeLabel(
   >
 ): string {
   const { startsAt, endsAt } = range;
-  const start = formatDateTimeWithZone(
-    new Date(startsAt.instantUtc),
-    startsAt.timeZone
-  );
-  const end = endsAt
-    ? `–${formatTime(new Date(endsAt.instantUtc), endsAt.timeZone)}`
-    : "";
-  return `${start}${end}`;
+  const startInstant = new Date(startsAt.instantUtc);
+  const start = formatDateTime(startInstant, "long", startsAt.timeZone);
+  const zone = formatTimeZoneName(startInstant, startsAt.timeZone);
+  if (!endsAt) return `${start} ${zone}`;
+
+  const endInstant = new Date(endsAt.instantUtc);
+  const end =
+    formatDate(startInstant, "long", startsAt.timeZone) ===
+    formatDate(endInstant, "long", endsAt.timeZone)
+      ? formatTime(endInstant, endsAt.timeZone)
+      : formatDateTime(endInstant, "long", endsAt.timeZone);
+  return `${start}–${end} ${zone}`;
+}
+
+function confirmationStepTitle(
+  step: EvryDetailedConfirmationArtifactDocument["steps"][number]
+): string {
+  if (step.stepId === "create-meeting") return "Meeting";
+  if (step.stepId === "add-guests") return "Guests";
+  if (step.stepId === "send-invitations") return "Invitation email";
+  return step.title;
+}
+
+function confirmationStepLead(
+  step: EvryDetailedConfirmationArtifactDocument["steps"][number]
+): string | null {
+  if (step.stepId === "create-meeting") {
+    return "Evry will create this meeting after you confirm.";
+  }
+  if (step.stepId === "add-guests") {
+    const count = step.counts.find(({ label }) =>
+      /guests (?:added|to add)/i.test(label)
+    );
+    if (!count) return null;
+    return `Evry will add ${count.count.toLocaleString()} ${count.count === 1 ? "person" : "people"} to the guest list.`;
+  }
+  if (step.effectKind === "communication") {
+    const count = step.counts.find(({ label }) =>
+      /emails|recipients/i.test(label)
+    );
+    if (!count) return null;
+    return `Evry will use this template for ${count.count.toLocaleString()} ${count.count === 1 ? "person" : "people"}.`;
+  }
+  return null;
+}
+
+function confirmationStepIcon(
+  step: EvryDetailedConfirmationArtifactDocument["steps"][number]
+) {
+  if (step.effectKind === "meeting") return CalendarDays;
+  if (step.stepId === "add-guests") return UsersRound;
+  if (step.effectKind === "communication") return Mail;
+  return ListChecks;
+}
+
+function customerCountLabel(label: string): string {
+  return label
+    .replace(
+      /\s+(?:created|added|sent|scheduled|changed|deleted|imported|parsed)$/i,
+      ""
+    )
+    .trim();
 }
 
 function DetailedConfirmation({
@@ -324,46 +391,57 @@ function DetailedConfirmation({
   artifact: EvryDetailedConfirmationArtifactDocument;
 }) {
   return (
-    <div className="space-y-5">
-      <ol className="space-y-5">
-        {artifact.steps.map((step, index) => {
-          const targets = customerReviewTargets(step.resolvedTargets);
+    <div className="space-y-6">
+      <p className="text-muted-foreground max-w-prose text-sm leading-relaxed text-pretty">
+        Nothing has changed yet. Review the details, then confirm or edit the
+        plan.
+      </p>
+
+      <ol className="space-y-4">
+        {artifact.steps.map((step) => {
+          const targets = customerReviewTargets(
+            step.resolvedTargets,
+            step.effectKind
+          );
           const previews = customerContentPreviews(step.contentPreviews);
-          const needsWarning = step.reversibility !== "reversible";
+          const title = confirmationStepTitle(step);
+          const lead = confirmationStepLead(step);
+          const StepIcon = confirmationStepIcon(step);
           const showChanges =
-            needsWarning ||
             step.effectKind === "bulk_change" ||
-            step.effectKind === "destructive";
+            step.effectKind === "destructive" ||
+            step.effectKind === "file_import";
+          const excludedCount = step.exclusions.reduce(
+            (sum, exclusion) => sum + exclusion.count,
+            0
+          );
           return (
             <li
               key={step.stepId}
-              className="space-y-3 border-b pb-5 last:border-0 last:pb-0"
+              className="bg-muted/35 space-y-4 rounded-xl p-4"
             >
               <div className="flex items-start gap-3">
-                <span className="bg-primary text-primary-foreground grid size-6 shrink-0 place-items-center rounded-full text-xs font-semibold">
-                  {index + 1}
+                <span className="bg-background text-muted-foreground grid size-9 shrink-0 place-items-center rounded-lg border">
+                  <StepIcon aria-hidden="true" className="size-4" />
                 </span>
-                <div className="min-w-0">
-                  <h4 className="font-medium">{step.title}</h4>
-                  {needsWarning ? (
-                    <p className="text-destructive text-xs font-medium">
-                      {step.reversibility === "irreversible"
-                        ? "This cannot be undone"
-                        : "This is difficult to undo"}
+                <div className="min-w-0 space-y-1">
+                  <h4 className="font-semibold text-balance">{title}</h4>
+                  {lead ? (
+                    <p className="text-muted-foreground text-sm leading-relaxed text-pretty">
+                      {lead}
                     </p>
                   ) : null}
                 </div>
               </div>
 
               {targets.length ? (
-                <section>
-                  <h5 className="text-sm font-medium">Details</h5>
-                  <ul className="mt-1 space-y-1 text-sm">
-                    {targets.map((target, targetIndex) => (
-                      <li key={`${target.label}-${targetIndex}`}>
-                        <span className="text-muted-foreground">
-                          {target.label}:{" "}
-                        </span>
+                <dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
+                  {targets.map((target, targetIndex) => (
+                    <div key={`${target.label}-${targetIndex}`}>
+                      <dt className="text-muted-foreground text-xs font-medium">
+                        {target.label}
+                      </dt>
+                      <dd className="mt-0.5 leading-relaxed [overflow-wrap:anywhere]">
                         {target.sourceLink ? (
                           <AuthenticatedLink
                             href={target.sourceLink.href}
@@ -374,76 +452,82 @@ function DetailedConfirmation({
                         ) : (
                           target.value
                         )}
-                      </li>
-                    ))}
-                  </ul>
-                </section>
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
               ) : null}
 
               {step.dateTime ? (
-                <section className="bg-muted/40 rounded-lg border p-3">
+                <section className="bg-background/80 rounded-lg p-3">
                   <h5 className="flex items-center gap-2 text-sm font-medium">
                     <Clock3 aria-hidden="true" className="size-4" />
-                    When
+                    Date and time
                   </h5>
-                  <p className="mt-1 text-sm">{dateTimeLabel(step.dateTime)}</p>
+                  <p className="mt-1 text-sm leading-relaxed text-pretty">
+                    {dateTimeLabel(step.dateTime)}
+                  </p>
                 </section>
               ) : null}
 
-              <section>
-                <h5 className="text-sm font-medium">Summary</h5>
-                <dl className="mt-1 grid gap-1 text-sm sm:grid-cols-2">
+              {!lead ? (
+                <dl className="grid gap-2 text-sm sm:grid-cols-2">
                   {step.counts.map((count) => (
                     <div
                       key={count.label}
-                      className="flex justify-between gap-3 rounded-md border px-2.5 py-2"
+                      className="bg-background/80 flex justify-between gap-3 rounded-lg px-3 py-2.5"
                     >
-                      <dt className="text-muted-foreground">{count.label}</dt>
+                      <dt className="text-muted-foreground">
+                        {customerCountLabel(count.label)}
+                      </dt>
                       <dd className="font-medium tabular-nums">
                         {count.count}
                       </dd>
                     </div>
                   ))}
                 </dl>
-                {step.exclusions.length ? (
-                  <details className="text-muted-foreground mt-2 text-sm">
-                    <summary className="cursor-pointer">Not included</summary>
-                    <ul className="mt-1 list-disc pl-5">
-                      {step.exclusions.map((exclusion) => (
-                        <li key={exclusion.reason}>
-                          {exclusion.count} · {exclusion.reason}
-                        </li>
-                      ))}
-                    </ul>
-                  </details>
-                ) : null}
-              </section>
+              ) : null}
+
+              {step.exclusions.length ? (
+                <details className="text-muted-foreground text-sm">
+                  <summary className="min-h-6 cursor-pointer font-medium">
+                    {excludedCount.toLocaleString()} not included
+                  </summary>
+                  <ul className="mt-2 list-disc space-y-1 ps-5">
+                    {step.exclusions.map((exclusion) => (
+                      <li key={exclusion.reason}>
+                        {exclusion.count.toLocaleString()} {exclusion.reason}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              ) : null}
 
               {showChanges && step.beforeAfter.length ? (
                 <section>
-                  <h5 className="text-sm font-medium">Before and after</h5>
+                  <h5 className="text-sm font-medium">
+                    Changes after confirmation
+                  </h5>
                   <ul className="mt-2 space-y-2">
                     {step.beforeAfter.map((change) => (
                       <li
                         key={change.label}
-                        className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 rounded-lg border p-3 text-sm"
+                        className="bg-background/80 grid gap-3 rounded-lg p-3 text-sm sm:grid-cols-2"
                       >
                         <div>
                           <p className="text-muted-foreground text-xs">
-                            Before
+                            Current
                           </p>
                           <p>{change.before}</p>
                         </div>
-                        <ArrowRight
-                          aria-hidden="true"
-                          className="text-muted-foreground size-4"
-                        />
                         <div>
-                          <p className="text-muted-foreground text-xs">After</p>
+                          <p className="text-muted-foreground text-xs">
+                            After confirmation
+                          </p>
                           <p>{change.after}</p>
                         </div>
-                        <p className="text-muted-foreground col-span-3 text-xs">
-                          {change.count} · {change.label}
+                        <p className="text-muted-foreground text-xs sm:col-span-2">
+                          {change.count.toLocaleString()} {change.label}
                         </p>
                       </li>
                     ))}
@@ -452,15 +536,20 @@ function DetailedConfirmation({
               ) : null}
 
               {previews.length ? (
-                <details>
-                  <summary className="cursor-pointer text-sm font-medium">
-                    Preview content ({previews.length})
-                  </summary>
-                  <dl className="mt-2 space-y-2">
+                <section>
+                  {step.effectKind === "communication" ? null : (
+                    <h5 className="text-sm font-medium">Preview</h5>
+                  )}
+                  <dl
+                    className={cn(
+                      "space-y-2",
+                      step.effectKind === "communication" ? "" : "mt-2"
+                    )}
+                  >
                     {previews.map((preview) => (
                       <div
-                        key={preview.label}
-                        className="bg-muted/40 rounded-lg border p-3 text-sm"
+                        key={`${preview.label}:${preview.content}`}
+                        className="bg-background/80 rounded-lg p-3 text-sm"
                       >
                         <dt className="text-muted-foreground text-xs font-medium">
                           {preview.label}
@@ -477,24 +566,33 @@ function DetailedConfirmation({
                       </div>
                     ))}
                   </dl>
-                </details>
+                </section>
+              ) : null}
+
+              {step.effectKind === "communication" ? (
+                <p className="text-destructive flex gap-2 text-sm leading-relaxed">
+                  <AlertCircle
+                    aria-hidden="true"
+                    className="mt-0.5 size-4 shrink-0"
+                  />
+                  Emails send immediately after you confirm and cannot be
+                  recalled.
+                </p>
+              ) : step.reversibility !== "reversible" ? (
+                <p className="text-destructive flex gap-2 text-sm leading-relaxed">
+                  <AlertCircle
+                    aria-hidden="true"
+                    className="mt-0.5 size-4 shrink-0"
+                  />
+                  {step.reversibility === "irreversible"
+                    ? "This change cannot be undone after you confirm."
+                    : "This change may be difficult to undo after you confirm."}
+                </p>
               ) : null}
             </li>
           );
         })}
       </ol>
-
-      <section className="bg-muted/40 rounded-lg border p-3">
-        <h4 className="flex items-center gap-2 text-sm font-medium">
-          <ShieldAlert aria-hidden="true" className="size-4" />
-          What will happen
-        </h4>
-        <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
-          {artifact.consequences.map((consequence) => (
-            <li key={consequence}>{consequence}</li>
-          ))}
-        </ul>
-      </section>
     </div>
   );
 }
@@ -514,13 +612,27 @@ function renderConfirmation(
       footer={
         controls ? (
           <>
-            <Button type="button" variant="ghost" onClick={controls.onCancel}>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={controls.onCancel}
+              className="min-h-10 w-full active:scale-[0.96] sm:w-auto"
+            >
               Cancel
             </Button>
-            <Button type="button" variant="outline" onClick={controls.onEdit}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={controls.onEdit}
+              className="min-h-10 w-full active:scale-[0.96] sm:w-auto"
+            >
               Edit plan
             </Button>
-            <Button type="button" onClick={controls.onExecute}>
+            <Button
+              type="button"
+              onClick={controls.onExecute}
+              className="min-h-10 w-full active:scale-[0.96] sm:w-auto"
+            >
               {artifact.actionLabel}
             </Button>
           </>

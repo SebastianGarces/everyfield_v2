@@ -62,11 +62,26 @@ export type EvryCapabilityConversationResult = Readonly<{
  */
 export type EvryCapabilityConversationContinuation = Readonly<{
   identity: string;
+  /** A self-contained request must reach this pack before pronoun resolution. */
+  referencePolicy?: "self_contained";
   matches(input: EvryCapabilityConversationSelectionInput): boolean;
   continue(
     input: EvryCapabilityConversationSelectionInput
   ): Promise<EvryCapabilityConversationResult | null>;
 }>;
+
+export type EvryCapabilityConversationRunner = (
+  input: EvryCapabilityConversationSelectionInput &
+    Readonly<{ store: EvryCapabilityConversationStore }>
+) => Promise<EvryStoredConversation | null>;
+
+export type EvryCapabilityConversationDispatcher =
+  EvryCapabilityConversationRunner &
+    Readonly<{
+      matchesBeforeReferences(
+        input: EvryCapabilityConversationSelectionInput
+      ): boolean;
+    }>;
 
 export class EvryCapabilityConversationAmbiguityError extends Error {
   constructor(identities: readonly string[]) {
@@ -233,10 +248,7 @@ async function appendResult(input: {
 /** Recover a request's durable result, then select exactly one closed pack. */
 export function composeEvryCapabilityConversationContinuations(
   continuations: readonly EvryCapabilityConversationContinuation[]
-): (
-  input: EvryCapabilityConversationSelectionInput &
-    Readonly<{ store: EvryCapabilityConversationStore }>
-) => Promise<EvryStoredConversation | null> {
+): EvryCapabilityConversationDispatcher {
   const identities = continuations.map(({ identity }) => identity);
   if (
     identities.some((identity) => identity.trim().length === 0) ||
@@ -245,37 +257,57 @@ export function composeEvryCapabilityConversationContinuations(
     throw new Error("Evry capability continuation identities must be unique");
   }
 
-  return async function continueEvryCapabilityConversation(input) {
-    if (
-      hasDurableEvryCapabilityConversationResult({
-        conversation: input.conversation,
-        userRequestKey: input.userRequestKey,
-      })
-    ) {
-      return input.conversation;
-    }
-
-    const selectionInput: EvryCapabilityConversationSelectionInput = input;
-    const matches = continuations.filter((continuation) =>
-      continuation.matches(selectionInput)
+  function select(
+    input: EvryCapabilityConversationSelectionInput,
+    candidates = continuations
+  ) {
+    const matches = candidates.filter((continuation) =>
+      continuation.matches(input)
     );
     if (matches.length > 1) {
       throw new EvryCapabilityConversationAmbiguityError(
         matches.map(({ identity }) => identity)
       );
     }
-    const selected = matches[0];
-    if (!selected) return null;
-    const result = await selected.continue(selectionInput);
-    if (!result) return null;
-    return appendResult({
-      selection: selectionInput,
-      store: input.store,
-      identity: evryCapabilityConversationResultIdentity({
-        conversationId: input.conversation.id,
-        userRequestKey: input.userRequestKey,
-      }),
-      result,
-    });
-  };
+    return matches[0] ?? null;
+  }
+
+  const dispatch: EvryCapabilityConversationRunner =
+    async function continueEvryCapabilityConversation(input) {
+      if (
+        hasDurableEvryCapabilityConversationResult({
+          conversation: input.conversation,
+          userRequestKey: input.userRequestKey,
+        })
+      ) {
+        return input.conversation;
+      }
+
+      const selectionInput: EvryCapabilityConversationSelectionInput = input;
+      const selected = select(selectionInput);
+      if (!selected) return null;
+      const result = await selected.continue(selectionInput);
+      if (!result) return null;
+      return appendResult({
+        selection: selectionInput,
+        store: input.store,
+        identity: evryCapabilityConversationResultIdentity({
+          conversationId: input.conversation.id,
+          userRequestKey: input.userRequestKey,
+        }),
+        result,
+      });
+    };
+  return Object.assign(dispatch, {
+    matchesBeforeReferences(input: EvryCapabilityConversationSelectionInput) {
+      return (
+        select(
+          input,
+          continuations.filter(
+            ({ referencePolicy }) => referencePolicy === "self_contained"
+          )
+        ) !== null
+      );
+    },
+  });
 }

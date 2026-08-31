@@ -152,7 +152,7 @@ test("reuse keeps the visible relative date intent and enters closed selection",
     sourceText: "next Friday at 10 AM",
     durationMinutes: 90,
     subject: "You're invited to Vision Meeting",
-    body: "Join us for Vision Meeting at our church location. We look forward to seeing you.",
+    body: "Hi {{first_name}},\n\nJoin us for Vision Meeting at our church location. We look forward to seeing you.",
   });
   assert.equal(draft.message.includes(PLAN.planId), false);
   assert.equal(draft.message.includes(PLAN.fingerprint), false);
@@ -228,7 +228,7 @@ test("reuse converts a persisted location choice into visible resolvable intent"
     durationMinutes: 90,
     locationQuery: southName,
     subject: "You're invited to Vision Meeting",
-    body: "Join us for Vision Meeting at our church location. We look forward to seeing you.",
+    body: "Hi {{first_name}},\n\nJoin us for Vision Meeting at our church location. We look forward to seeing you.",
   });
 });
 

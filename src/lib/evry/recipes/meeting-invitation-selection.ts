@@ -2,7 +2,7 @@ import type { MeetingInvitationReferenceRequest } from "./meeting-invitation";
 
 const DEFAULT_SUBJECT = "You're invited to Vision Meeting";
 const DEFAULT_BODY =
-  "Join us for Vision Meeting at our church location. We look forward to seeing you.";
+  "Hi {{first_name}},\n\nJoin us for Vision Meeting at our church location. We look forward to seeing you.";
 const REUSE_LOCATION_PREFIX = "Location choice:";
 export const MEETING_INVITATION_REUSE_INTRO =
   "Reuse this successful meeting invitation with fresh application data.";

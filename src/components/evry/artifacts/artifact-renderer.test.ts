@@ -165,8 +165,9 @@ test("all confirmation families render the evidence their effect requires", () =
       "confirmation"
     );
     assert.match(markup, /Review before Evry acts/);
-    assert.match(markup, /Summary/);
-    assert.match(markup, /What will happen/);
+    assert.match(markup, /Nothing has changed yet/);
+    assert.doesNotMatch(markup, />Summary</);
+    assert.doesNotMatch(markup, /What will happen/);
     assert.match(markup, />Cancel</);
     assert.match(markup, />Edit plan</);
     assert.match(markup, new RegExp(`>${fixture.actionLabel}</button>`));
@@ -179,7 +180,7 @@ test("all confirmation families render the evidence their effect requires", () =
       ),
       "confirmation"
     ),
-    /Wednesday, September 2, 2026 at 10:00 AM EDT–11:30 AM/
+    /Wednesday, September 2, 2026 at 10:00 AM–11:30 AM EDT/
   );
   assert.match(
     render(
@@ -190,7 +191,7 @@ test("all confirmation families render the evidence their effect requires", () =
       ),
       "confirmation"
     ),
-    /Before and after/
+    /Changes after confirmation/
   );
   assert.match(
     render(
@@ -201,7 +202,7 @@ test("all confirmation families render the evidence their effect requires", () =
       ),
       "confirmation"
     ),
-    /This cannot be undone/
+    /cannot be undone after you confirm/
   );
   assert.match(
     render(
@@ -210,7 +211,7 @@ test("all confirmation families render the evidence their effect requires", () =
       ),
       "confirmation"
     ),
-    /This is difficult to undo/
+    /may be difficult to undo after you confirm/
   );
   assert.match(
     render(
@@ -239,8 +240,22 @@ test("all confirmation families render the evidence their effect requires", () =
       ),
       "confirmation"
     ),
-    /Preview content[\s\S]*Launch update/
+    /Evry will use this template for 3 people[\s\S]*Launch update/
   );
+
+  const meetingMarkup = render(
+    renderableEvryArtifact(
+      evryPublicArtifactSchema.parse(EVRY_CONFIRMATION_FIXTURES.meeting)
+    ),
+    "confirmation"
+  );
+  assert.match(meetingMarkup, />Meeting</);
+  assert.match(meetingMarkup, />Guests</);
+  assert.match(meetingMarkup, />Invitation email</);
+  assert.match(meetingMarkup, /Evry will add 4 people to the guest list/);
+  assert.match(meetingMarkup, /use this template for 4 people/);
+  assert.doesNotMatch(meetingMarkup, /Add resolved guests/);
+  assert.doesNotMatch(meetingMarkup, /Before and after|Sent immediately/);
 });
 
 test("progress and a terminal receipt expose every step state without a second execute control", async () => {

@@ -12,6 +12,7 @@ import {
   formatRelativeDay,
   formatRelativeTimestamp,
   formatTime,
+  formatTimeZoneName,
   groupedTimeZones,
   instantsAtZonedTime,
   isValidTimeZone,
@@ -126,6 +127,14 @@ test("formatDate and formatTime render the pinned wall clock", () => {
 test("formatDateTime joins both halves with 'at' in either variant", () => {
   assert.equal(formatDateTime(EVENING), "Thursday, July 30, 2026 at 7:00 PM");
   assert.equal(formatDateTime(EVENING, "short"), "Jul 30, 2026 at 7:00 PM");
+});
+
+test("formatTimeZoneName follows daylight saving time", () => {
+  assert.equal(formatTimeZoneName(EVENING, "America/New_York"), "EDT");
+  assert.equal(
+    formatTimeZoneName(new Date("2026-01-30T19:00:00Z"), "America/New_York"),
+    "EST"
+  );
 });
 
 test("the header and the Date & Time card ask for the same strings", () => {
