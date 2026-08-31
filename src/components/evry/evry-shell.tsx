@@ -224,6 +224,9 @@ export function EvryShell({
   const [expandedFromPanel, setExpandedFromPanel] = useState(false);
   const launcherRef = useRef<HTMLButtonElement | null>(null);
   const conversationLoadStateRef = useRef(initialEvryConversationLoadState());
+  const conversationCacheRef = useRef(
+    new Map<string, PublicEvryConversation>()
+  );
   const pendingSubmissionRef = useRef<PendingEvrySubmission | null>(null);
   const pendingPeopleFileRef = useRef<PendingPeopleFileSubmission | null>(null);
   const pendingRecipeReuseRef = useRef(pendingRecipeReuse);
@@ -937,6 +940,17 @@ export function EvryShell({
   }, [clearPendingRecipeReuse, enabled, routeLocation, runRecipeReuse]);
 
   const clearContext = useCallback(() => setActiveContext(null), []);
+
+  useEffect(() => {
+    if (conversation === null) return;
+    const cache = conversationCacheRef.current;
+    cache.delete(conversation.id);
+    cache.set(conversation.id, conversation);
+    if (cache.size <= 8) return;
+    const oldestConversationId = cache.keys().next().value;
+    if (oldestConversationId !== undefined) cache.delete(oldestConversationId);
+  }, [conversation]);
+
   const loadConversation = useCallback(
     async (conversationId: string) => {
       if (isSending || isWorking) return;
@@ -944,6 +958,17 @@ export function EvryShell({
         return;
       if (conversation?.id === conversationId) {
         setRequestedConversationId(null);
+        return;
+      }
+      const cachedConversation =
+        conversationCacheRef.current.get(conversationId);
+      if (cachedConversation) {
+        cancelActiveConversationLoads();
+        setConversation(cachedConversation);
+        presentWork(
+          `cache:${cachedConversation.id}:${cachedConversation.stateVersion}`,
+          evryWorkStateForConversation(cachedConversation)
+        );
         return;
       }
       if (
@@ -1014,7 +1039,13 @@ export function EvryShell({
         }
       }
     },
-    [conversation?.id, isSending, isWorking, presentWork]
+    [
+      cancelActiveConversationLoads,
+      conversation?.id,
+      isSending,
+      isWorking,
+      presentWork,
+    ]
   );
 
   const resetConversation = useCallback(() => {

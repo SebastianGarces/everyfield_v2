@@ -510,25 +510,13 @@ test("real shell state survives stale route remounts for first and repeated New 
   await act(async () => {
     activate(row);
   });
-  const openingStatus = mountedRenderer.root.findByProps({
-    id: "evry-conversation-status",
-  });
-  assert.equal(openingStatus.props.role, undefined);
-  assert.equal(openingStatus.props["aria-live"], undefined);
-  assert.equal(openingStatus.props["aria-busy"], undefined);
   assert.equal(
-    openingStatus.findAll(
-      (node) => node.props.role === "status" || node.props.role === "alert"
-    ).length,
+    mountedRenderer.root.findAllByProps({ id: "evry-conversation-status" })
+      .length,
     0,
-    "history handoff must not compete with the stable work-status live regions"
+    "a cached conversation reopens without an intermediate loading surface"
   );
-  assert.equal(activeElementId(), "evry-conversation-status");
-  secondLoad.resolve();
-  await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  });
-  assert.equal(conversationLoads, 2);
+  assert.equal(conversationLoads, 1);
   assert.equal(renderedText(mountedRenderer, "First request"), true);
   assert.equal(activeElementId(), "evry-conversation-heading");
   assert.deepEqual(pushedHrefs, [
