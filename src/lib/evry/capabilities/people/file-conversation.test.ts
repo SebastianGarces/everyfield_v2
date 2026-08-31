@@ -69,6 +69,7 @@ function storedMessage(input: {
     author: input.author,
     body: input.body,
     pageContext: null,
+    requestPageContext: null,
     replayReference: null,
     relevanceKeys: [],
     deliveryStatus: "complete",
