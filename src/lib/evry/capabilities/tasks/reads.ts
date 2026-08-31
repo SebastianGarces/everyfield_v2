@@ -1377,6 +1377,13 @@ export function selectTaskEvryRead(
       cursor: null,
     };
   }
+  if (
+    /^(?:(?:show|list)(?: me)? )?(?:who needs? follow[ -]?up|(?:which )?(?:people|contacts) (?:need|needs|needing) follow[ -]?up)[.!?]*$/i.test(
+      text
+    )
+  ) {
+    return { kind: "follow_up_ownership", section: "contacts", cursor: null };
+  }
   match = new RegExp(
     `^load more task follow-up (contacts|tasks|assignees) after\\s+${UUID}[.!?]*$`,
     "i"

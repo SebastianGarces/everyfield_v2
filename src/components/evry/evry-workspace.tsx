@@ -74,7 +74,7 @@ export function EvryWorkspace({
           <EvryArtifactBrowserFixture />
         ) : (
           <ConversationHistoryWorkspace
-            key={newConversation ? "new" : "history"}
+            key={`${newConversation ? "new" : "history"}:${conversationId ?? ""}:${searchQuery ?? ""}`}
             conversations={conversations}
             conversationId={conversationId}
             conversationSurface={<ConversationSurface />}

@@ -33,8 +33,15 @@ import {
 } from "./meeting-invitation";
 import { selectMeetingInvitationReferenceRequest } from "./meeting-invitation-selection";
 
+type MeetingInvitationConversationHistoryInput = Readonly<{
+  conversation: Parameters<
+    EvryCapabilityConversationContinuation["matches"]
+  >[0]["conversation"];
+  literalUserText: string;
+}>;
+
 function latestMeetingClarification(
-  input: Parameters<EvryCapabilityConversationContinuation["matches"]>[0]
+  input: MeetingInvitationConversationHistoryInput
 ) {
   for (const message of [...(input.conversation.messages ?? [])].reverse()) {
     if (message.author !== "assistant") continue;
@@ -60,6 +67,12 @@ function addYear(sourceText: string, year: string) {
 /** Fold focused clarification answers back into the original closed request. */
 export function meetingInvitationRequestForConversation(
   input: Parameters<EvryCapabilityConversationContinuation["matches"]>[0]
+) {
+  return meetingInvitationRequestFromHistory(input);
+}
+
+export function meetingInvitationRequestFromHistory(
+  input: MeetingInvitationConversationHistoryInput
 ) {
   const direct = selectMeetingInvitationReferenceRequest(input.literalUserText);
   if (direct) return direct;
@@ -162,7 +175,7 @@ function proposalFromStored(stored: StoredEvryActionPlan) {
     throw new Error("Stored meeting invitation plan has no trusted review");
   }
   return {
-    body: "Review this exact meeting, guest list, notifications, and invitation send before anything is written.",
+    body: "Review the meeting, guest list, and invitation before Evry creates or sends anything.",
     artifacts: [parseEvryConversationArtifactDocument(review.confirmation)],
     activePlan: { mode: "set" as const, plan },
   };
@@ -174,6 +187,7 @@ export function createMeetingInvitationConversationContinuation(
 ): EvryCapabilityConversationContinuation {
   return {
     identity: MEETING_INVITATION_RECIPE_IDENTITY,
+    referencePolicy: "self_contained",
     matches(input) {
       return meetingInvitationRequestForConversation(input) !== null;
     },

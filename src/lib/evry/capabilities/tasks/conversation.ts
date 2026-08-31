@@ -37,6 +37,11 @@ const productionDependencies: TaskEvryConversationDependencies = {
   resolve: resolveTaskEvryEffect,
 };
 
+function taskReadMessage(count: number): string {
+  if (count === 0) return "Nothing needs your attention right now.";
+  return `I found ${count.toLocaleString()} matching result${count === 1 ? "" : "s"}.`;
+}
+
 function unavailableTaskResult() {
   const clarification = {
     kind: "clarification" as const,
@@ -108,7 +113,7 @@ export function createTaskEvryConversationContinuation(
         if (!artifact) return unavailableTaskResult();
         return artifact.kind === "read"
           ? {
-              body: artifact.title,
+              body: taskReadMessage(artifact.counts.returned),
               artifacts: [storedEvryReadArtifactDocument(artifact)],
             }
           : {

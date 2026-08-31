@@ -998,7 +998,7 @@ test("a legal large notification plan keeps every target and baseline row", () =
   );
 });
 
-test("reschedule confirmation renders scheduled and cancelled notification changes", () => {
+test("reschedule confirmation summarizes notification changes without lifecycle internals", () => {
   const { confirmation, step } = reviewForArguments(
     "updateMeetingAction",
     validArguments("updateMeetingAction")
@@ -1023,12 +1023,12 @@ test("reschedule confirmation renders scheduled and cancelled notification chang
       ),
     })
   );
-  assert.match(markup, /Notifications scheduled/);
-  assert.match(markup, /Notifications cancelled/);
-  assert.match(markup, /Absent/);
-  assert.match(markup, /Pending/);
-  assert.match(markup, /Scheduled/);
-  assert.match(markup, /Cancelled/);
+  assert.match(markup, /Notifications to schedule/);
+  assert.match(markup, /Notifications to cancel/);
+  assert.doesNotMatch(markup, />Absent</);
+  assert.doesNotMatch(markup, />Pending</);
+  assert.doesNotMatch(markup, />Scheduled</);
+  assert.doesNotMatch(markup, />Cancelled</);
 });
 
 test("meeting updates disclose the after datetime as the absolute time", () => {

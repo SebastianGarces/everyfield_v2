@@ -19,6 +19,7 @@ import {
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
 import { confirmEvryActionPlan } from "@/lib/evry/plans";
 import { cancelExactEvryActionPlan } from "@/lib/evry/plans/repository";
+import { PRODUCTION_EVRY_RECIPE_REUSE_REGISTRY } from "@/lib/evry/recipes/production-reuse";
 
 export type RunEvryProductionArtifactLifecycle = (input: {
   actor: EvryPlantActor;
@@ -41,5 +42,6 @@ export const runEvryProductionArtifactLifecycle = createEvryArtifactLifecycle({
       ...input,
       reviewRegistry: PRODUCTION_EVRY_REVIEW_REGISTRY,
     }),
+  reusableRecipeIdentities: PRODUCTION_EVRY_RECIPE_REUSE_REGISTRY.identities,
   now: () => new Date(),
 });

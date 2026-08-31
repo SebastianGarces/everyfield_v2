@@ -60,6 +60,7 @@ const appendRoute = read(
   "messages",
   "route.ts"
 );
+const conversationService = read("lib", "evry", "conversations", "service.ts");
 
 test("one persistent shell owns the launcher, panel, and dedicated workspace state", () => {
   assert.match(
@@ -123,7 +124,7 @@ test("expand and browser Back retain provider state and reopen the panel", () =>
   );
 });
 
-test("New is an explicit native-navigation mode with no current-tab mutation", () => {
+test("New keeps modifier navigation and uses a shallow current-tab transition", () => {
   assert.match(evryPage, /params\.new === "1"/);
   assert.match(evryPage, /newConversation=\{newConversation\}/);
   assert.match(
@@ -134,7 +135,8 @@ test("New is an explicit native-navigation mode with no current-tab mutation", (
     historyList,
     /<a[\s\S]*href=\{newConversationHref\}[\s\S]*event\.metaKey[\s\S]*event\.ctrlKey[\s\S]*event\.shiftKey[\s\S]*event\.altKey/
   );
-  assert.doesNotMatch(historyList, /onStartNew/);
+  assert.match(historyList, /event\.preventDefault\(\);[\s\S]*onNew\(\)/);
+  assert.match(historyWorkspace, /window\.history\.pushState/);
 });
 
 test("workspace URL sync cannot compete with App Router navigation and loads use the latest-attempt gate", () => {
@@ -147,11 +149,19 @@ test("workspace URL sync cannot compete with App Router navigation and loads use
   assert.doesNotMatch(historyWorkspace, /previousConversationIdRef/);
   assert.match(
     historyWorkspace,
-    /evryHistoryConversationIdToLoad\([\s\S]*isCreatingNew: ownsNewConversation,[\s\S]*navigationPending: isConversationNavigationPending/
+    /ownsNewConversation \|\|[\s\S]*routeConversationId === null \|\|[\s\S]*routeConversationId === conversation\?\.id/
   );
   assert.match(
     historyWorkspace,
-    /\}, \[conversation\?\.id, conversationId, searchQuery\]\);/
+    /\}, \[conversation\?\.id, routeConversationId, searchQuery\]\);/
+  );
+  assert.match(
+    historyWorkspace,
+    /setRouteConversationId\(nextConversationId\)[\s\S]*window\.history\.pushState/
+  );
+  assert.match(
+    historyWorkspace,
+    /routeConversationId === conversation\?\.id[\s\S]*void loadConversation\(routeConversationId\)/
   );
   assert.doesNotMatch(shell, /router\.replace|window\.history\.replaceState/);
   assert.match(
@@ -159,6 +169,10 @@ test("workspace URL sync cannot compete with App Router navigation and loads use
     /const conversationLoadStateRef = useRef\([\s\S]*initialEvryConversationLoadState\(\)/
   );
   assert.match(shell, /isLatestEvryConversationLoad\([\s\S]*load\.attempt/);
+  assert.match(
+    shell,
+    /conversationCacheRef = useRef\([\s\S]*new Map<string, PublicEvryConversation>[\s\S]*cachedConversation[\s\S]*setConversation\(cachedConversation\)/
+  );
   assert.match(shell, /finishEvryConversationLoad\([\s\S]*load\.attempt/);
   assert.match(
     shell,
@@ -175,7 +189,7 @@ test("workspace URL sync cannot compete with App Router navigation and loads use
   assert.match(shell, /if \(isSending \|\| isWorking\) return/);
   assert.match(
     shell,
-    /\[conversation\?\.id, isSending, isWorking, presentWork\]\s*\)/
+    /\[\s*cancelActiveConversationLoads,[\s\S]*conversation\?\.id,[\s\S]*isSending,[\s\S]*isWorking,[\s\S]*presentWork,[\s\S]*\]\s*\)/
   );
   assert.match(
     shell,
@@ -203,6 +217,18 @@ test("the mounted workspace owns query sync and send preserves in-flight edits",
     interaction,
     /currentDraft === submittedDraft \? "" : currentDraft/
   );
+  assert.match(
+    shell,
+    /mountedConversationIdRef = useRef<string \| null>\(null\)/
+  );
+  assert.match(
+    shell,
+    /mountedConversationId !== loadedConversationId[\s\S]*This conversation changed before the message was sent/
+  );
+  assert.match(
+    shell,
+    /pendingEvrySubmissionFor\([\s\S]*conversationId: mountedConversationId,[\s\S]*writeEvryRunRecoveryMarker\([\s\S]*conversationId: mountedConversationId/
+  );
 });
 
 test("message retries keep their semantic request identity until success", () => {
@@ -225,7 +251,14 @@ test("message retries keep their semantic request identity until success", () =>
     surface,
     /draft\.trim\(\)\.length === 0 \|\| isSending \|\| isComposerBlocked/
   );
-  assert.match(shell, /const message = evrySubmissionMessage\(draft\)/);
+  assert.match(
+    shell,
+    /const message = evrySubmissionMessage\(messageOverrideRef\.current \?\? draft\)/
+  );
+  assert.match(
+    shell,
+    /messageOverrideRef\.current = message;[\s\S]*await sendMessage\(\)/
+  );
 });
 
 test("the transcript is an attributed review log and one dedicated status owns announcements", () => {
@@ -302,21 +335,49 @@ test("removing context removes it from the request body", () => {
   assert.match(interaction, /pageContext: submission\.pageContext/);
 });
 
-test("both conversation writes resolve the untrusted hint after auth and before persistence", () => {
-  for (const route of [createRoute, appendRoute]) {
-    const auth = route.indexOf("const actor = await requireEvryPlantViewer()");
-    const body = route.indexOf("body = await request.json()");
-    const resolution = route.indexOf(
-      "const pageContext = await resolvePageContext"
-    );
-    const write = Math.max(
-      route.indexOf("await create({"),
-      route.indexOf("await continueConversation({")
-    );
-    assert.ok(
-      auth >= 0 && body > auth && resolution > body && write > resolution
-    );
-  }
+test("conversation writes authenticate first and continuation replay precedes context resolution", () => {
+  const createAuth = createRoute.indexOf(
+    "const actor = await requireEvryPlantViewer()"
+  );
+  const createBody = createRoute.indexOf("body = await request.json()");
+  const createResolution = createRoute.indexOf(
+    "const pageContext = await resolvePageContext"
+  );
+  const createWrite = createRoute.indexOf("create({");
+  assert.ok(
+    createAuth >= 0 &&
+      createBody > createAuth &&
+      createResolution > createBody &&
+      createWrite > createResolution
+  );
+
+  const appendAuth = appendRoute.indexOf(
+    "const actor = await requireEvryPlantViewer()"
+  );
+  const appendBody = appendRoute.indexOf("body = await request.json()");
+  const deferredResolution = appendRoute.indexOf(
+    "const resolveRequestPageContext = () =>"
+  );
+  const appendWrite = appendRoute.indexOf("continueConversation({");
+  assert.ok(
+    appendAuth >= 0 &&
+      appendBody > appendAuth &&
+      deferredResolution > appendBody &&
+      appendWrite > deferredResolution
+  );
+
+  const replayCheck = conversationService.indexOf(
+    "hasDurableEvryCapabilityConversationResult"
+  );
+  const resolution = conversationService.indexOf(
+    "const pageContext = input.resolvePageContext"
+  );
+  const persistence = conversationService.indexOf(
+    "let appended = await appendTrustedEvryConversationMessage"
+  );
+  assert.ok(
+    replayCheck >= 0 && resolution > replayCheck && persistence > resolution
+  );
 
   assert.match(resolver, /eq\(persons\.churchId, actor\.plantId\)/);
   assert.match(resolver, /eq\(churchMeetings\.churchId, actor\.plantId\)/);

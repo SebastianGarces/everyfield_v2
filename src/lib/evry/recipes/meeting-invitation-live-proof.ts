@@ -8,7 +8,9 @@ import { db } from "@/db";
 import {
   churches,
   communications,
+  evryExecutionAttempts,
   evryExecutionOutcomes,
+  evryPlanConfirmations,
   meetingAttendance,
   persons,
   sendingChurches,
@@ -56,6 +58,9 @@ async function loadModules() {
     conversations,
     planResume,
     planRepository,
+    reuse,
+    productionReuse,
+    invitation,
   ] = await Promise.all([
     import("@/lib/evry/eligibility/viewer"),
     import("@/lib/evry/plans"),
@@ -72,6 +77,9 @@ async function loadModules() {
     import("@/lib/evry/conversations/service"),
     import("@/lib/evry/conversations/plan-resume"),
     import("@/lib/evry/plans/repository"),
+    import("@/lib/evry/conversations/reuse"),
+    import("@/lib/evry/recipes/production-reuse"),
+    import("@/lib/evry/recipes/meeting-invitation"),
   ]);
   return {
     viewer,
@@ -89,6 +97,9 @@ async function loadModules() {
     conversations,
     planResume,
     planRepository,
+    reuse,
+    productionReuse,
+    invitation,
   };
 }
 
@@ -97,7 +108,7 @@ async function seedScenario(modules: Modules, label: string) {
     .insert(churches)
     .values({
       name: `__evry invitation ${label}__`,
-      timeZone: "UTC",
+      timeZone: "America/New_York",
       streetAddress: "1 Exact Plan Way",
       city: "Albany",
       stateRegion: "NY",
@@ -356,6 +367,8 @@ async function proveSendOnlyRetry(modules: Modules) {
   const lifecycle = modules.artifactLifecycle.createEvryArtifactLifecycle({
     planRegistry: modules.production.PRODUCTION_EVRY_PLAN_REGISTRY,
     executionRegistry: modules.production.PRODUCTION_EVRY_EXECUTION_REGISTRY,
+    reusableRecipeIdentities:
+      modules.productionReuse.PRODUCTION_EVRY_RECIPE_REUSE_REGISTRY.identities,
     revalidatePlan: modules.planResume.revalidateProductionEvryConversationPlan,
     resume: modules.conversations.resumeEvryConversation,
     append: modules.conversations.appendTrustedEvryConversationMessage,
@@ -421,6 +434,173 @@ async function proveSendOnlyRetry(modules: Modules) {
     "result"
   );
   assert.equal(calls, 3);
+  const resultArtifact = second.resumed.conversation.messages
+    .at(-1)
+    ?.artifacts.find(({ document }) => document.kind === "result");
+  assert.ok(resultArtifact);
+  assert.deepEqual(
+    resultArtifact.document.kind === "result" &&
+      "artifactVersion" in resultArtifact.document
+      ? resultArtifact.document.reuse
+      : null,
+    {
+      recipeIdentity: modules.recipes.MEETING_INVITATION_RECIPE_IDENTITY,
+      label: "Reuse",
+    }
+  );
+
+  const changedEmail = `casey.${randomUUID()}@example.test`;
+  await db.insert(persons).values({
+    churchId: scenario.churchId,
+    firstName: "Casey",
+    lastName: "Current recipient",
+    email: changedEmail,
+    status: "launch_team",
+    createdBy: scenario.actor.userId,
+  });
+  await db.insert(users).values({
+    email: changedEmail,
+    passwordHash: "scratch",
+    name: "Casey guest",
+    seat: "member",
+    churchId: scenario.churchId,
+  });
+  const reuseRequestKey = randomUUID();
+  const reused = await modules.reuse.reuseCompletedEvryRecipe({
+    actor: scenario.actor,
+    sourceConversationId: second.resumed.conversation.id,
+    resultArtifactId: resultArtifact.id,
+    recipeIdentity: modules.recipes.MEETING_INVITATION_RECIPE_IDENTITY,
+    requestKey: reuseRequestKey,
+    now: new Date(),
+  });
+  assert.equal(reused.status, "created");
+  if (reused.status !== "created" || !reused.resumed.activePlan) {
+    throw new Error("Completed meeting invitation did not create a fresh plan");
+  }
+  const reuseReplay = await modules.reuse.reuseCompletedEvryRecipe({
+    actor: scenario.actor,
+    sourceConversationId: second.resumed.conversation.id,
+    resultArtifactId: resultArtifact.id,
+    recipeIdentity: modules.recipes.MEETING_INVITATION_RECIPE_IDENTITY,
+    requestKey: reuseRequestKey,
+    now: new Date(),
+  });
+  assert.equal(reuseReplay.status, "created");
+  if (reuseReplay.status === "created") {
+    assert.equal(
+      reuseReplay.resumed.conversation.id,
+      reused.resumed.conversation.id
+    );
+    assert.deepEqual(
+      reuseReplay.resumed.activePlan?.identity,
+      reused.resumed.activePlan.identity
+    );
+  }
+  assert.notEqual(
+    reused.resumed.conversation.id,
+    second.resumed.conversation.id
+  );
+  assert.match(
+    reused.resumed.conversation.messages[0]?.body ?? "",
+    /Reuse this successful meeting invitation with fresh application data\./
+  );
+  assert.match(
+    reused.resumed.conversation.messages[0]?.body ?? "",
+    /Resolve the church location again\./
+  );
+  assert.equal(
+    reused.resumed.conversation.messages.some((message) =>
+      message.artifacts.some(({ document }) => document.kind === "result")
+    ),
+    false
+  );
+  const freshConfirmation = reused.resumed.conversation.messages
+    .flatMap(({ artifacts }) => artifacts)
+    .find(({ document }) => document.kind === "confirmation")?.document;
+  assert.equal(freshConfirmation?.kind, "confirmation");
+  if (freshConfirmation?.kind === "confirmation") {
+    assert.deepEqual(
+      freshConfirmation.plan,
+      reused.resumed.activePlan.identity
+    );
+    assert.notDeepEqual(freshConfirmation.plan, plan);
+  }
+
+  const originalPlan = await modules.planRepository.findExactEvryActionPlan({
+    planId: plan.planId,
+    actorUserId: scenario.actor.userId,
+    plantId: scenario.actor.plantId,
+    fingerprint: plan.fingerprint,
+  });
+  const freshPlan = await modules.planRepository.findExactEvryActionPlan({
+    planId: reused.resumed.activePlan.identity.planId,
+    actorUserId: scenario.actor.userId,
+    plantId: scenario.actor.plantId,
+    fingerprint: reused.resumed.activePlan.identity.fingerprint,
+  });
+  assert.ok(originalPlan);
+  assert.ok(freshPlan);
+  const originalDocument = modules.plans.parseStoredEvryActionPlan({
+    document: originalPlan.document,
+    registry: modules.production.PRODUCTION_EVRY_PLAN_REGISTRY,
+  });
+  const freshDocument = modules.plans.parseStoredEvryActionPlan({
+    document: freshPlan.document,
+    registry: modules.production.PRODUCTION_EVRY_PLAN_REGISTRY,
+  });
+  const snapshotFor = (document: typeof originalDocument) =>
+    modules.invitation.MEETING_INVITATION_PLAN_SNAPSHOT_SCHEMA.parse({
+      meeting: document.steps[0]?.arguments,
+      guests: document.steps[1]?.arguments,
+      communication: document.steps[2]?.arguments,
+    });
+  const originalSnapshot = snapshotFor(originalDocument);
+  const freshSnapshot = snapshotFor(freshDocument);
+  assert.notEqual(originalPlan.id, freshPlan.id);
+  assert.notEqual(originalPlan.requestKey, freshPlan.requestKey);
+  assert.notEqual(originalPlan.fingerprint, freshPlan.fingerprint);
+  assert.notDeepEqual(originalPlan.document, freshPlan.document);
+  assert.notEqual(
+    originalSnapshot.meeting.meetingId,
+    freshSnapshot.meeting.meetingId
+  );
+  assert.notEqual(
+    originalSnapshot.communication.communicationId,
+    freshSnapshot.communication.communicationId
+  );
+  assert.deepEqual(
+    originalSnapshot.guests.targets
+      .map(({ attendanceId }) => attendanceId)
+      .filter((attendanceId) =>
+        freshSnapshot.guests.targets.some(
+          (target) => target.attendanceId === attendanceId
+        )
+      ),
+    []
+  );
+  assert.equal(originalSnapshot.communication.audience.recipients.length, 2);
+  assert.equal(freshSnapshot.communication.audience.recipients.length, 3);
+  assert.equal(
+    freshSnapshot.communication.audience.recipients.some(
+      ({ email }) => email === changedEmail
+    ),
+    true
+  );
+  assert.deepEqual(
+    await db
+      .select({ id: evryPlanConfirmations.id })
+      .from(evryPlanConfirmations)
+      .where(eq(evryPlanConfirmations.planId, freshPlan.id)),
+    []
+  );
+  assert.deepEqual(
+    await db
+      .select({ id: evryExecutionAttempts.id })
+      .from(evryExecutionAttempts)
+      .where(eq(evryExecutionAttempts.planId, freshPlan.id)),
+    []
+  );
   assert.equal(
     await db
       .select({ id: meetingAttendance.id })
@@ -575,7 +755,7 @@ async function main() {
     mode === "all" || mode === "end_to_end" || mode === "partial_failure"
   );
   console.log(
-    "Meeting invitation live proof passed: atomic create/guest success, missing/tampered/version/tenancy drift refusal, and send-only retry"
+    "Meeting invitation live proof passed: atomic create/guest success, fresh recipe reuse, missing/tampered/version/tenancy drift refusal, and send-only retry"
   );
 }
 

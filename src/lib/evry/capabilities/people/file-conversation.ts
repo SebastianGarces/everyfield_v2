@@ -23,10 +23,16 @@ import {
   composeEvryCapabilityConversationContinuations,
   evryCapabilityConversationResultIdentity,
   hasDurableEvryCapabilityConversationResult,
+  type EvryCapabilityConversationRunner,
 } from "@/lib/evry/capabilities/conversation";
 
-const recoverOnlyPeopleFileContinuation =
+const recoverDurablePeopleFileContinuation =
   composeEvryCapabilityConversationContinuations([]);
+
+/** Keep the staged turn open until the caller appends its exact file review. */
+const recoverOnlyPeopleFileContinuation: EvryCapabilityConversationRunner =
+  async (input) =>
+    (await recoverDurablePeopleFileContinuation(input)) ?? input.conversation;
 
 export type EvryPeopleFileReviewIdentity = Readonly<{
   kind: "person_photo" | "people_csv" | "commitment_document";
@@ -263,6 +269,7 @@ export async function completeEvryPeopleFileReview(
     activePlan: { mode: "set", plan: input.plan },
     now: input.now,
     store: input.store,
+    knownConversation: input.resumed.conversation,
   });
   return resumeEvryConversation({
     actor: input.actor,

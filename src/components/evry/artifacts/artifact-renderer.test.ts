@@ -16,7 +16,10 @@ import {
 } from "@/lib/evry/artifacts/public";
 import { buildEvryReadArtifact } from "@/lib/evry/artifacts/core";
 import { trustedEvryApplicationSourceLink } from "@/lib/evry/artifacts/types";
-import { buildEvryProgressArtifact } from "@/lib/evry/artifacts/review";
+import {
+  buildEvryProgressArtifact,
+  buildEvryReceiptArtifact,
+} from "@/lib/evry/artifacts/review";
 import {
   boundaryArtifactFor,
   settingsHandoffArtifactFor,
@@ -33,7 +36,7 @@ import {
 
 function render(
   model: EvryRenderableArtifact,
-  controls: "confirmation" | "progress" | false = false
+  controls: "confirmation" | "progress" | "reuse" | false = false
 ): string {
   return renderToStaticMarkup(
     createElement(EvryArtifactRenderer, {
@@ -49,7 +52,15 @@ function render(
             }
           : controls === "progress"
             ? { progressControls: { onSafeRetry() {} } }
-            : undefined,
+            : controls === "reuse"
+              ? {
+                  receiptControls: {
+                    disabled: false,
+                    label: "Reuse",
+                    onReuse() {},
+                  },
+                }
+              : undefined,
     })
   );
 }
@@ -91,7 +102,8 @@ test("context, clarification, read, Settings, and boundary artifacts render stru
   );
   const readMarkup = render(renderableEvryArtifact(read));
   assert.match(readMarkup, /Read result/);
-  assert.match(readMarkup, /Matched/);
+  assert.match(readMarkup, /1 result/);
+  assert.doesNotMatch(readMarkup, /Matched|Shown|Applied filters/);
   assert.match(readMarkup, /Completed/);
   assert.doesNotMatch(readMarkup, />Confirm</);
 
@@ -153,9 +165,9 @@ test("all confirmation families render the evidence their effect requires", () =
       "confirmation"
     );
     assert.match(markup, /Review before Evry acts/);
-    assert.match(markup, /Resolved targets/);
-    assert.match(markup, /Counts and exclusions/);
-    assert.match(markup, /Consequences/);
+    assert.match(markup, /Nothing has changed yet/);
+    assert.doesNotMatch(markup, />Summary</);
+    assert.doesNotMatch(markup, /What will happen/);
     assert.match(markup, />Cancel</);
     assert.match(markup, />Edit plan</);
     assert.match(markup, new RegExp(`>${fixture.actionLabel}</button>`));
@@ -168,7 +180,7 @@ test("all confirmation families render the evidence their effect requires", () =
       ),
       "confirmation"
     ),
-    /Wednesday, September 2, 2026 at 10:00 AM EDT–11:30 AM · America\/New_York \(UTC-04:00\)/
+    /Wednesday, September 2, 2026 at 10:00 AM–11:30 AM EDT/
   );
   assert.match(
     render(
@@ -179,7 +191,7 @@ test("all confirmation families render the evidence their effect requires", () =
       ),
       "confirmation"
     ),
-    /Before and after/
+    /Changes after confirmation/
   );
   assert.match(
     render(
@@ -190,7 +202,7 @@ test("all confirmation families render the evidence their effect requires", () =
       ),
       "confirmation"
     ),
-    /Irreversible/
+    /cannot be undone after you confirm/
   );
   assert.match(
     render(
@@ -199,7 +211,7 @@ test("all confirmation families render the evidence their effect requires", () =
       ),
       "confirmation"
     ),
-    /Difficult to reverse/
+    /may be difficult to undo after you confirm/
   );
   assert.match(
     render(
@@ -228,8 +240,22 @@ test("all confirmation families render the evidence their effect requires", () =
       ),
       "confirmation"
     ),
-    /Content preview[\s\S]*Launch update/
+    /Evry will use this template for 3 people[\s\S]*Launch update/
   );
+
+  const meetingMarkup = render(
+    renderableEvryArtifact(
+      evryPublicArtifactSchema.parse(EVRY_CONFIRMATION_FIXTURES.meeting)
+    ),
+    "confirmation"
+  );
+  assert.match(meetingMarkup, />Meeting</);
+  assert.match(meetingMarkup, />Guests</);
+  assert.match(meetingMarkup, />Invitation email</);
+  assert.match(meetingMarkup, /Evry will add 4 people to the guest list/);
+  assert.match(meetingMarkup, /use this template for 4 people/);
+  assert.doesNotMatch(meetingMarkup, /Add resolved guests/);
+  assert.doesNotMatch(meetingMarkup, /Before and after|Sent immediately/);
 });
 
 test("progress and a terminal receipt expose every step state without a second execute control", async () => {
@@ -296,6 +322,38 @@ test("progress and a terminal receipt expose every step state without a second e
   );
   assert.match(receiptMarkup, /has no execute control/);
   assert.doesNotMatch(receiptMarkup, /<button/);
+});
+
+test("a reusable completed receipt exposes one explicit Reuse action", () => {
+  const confirmation = EVRY_CONFIRMATION_FIXTURES.meeting;
+  const reusable = buildEvryReceiptArtifact({
+    kind: "result",
+    artifactVersion: 1,
+    plan: confirmation.plan,
+    title: "Receipt: meeting invitation",
+    status: "completed",
+    reuse: {
+      recipeIdentity: "meeting.invitation.reference",
+      label: "Reuse",
+    },
+    steps: confirmation.steps.map((step) => ({
+      stepId: step.stepId,
+      label: step.title,
+      status: "completed" as const,
+      resultCode: "effect_completed" as const,
+      affectedCount: 1,
+      excludedCount: 0,
+      sourceLinks: [],
+      retry: { status: "unavailable" as const },
+      error: null,
+    })),
+  });
+  const markup = render(
+    renderableEvryArtifact(evryPublicArtifactSchema.parse(reusable)),
+    "reuse"
+  );
+  assert.match(markup, />Reuse</);
+  assert.equal((markup.match(/<button/g) ?? []).length, 1);
 });
 
 test("unexpected errors render only generic copy and their support identity", () => {

@@ -14,6 +14,10 @@ import {
   type EvryConversationActiveRunCoordinator,
 } from "@/lib/evry/runs/conversation";
 import { EvryActiveRunIdentityError } from "@/lib/evry/runs/contract";
+import {
+  evryConversationTraceOutput,
+  observeEvryConversationRequest,
+} from "@/lib/evry/observability/conversation-request";
 
 import {
   evryConversationFailure,
@@ -37,6 +41,7 @@ export type EvryConversationCreatePostOptions = Readonly<{
   now?: () => Date;
   resolvePageContext?: typeof resolveAuthorizedEvryPageContext;
   activeRuns?: EvryConversationActiveRunCoordinator;
+  observe?: typeof observeEvryConversationRequest;
 }>;
 
 /** Build the auth-first conversation creation endpoint. */
@@ -45,6 +50,7 @@ export function createEvryConversationCreatePost({
   now = () => new Date(),
   resolvePageContext = resolveAuthorizedEvryPageContext,
   activeRuns = evryConversationActiveRunCoordinator,
+  observe = observeEvryConversationRequest,
 }: EvryConversationCreatePostOptions = {}): (
   request: Request
 ) => Promise<Response> {
@@ -91,14 +97,27 @@ export function createEvryConversationCreatePost({
           },
           startedAt,
           perform: async (reportStage) => {
-            const resumed = await create({
-              actor,
-              requestKey: parsed.data.requestKey,
-              message: parsed.data.message,
-              pageContext,
-              requestPageContext,
-              now: startedAt,
-              reportStage,
+            const resumed = await observe({
+              trace: {
+                operation: "create",
+                actorUserId: actor.userId,
+                conversationId: null,
+                requestKey: parsed.data.requestKey,
+                message: parsed.data.message,
+                pageContext: requestPageContext,
+              },
+              perform: () =>
+                create({
+                  actor,
+                  requestKey: parsed.data.requestKey,
+                  message: parsed.data.message,
+                  pageContext,
+                  requestPageContext,
+                  now: startedAt,
+                  reportStage,
+                }),
+              output: (result) =>
+                evryConversationTraceOutput(publicEvryConversation(result)),
             });
             return { conversation: publicEvryConversation(resumed) };
           },
@@ -114,13 +133,26 @@ export function createEvryConversationCreatePost({
         });
       }
 
-      const resumed = await create({
-        actor,
-        requestKey: parsed.data.requestKey,
-        message: parsed.data.message,
-        pageContext,
-        requestPageContext,
-        now: now(),
+      const resumed = await observe({
+        trace: {
+          operation: "create",
+          actorUserId: actor.userId,
+          conversationId: null,
+          requestKey: parsed.data.requestKey,
+          message: parsed.data.message,
+          pageContext: requestPageContext,
+        },
+        perform: () =>
+          create({
+            actor,
+            requestKey: parsed.data.requestKey,
+            message: parsed.data.message,
+            pageContext,
+            requestPageContext,
+            now: now(),
+          }),
+        output: (result) =>
+          evryConversationTraceOutput(publicEvryConversation(result)),
       });
       return evryConversationJson(
         {

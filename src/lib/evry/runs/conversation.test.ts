@@ -250,6 +250,80 @@ test("a same-key retry adopts the active owner instead of becoming a terminal fa
   assert.equal(performCount, 0);
 });
 
+test("a failed reuse retry stays unavailable and never re-enters its creator", async () => {
+  let performCount = 0;
+  const failedReuse = parseEvryActiveRunRecord({
+    id: "50000000-0000-4000-8000-000000000002",
+    churchId: actor.plantId,
+    actorUserId: actor.userId,
+    requestKey: REQUEST_ID,
+    requestFingerprint: fingerprintEvryActiveRunRequest({
+      operation: "reuse",
+      sourceConversationId: "source",
+      resultArtifactId: "receipt",
+      recipeIdentity: "meeting.invitation.reference",
+    }),
+    kind: "conversation",
+    operation: "reuse",
+    status: "failed",
+    stage: "compiling_response",
+    version: 2,
+    conversationId: null,
+    planId: null,
+    planFingerprint: null,
+    startedAt: START,
+    changedAt: new Date(START.valueOf() + 1_000),
+    expiresAt: new Date(START.valueOf() + EVRY_ACTIVE_RUN_TTL_MS),
+    completedAt: new Date(START.valueOf() + 1_000),
+  });
+  const input: EvryConversationRunInput = {
+    actor,
+    requestKey: REQUEST_ID,
+    identity: {
+      kind: "conversation",
+      operation: "reuse",
+      conversationId: null,
+      planId: null,
+      planFingerprint: null,
+    },
+    fingerprintInput: {
+      operation: "reuse",
+      sourceConversationId: "source",
+      resultArtifactId: "receipt",
+      recipeIdentity: "meeting.invitation.reference",
+    },
+    startedAt: START,
+    perform: async () => {
+      performCount += 1;
+      return { conversation };
+    },
+  };
+  const boundaries = {
+    runs: {
+      claim: async () => ({ ownership: "adopted" as const, run: failedReuse }),
+      advance: async () => null,
+      complete: async () => null,
+      fail: async () => null,
+    },
+    recover: async ({ expectedOperation }: { expectedOperation?: "reuse" }) => {
+      assert.equal(expectedOperation, "reuse");
+      return {
+        status: "unavailable" as const,
+        requestId: REQUEST_ID,
+      };
+    },
+    now: () => new Date(START.valueOf() + 2_000),
+  };
+  const prepared = await prepareEvryConversationActiveRun(input, boundaries);
+  const result = await runPreparedEvryConversationActiveRun(
+    prepared,
+    () => {},
+    boundaries
+  );
+  assert.equal(result, null);
+  assert.equal(performCount, 0);
+});
+
 test("crashes before output settle the one claim with its latest durable identity", async () => {
   for (const crashPoint of ["perform", "present", "complete"] as const) {
     const events: string[] = [];

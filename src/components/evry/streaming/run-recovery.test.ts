@@ -12,6 +12,8 @@ import {
 
 const REQUEST_ID = "10000000-0000-4000-8000-000000000001";
 const CONVERSATION_ID = "20000000-0000-4000-8000-000000000001";
+const SOURCE_ID = "20000000-0000-4000-8000-000000000002";
+const ARTIFACT_ID = "30000000-0000-4000-8000-000000000001";
 
 function memoryStorage(): Storage {
   const values = new Map<string, string>();
@@ -69,6 +71,52 @@ test("a marker cannot replace a different selected conversation", () => {
     markerMatchesEvryLocation(marker, {
       pathname: "/evry",
       search: "?new=1",
+    }),
+    false
+  );
+});
+
+test("reuse retains its exact source tuple across reload and owns only source or destination", () => {
+  const storage = memoryStorage();
+  writeEvryRunRecoveryMarker(
+    {
+      requestId: REQUEST_ID,
+      kind: "conversation",
+      operation: "reuse",
+      conversationId: null,
+      sourceConversationId: SOURCE_ID,
+      resultArtifactId: ARTIFACT_ID,
+      recipeIdentity: "meeting.invitation.reference",
+      sourceLocation: {
+        pathname: "/evry",
+        search: `?conversation=${SOURCE_ID}`,
+      },
+    },
+    storage
+  );
+  const reloaded = readEvryRunRecoveryMarker(storage);
+  assert.ok(reloaded && reloaded.version === 2);
+  assert.equal(
+    markerMatchesEvryLocation(reloaded, reloaded.sourceLocation),
+    true
+  );
+  bindEvryRunRecoveryConversation(REQUEST_ID, CONVERSATION_ID, storage);
+  const bound = readEvryRunRecoveryMarker(storage);
+  assert.ok(bound && bound.version === 2);
+  assert.equal(bound.sourceConversationId, SOURCE_ID);
+  assert.equal(bound.resultArtifactId, ARTIFACT_ID);
+  assert.equal(bound.recipeIdentity, "meeting.invitation.reference");
+  assert.equal(
+    markerMatchesEvryLocation(bound, {
+      pathname: "/evry",
+      search: `?conversation=${CONVERSATION_ID}`,
+    }),
+    true
+  );
+  assert.equal(
+    markerMatchesEvryLocation(bound, {
+      pathname: "/evry",
+      search: "?conversation=40000000-0000-4000-8000-000000000001",
     }),
     false
   );
@@ -440,4 +488,44 @@ test("recovery rejects a resumable execution for a conversation marker", async (
     }),
     /changed run kind/
   );
+});
+
+test("reuse recovery rejects an active create run under the retained request key", async () => {
+  const expectedOperations: Array<"reuse" | undefined> = [];
+  await assert.rejects(
+    reconnectEvryRun({
+      marker: {
+        version: 2,
+        requestId: REQUEST_ID,
+        kind: "conversation",
+        operation: "reuse",
+        conversationId: null,
+        sourceConversationId: SOURCE_ID,
+        resultArtifactId: ARTIFACT_ID,
+        recipeIdentity: "meeting.invitation.reference",
+        sourceLocation: {
+          pathname: "/evry",
+          search: `?conversation=${SOURCE_ID}`,
+        },
+      },
+      signal: new AbortController().signal,
+      fetchRecovery: async (_requestId, _mode, _signal, expectedOperation) => {
+        expectedOperations.push(expectedOperation);
+        return {
+          status: "active",
+          requestId: REQUEST_ID,
+          kind: "conversation",
+          operation: "create",
+          sequence: 0,
+          stage: "accepted",
+          conversationId: null,
+          expiresAt: "2026-08-29T01:15:00.000Z",
+        };
+      },
+      wait: async () => {},
+      onActive: () => {},
+    }),
+    /changed reuse operation/
+  );
+  assert.deepEqual(expectedOperations, ["reuse"]);
 });
