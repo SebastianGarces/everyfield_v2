@@ -60,6 +60,7 @@ const appendRoute = read(
   "messages",
   "route.ts"
 );
+const conversationService = read("lib", "evry", "conversations", "service.ts");
 
 test("one persistent shell owns the launcher, panel, and dedicated workspace state", () => {
   assert.match(
@@ -302,21 +303,49 @@ test("removing context removes it from the request body", () => {
   assert.match(interaction, /pageContext: submission\.pageContext/);
 });
 
-test("both conversation writes resolve the untrusted hint after auth and before persistence", () => {
-  for (const route of [createRoute, appendRoute]) {
-    const auth = route.indexOf("const actor = await requireEvryPlantViewer()");
-    const body = route.indexOf("body = await request.json()");
-    const resolution = route.indexOf(
-      "const pageContext = await resolvePageContext"
-    );
-    const write = Math.max(
-      route.indexOf("await create({"),
-      route.indexOf("await continueConversation({")
-    );
-    assert.ok(
-      auth >= 0 && body > auth && resolution > body && write > resolution
-    );
-  }
+test("conversation writes authenticate first and continuation replay precedes context resolution", () => {
+  const createAuth = createRoute.indexOf(
+    "const actor = await requireEvryPlantViewer()"
+  );
+  const createBody = createRoute.indexOf("body = await request.json()");
+  const createResolution = createRoute.indexOf(
+    "const pageContext = await resolvePageContext"
+  );
+  const createWrite = createRoute.indexOf("await create({");
+  assert.ok(
+    createAuth >= 0 &&
+      createBody > createAuth &&
+      createResolution > createBody &&
+      createWrite > createResolution
+  );
+
+  const appendAuth = appendRoute.indexOf(
+    "const actor = await requireEvryPlantViewer()"
+  );
+  const appendBody = appendRoute.indexOf("body = await request.json()");
+  const deferredResolution = appendRoute.indexOf(
+    "const resolveRequestPageContext = () =>"
+  );
+  const appendWrite = appendRoute.indexOf("await continueConversation({");
+  assert.ok(
+    appendAuth >= 0 &&
+      appendBody > appendAuth &&
+      deferredResolution > appendBody &&
+      appendWrite > deferredResolution
+  );
+
+  const replayCheck = conversationService.indexOf(
+    "hasDurableEvryCapabilityConversationResult"
+  );
+  const resolution = conversationService.indexOf(
+    "const pageContext = input.resolvePageContext"
+  );
+  const persistence = conversationService.indexOf(
+    "let appended = await appendTrustedEvryConversationMessage"
+  );
+  assert.ok(
+    replayCheck >= 0 && resolution > replayCheck && persistence > resolution
+  );
 
   assert.match(resolver, /eq\(persons\.churchId, actor\.plantId\)/);
   assert.match(resolver, /eq\(churchMeetings\.churchId, actor\.plantId\)/);
