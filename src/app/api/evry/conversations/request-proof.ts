@@ -883,7 +883,7 @@ async function main(): Promise<void> {
   });
   assert.equal(changedTargetPlan.status, "stale");
   assert.equal(changedTargetPlan.confirmable, false);
-  assert.equal(targetChecks, 1);
+  assert.equal(targetChecks, 2);
 
   const confirmation = parseArtifactDocument({
     kind: "confirmation",

@@ -251,7 +251,14 @@ test("message retries keep their semantic request identity until success", () =>
     surface,
     /draft\.trim\(\)\.length === 0 \|\| isSending \|\| isComposerBlocked/
   );
-  assert.match(shell, /const message = evrySubmissionMessage\(draft\)/);
+  assert.match(
+    shell,
+    /const message = evrySubmissionMessage\(messageOverrideRef\.current \?\? draft\)/
+  );
+  assert.match(
+    shell,
+    /messageOverrideRef\.current = message;[\s\S]*await sendMessage\(\)/
+  );
 });
 
 test("the transcript is an attributed review log and one dedicated status owns announcements", () => {
