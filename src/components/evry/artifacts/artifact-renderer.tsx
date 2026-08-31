@@ -376,13 +376,28 @@ function confirmationStepIcon(
   return ListChecks;
 }
 
+const CUSTOMER_COUNT_ACTION_BY_SUFFIX: Readonly<Record<string, string>> = {
+  created: "create",
+  added: "add",
+  sent: "send",
+  scheduled: "schedule",
+  changed: "update",
+  updated: "update",
+  deleted: "delete",
+  removed: "remove",
+  cancelled: "cancel",
+  imported: "import",
+  parsed: "review",
+};
+
 function customerCountLabel(label: string): string {
-  return label
-    .replace(
-      /\s+(?:created|added|sent|scheduled|changed|deleted|imported|parsed)$/i,
-      ""
-    )
-    .trim();
+  const match = label.match(/^(.+?)\s+([a-z]+)$/i);
+  if (!match) return label;
+  const [, subject, suffix] = match;
+  const action = suffix
+    ? CUSTOMER_COUNT_ACTION_BY_SUFFIX[suffix.toLowerCase()]
+    : null;
+  return subject && action ? `${subject} to ${action}` : label;
 }
 
 function DetailedConfirmation({

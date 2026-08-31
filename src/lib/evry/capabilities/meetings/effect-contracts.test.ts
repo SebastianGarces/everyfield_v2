@@ -1023,8 +1023,8 @@ test("reschedule confirmation summarizes notification changes without lifecycle 
       ),
     })
   );
-  assert.match(markup, /Notifications scheduled/);
-  assert.match(markup, /Notifications cancelled/);
+  assert.match(markup, /Notifications to schedule/);
+  assert.match(markup, /Notifications to cancel/);
   assert.doesNotMatch(markup, />Absent</);
   assert.doesNotMatch(markup, />Pending</);
   assert.doesNotMatch(markup, />Scheduled</);
