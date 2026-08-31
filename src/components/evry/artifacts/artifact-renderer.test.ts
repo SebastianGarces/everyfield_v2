@@ -102,7 +102,8 @@ test("context, clarification, read, Settings, and boundary artifacts render stru
   );
   const readMarkup = render(renderableEvryArtifact(read));
   assert.match(readMarkup, /Read result/);
-  assert.match(readMarkup, /Matched/);
+  assert.match(readMarkup, /1 result/);
+  assert.doesNotMatch(readMarkup, /Matched|Shown|Applied filters/);
   assert.match(readMarkup, /Completed/);
   assert.doesNotMatch(readMarkup, />Confirm</);
 
@@ -164,9 +165,8 @@ test("all confirmation families render the evidence their effect requires", () =
       "confirmation"
     );
     assert.match(markup, /Review before Evry acts/);
-    assert.match(markup, /Resolved targets/);
-    assert.match(markup, /Counts and exclusions/);
-    assert.match(markup, /Consequences/);
+    assert.match(markup, /Summary/);
+    assert.match(markup, /What will happen/);
     assert.match(markup, />Cancel</);
     assert.match(markup, />Edit plan</);
     assert.match(markup, new RegExp(`>${fixture.actionLabel}</button>`));
@@ -179,7 +179,7 @@ test("all confirmation families render the evidence their effect requires", () =
       ),
       "confirmation"
     ),
-    /Wednesday, September 2, 2026 at 10:00 AM EDT–11:30 AM · America\/New_York \(UTC-04:00\)/
+    /Wednesday, September 2, 2026 at 10:00 AM EDT–11:30 AM/
   );
   assert.match(
     render(
@@ -201,7 +201,7 @@ test("all confirmation families render the evidence their effect requires", () =
       ),
       "confirmation"
     ),
-    /Irreversible/
+    /This cannot be undone/
   );
   assert.match(
     render(
@@ -210,7 +210,7 @@ test("all confirmation families render the evidence their effect requires", () =
       ),
       "confirmation"
     ),
-    /Difficult to reverse/
+    /This is difficult to undo/
   );
   assert.match(
     render(
@@ -239,7 +239,7 @@ test("all confirmation families render the evidence their effect requires", () =
       ),
       "confirmation"
     ),
-    /Content preview[\s\S]*Launch update/
+    /Preview content[\s\S]*Launch update/
   );
 });
 

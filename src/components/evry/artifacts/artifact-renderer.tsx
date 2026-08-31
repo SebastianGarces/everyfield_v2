@@ -41,6 +41,12 @@ import { formatDateTimeWithZone, formatTime } from "@/lib/datetime";
 import { cn } from "@/lib/utils";
 import { AuthenticatedLink } from "@/components/authenticated-navigation";
 
+import {
+  customerContentPreviews,
+  customerReviewTargets,
+  readResultLabel,
+} from "./artifact-presentation";
+
 export const EVRY_ARTIFACT_RENDER_VARIANTS = [
   "context",
   "clarification",
@@ -244,59 +250,45 @@ function renderRead(artifact: ArtifactByVariant["read"]) {
       title={artifact.title}
       icon={<ListChecks className="size-4" />}
     >
-      <dl className="grid grid-cols-3 gap-2 text-center">
-        {[
-          ["Matched", artifact.counts.matched],
-          ["Shown", artifact.counts.returned],
-          ["Excluded", artifact.counts.excluded],
-        ].map(([label, value]) => (
-          <div key={label} className="bg-muted/40 rounded-lg border px-2 py-3">
-            <dt className="text-muted-foreground text-xs">{label}</dt>
-            <dd className="mt-1 text-lg font-semibold tabular-nums">{value}</dd>
-          </div>
-        ))}
-      </dl>
+      <p className="text-2xl font-semibold tabular-nums">
+        {readResultLabel(artifact.counts.returned)}
+      </p>
 
-      {artifact.filters.length ? (
-        <div>
-          <h4 className="text-sm font-medium">Applied filters</h4>
-          <dl className="mt-2 grid gap-2 sm:grid-cols-2">
-            {artifact.filters.map((filter) => (
-              <div key={filter.label} className="text-sm">
-                <dt className="text-muted-foreground">{filter.label}</dt>
-                <dd>{filter.value}</dd>
-              </div>
-            ))}
-          </dl>
-        </div>
-      ) : null}
+      {artifact.items.length ? (
+        <ul className="space-y-2">
+          {artifact.items.map((item) => (
+            <li key={item.id} className="rounded-lg border p-3">
+              <AuthenticatedLink
+                href={item.sourceLink.href}
+                className={linkClassName}
+              >
+                {item.label}
+              </AuthenticatedLink>
+              <dl className="mt-2 grid gap-1 text-sm sm:grid-cols-2">
+                {item.facts.map((fact) => (
+                  <div key={fact.label}>
+                    <dt className="text-muted-foreground inline">
+                      {fact.label}:{" "}
+                    </dt>
+                    <dd className="inline">{fact.value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-muted-foreground text-sm">
+          Nothing needs your attention right now.
+        </p>
+      )}
 
-      <ul className="space-y-2">
-        {artifact.items.map((item) => (
-          <li key={item.id} className="rounded-lg border p-3">
-            <AuthenticatedLink
-              href={item.sourceLink.href}
-              className={linkClassName}
-            >
-              {item.label}
-            </AuthenticatedLink>
-            <dl className="mt-2 grid gap-1 text-sm sm:grid-cols-2">
-              {item.facts.map((fact) => (
-                <div key={fact.label}>
-                  <dt className="text-muted-foreground inline">
-                    {fact.label}:{" "}
-                  </dt>
-                  <dd className="inline">{fact.value}</dd>
-                </div>
-              ))}
-            </dl>
-          </li>
-        ))}
-      </ul>
-
-      <div className="text-sm">
-        <h4 className="font-medium">Exclusions</h4>
-        {artifact.exclusions.length ? (
+      {artifact.exclusions.length ? (
+        <details className="text-sm">
+          <summary className="text-muted-foreground cursor-pointer">
+            {artifact.counts.excluded.toLocaleString()} additional result
+            {artifact.counts.excluded === 1 ? "" : "s"} not shown
+          </summary>
           <ul className="text-muted-foreground mt-1 list-disc pl-5">
             {artifact.exclusions.map((exclusion) => (
               <li key={exclusion.reason}>
@@ -304,10 +296,8 @@ function renderRead(artifact: ArtifactByVariant["read"]) {
               </li>
             ))}
           </ul>
-        ) : (
-          <p className="text-muted-foreground mt-1">None</p>
-        )}
-      </div>
+        </details>
+      ) : null}
     </ArtifactFrame>
   );
 }
@@ -325,7 +315,7 @@ function dateTimeLabel(
   const end = endsAt
     ? `–${formatTime(new Date(endsAt.instantUtc), endsAt.timeZone)}`
     : "";
-  return `${start}${end} · ${startsAt.timeZone} (UTC${startsAt.utcOffset})`;
+  return `${start}${end}`;
 }
 
 function DetailedConfirmation({
@@ -336,153 +326,168 @@ function DetailedConfirmation({
   return (
     <div className="space-y-5">
       <ol className="space-y-5">
-        {artifact.steps.map((step, index) => (
-          <li
-            key={step.stepId}
-            className="space-y-3 border-b pb-5 last:border-0 last:pb-0"
-          >
-            <div className="flex items-start gap-3">
-              <span className="bg-primary text-primary-foreground grid size-6 shrink-0 place-items-center rounded-full text-xs font-semibold">
-                {index + 1}
-              </span>
-              <div className="min-w-0">
-                <h4 className="font-medium">{step.title}</h4>
-                <p className="text-muted-foreground text-xs">
-                  {step.effectKind.replaceAll("_", " ")} ·{" "}
-                  {step.reversibility === "difficult_to_reverse"
-                    ? "Difficult to reverse"
-                    : step.reversibility === "irreversible"
-                      ? "Irreversible"
-                      : "Reversible"}
-                </p>
+        {artifact.steps.map((step, index) => {
+          const targets = customerReviewTargets(step.resolvedTargets);
+          const previews = customerContentPreviews(step.contentPreviews);
+          const needsWarning = step.reversibility !== "reversible";
+          const showChanges =
+            needsWarning ||
+            step.effectKind === "bulk_change" ||
+            step.effectKind === "destructive";
+          return (
+            <li
+              key={step.stepId}
+              className="space-y-3 border-b pb-5 last:border-0 last:pb-0"
+            >
+              <div className="flex items-start gap-3">
+                <span className="bg-primary text-primary-foreground grid size-6 shrink-0 place-items-center rounded-full text-xs font-semibold">
+                  {index + 1}
+                </span>
+                <div className="min-w-0">
+                  <h4 className="font-medium">{step.title}</h4>
+                  {needsWarning ? (
+                    <p className="text-destructive text-xs font-medium">
+                      {step.reversibility === "irreversible"
+                        ? "This cannot be undone"
+                        : "This is difficult to undo"}
+                    </p>
+                  ) : null}
+                </div>
               </div>
-            </div>
 
-            <section>
-              <h5 className="text-sm font-medium">Resolved targets</h5>
-              <ul className="mt-1 space-y-1 text-sm">
-                {step.resolvedTargets.map((target, targetIndex) => (
-                  <li key={`${target.label}-${targetIndex}`}>
-                    <span className="text-muted-foreground">
-                      {target.label}:{" "}
-                    </span>
-                    {target.sourceLink ? (
-                      <AuthenticatedLink
-                        href={target.sourceLink.href}
-                        className={linkClassName}
-                      >
-                        {target.value}
-                      </AuthenticatedLink>
-                    ) : (
-                      target.value
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </section>
-
-            {step.dateTime ? (
-              <section className="bg-muted/40 rounded-lg border p-3">
-                <h5 className="flex items-center gap-2 text-sm font-medium">
-                  <Clock3 aria-hidden="true" className="size-4" />
-                  Absolute date and time
-                </h5>
-                <p className="mt-1 text-sm">{dateTimeLabel(step.dateTime)}</p>
-              </section>
-            ) : null}
-
-            <section>
-              <h5 className="text-sm font-medium">Counts and exclusions</h5>
-              <dl className="mt-1 grid gap-1 text-sm sm:grid-cols-2">
-                {step.counts.map((count) => (
-                  <div
-                    key={count.label}
-                    className="flex justify-between gap-3 rounded-md border px-2.5 py-2"
-                  >
-                    <dt className="text-muted-foreground">{count.label}</dt>
-                    <dd className="font-medium tabular-nums">{count.count}</dd>
-                  </div>
-                ))}
-              </dl>
-              {step.exclusions.length ? (
-                <ul className="text-muted-foreground mt-2 list-disc pl-5 text-sm">
-                  {step.exclusions.map((exclusion) => (
-                    <li key={exclusion.reason}>
-                      {exclusion.count} excluded · {exclusion.reason}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-muted-foreground mt-2 text-sm">
-                  Exclusions: none
-                </p>
-              )}
-            </section>
-
-            {step.beforeAfter.length ? (
-              <section>
-                <h5 className="text-sm font-medium">Before and after</h5>
-                <ul className="mt-2 space-y-2">
-                  {step.beforeAfter.map((change) => (
-                    <li
-                      key={change.label}
-                      className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 rounded-lg border p-3 text-sm"
-                    >
-                      <div>
-                        <p className="text-muted-foreground text-xs">Before</p>
-                        <p>{change.before}</p>
-                      </div>
-                      <ArrowRight
-                        aria-hidden="true"
-                        className="text-muted-foreground size-4"
-                      />
-                      <div>
-                        <p className="text-muted-foreground text-xs">After</p>
-                        <p>{change.after}</p>
-                      </div>
-                      <p className="text-muted-foreground col-span-3 text-xs">
-                        {change.count} · {change.label}
-                      </p>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            ) : null}
-
-            {step.contentPreviews.length ? (
-              <section>
-                <h5 className="text-sm font-medium">Content preview</h5>
-                <dl className="mt-2 space-y-2">
-                  {step.contentPreviews.map((preview) => (
-                    <div
-                      key={preview.label}
-                      className="bg-muted/40 rounded-lg border p-3 text-sm"
-                    >
-                      <dt className="text-muted-foreground text-xs font-medium">
-                        {preview.label}
-                      </dt>
-                      <dd className="mt-1 [overflow-wrap:anywhere]">
-                        {preview.format === "rich_text" ? (
-                          <RichText body={preview.content} />
+              {targets.length ? (
+                <section>
+                  <h5 className="text-sm font-medium">Details</h5>
+                  <ul className="mt-1 space-y-1 text-sm">
+                    {targets.map((target, targetIndex) => (
+                      <li key={`${target.label}-${targetIndex}`}>
+                        <span className="text-muted-foreground">
+                          {target.label}:{" "}
+                        </span>
+                        {target.sourceLink ? (
+                          <AuthenticatedLink
+                            href={target.sourceLink.href}
+                            className={linkClassName}
+                          >
+                            {target.value}
+                          </AuthenticatedLink>
                         ) : (
-                          <span className="whitespace-pre-wrap">
-                            {preview.content}
-                          </span>
+                          target.value
                         )}
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ) : null}
+
+              {step.dateTime ? (
+                <section className="bg-muted/40 rounded-lg border p-3">
+                  <h5 className="flex items-center gap-2 text-sm font-medium">
+                    <Clock3 aria-hidden="true" className="size-4" />
+                    When
+                  </h5>
+                  <p className="mt-1 text-sm">{dateTimeLabel(step.dateTime)}</p>
+                </section>
+              ) : null}
+
+              <section>
+                <h5 className="text-sm font-medium">Summary</h5>
+                <dl className="mt-1 grid gap-1 text-sm sm:grid-cols-2">
+                  {step.counts.map((count) => (
+                    <div
+                      key={count.label}
+                      className="flex justify-between gap-3 rounded-md border px-2.5 py-2"
+                    >
+                      <dt className="text-muted-foreground">{count.label}</dt>
+                      <dd className="font-medium tabular-nums">
+                        {count.count}
                       </dd>
                     </div>
                   ))}
                 </dl>
+                {step.exclusions.length ? (
+                  <details className="text-muted-foreground mt-2 text-sm">
+                    <summary className="cursor-pointer">Not included</summary>
+                    <ul className="mt-1 list-disc pl-5">
+                      {step.exclusions.map((exclusion) => (
+                        <li key={exclusion.reason}>
+                          {exclusion.count} · {exclusion.reason}
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                ) : null}
               </section>
-            ) : null}
-          </li>
-        ))}
+
+              {showChanges && step.beforeAfter.length ? (
+                <section>
+                  <h5 className="text-sm font-medium">Before and after</h5>
+                  <ul className="mt-2 space-y-2">
+                    {step.beforeAfter.map((change) => (
+                      <li
+                        key={change.label}
+                        className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 rounded-lg border p-3 text-sm"
+                      >
+                        <div>
+                          <p className="text-muted-foreground text-xs">
+                            Before
+                          </p>
+                          <p>{change.before}</p>
+                        </div>
+                        <ArrowRight
+                          aria-hidden="true"
+                          className="text-muted-foreground size-4"
+                        />
+                        <div>
+                          <p className="text-muted-foreground text-xs">After</p>
+                          <p>{change.after}</p>
+                        </div>
+                        <p className="text-muted-foreground col-span-3 text-xs">
+                          {change.count} · {change.label}
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ) : null}
+
+              {previews.length ? (
+                <details>
+                  <summary className="cursor-pointer text-sm font-medium">
+                    Preview content ({previews.length})
+                  </summary>
+                  <dl className="mt-2 space-y-2">
+                    {previews.map((preview) => (
+                      <div
+                        key={preview.label}
+                        className="bg-muted/40 rounded-lg border p-3 text-sm"
+                      >
+                        <dt className="text-muted-foreground text-xs font-medium">
+                          {preview.label}
+                        </dt>
+                        <dd className="mt-1 [overflow-wrap:anywhere]">
+                          {preview.format === "rich_text" ? (
+                            <RichText body={preview.content} />
+                          ) : (
+                            <span className="whitespace-pre-wrap">
+                              {preview.content}
+                            </span>
+                          )}
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                </details>
+              ) : null}
+            </li>
+          );
+        })}
       </ol>
 
-      <section className="border-destructive/40 bg-destructive/5 rounded-lg border p-3">
+      <section className="bg-muted/40 rounded-lg border p-3">
         <h4 className="flex items-center gap-2 text-sm font-medium">
           <ShieldAlert aria-hidden="true" className="size-4" />
-          Consequences
+          What will happen
         </h4>
         <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
           {artifact.consequences.map((consequence) => (
