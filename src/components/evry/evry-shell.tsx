@@ -105,7 +105,7 @@ type EvryShellValue = Readonly<{
   isWorking: boolean;
   isWatchingDetached: boolean;
   loadConversation: (conversationId: string) => Promise<void>;
-  acknowledgeConversationMounted: (conversationId: string) => void;
+  acknowledgeConversationMounted: (conversationId: string | null) => void;
   startRecipeReuse: (input: {
     sourceConversationId: string;
     resultArtifactId: string;
@@ -874,8 +874,9 @@ export function EvryShell({
   );
 
   const acknowledgeConversationMounted = useCallback(
-    (conversationId: string) => {
+    (conversationId: string | null) => {
       mountedConversationIdRef.current = conversationId;
+      if (conversationId === null) return;
       const marker = pendingRecipeReuseRef.current;
       if (!marker || marker.conversationId !== conversationId) return;
       if (marker.sourceLocation.pathname === "/evry") {
@@ -1025,6 +1026,7 @@ export function EvryShell({
     )
       return;
     cancelActiveConversationLoads();
+    mountedConversationIdRef.current = null;
     pendingSubmissionRef.current = null;
     setConversation(null);
     setActiveContext(null);
@@ -1042,6 +1044,8 @@ export function EvryShell({
 
   const sendMessage = useCallback(async () => {
     const message = evrySubmissionMessage(draft);
+    const mountedConversationId = mountedConversationIdRef.current;
+    const loadedConversationId = conversation?.id ?? null;
     if (
       message === null ||
       isSending ||
@@ -1055,11 +1059,18 @@ export function EvryShell({
       return;
     }
 
+    if (mountedConversationId !== loadedConversationId) {
+      setError(
+        "This conversation changed before the message was sent. Open it again and retry."
+      );
+      return;
+    }
+
     const pageContext = activeContext?.wire ?? null;
     const pendingSubmission = pendingEvrySubmissionFor(
       pendingSubmissionRef.current,
       {
-        conversationId: conversation?.id ?? null,
+        conversationId: mountedConversationId,
         message,
         pageContext,
       },
@@ -1072,7 +1083,7 @@ export function EvryShell({
     writeEvryRunRecoveryMarker({
       requestId: pendingSubmission.requestKey,
       kind: "conversation",
-      conversationId: conversation?.id ?? null,
+      conversationId: mountedConversationId,
     });
     setSending(true);
     setError(null);
@@ -1103,7 +1114,7 @@ export function EvryShell({
       );
       const streamed = await readEvryConversationStream(response, {
         requestId: pendingSubmission.requestKey,
-        expectedConversationId: conversation?.id ?? null,
+        expectedConversationId: mountedConversationId,
         onEvent(event) {
           lastSequence = event.sequence;
           if (event.type === "work") {

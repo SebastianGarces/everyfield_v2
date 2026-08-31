@@ -226,6 +226,7 @@ async function appendResult(input: {
     replayReference: null,
     activePlan: result.activePlan ?? { mode: "preserve" },
     createdAt: input.selection.now,
+    knownConversation: input.selection.conversation,
   });
 }
 

@@ -567,14 +567,7 @@ async function main(): Promise<void> {
     created.body.conversation.messages[1].artifacts[0].artifact.kind,
     "boundary"
   );
-  assert.deepEqual(events, [
-    "auth",
-    "body",
-    "context",
-    "create",
-    "append",
-    "find",
-  ]);
+  assert.deepEqual(events, ["auth", "body", "context", "create", "append"]);
   assert.ok(capturedActor);
   assert.ok(stored);
 
@@ -610,7 +603,7 @@ async function main(): Promise<void> {
     [0, 1, 2, 3]
   );
   assert.equal(createStream[2]?.requestId, firstRequestKey);
-  assert.deepEqual(events, ["auth", "body", "context", "create", "find"]);
+  assert.deepEqual(events, ["auth", "body", "context", "create"]);
 
   pageContextRecordState = "missing";
   sessions = [user()];
@@ -631,7 +624,7 @@ async function main(): Promise<void> {
     replayedCreateAfterDelete.body.conversation.messages[0].pageContext.label,
     "Scoped task"
   );
-  assert.deepEqual(events, ["auth", "body", "context", "create", "find"]);
+  assert.deepEqual(events, ["auth", "body", "context", "create"]);
   pageContextRecordState = "available";
 
   contextQueries.length = 0;

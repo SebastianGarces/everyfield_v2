@@ -13,6 +13,10 @@ import {
   type EvryConversationActiveRunCoordinator,
 } from "@/lib/evry/runs/conversation";
 import { EvryActiveRunIdentityError } from "@/lib/evry/runs/contract";
+import {
+  evryConversationTraceOutput,
+  observeEvryConversationRequest,
+} from "@/lib/evry/observability/conversation-request";
 
 import {
   evryConversationFailure,
@@ -45,6 +49,7 @@ export type EvryConversationMessagePostOptions = Readonly<{
   now?: () => Date;
   resolvePageContext?: typeof resolveAuthorizedEvryPageContext;
   activeRuns?: EvryConversationActiveRunCoordinator;
+  observe?: typeof observeEvryConversationRequest;
 }>;
 
 /** Persist and compile one authenticated continuation without running a model. */
@@ -53,6 +58,7 @@ export function createEvryConversationMessagePost({
   now = () => new Date(),
   resolvePageContext = resolveAuthorizedEvryPageContext,
   activeRuns = evryConversationActiveRunCoordinator,
+  observe = observeEvryConversationRequest,
 }: EvryConversationMessagePostOptions = {}): (
   request: Request,
   context: RouteContext
@@ -103,15 +109,30 @@ export function createEvryConversationMessagePost({
           },
           startedAt,
           perform: async (reportStage) => {
-            const result = await continueConversation({
-              actor,
-              conversationId: params.data.conversationId,
-              requestKey: parsed.data.requestKey,
-              message: parsed.data.message,
-              resolvePageContext: resolveRequestPageContext,
-              requestPageContext,
-              now: startedAt,
-              reportStage,
+            const result = await observe({
+              trace: {
+                operation: "continue",
+                actorUserId: actor.userId,
+                conversationId: params.data.conversationId,
+                requestKey: parsed.data.requestKey,
+                message: parsed.data.message,
+                pageContext: requestPageContext,
+              },
+              perform: () =>
+                continueConversation({
+                  actor,
+                  conversationId: params.data.conversationId,
+                  requestKey: parsed.data.requestKey,
+                  message: parsed.data.message,
+                  resolvePageContext: resolveRequestPageContext,
+                  requestPageContext,
+                  now: startedAt,
+                  reportStage,
+                }),
+              output: (value) =>
+                evryConversationTraceOutput(
+                  value ? publicEvryConversation(value.resumed) : null
+                ),
             });
             return result
               ? { conversation: publicEvryConversation(result.resumed) }
@@ -129,14 +150,29 @@ export function createEvryConversationMessagePost({
         });
       }
 
-      const result = await continueConversation({
-        actor,
-        conversationId: params.data.conversationId,
-        requestKey: parsed.data.requestKey,
-        message: parsed.data.message,
-        resolvePageContext: resolveRequestPageContext,
-        requestPageContext,
-        now: now(),
+      const result = await observe({
+        trace: {
+          operation: "continue",
+          actorUserId: actor.userId,
+          conversationId: params.data.conversationId,
+          requestKey: parsed.data.requestKey,
+          message: parsed.data.message,
+          pageContext: requestPageContext,
+        },
+        perform: () =>
+          continueConversation({
+            actor,
+            conversationId: params.data.conversationId,
+            requestKey: parsed.data.requestKey,
+            message: parsed.data.message,
+            resolvePageContext: resolveRequestPageContext,
+            requestPageContext,
+            now: now(),
+          }),
+        output: (value) =>
+          evryConversationTraceOutput(
+            value ? publicEvryConversation(value.resumed) : null
+          ),
       });
       if (!result) {
         return evryConversationJson({ status: "unavailable" }, 404);

@@ -100,6 +100,7 @@ async function appendUnmatchedEvryConversationResult(input: {
     activePlan: { mode: "preserve" },
     now: input.now,
     store: input.store,
+    knownConversation: input.conversation,
   });
 }
 
@@ -108,6 +109,35 @@ export type EvryResumedConversation = Readonly<{
   activePlan: EvryRevalidatedActivePlan | null;
   context: EvryCompiledConversationContext;
 }>;
+
+async function resumeEvryConversationSnapshot(input: {
+  actor: EvryPlantActor;
+  conversation: EvryStoredConversation;
+  now: Date;
+  focusRelevanceKeys?: readonly EvryConversationRelevanceKey[];
+  revalidatePlan?: EvryConversationPlanResumeRevalidator;
+}): Promise<EvryResumedConversation> {
+  let activePlan: EvryRevalidatedActivePlan | null = null;
+  if (input.conversation.activePlan) {
+    activePlan = await (
+      input.revalidatePlan ?? revalidateProductionEvryConversationPlan
+    )({
+      actor: input.actor,
+      identity: input.conversation.activePlan,
+      checkedAt: input.now,
+    });
+  }
+
+  return Object.freeze({
+    conversation: input.conversation,
+    activePlan,
+    context: compileEvryConversationContext({
+      conversation: input.conversation,
+      activePlan,
+      focusRelevanceKeys: input.focusRelevanceKeys,
+    }),
+  });
+}
 
 export async function resumeEvryConversation(input: {
   actor: EvryPlantActor;
@@ -125,25 +155,12 @@ export async function resumeEvryConversation(input: {
   });
   if (!conversation) return null;
 
-  let activePlan: EvryRevalidatedActivePlan | null = null;
-  if (conversation.activePlan) {
-    activePlan = await (
-      input.revalidatePlan ?? revalidateProductionEvryConversationPlan
-    )({
-      actor: input.actor,
-      identity: conversation.activePlan,
-      checkedAt: input.now,
-    });
-  }
-
-  return Object.freeze({
+  return resumeEvryConversationSnapshot({
+    actor: input.actor,
     conversation,
-    activePlan,
-    context: compileEvryConversationContext({
-      conversation,
-      activePlan,
-      focusRelevanceKeys: input.focusRelevanceKeys,
-    }),
+    now: input.now,
+    focusRelevanceKeys: input.focusRelevanceKeys,
+    revalidatePlan: input.revalidatePlan,
   });
 }
 
@@ -194,13 +211,11 @@ export async function createEvryConversation(input: {
   } else {
     conversation = continued;
   }
-  const resumed = await resumeEvryConversation({
+  const resumed = await resumeEvryConversationSnapshot({
     actor: input.actor,
-    conversationId: conversation.id,
+    conversation,
     now: input.now,
-    store,
   });
-  if (!resumed) throw new Error("Created Evry conversation disappeared");
   return resumed;
 }
 
@@ -226,6 +241,7 @@ export async function appendTrustedEvryConversationMessage(input: {
     | Readonly<{ mode: "set"; plan: EvryConversationPlanIdentity }>;
   now: Date;
   store?: EvryConversationStore;
+  knownConversation?: EvryStoredConversation;
 }): Promise<EvryStoredConversation> {
   return (input.store ?? evryConversationStore).append({
     messageId: input.messageId,
@@ -246,6 +262,7 @@ export async function appendTrustedEvryConversationMessage(input: {
     replayReference: input.replayReference,
     activePlan: input.activePlan,
     createdAt: input.now,
+    knownConversation: input.knownConversation,
   });
 }
 
@@ -489,6 +506,7 @@ export async function continueEvryConversation(
     activePlan: { mode: "preserve" },
     now: input.now,
     store,
+    knownConversation: current,
   });
 
   if (reference.status === "clarification") {
@@ -511,6 +529,7 @@ export async function continueEvryConversation(
       activePlan: { mode: "preserve" },
       now: input.now,
       store,
+      knownConversation: appended,
     });
   } else {
     const continued = await (
@@ -540,15 +559,13 @@ export async function continueEvryConversation(
   await input.reportStage?.(
     current.activePlan ? "revalidating_plan" : "compiling_response"
   );
-  const resumed = await resumeEvryConversation({
+  const resumed = await resumeEvryConversationSnapshot({
     actor: input.actor,
-    conversationId: appended.id,
+    conversation: appended,
     now: input.now,
     focusRelevanceKeys: relevanceKeys,
-    store,
     revalidatePlan: input.revalidatePlan,
   });
-  if (!resumed) return null;
   return reference.status === "clarification"
     ? { status: "clarification", resumed, reference }
     : { status: "continued", resumed, reference };
