@@ -60,7 +60,11 @@ test("conversation changes are blocked while send, load, or direct selection own
   assert.match(workspace, /canUseEvryHistoryComposer\(/);
   assert.match(
     workspace,
-    /function selectConversation[\s\S]*setRouteConversationId\(nextConversationId\)[\s\S]*window\.history\.pushState[\s\S]*loadConversation\(nextConversationId\)/
+    /function selectConversation[\s\S]*setRouteConversationId\(nextConversationId\)[\s\S]*window\.history\.pushState/
+  );
+  assert.match(
+    workspace,
+    /routeConversationId === conversation\?\.id[\s\S]*void loadConversation\(routeConversationId\)/
   );
   assert.match(list, /aria-disabled=\{blocked \|\| undefined\}/);
   assert.match(list, /if \(blocked\) \{[\s\S]*event\.preventDefault\(\)/);

@@ -157,7 +157,11 @@ test("workspace URL sync cannot compete with App Router navigation and loads use
   );
   assert.match(
     historyWorkspace,
-    /setRouteConversationId\(nextConversationId\)[\s\S]*loadConversation\(nextConversationId\)/
+    /setRouteConversationId\(nextConversationId\)[\s\S]*window\.history\.pushState/
+  );
+  assert.match(
+    historyWorkspace,
+    /routeConversationId === conversation\?\.id[\s\S]*void loadConversation\(routeConversationId\)/
   );
   assert.doesNotMatch(shell, /router\.replace|window\.history\.replaceState/);
   assert.match(
@@ -165,6 +169,10 @@ test("workspace URL sync cannot compete with App Router navigation and loads use
     /const conversationLoadStateRef = useRef\([\s\S]*initialEvryConversationLoadState\(\)/
   );
   assert.match(shell, /isLatestEvryConversationLoad\([\s\S]*load\.attempt/);
+  assert.match(
+    shell,
+    /conversationCacheRef = useRef\([\s\S]*new Map<string, PublicEvryConversation>[\s\S]*cachedConversation[\s\S]*setConversation\(cachedConversation\)/
+  );
   assert.match(shell, /finishEvryConversationLoad\([\s\S]*load\.attempt/);
   assert.match(
     shell,
@@ -181,7 +189,7 @@ test("workspace URL sync cannot compete with App Router navigation and loads use
   assert.match(shell, /if \(isSending \|\| isWorking\) return/);
   assert.match(
     shell,
-    /\[conversation\?\.id, isSending, isWorking, presentWork\]\s*\)/
+    /\[\s*cancelActiveConversationLoads,[\s\S]*conversation\?\.id,[\s\S]*isSending,[\s\S]*isWorking,[\s\S]*presentWork,[\s\S]*\]\s*\)/
   );
   assert.match(
     shell,

@@ -158,8 +158,6 @@ export function ConversationHistoryWorkspace({
         ? awaitingEvryCreatedConversation(conversation?.id ?? null)
         : null;
       if (nextNewConversation) resetConversation();
-      else if (nextConversationId !== null)
-        void loadConversation(nextConversationId);
     }
 
     window.addEventListener("popstate", restoreLocation);
@@ -256,7 +254,6 @@ export function ConversationHistoryWorkspace({
         search: searchQuery,
       })
     );
-    void loadConversation(nextConversationId);
   }
 
   function startNewConversation(): void {
