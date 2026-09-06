@@ -256,6 +256,10 @@ function renderClarification(
 }
 
 function renderRead(artifact: ArtifactByVariant["read"]) {
+  const hasMore = artifact.filters.some(
+    ({ label, value }) =>
+      label === "Next page cursor" && value !== "End of results"
+  );
   return (
     <ArtifactFrame
       variant="read"
@@ -264,7 +268,9 @@ function renderRead(artifact: ArtifactByVariant["read"]) {
       icon={<ListChecks className="size-4" />}
     >
       <p className="text-2xl font-semibold tabular-nums">
-        {readResultLabel(artifact.counts.returned)}
+        {hasMore
+          ? `${readResultLabel(artifact.counts.returned)} shown`
+          : readResultLabel(artifact.counts.returned)}
       </p>
 
       {artifact.items.length ? (
@@ -292,7 +298,7 @@ function renderRead(artifact: ArtifactByVariant["read"]) {
         </ul>
       ) : (
         <p className="text-muted-foreground text-sm">
-          Nothing needs your attention right now.
+          No matches for this request.
         </p>
       )}
 
@@ -310,6 +316,19 @@ function renderRead(artifact: ArtifactByVariant["read"]) {
             ))}
           </ul>
         </details>
+      ) : null}
+      {artifact.sourceLinks.length ? (
+        <div className="flex flex-wrap gap-x-4 gap-y-2">
+          {artifact.sourceLinks.map((source) => (
+            <AuthenticatedLink
+              key={source.href}
+              href={source.href}
+              className={linkClassName}
+            >
+              {source.label}
+            </AuthenticatedLink>
+          ))}
+        </div>
       ) : null}
     </ArtifactFrame>
   );

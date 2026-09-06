@@ -170,6 +170,35 @@ test("Task list and count selectors preserve every legal UI filter", () => {
   );
 });
 
+test("follow-up ownership filters accept user language and preserve the filter across pages", () => {
+  for (const request of [
+    "Only show people who do not have a follow-up owner.",
+    "Show me contacts without a follow-up owner",
+    "Who needs a follow-up owner?",
+    "List unassigned follow-ups",
+  ]) {
+    assert.deepEqual(selectTaskEvryRead(request), {
+      kind: "follow_up_ownership",
+      section: "unowned_contacts",
+      cursor: null,
+    });
+  }
+  assert.deepEqual(
+    selectTaskEvryRead(
+      `Load more task follow-up unowned contacts after ${TASK_FIXTURE_ID}`
+    ),
+    {
+      kind: "follow_up_ownership",
+      section: "unowned_contacts",
+      cursor: TASK_FIXTURE_ID,
+    }
+  );
+  assert.equal(
+    selectTaskEvryRead("Delete people without a follow-up owner"),
+    null
+  );
+});
+
 test("Task assignments route only through follow-up ownership", () => {
   assert.deepEqual(selectTaskEvryRead("Show task assignments"), {
     kind: "follow_up_ownership",

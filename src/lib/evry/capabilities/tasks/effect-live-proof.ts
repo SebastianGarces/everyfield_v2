@@ -2326,10 +2326,26 @@ async function runUncoveredFollowUpContactProof(input: {
   const item = result.items.find(({ id }) => id === contact.id);
   assert.ok(item, "follow-up contact with no Task must remain visible");
   assert.equal(
-    item.facts.find(({ label }) => label === "Coverage")?.value,
+    item.facts.find(({ label }) => label === "Follow-up owner")?.value,
     "Needs owner"
   );
   assert.ok(Number(filterValue(result, "Contacts needing an owner")) >= 1);
+  const unowned = await input.registration.execute(
+    {
+      literalUserText: "Only show people who do not have a follow-up owner.",
+      pageContext: null,
+    },
+    { section: "unowned_contacts", cursor: null }
+  );
+  assert.ok(unowned?.kind === "read");
+  assert.ok(unowned.items.some(({ id }) => id === contact.id));
+  assert.ok(
+    unowned.items.every(
+      ({ facts }) =>
+        facts.find(({ label }) => label === "Follow-up owner")?.value ===
+        "Needs owner"
+    )
+  );
   console.log("PASS tasks.read.follow-up-ownership:uncovered-contact");
 }
 

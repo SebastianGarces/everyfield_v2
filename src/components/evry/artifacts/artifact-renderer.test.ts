@@ -72,6 +72,28 @@ test("the renderer registry is exhaustive across every required artifact", () =>
   );
 });
 
+test("read cards distinguish a page from the full result set and retain a way to open the source", () => {
+  const sourceLink = trustedEvryApplicationSourceLink({
+    label: "Open Task assignments",
+    href: "/tasks?view=assignments",
+  });
+  const artifact = buildEvryReadArtifact({
+    title: "People needing follow-up",
+    filters: [{ label: "Next page cursor", value: "internal-cursor" }],
+    exclusions: [],
+    items: [{ id: "person-1", label: "Alex Lee", facts: [], sourceLink }],
+    sourceLinks: [sourceLink],
+  });
+  const markup = render(renderableEvryArtifact(publicEvryArtifact(artifact)));
+  assert.match(markup, /1 result shown/);
+  assert.match(markup, /Open Task assignments/);
+  assert.doesNotMatch(markup, /internal-cursor|Next page cursor/);
+  const empty = buildEvryReadArtifact({ ...artifact, filters: [], items: [] });
+  const emptyMarkup = render(renderableEvryArtifact(publicEvryArtifact(empty)));
+  assert.match(emptyMarkup, /No matches for this request/);
+  assert.doesNotMatch(emptyMarkup, /Nothing needs your attention/);
+});
+
 test("context, clarification, read, Settings, and boundary artifacts render structured review UI", () => {
   const context = render({
     variant: "context",

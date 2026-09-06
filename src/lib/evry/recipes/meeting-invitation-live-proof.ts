@@ -356,12 +356,18 @@ async function proveSendOnlyRetry(modules: Modules) {
   ) {
     throw new Error("Production recipe continuation omitted its review");
   }
+  assert.deepEqual(
+    confirmationArtifact.steps.map(({ counts }) => counts),
+    [
+      [{ label: "Meetings to create", count: 1 }],
+      [{ label: "Guests to add", count: scenario.people.length }],
+      [{ label: "Invitation emails to send", count: scenario.people.length }],
+    ]
+  );
   assert.equal(
-    confirmationArtifact.steps
-      .flatMap(({ counts }) => counts)
-      .filter(({ label }) => label.includes("notifications"))
-      .reduce((sum, { count }) => sum + count, 0) > 0,
-    true
+    calls,
+    0,
+    "Review must not send any invitation before confirmation"
   );
   const plan = created.activePlan.identity;
   const lifecycle = modules.artifactLifecycle.createEvryArtifactLifecycle({

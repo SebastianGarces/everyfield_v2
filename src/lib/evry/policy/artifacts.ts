@@ -47,9 +47,9 @@ const MIXED_BOUNDARY: EvryBoundaryArtifact = {
 
 const AMBIGUOUS_BOUNDARY: EvryBoundaryArtifact = {
   kind: "boundary",
-  title: "Ask Evry about EveryField",
+  title: "I couldn’t understand that request",
   message:
-    "Name the EveryField work you want Evry to do. Nothing from this request was run.",
+    "Try asking for one task at a time, such as finding overdue tasks or scheduling a meeting. Nothing has been changed.",
   examples: EXAMPLES,
 };
 

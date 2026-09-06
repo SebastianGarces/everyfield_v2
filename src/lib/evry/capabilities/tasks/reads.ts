@@ -35,6 +35,10 @@ import { readPhaseTemplatePrompt } from "@/lib/tasks/phase-prompt";
 import { getTask, getTaskCounts, listSubtasks } from "@/lib/tasks/service";
 import { exactTaskAssigneeJoin } from "@/lib/tasks/assignees";
 import { TASK_TEMPLATES, taskTemplateSize } from "@/lib/tasks/templates";
+import { STATUS_LABELS } from "@/lib/people/status.shared";
+import { formatDateWithoutWeekday } from "@/lib/datetime";
+
+import { followUpContactRows } from "./follow-up-presentation";
 
 export const TASK_READ_IDENTITIES = {
   counts: "tasks.read.counts",
@@ -485,7 +489,12 @@ export const TASK_FOLLOW_UP_OWNERSHIP_READ = defineEvryReadRegistration({
   id: "tasks.follow-up-ownership",
   capabilityIdentity: TASK_READ_IDENTITIES.followUpOwnership,
   inputShape: {
-    section: z.enum(["contacts", "open_tasks", "assignees"]),
+    section: z.enum([
+      "contacts",
+      "unowned_contacts",
+      "open_tasks",
+      "assignees",
+    ]),
     cursor: uuid.nullable(),
   },
   async run({ authorization }, input) {
@@ -498,24 +507,19 @@ export const TASK_FOLLOW_UP_OWNERSHIP_READ = defineEvryReadRegistration({
       selectUnownedContacts(contacts, openTasks).map(({ personId }) => personId)
     );
     const rows =
-      input.section === "contacts"
-        ? contacts.map((contact) => ({
-            id: contact.personId,
-            label: artifactLabel(contact.name, "Unnamed contact"),
-            facts: [
-              { label: "Status", value: contact.status },
-              {
-                label: "Coverage",
-                value: unownedContactIds.has(contact.personId)
-                  ? "Needs owner"
-                  : "Owned",
-              },
-              {
-                label: "Last touched",
-                value: contact.lastTouchedAt.toISOString(),
-              },
-            ],
-            sourceLink: link("Open person", `/people/${contact.personId}`),
+      input.section === "contacts" || input.section === "unowned_contacts"
+        ? followUpContactRows(
+            contacts,
+            openTasks,
+            input.section === "unowned_contacts"
+          ).map((contact) => ({
+            ...contact,
+            label: artifactLabel(contact.label, "Unnamed contact"),
+            facts: contact.facts.map(({ label, value }) => ({
+              label,
+              value: artifactFact(value, "Not set"),
+            })),
+            sourceLink: link("Open person", `/people/${contact.id}`),
           }))
         : input.section === "open_tasks"
           ? openTasks.map((task) => ({
@@ -531,8 +535,16 @@ export const TASK_FOLLOW_UP_OWNERSHIP_READ = defineEvryReadRegistration({
                       )
                     : "Needs owner",
                 },
-                { label: "Due date", value: task.dueDate ?? "Not set" },
-                { label: "Contact", value: task.contactId ?? "Not linked" },
+                {
+                  label: "Due date",
+                  value: task.dueDate
+                    ? formatDateWithoutWeekday(
+                        new Date(`${task.dueDate}T00:00:00Z`),
+                        "short",
+                        "UTC"
+                      )
+                    : "Not set",
+                },
               ],
               sourceLink: link("Open task", `/tasks/${task.taskId}`),
             }))
@@ -544,7 +556,7 @@ export const TASK_FOLLOW_UP_OWNERSHIP_READ = defineEvryReadRegistration({
               ),
               facts: [
                 { label: "Email", value: assignee.email },
-                { label: "Status", value: assignee.status },
+                { label: "Status", value: STATUS_LABELS[assignee.status] },
                 {
                   label: "Planter",
                   value: assignee.isPlanter ? "Yes" : "No",
@@ -562,7 +574,14 @@ export const TASK_FOLLOW_UP_OWNERSHIP_READ = defineEvryReadRegistration({
       });
     }
     return buildEvryReadArtifact({
-      title: "Task follow-up ownership",
+      title:
+        input.section === "unowned_contacts"
+          ? "People who need a follow-up owner"
+          : input.section === "contacts"
+            ? "People needing follow-up"
+            : input.section === "open_tasks"
+              ? "Follow-up tasks"
+              : "People who can own follow-ups",
       filters: [
         { label: "Section", value: input.section },
         { label: "Open follow-up tasks", value: String(openTasks.length) },
@@ -1174,7 +1193,7 @@ export type TaskEvryReadSelection =
     }>
   | Readonly<{
       kind: "follow_up_ownership";
-      section: "contacts" | "open_tasks" | "assignees";
+      section: "contacts" | "unowned_contacts" | "open_tasks" | "assignees";
       cursor: string | null;
     }>
   | Readonly<{ kind: "detail"; taskId: string | null }>
@@ -1378,6 +1397,17 @@ export function selectTaskEvryRead(
     };
   }
   if (
+    /^(?:(?:only )?(?:show|list)(?: me)? )?(?:(?:people|contacts) (?:who (?:do not|don't) have|without|with no|needing) (?:a )?follow[ -]?up owner|(?:unowned|unassigned) follow[ -]?ups|who needs (?:a )?follow[ -]?up owner)[.!?]*$/i.test(
+      text
+    )
+  ) {
+    return {
+      kind: "follow_up_ownership",
+      section: "unowned_contacts",
+      cursor: null,
+    };
+  }
+  if (
     /^(?:(?:show|list)(?: me)? )?(?:who needs? follow[ -]?up|(?:which )?(?:people|contacts) (?:need|needs|needing) follow[ -]?up)[.!?]*$/i.test(
       text
     )
@@ -1385,7 +1415,7 @@ export function selectTaskEvryRead(
     return { kind: "follow_up_ownership", section: "contacts", cursor: null };
   }
   match = new RegExp(
-    `^load more task follow-up (contacts|tasks|assignees) after\\s+${UUID}[.!?]*$`,
+    `^load more task follow-up (contacts|unowned contacts|tasks|assignees) after\\s+${UUID}[.!?]*$`,
     "i"
   ).exec(text);
   if (match?.[1] && match[2]) {
@@ -1393,9 +1423,11 @@ export function selectTaskEvryRead(
     const section =
       subject === "tasks"
         ? "open_tasks"
-        : subject === "contacts"
-          ? "contacts"
-          : "assignees";
+        : subject === "unowned contacts"
+          ? "unowned_contacts"
+          : subject === "contacts"
+            ? "contacts"
+            : "assignees";
     return {
       kind: "follow_up_ownership",
       section,
