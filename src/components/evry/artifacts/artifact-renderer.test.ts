@@ -98,6 +98,15 @@ test("read cards distinguish a page from the full result set and retain a way to
   assert.match(markup, /1 result shown/);
   assert.match(markup, /Open Task assignments/);
   assert.doesNotMatch(markup, /internal-cursor|Next page cursor/);
+  const meetingPage = buildEvryReadArtifact({
+    ...artifact,
+    filters: [],
+    exclusions: [{ reason: "Outside this page", count: 3 }],
+  });
+  assert.match(
+    render(renderableEvryArtifact(publicEvryArtifact(meetingPage))),
+    /1 result shown/
+  );
   const empty = buildEvryReadArtifact({ ...artifact, filters: [], items: [] });
   const emptyMarkup = render(renderableEvryArtifact(publicEvryArtifact(empty)));
   assert.match(emptyMarkup, /No matches for this request/);

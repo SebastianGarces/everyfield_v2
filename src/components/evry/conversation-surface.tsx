@@ -75,8 +75,7 @@ export function ConversationSurface({ className }: { className?: string }) {
     workState,
   } = useEvryShell();
   const endRef = useRef<HTMLDivElement>(null);
-  const transcriptRef = useRef<HTMLDivElement>(null);
-  const composerRef = useRef<HTMLFormElement>(null);
+  const followTranscriptRef = useRef(true);
   const latestMessage = conversation?.messages.at(-1);
   const showSuggestions =
     !isSending &&
@@ -105,32 +104,32 @@ export function ConversationSurface({ className }: { className?: string }) {
 
   useEffect(() => {
     const conversationId = conversation?.id ?? null;
+    followTranscriptRef.current = true;
     acknowledgeConversationMounted(conversationId);
     return () => acknowledgeConversationMounted(null);
   }, [acknowledgeConversationMounted, conversation?.id]);
 
   useEffect(() => {
-    const transcript = transcriptRef.current;
-    if (
-      transcript &&
-      shouldFollowEvryTranscript({
-        distanceFromEnd:
-          transcript.scrollHeight -
-          transcript.clientHeight -
-          transcript.scrollTop,
-        focusInComposer:
-          composerRef.current?.contains(document.activeElement) ?? false,
-      })
-    ) {
+    if (followTranscriptRef.current) {
       endRef.current?.scrollIntoView({ block: "nearest" });
     }
-  }, [conversation?.messages.length, latestMessage]);
+  }, [conversation?.messages.length, latestMessage, isLoading, isSending]);
 
   return (
     <div className={cn("flex min-h-0 flex-1 flex-col", className)}>
       <div
-        ref={transcriptRef}
         data-slot="evry-transcript"
+        onScroll={(event) => {
+          const transcript = event.currentTarget;
+          // Capture the reader's position before a new reply changes its height.
+          followTranscriptRef.current = shouldFollowEvryTranscript({
+            distanceFromEnd:
+              transcript.scrollHeight -
+              transcript.clientHeight -
+              transcript.scrollTop,
+            focusInComposer: false,
+          });
+        }}
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5 sm:px-5"
         aria-busy={isLoading}
       >
@@ -268,10 +267,10 @@ export function ConversationSurface({ className }: { className?: string }) {
       </div>
 
       <form
-        ref={composerRef}
         className="bg-background mx-auto w-full max-w-3xl shrink-0 space-y-3 p-4 sm:p-5"
         onSubmit={(event) => {
           event.preventDefault();
+          followTranscriptRef.current = true;
           void sendMessage();
         }}
       >
@@ -287,7 +286,7 @@ export function ConversationSurface({ className }: { className?: string }) {
             id="evry-message"
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
-            placeholder="Create a follow-up task for Friday"
+            placeholder="Ask Evry about your work"
             rows={3}
             required
             maxLength={8_000}

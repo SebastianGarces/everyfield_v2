@@ -41,7 +41,7 @@ import {
   CATEGORY_CONFIG,
   PRIORITY_CONFIG,
   STATUS_CONFIG,
-} from "@/components/tasks/task-card-view";
+} from "@/lib/tasks/presentation";
 import type { TaskWithAssignee } from "@/lib/tasks/types";
 
 import { followUpContactRows } from "./follow-up-presentation";

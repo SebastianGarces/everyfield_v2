@@ -82,7 +82,7 @@ test("Owner, Admin, and Member see only suggestions for capabilities they hold",
       "member",
       {
         people: ["people-follow-up"],
-        meetings: [],
+        meetings: ["meetings-list"],
         tasks: ["tasks-list"],
         launch: ["launch-milestones"],
       },
@@ -132,7 +132,7 @@ test("Settings, coaching, oversight, and sessionless paths advertise nothing", (
   );
 });
 
-test("inventory support is required in addition to the actor capability", () => {
+test("read suggestions require a supported route, not a write action", () => {
   const withoutMeetingActions: EvryParityInventory = {
     ...INVENTORY,
     entries: INVENTORY.entries.filter(
@@ -146,8 +146,27 @@ test("inventory support is required in addition to the actor capability", () => 
     heldCapabilities(actor("owner")),
     withoutMeetingActions
   );
+  assert.deepEqual(ids(evrySuggestionsForPathname("/meetings", suggestions)), [
+    "meetings-list",
+  ]);
+  const withoutMeetingRoutes: EvryParityInventory = {
+    ...INVENTORY,
+    entries: INVENTORY.entries.filter(
+      (entry) =>
+        !(entry.kind === "route" && entry.parityCapability === "meetings")
+    ),
+  };
   assert.deepEqual(
-    ids(evrySuggestionsForPathname("/meetings", suggestions)),
+    ids(
+      evrySuggestionsForPathname(
+        "/meetings",
+        eligibleEvrySuggestions(
+          true,
+          heldCapabilities(actor("member")),
+          withoutMeetingRoutes
+        )
+      )
+    ),
     []
   );
 });

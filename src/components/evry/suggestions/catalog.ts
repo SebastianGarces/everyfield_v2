@@ -18,7 +18,7 @@ export const EVRY_SUGGESTION_CATALOG = [
   {
     id: "meetings-list",
     module: "meetings",
-    requiredCapability: "meetings.write",
+    requiredCapability: "read",
     request: "Show me meetings",
     fallback: true,
   },

@@ -262,10 +262,6 @@ function renderRead(artifact: ArtifactByVariant["read"]) {
   const additionalLinks = artifact.sourceLinks.filter(
     ({ href }) => !itemLinks.has(href)
   );
-  const hasMore = artifact.filters.some(
-    ({ label, value }) =>
-      label === "Next page cursor" && value !== "End of results"
-  );
   return (
     <ArtifactFrame
       variant="read"
@@ -274,9 +270,7 @@ function renderRead(artifact: ArtifactByVariant["read"]) {
       icon={<ListChecks className="size-4" />}
     >
       <p className="text-2xl font-semibold tabular-nums">
-        {hasMore
-          ? `${readResultLabel(artifact.counts.returned)} shown`
-          : readResultLabel(artifact.counts.returned)}
+        {readResultLabel(artifact.counts.returned)} shown
       </p>
 
       {artifact.items.length ? (

@@ -6,9 +6,9 @@ import type { EligibleEvrySuggestion } from "./types";
 
 /**
  * Inventory-backed eligibility, run on the server before suggestions cross
- * the RSC boundary. An entry needs a supported route, a supported action
- * carrying the same application capability, and that capability in the
- * actor's held set.
+ * the RSC boundary. Reads need a supported route; writes also need a supported
+ * action carrying the same application capability. Both require the actor's
+ * capability. Catalog requests are checked against installed continuations.
  */
 export function eligibleEvrySuggestions(
   enabled: boolean,
@@ -39,9 +39,10 @@ export function eligibleEvrySuggestions(
     (suggestion) =>
       held.has(suggestion.requiredCapability) &&
       supportedRoutes.has(suggestion.module) &&
-      supportedActions.has(
-        `${suggestion.module}:${suggestion.requiredCapability}`
-      )
+      (suggestion.requiredCapability === "read" ||
+        supportedActions.has(
+          `${suggestion.module}:${suggestion.requiredCapability}`
+        ))
   ).map(({ id, module, request, fallback }) => ({
     id,
     module,
