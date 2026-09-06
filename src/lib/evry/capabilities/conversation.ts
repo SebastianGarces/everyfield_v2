@@ -65,6 +65,8 @@ export type EvryCapabilityConversationContinuation = Readonly<{
   /** A self-contained request must reach this pack before pronoun resolution. */
   referencePolicy?: "self_contained";
   matches(input: EvryCapabilityConversationSelectionInput): boolean;
+  /** A focused answer to a previous question, considered only after new requests. */
+  matchesFollowUp?(input: EvryCapabilityConversationSelectionInput): boolean;
   continue(
     input: EvryCapabilityConversationSelectionInput
   ): Promise<EvryCapabilityConversationResult | null>;
@@ -261,9 +263,14 @@ export function composeEvryCapabilityConversationContinuations(
     input: EvryCapabilityConversationSelectionInput,
     candidates = continuations
   ) {
-    const matches = candidates.filter((continuation) =>
+    const directMatches = candidates.filter((continuation) =>
       continuation.matches(input)
     );
+    const matches = directMatches.length
+      ? directMatches
+      : candidates.filter((continuation) =>
+          continuation.matchesFollowUp?.(input)
+        );
     if (matches.length > 1) {
       throw new EvryCapabilityConversationAmbiguityError(
         matches.map(({ identity }) => identity)
@@ -300,14 +307,13 @@ export function composeEvryCapabilityConversationContinuations(
     };
   return Object.assign(dispatch, {
     matchesBeforeReferences(input: EvryCapabilityConversationSelectionInput) {
-      return (
-        select(
-          input,
-          continuations.filter(
-            ({ referencePolicy }) => referencePolicy === "self_contained"
-          )
-        ) !== null
-      );
+      if (
+        !continuations.some(
+          ({ referencePolicy }) => referencePolicy === "self_contained"
+        )
+      )
+        return false;
+      return select(input)?.referencePolicy === "self_contained";
     },
   });
 }

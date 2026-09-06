@@ -27,7 +27,7 @@ export type EvryPublicPolicyArtifact =
   | EvryBoundaryArtifact
   | EvrySettingsHandoffArtifact;
 
-const EXAMPLES = ["Find overdue tasks", "Create a meeting"] as const;
+const EXAMPLES = ["Show me my tasks", "Show me meetings"] as const;
 
 const APPLICATION_ONLY_BOUNDARY: EvryBoundaryArtifact = {
   kind: "boundary",
@@ -49,7 +49,7 @@ const AMBIGUOUS_BOUNDARY: EvryBoundaryArtifact = {
   kind: "boundary",
   title: "I couldn’t understand that request",
   message:
-    "Try asking for one task at a time, such as finding overdue tasks or scheduling a meeting. Nothing has been changed.",
+    "Try asking for one thing at a time, such as listing tasks or meetings. Nothing has been changed.",
   examples: EXAMPLES,
 };
 

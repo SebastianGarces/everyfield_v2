@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { parseEvryActionPlanCandidate } from "@/lib/evry/plans";
+import { EVRY_SUGGESTION_CATALOG } from "@/components/evry/suggestions/catalog";
 
 import { continueCommunicationEvryConversation } from "./communication/conversation";
 import communicationInventory from "./communication/inventory.generated.json";
@@ -33,6 +34,24 @@ const PRODUCTION_CAPABILITIES = [
   ...peopleInventory.capabilities,
   ...taskInventory.capabilities,
 ];
+
+test("every displayed suggestion matches exactly one installed conversation capability", () => {
+  for (const suggestion of EVRY_SUGGESTION_CATALOG) {
+    const matches = PRODUCTION_EVRY_CAPABILITY_CONTINUATIONS.filter(
+      (continuation) =>
+        continuation.matches({
+          actor: {} as never,
+          conversation: { messages: [], activePlan: null } as never,
+          userRequestKey: "suggestion-proof",
+          literalUserText: suggestion.request,
+          pageContext: null,
+          requestPageContext: null,
+          now: new Date("2026-09-06T12:00:00Z"),
+        })
+    );
+    assert.equal(matches.length, 1, suggestion.request);
+  }
+});
 
 test("production installs every Communication, Launch, Meetings, People, and Tasks effect together", () => {
   const identities = PRODUCTION_CAPABILITIES.map(({ identity }) => identity);

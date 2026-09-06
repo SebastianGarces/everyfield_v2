@@ -189,6 +189,11 @@ export function createMeetingInvitationConversationContinuation(
     identity: MEETING_INVITATION_RECIPE_IDENTITY,
     referencePolicy: "self_contained",
     matches(input) {
+      return (
+        selectMeetingInvitationReferenceRequest(input.literalUserText) !== null
+      );
+    },
+    matchesFollowUp(input) {
       return meetingInvitationRequestForConversation(input) !== null;
     },
     async continue(input) {

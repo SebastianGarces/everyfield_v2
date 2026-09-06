@@ -1354,7 +1354,7 @@ export function selectTaskEvryRead(
       cursor: match[1],
     };
   }
-  if (/^(?:show|list)(?: me)? tasks[.!?]*$/i.test(text)) {
+  if (/^(?:show|list)(?: me)? (?:my )?tasks[.!?]*$/i.test(text)) {
     return {
       kind: "list",
       view: "my_tasks",

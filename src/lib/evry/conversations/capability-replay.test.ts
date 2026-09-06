@@ -516,7 +516,7 @@ test("an unmatched create persists an assistant clarification", async () => {
   assert.equal(created.conversation.messages.length, 2);
   const response = created.conversation.messages.at(-1);
   assert.equal(response?.author, "assistant");
-  assert.match(response?.body ?? "", /EveryField work/i);
+  assert.match(response?.body ?? "", /Nothing has been changed/i);
   assert.deepEqual(
     response?.artifacts.map(({ document }) => document),
     [{ kind: "boundary", classification: "ambiguous" }]

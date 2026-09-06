@@ -42,12 +42,12 @@ const ids = (suggestions: readonly EligibleEvrySuggestion[]) =>
 test("page context selects only the current supported module", () => {
   const adminSuggestions = eligibleFor("admin");
   const cases = [
-    ["/people", ["people-follow-up", "people-add"]],
-    ["/people/person-1/activity", ["people-follow-up", "people-add"]],
-    ["/meetings", ["meetings-schedule"]],
-    ["/tasks/task-1", ["tasks-overdue", "tasks-complete-own", "tasks-create"]],
+    ["/people", ["people-follow-up"]],
+    ["/people/person-1/activity", ["people-follow-up"]],
+    ["/meetings", ["meetings-list"]],
+    ["/tasks/task-1", ["tasks-list"]],
     ["/launch", ["launch-milestones"]],
-    ["/evry", ["people-follow-up", "meetings-schedule", "tasks-overdue"]],
+    ["/evry", ["people-follow-up", "meetings-list", "tasks-list"]],
   ] as const;
 
   for (const [pathname, expected] of cases) {
@@ -63,18 +63,18 @@ test("Owner, Admin, and Member see only suggestions for capabilities they hold",
     [
       "owner",
       {
-        people: ["people-follow-up", "people-add"],
-        meetings: ["meetings-schedule"],
-        tasks: ["tasks-overdue", "tasks-complete-own", "tasks-create"],
-        launch: ["launch-milestones", "launch-date"],
+        people: ["people-follow-up"],
+        meetings: ["meetings-list"],
+        tasks: ["tasks-list"],
+        launch: ["launch-milestones"],
       },
     ],
     [
       "admin",
       {
-        people: ["people-follow-up", "people-add"],
-        meetings: ["meetings-schedule"],
-        tasks: ["tasks-overdue", "tasks-complete-own", "tasks-create"],
+        people: ["people-follow-up"],
+        meetings: ["meetings-list"],
+        tasks: ["tasks-list"],
         launch: ["launch-milestones"],
       },
     ],
@@ -83,7 +83,7 @@ test("Owner, Admin, and Member see only suggestions for capabilities they hold",
       {
         people: ["people-follow-up"],
         meetings: [],
-        tasks: ["tasks-overdue", "tasks-complete-own"],
+        tasks: ["tasks-list"],
         launch: ["launch-milestones"],
       },
     ],

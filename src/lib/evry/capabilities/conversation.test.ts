@@ -158,6 +158,48 @@ test("composition evaluates every pure matcher then shared code appends one resu
   });
 });
 
+test("a new request takes precedence over a pending clarification, including before reference resolution", async () => {
+  const calls: string[] = [];
+  const continuation = composeEvryCapabilityConversationContinuations([
+    {
+      ...registration({ identity: "meeting", match: false, calls }),
+      referencePolicy: "self_contained",
+      matchesFollowUp: () => true,
+    },
+    registration({
+      identity: "tasks",
+      match: true,
+      calls,
+      result: { body: "Your tasks", artifacts: [clarification] },
+    }),
+  ]);
+  const input = selectionInput({ appendCalls: [] });
+  assert.equal(continuation.matchesBeforeReferences(input), false);
+  await continuation(input);
+  assert.ok(calls.includes("continue:tasks"));
+  assert.ok(!calls.includes("continue:meeting"));
+});
+
+test("a focused clarification reply still resumes when no new request matches", async () => {
+  const calls: string[] = [];
+  const continuation = composeEvryCapabilityConversationContinuations([
+    {
+      ...registration({
+        identity: "meeting",
+        match: false,
+        calls,
+        result: { body: "Review meeting", artifacts: [clarification] },
+      }),
+      referencePolicy: "self_contained",
+      matchesFollowUp: () => true,
+    },
+  ]);
+  const input = selectionInput({ appendCalls: [] });
+  assert.equal(continuation.matchesBeforeReferences(input), true);
+  await continuation(input);
+  assert.ok(calls.includes("continue:meeting"));
+});
+
 test("ambiguous packs fail before any continuation or append can mutate", async () => {
   const calls: string[] = [];
   const appendCalls: unknown[] = [];
