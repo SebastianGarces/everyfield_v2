@@ -256,6 +256,12 @@ function renderClarification(
 }
 
 function renderRead(artifact: ArtifactByVariant["read"]) {
+  const itemLinks = new Set(
+    artifact.items.map(({ sourceLink }) => sourceLink.href)
+  );
+  const additionalLinks = artifact.sourceLinks.filter(
+    ({ href }) => !itemLinks.has(href)
+  );
   const hasMore = artifact.filters.some(
     ({ label, value }) =>
       label === "Next page cursor" && value !== "End of results"
@@ -317,9 +323,9 @@ function renderRead(artifact: ArtifactByVariant["read"]) {
           </ul>
         </details>
       ) : null}
-      {artifact.sourceLinks.length ? (
+      {additionalLinks.length ? (
         <div className="flex flex-wrap gap-x-4 gap-y-2">
-          {artifact.sourceLinks.map((source) => (
+          {additionalLinks.map((source) => (
             <AuthenticatedLink
               key={source.href}
               href={source.href}

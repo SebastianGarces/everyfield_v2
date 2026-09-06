@@ -25,7 +25,11 @@ import {
 import { TASK_ACTION_CONTRACTS } from "./contracts";
 import { TASKS_EFFECT_ARGUMENT_SCHEMAS } from "./effect-contracts";
 import inventory from "./inventory.generated.json";
-import { TASK_READ_IDENTITIES, selectTaskEvryRead } from "./reads";
+import {
+  TASK_READ_IDENTITIES,
+  selectTaskEvryRead,
+  taskReadFacts,
+} from "./reads";
 import { TASK_EXECUTION_REGISTRY, TASK_PLAN_REGISTRY } from "./runtime";
 import { TASK_REVIEW_REGISTRY } from "./review";
 import { selectTaskEvryEffect } from "./selection";
@@ -107,6 +111,29 @@ test("Task follow-up selection accepts ordinary user wording", () => {
       cursor: null,
     });
   }
+});
+
+test("task results use the Tasks page labels, a date-only due date, and the assignee name", () => {
+  const facts = taskReadFacts({
+    status: "not_started",
+    priority: "medium",
+    dueDate: "2026-09-16",
+    assignedToId: TASK_FIXTURE_ID,
+    assigneeName: "Jordan Lee",
+    assigneeEmail: "jordan@example.test",
+    category: "follow_up",
+  });
+  assert.deepEqual(facts, [
+    { label: "Status", value: "Not Started" },
+    { label: "Priority", value: "Medium" },
+    { label: "Due date", value: "Sep 16, 2026" },
+    { label: "Assignee", value: "Jordan Lee" },
+    { label: "Category", value: "Follow-up" },
+  ]);
+  assert.doesNotMatch(
+    JSON.stringify(facts),
+    new RegExp(`${TASK_FIXTURE_ID}|not_started|follow_up`)
+  );
 });
 
 test("Task list and count selectors preserve every legal UI filter", () => {

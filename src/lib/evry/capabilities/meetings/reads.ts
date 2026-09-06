@@ -1,4 +1,13 @@
 import { z } from "zod";
+import { eq } from "drizzle-orm";
+import { db } from "@/db";
+import { churches } from "@/db/schema";
+import {
+  formatDateTime,
+  formatDateTimeWithZone,
+  instantsAtZonedTime,
+  toCalendarDate,
+} from "@/lib/datetime";
 
 import { buildEvryReadArtifact } from "@/lib/evry/artifacts/core";
 import {
@@ -16,7 +25,10 @@ import {
   getMeetingSummaryStats,
 } from "@/lib/meetings/analytics";
 import { getGuestList } from "@/lib/meetings/guest-list";
-import { meetingDisplayTitle } from "@/lib/meetings/labels";
+import {
+  meetingDisplayTitle,
+  MEETING_STATUS_LABELS,
+} from "@/lib/meetings/labels";
 import { listLocations } from "@/lib/meetings/locations";
 import {
   getMeetingResponseBreakdown,
@@ -67,8 +79,27 @@ type MeetingsReadAdapter = Readonly<{
   ): Promise<EvryReadContinuationArtifact>;
 }>;
 
-function dateFact(value: Date): string {
-  return value.toISOString();
+/** Meeting rows store wall-clock values, not UTC instants. Preserve the hour. */
+export function meetingReadDateTime(value: Date, timeZone: string): string {
+  const instants = instantsAtZonedTime(
+    toCalendarDate(value, "UTC"),
+    value.getUTCHours(),
+    value.getUTCMinutes(),
+    timeZone
+  );
+  return instants.length === 1
+    ? formatDateTimeWithZone(instants[0], timeZone)
+    : `${formatDateTime(value, "long", "UTC")} (${timeZone}; time needs review)`;
+}
+
+async function readPlantTimeZone(plantId: string) {
+  const [plant] = await db
+    .select({ timeZone: churches.timeZone })
+    .from(churches)
+    .where(eq(churches.id, plantId))
+    .limit(1);
+  if (!plant) throw new Error("Meeting plant unavailable");
+  return plant.timeZone;
 }
 
 const READ_ADAPTERS: readonly MeetingsReadAdapter[] = [
@@ -76,10 +107,11 @@ const READ_ADAPTERS: readonly MeetingsReadAdapter[] = [
     identity: "meetings.read.list",
     inputSchema: listInputSchema,
     async run({ actor }, input: z.infer<typeof listInputSchema>) {
-      const [result, history, team] = await Promise.all([
+      const [result, history, team, timeZone] = await Promise.all([
         listMeetings(actor.plantId, input),
         hasMeetingHistory(actor.plantId),
         input.teamId ? getTeam(actor.plantId, input.teamId) : null,
+        readPlantTimeZone(actor.plantId),
       ]);
       if (input.teamId && !team) {
         return {
@@ -102,8 +134,11 @@ const READ_ADAPTERS: readonly MeetingsReadAdapter[] = [
           id: meeting.id,
           label: meetingDisplayTitle(meeting),
           facts: [
-            { label: "Date and time", value: dateFact(meeting.datetime) },
-            { label: "Status", value: meeting.status },
+            {
+              label: "Date and time",
+              value: meetingReadDateTime(meeting.datetime, timeZone),
+            },
+            { label: "Status", value: MEETING_STATUS_LABELS[meeting.status] },
             {
               label: "Location",
               value: meeting.locationName ?? "No location set",
@@ -138,7 +173,10 @@ const READ_ADAPTERS: readonly MeetingsReadAdapter[] = [
     identity: "meetings.read.detail",
     inputSchema: detailInputSchema,
     async run({ actor }, input: z.infer<typeof detailInputSchema>) {
-      const meeting = await getMeeting(actor.plantId, input.meetingId);
+      const [meeting, timeZone] = await Promise.all([
+        getMeeting(actor.plantId, input.meetingId),
+        readPlantTimeZone(actor.plantId),
+      ]);
       if (!meeting) {
         return {
           kind: "clarification",
@@ -190,8 +228,11 @@ const READ_ADAPTERS: readonly MeetingsReadAdapter[] = [
             id: meeting.id,
             label: meetingDisplayTitle(meeting),
             facts: [
-              { label: "Date and time", value: dateFact(meeting.datetime) },
-              { label: "Status", value: meeting.status },
+              {
+                label: "Date and time",
+                value: meetingReadDateTime(meeting.datetime, timeZone),
+              },
+              { label: "Status", value: MEETING_STATUS_LABELS[meeting.status] },
               {
                 label: "Location",
                 value: meeting.locationName ?? "No location set",

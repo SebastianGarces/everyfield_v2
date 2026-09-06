@@ -41,7 +41,7 @@ mock.module("@/lib/auth/session", {
 async function seedPlant(label: string) {
   const [plant] = await db
     .insert(churches)
-    .values({ name: `${SCRATCH} ${label}` })
+    .values({ name: `${SCRATCH} ${label}`, timeZone: "America/New_York" })
     .returning({ id: churches.id });
   const [user] = await db
     .insert(users)
@@ -158,7 +158,7 @@ async function main() {
 
   const inputs = {
     "meetings.read.list": {
-      valid: { status: "all", teamId: local.team.id, limit: 25, offset: 0 },
+      valid: { status: "all", limit: 25, offset: 0 },
       foreign: {
         status: "all",
         teamId: foreign.team.id,
@@ -193,6 +193,20 @@ async function main() {
     });
     assert.ok(first, identity);
     assert.equal(first.kind, "read", identity);
+    if (
+      first.kind === "read" &&
+      (identity === "meetings.read.list" || identity === "meetings.read.detail")
+    ) {
+      assert.equal(
+        first.items[0]?.facts.find(({ label }) => label === "Date and time")
+          ?.value,
+        "Tuesday, September 29, 2026 at 6:00 PM EDT"
+      );
+      assert.equal(
+        first.items[0]?.facts.find(({ label }) => label === "Status")?.value,
+        "Planning"
+      );
+    }
     const replay = await executeMeetingsRead({
       authorization,
       untrustedInput: values.valid,
@@ -280,7 +294,7 @@ async function main() {
     if (identity === "meetings.read.list" && first.kind === "read") {
       assert.deepEqual(
         first.filters.map(({ label }) => label),
-        ["Time", "Type", "Team", "Plant meeting history"]
+        ["Time", "Type", "Plant meeting history"]
       );
     }
     console.log(`PASS ${identity}:ui_artifact`);

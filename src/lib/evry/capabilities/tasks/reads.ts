@@ -37,6 +37,12 @@ import { exactTaskAssigneeJoin } from "@/lib/tasks/assignees";
 import { TASK_TEMPLATES, taskTemplateSize } from "@/lib/tasks/templates";
 import { STATUS_LABELS } from "@/lib/people/status.shared";
 import { formatDateWithoutWeekday } from "@/lib/datetime";
+import {
+  CATEGORY_CONFIG,
+  PRIORITY_CONFIG,
+  STATUS_CONFIG,
+} from "@/components/tasks/task-card-view";
+import type { TaskWithAssignee } from "@/lib/tasks/types";
 
 import { followUpContactRows } from "./follow-up-presentation";
 
@@ -166,19 +172,44 @@ function link(label: string, href: string) {
   return trustedEvryApplicationSourceLink({ label, href });
 }
 
-function taskFacts(task: {
-  status: string;
-  priority: string;
-  dueDate: string | null;
-  assignedToId?: string | null;
-  category?: string | null;
-}) {
+export function taskReadFacts(
+  task: Pick<
+    TaskWithAssignee,
+    | "status"
+    | "priority"
+    | "dueDate"
+    | "assignedToId"
+    | "assigneeName"
+    | "assigneeEmail"
+    | "category"
+  >
+) {
   return [
-    { label: "Status", value: task.status },
-    { label: "Priority", value: task.priority },
-    { label: "Due date", value: task.dueDate ?? "Not set" },
-    { label: "Assignee", value: task.assignedToId ?? "Unassigned" },
-    { label: "Category", value: task.category ?? "General" },
+    { label: "Status", value: STATUS_CONFIG[task.status].label },
+    { label: "Priority", value: PRIORITY_CONFIG[task.priority].label },
+    {
+      label: "Due date",
+      value: task.dueDate
+        ? formatDateWithoutWeekday(
+            new Date(`${task.dueDate}T00:00:00Z`),
+            "short",
+            "UTC"
+          )
+        : "Not set",
+    },
+    {
+      label: "Assignee",
+      value: task.assignedToId
+        ? artifactFact(
+            task.assigneeName ?? task.assigneeEmail,
+            "Assigned member"
+          )
+        : "Unassigned",
+    },
+    {
+      label: "Category",
+      value: CATEGORY_CONFIG[task.category ?? "general"].label,
+    },
   ];
 }
 
@@ -412,7 +443,7 @@ export const TASK_LIST_READ = defineEvryReadRegistration({
           id: task.id,
           label: artifactLabel(task.title, "Untitled task"),
           facts: [
-            ...taskFacts(task),
+            ...taskReadFacts(task),
             ...(note
               ? [
                   {
@@ -707,7 +738,7 @@ export const TASK_DETAIL_READ = defineEvryReadRegistration({
               label: "Full title",
               value: artifactFact(task.title, "Untitled task"),
             },
-            ...taskFacts(task),
+            ...taskReadFacts(task),
             {
               label: "Description preview",
               value: artifactFact(
@@ -788,7 +819,7 @@ export const TASK_CHECKLIST_DETAIL_READ = defineEvryReadRegistration({
             value: artifactFact(subtask.title, "Untitled checklist item"),
           },
           { label: "Checklist item ID", value: subtask.id },
-          ...taskFacts(subtask),
+          ...taskReadFacts(subtask),
           { label: "Blocked", value: subtask.isBlocked ? "Yes" : "No" },
           {
             label: "Description preview",

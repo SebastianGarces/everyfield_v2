@@ -81,7 +81,17 @@ test("read cards distinguish a page from the full result set and retain a way to
     title: "People needing follow-up",
     filters: [{ label: "Next page cursor", value: "internal-cursor" }],
     exclusions: [],
-    items: [{ id: "person-1", label: "Alex Lee", facts: [], sourceLink }],
+    items: [
+      {
+        id: "person-1",
+        label: "Alex Lee",
+        facts: [],
+        sourceLink: trustedEvryApplicationSourceLink({
+          label: "Alex Lee",
+          href: "/people/person-1",
+        }),
+      },
+    ],
     sourceLinks: [sourceLink],
   });
   const markup = render(renderableEvryArtifact(publicEvryArtifact(artifact)));
