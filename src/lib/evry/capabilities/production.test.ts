@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { parseEvryActionPlanCandidate } from "@/lib/evry/plans";
 import { EVRY_SUGGESTION_CATALOG } from "@/components/evry/suggestions/catalog";
+import { boundaryArtifactFor } from "@/lib/evry/policy/artifacts";
 
 import { continueCommunicationEvryConversation } from "./communication/conversation";
 import communicationInventory from "./communication/inventory.generated.json";
@@ -35,21 +36,24 @@ const PRODUCTION_CAPABILITIES = [
   ...taskInventory.capabilities,
 ];
 
-test("every displayed suggestion matches exactly one installed conversation capability", () => {
-  for (const suggestion of EVRY_SUGGESTION_CATALOG) {
+test("every displayed suggestion and boundary example matches exactly one installed conversation capability", () => {
+  for (const request of [
+    ...EVRY_SUGGESTION_CATALOG.map(({ request }) => request),
+    ...boundaryArtifactFor("ambiguous").examples,
+  ]) {
     const matches = PRODUCTION_EVRY_CAPABILITY_CONTINUATIONS.filter(
       (continuation) =>
         continuation.matches({
           actor: {} as never,
           conversation: { messages: [], activePlan: null } as never,
           userRequestKey: "suggestion-proof",
-          literalUserText: suggestion.request,
+          literalUserText: request,
           pageContext: null,
           requestPageContext: null,
           now: new Date("2026-09-06T12:00:00Z"),
         })
     );
-    assert.equal(matches.length, 1, suggestion.request);
+    assert.equal(matches.length, 1, request);
   }
 });
 

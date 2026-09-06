@@ -143,7 +143,7 @@ test("context, clarification, read, Settings, and boundary artifacts render stru
     renderableEvryArtifact(publicEvryArtifact(boundaryArtifactFor("unrelated")))
   );
   assert.match(boundaryMarkup, /Ask Evry about EveryField/);
-  assert.match(boundaryMarkup, /Find overdue tasks/);
+  assert.match(boundaryMarkup, /Show me my tasks/);
 
   const clarification = publicEvryArtifact({
     kind: "clarification",
