@@ -52,6 +52,7 @@ test("the real composer commits a request-keyed acknowledgement before its POST 
   });
 
   let activeElement: FocusNode | null = null;
+  let ancestorScrollCalls = 0;
   const nodes = new Map<string, FocusNode>();
   const originalDocument = Object.getOwnPropertyDescriptor(
     globalThis,
@@ -137,7 +138,12 @@ test("the real composer commits a request-keyed acknowledgement before its POST 
       {
         createNodeMock(element) {
           const props = element.props as Record<string, unknown>;
-          const id = typeof props.id === "string" ? props.id : null;
+          const id =
+            typeof props.id === "string"
+              ? props.id
+              : props["data-slot"] === "evry-transcript"
+                ? "evry-transcript"
+                : null;
           const existing = id ? nodes.get(id) : undefined;
           if (existing) return existing;
           const node: FocusNode = {
@@ -148,7 +154,9 @@ test("the real composer commits a request-keyed acknowledgement before its POST 
             contains(candidate) {
               return candidate === node || candidate?.id === "evry-message";
             },
-            scrollIntoView() {},
+            scrollIntoView() {
+              ancestorScrollCalls++;
+            },
             scrollHeight: 100,
             clientHeight: 100,
             scrollTop: 0,
@@ -399,6 +407,15 @@ test("the real composer commits a request-keyed acknowledgement before its POST 
   assert.equal(composerIsBusy(), false);
   assert.equal(workSnapshots.at(-1), false);
   assert.equal(renderedText(mounted, "Request saved."), true);
+  assert.equal(
+    ancestorScrollCalls,
+    0,
+    "following a reply must not scroll outer containers"
+  );
+  assert.equal(
+    nodes.get("evry-transcript")?.scrollTop,
+    nodes.get("evry-transcript")?.scrollHeight
+  );
   assert.ok(
     mounted.root.findAll(
       (node) =>

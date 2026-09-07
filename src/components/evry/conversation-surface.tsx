@@ -71,7 +71,7 @@ export function ConversationSurface({ className }: { className?: string }) {
     workRequestId,
     workState,
   } = useEvryShell();
-  const endRef = useRef<HTMLDivElement>(null);
+  const transcriptRef = useRef<HTMLDivElement>(null);
   const surfaceRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLFormElement>(null);
   const followTranscriptRef = useRef(true);
@@ -115,8 +115,9 @@ export function ConversationSurface({ className }: { className?: string }) {
   }, [acknowledgeConversationMounted, conversation?.id]);
 
   useEffect(() => {
-    if (followTranscriptRef.current) {
-      endRef.current?.scrollIntoView({ block: "nearest" });
+    const transcript = transcriptRef.current;
+    if (transcript && followTranscriptRef.current) {
+      transcript.scrollTop = transcript.scrollHeight;
     }
   }, [
     conversation?.messages.length,
@@ -130,9 +131,13 @@ export function ConversationSurface({ className }: { className?: string }) {
   return (
     <div
       ref={surfaceRef}
-      className={cn("relative isolate flex min-h-0 flex-1 flex-col", className)}
+      className={cn(
+        "relative isolate flex min-h-0 flex-1 flex-col overflow-hidden",
+        className
+      )}
     >
       <div
+        ref={transcriptRef}
         data-slot="evry-transcript"
         onScroll={(event) => {
           const transcript = event.currentTarget;
@@ -145,7 +150,7 @@ export function ConversationSurface({ className }: { className?: string }) {
             focusInComposer: false,
           });
         }}
-        className="min-h-0 flex-1 scroll-pb-[calc(var(--evry-composer-height,8rem)+2.5rem+env(safe-area-inset-bottom))] overflow-y-auto overscroll-contain px-4 pt-5 pb-[calc(var(--evry-composer-height,8rem)+2.5rem+env(safe-area-inset-bottom))] sm:px-5"
+        className="relative min-h-0 flex-1 scroll-pb-[calc(var(--evry-composer-height,8rem)+2.5rem+env(safe-area-inset-bottom))] overflow-y-auto overscroll-contain px-4 pt-5 pb-[calc(var(--evry-composer-height,8rem)+2.5rem+env(safe-area-inset-bottom))] sm:px-5"
         aria-busy={isLoading}
       >
         <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col">
@@ -316,7 +321,6 @@ export function ConversationSurface({ className }: { className?: string }) {
               </Button>
             ) : null}
           </div>
-          <div ref={endRef} />
         </div>
       </div>
 
