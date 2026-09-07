@@ -268,7 +268,13 @@ test("real shell state survives stale route remounts for first and repeated New 
     if (String(args[0]).includes("react-test-renderer is deprecated")) return;
     process.stderr.write(`${args.map(String).join(" ")}\n`);
   });
-  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  Object.assign(globalThis, {
+    IS_REACT_ACT_ENVIRONMENT: true,
+    ResizeObserver: class {
+      observe() {}
+      disconnect() {}
+    },
+  });
   route.reset();
   let activeElement: FocusNode | null = null;
   const activeElementId = () => activeElement?.id ?? null;
@@ -376,7 +382,6 @@ test("real shell state survives stale route remounts for first and repeated New 
     createElement(EvryShell, {
       key,
       enabled: true,
-      eligibleSuggestions: [],
       children: createElement(RemountingRoute, {
         Surface: ConversationSurface,
         Workspace: ConversationHistoryWorkspace,

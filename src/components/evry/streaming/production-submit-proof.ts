@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mock, test } from "node:test";
 
-import { createElement, type ReactNode } from "react";
+import { createElement, useEffect, type ReactNode } from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 
 const emptySearchParams = new URLSearchParams();
@@ -43,7 +43,13 @@ test("the real composer commits a request-keyed acknowledgement before its POST 
     if (String(args[0]).includes("react-test-renderer is deprecated")) return;
     process.stderr.write(`${args.map(String).join(" ")}\n`);
   });
-  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  Object.assign(globalThis, {
+    IS_REACT_ACT_ENVIRONMENT: true,
+    ResizeObserver: class {
+      observe() {}
+      disconnect() {}
+    },
+  });
 
   let activeElement: FocusNode | null = null;
   const nodes = new Map<string, FocusNode>();
@@ -112,8 +118,12 @@ test("the real composer commits a request-keyed acknowledgement before its POST 
       import("@/components/evry/conversation-surface"),
     ]);
   const workSnapshots: boolean[] = [];
+  let currentShell!: ReturnType<typeof useEvryShell>;
   function SurfaceWithWorkProbe() {
     const shell = useEvryShell();
+    useEffect(() => {
+      currentShell = shell;
+    }, [shell]);
     workSnapshots.push(shell.isWorking);
     return createElement(ConversationSurface);
   }
@@ -122,14 +132,6 @@ test("the real composer commits a request-keyed acknowledgement before its POST 
     renderer = create(
       createElement(EvryShell, {
         enabled: true,
-        eligibleSuggestions: [
-          {
-            id: "people-follow-up",
-            module: "people",
-            request: "Show me who needs follow-up",
-            fallback: true,
-          },
-        ],
         children: createElement(SurfaceWithWorkProbe),
       }),
       {
@@ -159,7 +161,8 @@ test("the real composer commits a request-keyed acknowledgement before its POST 
   });
   assert.ok(renderer);
   const mounted = renderer as ReactTestRenderer;
-  assert.equal(renderedText(mounted, "Show me who needs follow-up"), true);
+  assert.equal(renderedText(mounted, "Show me who needs follow-up"), false);
+  assert.equal(renderedText(mounted, "What can I help you with today?"), true);
   const polite = mounted.root.findByProps({ role: "status" });
   const textarea = mounted.root.findByType("textarea");
   const composerIsBusy = () =>
@@ -180,7 +183,21 @@ test("the real composer commits a request-keyed acknowledgement before its POST 
 
   assert.equal(textarea.props["aria-busy"], true);
   assert.equal(workSnapshots.at(-1), true);
-  assert.equal(renderedText(mounted, "Checking this conversation"), true);
+  assert.equal(renderedText(mounted, "Analyzing your request…"), true);
+  assert.equal(renderedText(mounted, "Find people to follow up"), true);
+  assert.equal(textarea.props.value, "");
+  assert.equal(
+    mounted.root
+      .findByProps({ "aria-label": "Sending message" })
+      .findAllByType("p").length,
+    1
+  );
+  assert.ok(polite.findAllByType("form").length === 0);
+  assert.ok(
+    mounted.root
+      .findByProps({ "data-slot": "evry-transcript" })
+      .findAllByProps({ role: "status" }).length === 1
+  );
   assert.equal(renderedText(mounted, "Show me who needs follow-up"), false);
   assert.equal(mounted.root.findByProps({ role: "status" }), polite);
   for (let ancestor = polite.parent; ancestor; ancestor = ancestor.parent) {
@@ -319,6 +336,10 @@ test("the real composer commits a request-keyed acknowledgement before its POST 
   );
   assert.equal(textarea.props.value, "Find people to follow up");
   assert.equal(
+    mounted.root.findAllByProps({ "aria-label": "Sending message" }).length,
+    0
+  );
+  assert.equal(
     renderedText(mounted, "Which Taylor should join the meeting?"),
     true,
     "the durable frame is presented even though its terminal frame was lost"
@@ -378,6 +399,14 @@ test("the real composer commits a request-keyed acknowledgement before its POST 
   assert.equal(composerIsBusy(), false);
   assert.equal(workSnapshots.at(-1), false);
   assert.equal(renderedText(mounted, "Request saved."), true);
+  assert.ok(
+    mounted.root.findAll(
+      (node) =>
+        node.type === "div" &&
+        String(node.props.className).includes("sr-only") &&
+        node.findAllByProps({ role: "status" }).length === 1
+    ).length > 0
+  );
   assert.equal(mounted.root.findByProps({ role: "status" }), polite);
   assert.equal(activeElement, textarea.instance);
   assert.equal(
@@ -393,4 +422,78 @@ test("the real composer commits a request-keyed acknowledgement before its POST 
   });
   assert.equal(textarea.props.value, "Taylor Adams");
   assert.equal(activeElement, textarea.instance);
+
+  // A failed first request must survive a separately edited next draft.
+  await act(async () => {
+    form.props.onSubmit({ preventDefault() {} });
+    await Promise.resolve();
+    textarea.props.onChange({ target: { value: "Show me meetings" } });
+    resolvePost?.(new Response("Unavailable", { status: 503 }));
+  });
+  for (let attempt = 0; attempt < 20 && composerIsBusy(); attempt++) {
+    await act(async () => {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    });
+  }
+  assert.equal(textarea.props.value, "Show me meetings");
+  assert.equal(renderedText(mounted, "Taylor Adams"), true);
+  assert.equal(
+    mounted.root
+      .findByProps({ "aria-label": "Unsent message" })
+      .findAllByType("p").length,
+    1
+  );
+  const postsBeforeBlockedSend = postedUrls.length;
+  await act(async () => {
+    await currentShell.loadConversation("20000000-0000-4000-8000-000000000099");
+    currentShell.resetConversation();
+  });
+  assert.equal(
+    currentShell.conversation?.id,
+    nextConversation.id,
+    "an unresolved failure cannot move from chat A to chat B"
+  );
+  assert.equal(postedUrls.length, postsBeforeBlockedSend);
+  await act(async () => {
+    form.props.onSubmit({ preventDefault() {} });
+  });
+  assert.equal(postedUrls.length, postsBeforeBlockedSend);
+  const retry = mounted.root
+    .findAllByType("button")
+    .find((node) => node.children.includes("Retry"));
+  assert.ok(retry);
+  await act(async () => {
+    retry.props.onClick();
+    await Promise.resolve();
+  });
+  assert.equal(postedUrls.length, postsBeforeBlockedSend + 1);
+  assert.equal(
+    postedRequestIds.at(-1),
+    postedRequestIds.at(-2),
+    "retry keeps the original request identity"
+  );
+  assert.equal(activeElement, textarea.instance);
+  assert.equal(textarea.props.value, "Show me meetings");
+  await act(async () => {
+    resolvePost?.(new Response("Unavailable", { status: 503 }));
+  });
+  for (let attempt = 0; attempt < 20 && composerIsBusy(); attempt++) {
+    await act(async () => {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    });
+  }
+  const discard = mounted.root
+    .findAllByType("button")
+    .find((node) => node.children.includes("Discard"));
+  assert.ok(discard);
+  await act(() => {
+    discard.props.onClick();
+  });
+  assert.equal(activeElement, textarea.instance);
+  assert.equal(
+    mounted.root.findAllByProps({ "aria-label": "Unsent message" }).length,
+    0
+  );
+  assert.equal(textarea.props.value, "Show me meetings");
+  await act(() => mounted.unmount());
 });

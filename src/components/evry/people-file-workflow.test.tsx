@@ -12,6 +12,67 @@ type MockInput = {
   focus(): void;
 };
 
+test("a failed attachment stays selected and reports its error inside the form", async () => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  let renderer!: ReactTestRenderer;
+  let submissions = 0;
+  await act(() => {
+    renderer = create(
+      createElement(EvryPeopleFileWorkflowForm, {
+        personId: null,
+        isComposerBlocked: false,
+        isSending: false,
+        submitPeopleFile: async () => {
+          submissions++;
+          return {
+            status: "failed" as const,
+            message:
+              submissions > 1
+                ? "Choose a file that is 10 MB or smaller."
+                : undefined,
+          };
+        },
+      })
+    );
+  });
+  const file = new File(["name\nAlex"], "people.csv", { type: "text/csv" });
+  await act(() =>
+    renderer.root
+      .findByProps({ type: "file" })
+      .props.onChange({ target: { files: [file] } })
+  );
+  let stopped = false;
+  const submit = () =>
+    renderer.root.findByType("form").props.onSubmit({
+      preventDefault() {},
+      stopPropagation() {
+        stopped = true;
+      },
+    });
+  await act(submit);
+  assert.equal(
+    stopped,
+    true,
+    "a portal form must not bubble submission to the chat composer"
+  );
+  assert.equal(submissions, 1);
+  assert.match(
+    renderer.root.findByProps({ role: "alert" }).children.join(""),
+    /could not be prepared/
+  );
+  assert.equal(
+    renderer.root.findByProps({ type: "submit" }).props.disabled,
+    false
+  );
+  await act(submit);
+  assert.equal(submissions, 2, "the selected file is available to retry");
+  assert.equal(
+    renderer.root.findByProps({ role: "alert" }).children.join(""),
+    "Choose a file that is 10 MB or smaller."
+  );
+  await act(() => renderer.unmount());
+});
+
 test("clearing a file preserves its node and focus while resetting the native value", async (t) => {
   t.mock.method(console, "error", (...args: unknown[]) => {
     if (String(args[0]).includes("react-test-renderer is deprecated")) return;
@@ -75,7 +136,9 @@ test("clearing a file preserves its node and focus while resetting the native va
   );
 
   await act(() =>
-    mounted.root.findByType("form").props.onSubmit({ preventDefault() {} })
+    mounted.root
+      .findByType("form")
+      .props.onSubmit({ preventDefault() {}, stopPropagation() {} })
   );
   assert.equal(mounted.root.findAllByType("input")[0], fileInput);
   assert.equal(activeElement, fileNode);
@@ -162,7 +225,9 @@ test("CSV duplicate decisions are collected independently for each row", async (
     fileInput.props.onChange({ target: { files: [selectedFile] } })
   );
   await act(() =>
-    mounted.root.findByType("form").props.onSubmit({ preventDefault() {} })
+    mounted.root
+      .findByType("form")
+      .props.onSubmit({ preventDefault() {}, stopPropagation() {} })
   );
 
   const resolutionSelects = mounted.root
@@ -174,7 +239,9 @@ test("CSV duplicate decisions are collected independently for each row", async (
     resolutionSelects[1]!.props.onChange({ target: { value: "skip" } });
   });
   await act(() =>
-    mounted.root.findByType("form").props.onSubmit({ preventDefault() {} })
+    mounted.root
+      .findByType("form")
+      .props.onSubmit({ preventDefault() {}, stopPropagation() {} })
   );
 
   assert.deepEqual(
@@ -243,7 +310,9 @@ test("commitment files reject WebP specifically and submit optional notes", asyn
     });
   });
   await act(() =>
-    mounted.root.findByType("form").props.onSubmit({ preventDefault() {} })
+    mounted.root
+      .findByType("form")
+      .props.onSubmit({ preventDefault() {}, stopPropagation() {} })
   );
   assert.equal(
     (submitted as { notes: string }).notes,

@@ -65,7 +65,7 @@ const conversationService = read("lib", "evry", "conversations", "service.ts");
 test("one persistent shell owns the launcher, panel, and dedicated workspace state", () => {
   assert.match(
     layout,
-    /<HeaderProvider>[\s\S]*<EvryShell[\s\S]*enabled=\{evryEnabled\}[\s\S]*eligibleSuggestions=\{evrySuggestions\}/
+    /<HeaderProvider>[\s\S]*<EvryShell[\s\S]*enabled=\{evryEnabled\}/
   );
   assert.match(
     layout,
@@ -112,7 +112,7 @@ test("expand and browser Back retain provider state and reopen the panel", () =>
     shell,
     /if \(expandedFromPanel\) \{[\s\S]*setPanelOpen\(true\)[\s\S]*router\.back\(\)/
   );
-  assert.match(workspace, /onClick=\{returnToPage\}/);
+  assert.match(historyWorkspace, /onClick=\{returnToPage\}/);
   assert.match(
     shell,
     /previousPathname === "\/evry"[\s\S]*pathname !== "\/evry"[\s\S]*setPanelOpen\(true\)/
@@ -186,7 +186,10 @@ test("workspace URL sync cannot compete with App Router navigation and loads use
     shell,
     /requestedConversationId !== null \|\|[\s\S]*conversationLoadStateRef\.current\.latest !== null/
   );
-  assert.match(shell, /if \(isSending \|\| isWorking\) return/);
+  assert.match(
+    shell,
+    /isSending \|\| isWorking \|\| pendingMessage\?\.status === "failed"/
+  );
   assert.match(
     shell,
     /\[\s*cancelActiveConversationLoads,[\s\S]*conversation\?\.id,[\s\S]*isSending,[\s\S]*isWorking,[\s\S]*presentWork,[\s\S]*\]\s*\)/
@@ -280,7 +283,8 @@ test("loading remains understandable without motion", () => {
     2
   );
   assert.match(surface, /Opening conversation…/);
-  assert.match(surface, /Sending…/);
+  assert.match(shell, /Analyzing your request…/);
+  assert.match(surface, /"Sending message"/);
 });
 
 test("the synthetic streaming lifecycle is preview-only and split from the production bundle", () => {

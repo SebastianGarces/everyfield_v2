@@ -48,8 +48,6 @@ import {
   visibleEvryPageContextFor,
   type VisibleEvryPageContext,
 } from "./page-context";
-import { evrySuggestionsForPathname } from "./suggestions/pathname";
-import type { EligibleEvrySuggestion } from "./suggestions/types";
 import { evryWorkStateForConversation } from "./streaming/conversation-state";
 import type { EvryAcknowledgementTarget } from "./streaming/work-status";
 import {
@@ -94,6 +92,12 @@ type EvryShellValue = Readonly<{
   closePanel: () => void;
   conversation: PublicEvryConversation | null;
   draft: string;
+  pendingMessage: Readonly<{
+    body: string;
+    status: "sending" | "failed";
+    requestId: string;
+  }> | null;
+  discardPendingMessage: () => void;
   error: string | null;
   expandToWorkspace: () => void;
   finishWork: (requestId: string, sequence: number) => boolean;
@@ -126,7 +130,6 @@ type EvryShellValue = Readonly<{
     sequence: number,
     state: EvryWorkState
   ) => boolean;
-  suggestions: readonly EligibleEvrySuggestion[];
   submitPeopleFile: (
     input: EvryPeopleFileSubmission
   ) => Promise<EvryPeopleFileSubmissionResult>;
@@ -159,7 +162,7 @@ export type EvryPeopleFileSubmissionResult =
       status: "needs_duplicate_resolution";
       prepared: PreparedEvryPeopleFile;
     }>
-  | Readonly<{ status: "failed" }>;
+  | Readonly<{ status: "failed"; message?: string }>;
 
 const EvryShellContext = createContext<EvryShellValue | null>(null);
 
@@ -173,11 +176,9 @@ async function responseConversation(response: Response) {
 export function EvryShell({
   children,
   enabled,
-  eligibleSuggestions,
 }: {
   children: ReactNode;
   enabled: boolean;
-  eligibleSuggestions: readonly EligibleEvrySuggestion[];
 }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -189,15 +190,13 @@ export function EvryShell({
     () => visibleEvryPageContextFor(pathname, breadcrumbs),
     [breadcrumbs, pathname]
   );
-  const suggestions = useMemo(
-    () => evrySuggestionsForPathname(pathname, eligibleSuggestions),
-    [eligibleSuggestions, pathname]
-  );
   const [activeContext, setActiveContext] =
     useState<VisibleEvryPageContext | null>(null);
   const [conversation, setConversation] =
     useState<PublicEvryConversation | null>(null);
   const [draft, setDraftState] = useState("");
+  const [pendingMessage, setPendingMessage] =
+    useState<EvryShellValue["pendingMessage"]>(null);
   const [error, setError] = useState<string | null>(null);
   const [acknowledgement, setAcknowledgement] =
     useState<EvryAcknowledgementTarget | null>(null);
@@ -383,6 +382,9 @@ export function EvryShell({
         return false;
       }
       setConversation(nextConversation);
+      setPendingMessage((current) =>
+        current?.requestId === requestId ? null : current
+      );
       setError(null);
       return true;
     },
@@ -955,7 +957,7 @@ export function EvryShell({
 
   const loadConversation = useCallback(
     async (conversationId: string) => {
-      if (isSending || isWorking) return;
+      if (isSending || isWorking || pendingMessage?.status === "failed") return;
       if (pendingRecipeReuseRef.current || pendingRouteDepartureRef.current)
         return;
       if (conversation?.id === conversationId) {
@@ -1046,12 +1048,14 @@ export function EvryShell({
       conversation?.id,
       isSending,
       isWorking,
+      pendingMessage,
       presentWork,
     ]
   );
 
   const resetConversation = useCallback(() => {
     if (
+      pendingMessage?.status === "failed" ||
       isSending ||
       isWorking ||
       pendingRecipeReuseRef.current ||
@@ -1062,6 +1066,7 @@ export function EvryShell({
     mountedConversationIdRef.current = null;
     pendingSubmissionRef.current = null;
     setConversation(null);
+    setPendingMessage(null);
     setActiveContext(null);
     setDraft("");
     setError(null);
@@ -1072,6 +1077,7 @@ export function EvryShell({
     clearWork,
     isSending,
     isWorking,
+    pendingMessage,
     setDraft,
   ]);
 
@@ -1082,6 +1088,8 @@ export function EvryShell({
     const loadedConversationId = conversation?.id ?? null;
     if (
       message === null ||
+      (pendingMessage?.status === "failed" &&
+        message !== pendingMessage.body) ||
       isSending ||
       isWorking ||
       pendingRecipeReuseRef.current !== null ||
@@ -1101,15 +1109,18 @@ export function EvryShell({
     }
 
     const pageContext = activeContext?.wire ?? null;
-    const pendingSubmission = pendingEvrySubmissionFor(
-      pendingSubmissionRef.current,
-      {
-        conversationId: mountedConversationId,
-        message,
-        pageContext,
-      },
-      () => crypto.randomUUID()
-    );
+    const pendingSubmission =
+      pendingMessage?.status === "failed" && pendingSubmissionRef.current
+        ? pendingSubmissionRef.current
+        : pendingEvrySubmissionFor(
+            pendingSubmissionRef.current,
+            {
+              conversationId: mountedConversationId,
+              message,
+              pageContext,
+            },
+            () => crypto.randomUUID()
+          );
     setAcknowledgement({
       requestId: pendingSubmission.requestKey,
       submittedAt: performance.now(),
@@ -1120,16 +1131,30 @@ export function EvryShell({
       conversationId: mountedConversationId,
     });
     setSending(true);
+    setPendingMessage(
+      pendingSubmission.presentedConversationId
+        ? null
+        : {
+            body: message,
+            status: "sending",
+            requestId: pendingSubmission.requestKey,
+          }
+    );
+    setDraft(evryDraftAfterSubmission(draftRef.current, message));
     setError(null);
     beginWork(pendingSubmission.requestKey, {
       phase: "reading",
       message: pageContext
-        ? "Checking this conversation and page context"
-        : "Checking this conversation",
+        ? "Analyzing your request and page context…"
+        : "Analyzing your request…",
     });
     const controller = new AbortController();
     observeWith(pendingSubmission.requestKey, controller);
     let recoverAfterStream = false;
+    let messageSaved = pendingSubmission.presentedConversationId !== null;
+    const existingMessageIds = new Set(
+      conversation?.messages.map(({ id }) => id)
+    );
     try {
       pendingSubmissionRef.current = pendingSubmission;
       const body = evryConversationRequestBody(pendingSubmission);
@@ -1165,6 +1190,17 @@ export function EvryShell({
                 event.conversation
               )
             ) {
+              if (
+                event.conversation.messages.some(
+                  (candidate) =>
+                    candidate.author === "user" &&
+                    candidate.body === message &&
+                    !existingMessageIds.has(candidate.id)
+                )
+              ) {
+                messageSaved = true;
+                setPendingMessage(null);
+              }
               pendingSubmissionRef.current =
                 pendingEvrySubmissionAfterConversation(
                   pendingSubmission,
@@ -1189,7 +1225,6 @@ export function EvryShell({
       if (!streamed.sawComplete || lastSequence < 2) {
         throw new Error("Evry response did not complete.");
       }
-      setDraft(evryDraftAfterSubmission(draftRef.current, message));
       clearEvryRunRecoveryMarker(pendingSubmission.requestKey);
     } catch (cause) {
       if (
@@ -1202,11 +1237,17 @@ export function EvryShell({
         cause instanceof EvryConversationStreamFailure &&
         !cause.durableConversationSeen
       ) {
-        pendingSubmissionRef.current = null;
         clearEvryRunRecoveryMarker(pendingSubmission.requestKey);
       }
       const failure =
         "Unable to save your request. Check your connection and try again.";
+      if (draftRef.current.length === 0) setDraft(message);
+      if (!messageSaved)
+        setPendingMessage({
+          body: message,
+          status: "failed",
+          requestId: pendingSubmission.requestKey,
+        });
       setError(failure);
       const failureSequence =
         (sequencedWorkRef.current?.requestId === pendingSubmission.requestKey
@@ -1236,6 +1277,7 @@ export function EvryShell({
     beginWork,
     conversation,
     draft,
+    pendingMessage,
     finishWork,
     isLoading,
     isSending,
@@ -1412,7 +1454,7 @@ export function EvryShell({
           message: failure,
         });
         finishWork(workRequestId, 3);
-        return { status: "failed" };
+        return { status: "failed", message: failure };
       } finally {
         setSending(false);
       }
@@ -1444,12 +1486,17 @@ export function EvryShell({
       closePanel,
       conversation,
       draft,
+      pendingMessage,
+      discardPendingMessage: () => setPendingMessage(null),
       error,
       expandToWorkspace,
       finishWork,
       isEnabled: enabled,
       isComposerBlocked:
-        isLoading || isWorking || requestedConversationId !== null,
+        isLoading ||
+        isWorking ||
+        requestedConversationId !== null ||
+        pendingMessage?.status === "failed",
       isLoading,
       isPanelOpen,
       isSending,
@@ -1468,7 +1515,6 @@ export function EvryShell({
       setDraft,
       stopWatching,
       updateWork,
-      suggestions,
       submitPeopleFile,
       workRequestId: sequencedWork?.requestId ?? null,
       workState: sequencedWork?.state ?? { phase: "idle" },
@@ -1483,6 +1529,7 @@ export function EvryShell({
       closePanel,
       conversation,
       draft,
+      pendingMessage,
       enabled,
       error,
       expandToWorkspace,
@@ -1508,7 +1555,6 @@ export function EvryShell({
       stopWatching,
       startRecipeReuse,
       sequencedWork,
-      suggestions,
       submitPeopleFile,
       updateWork,
     ]

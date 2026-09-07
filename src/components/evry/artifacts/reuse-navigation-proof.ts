@@ -392,7 +392,6 @@ test("reuse owns delayed workspace navigation and ignores completion after depar
     renderer = create(
       createElement(EvryShell, {
         enabled: true,
-        eligibleSuggestions: [],
         children: createElement(ShellChildren),
       })
     );
@@ -558,7 +557,6 @@ test("reuse owns delayed workspace navigation and ignores completion after depar
     reloadedRenderer = create(
       createElement(EvryShell, {
         enabled: true,
-        eligibleSuggestions: [],
         children: createElement(ShellChildren),
       })
     );

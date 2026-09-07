@@ -160,7 +160,7 @@ const activePlanMutationSchema = z.discriminatedUnion("mode", [
 ]);
 const resultSchema = z.strictObject({
   body: z.string().trim().min(1).max(EVRY_CONVERSATION_MAX_MESSAGE_CHARACTERS),
-  artifacts: z.array(z.unknown()).min(1).max(16),
+  artifacts: z.array(z.unknown()).max(16),
   activePlan: activePlanMutationSchema.optional(),
 });
 
@@ -202,7 +202,6 @@ function isCompleteCapabilityResultMessage(
     message.deliveryStatus !== "complete" ||
     message.body.trim().length === 0 ||
     message.body.length > EVRY_CONVERSATION_MAX_MESSAGE_CHARACTERS ||
-    message.artifacts.length < 1 ||
     message.artifacts.length > 16
   ) {
     return false;

@@ -23,6 +23,7 @@ import {
   communicationEvryPlanTargetIsCurrent,
 } from "./communication/runtime";
 import { composeEvryCapabilityConversationContinuations } from "./conversation";
+import { continueEvryHelpConversation } from "./help";
 import { continueLaunchEvryConversation } from "./launch/conversation";
 import {
   LAUNCH_EVRY_EXECUTIONS,
@@ -126,6 +127,7 @@ export const PRODUCTION_EVRY_ARTIFACT_REVIEWS = Object.freeze([
 ]);
 
 export const PRODUCTION_EVRY_CAPABILITY_CONTINUATIONS = Object.freeze([
+  continueEvryHelpConversation,
   continueMeetingInvitationConversation,
   continueCommunicationEvryConversation,
   continueMeetingsEvryConversation,

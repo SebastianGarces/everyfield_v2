@@ -10,7 +10,7 @@ import type { EvryConversationHistoryItem } from "@/lib/evry/conversations/histo
 import { cn } from "@/lib/utils";
 
 import { ConversationHistoryCheckpoint } from "./history-checkpoint";
-import { ConversationHistoryList, HistoryStateBadge } from "./history-list";
+import { ConversationHistoryList } from "./history-list";
 import {
   awaitingEvryCreatedConversation,
   canUseEvryHistoryComposer,
@@ -47,6 +47,7 @@ export function ConversationHistoryWorkspace({
     isLoading,
     isSending,
     isWorking,
+    pendingMessage,
     loadConversation,
     resetConversation,
     sendMessageText,
@@ -96,6 +97,7 @@ export function ConversationHistoryWorkspace({
     ownsNewConversation && selectedConversationId === null && !isNewComposer;
   const hasDetail = selectedConversationId !== null || ownsNewConversation;
   const blocked =
+    pendingMessage?.status === "failed" ||
     isLoading ||
     isSending ||
     isWorking ||
@@ -346,7 +348,7 @@ export function ConversationHistoryWorkspace({
               state={selectedState}
               title={selectedConversation.title}
             />
-            {checkpoint ? (
+            {checkpoint?.rebuildRequired ? (
               <ConversationHistoryCheckpoint
                 checkpoint={checkpoint}
                 disabled={blocked || rebuildMessage === null}
@@ -457,7 +459,6 @@ function ConversationDetailHeader({
   blocked,
   headingRef,
   onBack,
-  state,
   title,
 }: {
   blocked: boolean;
@@ -466,8 +467,19 @@ function ConversationDetailHeader({
   state?: EvryConversationHistoryItem["actionableState"];
   title: string;
 }) {
+  const { returnToPage } = useEvryShell();
   return (
-    <header className="flex shrink-0 items-center gap-3 border-b px-4 py-3 sm:px-5">
+    <header className="flex min-h-12 shrink-0 items-center gap-3 border-b px-4 py-2 sm:px-5">
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        onClick={returnToPage}
+        aria-label="Return to previous page"
+        className="hidden cursor-pointer lg:inline-flex"
+      >
+        <ArrowLeft aria-hidden="true" />
+      </Button>
       <Button
         type="button"
         variant="ghost"
@@ -489,11 +501,7 @@ function ConversationDetailHeader({
         >
           {title}
         </h2>
-        <p className="text-muted-foreground text-sm">
-          Your private Evry conversation
-        </p>
       </div>
-      {state ? <HistoryStateBadge state={state} /> : null}
     </header>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { LoaderCircle, MapPin, Send, X } from "lucide-react";
+import { ArrowUp, LoaderCircle, MapPin, X } from "lucide-react";
 import { useEffect, useRef } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -12,11 +12,6 @@ import { EvryArtifactRenderer } from "./artifacts/artifact-renderer";
 import { EvryProductionArtifact } from "./artifacts/production-artifact";
 import { useEvryShell } from "./evry-shell";
 import type { VisibleEvryPageContext } from "./page-context";
-import { EvrySuggestionList } from "./suggestions/suggestion-list";
-import {
-  populateComposerFromSuggestion,
-  shouldOfferEvrySuggestions,
-} from "./suggestions/interaction";
 import { EvryWorkStatus } from "./streaming/work-status";
 import { shouldFollowEvryTranscript } from "./interaction-state";
 import { EvryPeopleFileWorkflow } from "./people-file-workflow";
@@ -61,6 +56,8 @@ export function ConversationSurface({ className }: { className?: string }) {
     clearContext,
     conversation,
     draft,
+    pendingMessage,
+    discardPendingMessage,
     error,
     isComposerBlocked,
     isLoading,
@@ -68,21 +65,29 @@ export function ConversationSurface({ className }: { className?: string }) {
     isWatchingDetached,
     resumeWatching,
     sendMessage,
+    sendMessageText,
     setDraft,
     stopWatching,
-    suggestions,
     workRequestId,
     workState,
   } = useEvryShell();
   const endRef = useRef<HTMLDivElement>(null);
+  const surfaceRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<HTMLFormElement>(null);
   const followTranscriptRef = useRef(true);
   const latestMessage = conversation?.messages.at(-1);
-  const showSuggestions =
-    !isSending &&
-    workState.phase !== "reading" &&
-    workState.phase !== "planning" &&
-    workState.phase !== "execution" &&
-    shouldOfferEvrySuggestions(conversation);
+  useEffect(() => {
+    const composer = composerRef.current;
+    if (!composer) return;
+    const observer = new ResizeObserver(() => {
+      surfaceRef.current?.style.setProperty(
+        "--evry-composer-height",
+        `${composer.offsetHeight}px`
+      );
+    });
+    observer.observe(composer);
+    return () => observer.disconnect();
+  }, []);
   const activeArtifactId =
     conversation?.messages
       .flatMap((message) => message.artifacts)
@@ -113,10 +118,20 @@ export function ConversationSurface({ className }: { className?: string }) {
     if (followTranscriptRef.current) {
       endRef.current?.scrollIntoView({ block: "nearest" });
     }
-  }, [conversation?.messages.length, latestMessage, isLoading, isSending]);
+  }, [
+    conversation?.messages.length,
+    latestMessage,
+    isLoading,
+    isSending,
+    pendingMessage,
+    workState,
+  ]);
 
   return (
-    <div className={cn("flex min-h-0 flex-1 flex-col", className)}>
+    <div
+      ref={surfaceRef}
+      className={cn("relative isolate flex min-h-0 flex-1 flex-col", className)}
+    >
       <div
         data-slot="evry-transcript"
         onScroll={(event) => {
@@ -130,10 +145,10 @@ export function ConversationSurface({ className }: { className?: string }) {
             focusInComposer: false,
           });
         }}
-        className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5 sm:px-5"
+        className="min-h-0 flex-1 scroll-pb-[calc(var(--evry-composer-height,8rem)+2.5rem+env(safe-area-inset-bottom))] overflow-y-auto overscroll-contain px-4 pt-5 pb-[calc(var(--evry-composer-height,8rem)+2.5rem+env(safe-area-inset-bottom))] sm:px-5"
         aria-busy={isLoading}
       >
-        <div className="mx-auto w-full max-w-3xl">
+        <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col">
           {isLoading ? (
             <div className="text-muted-foreground flex min-h-32 items-center justify-center gap-2 text-sm">
               <LoaderCircle
@@ -218,56 +233,97 @@ export function ConversationSurface({ className }: { className?: string }) {
                   </li>
                 ))}
               </ol>
-              {showSuggestions ? (
-                <EvrySuggestionList
-                  suggestions={suggestions}
-                  onSelect={(suggestion) =>
-                    populateComposerFromSuggestion(suggestion, setDraft, () =>
-                      document.getElementById("evry-message")?.focus()
-                    )
-                  }
-                />
-              ) : null}
             </div>
-          ) : (
-            <div className="mx-auto flex min-h-48 max-w-sm flex-col items-center justify-center text-center">
-              <div className="bg-muted mb-4 grid size-10 place-items-center rounded-full">
-                <Send
-                  aria-hidden="true"
-                  className="text-muted-foreground size-4"
-                />
-              </div>
-              <h2 className="font-semibold">Start with an EveryField task</h2>
-              <p className="text-muted-foreground mt-1 text-sm leading-relaxed text-pretty">
-                Ask Evry to help with people, meetings, teams, tasks, or your
-                launch.
+          ) : !pendingMessage && !isSending ? (
+            <div className="flex flex-1 items-center justify-center py-12 text-center">
+              <h2 className="text-2xl font-medium text-balance sm:text-3xl">
+                What can I help you with today?
+              </h2>
+            </div>
+          ) : null}
+          {pendingMessage ? (
+            <div
+              className="mt-4 flex flex-col items-end gap-2"
+              aria-label={
+                pendingMessage.status === "failed"
+                  ? "Unsent message"
+                  : "Sending message"
+              }
+            >
+              <p className="bg-primary text-primary-foreground max-w-[92%] rounded-xl px-3.5 py-2.5 text-sm leading-relaxed [overflow-wrap:anywhere] whitespace-pre-wrap sm:max-w-[88%]">
+                <span className="sr-only">You: </span>
+                {pendingMessage.body}
               </p>
-              {showSuggestions ? (
-                <div className="mt-6 w-full">
-                  <EvrySuggestionList
-                    suggestions={suggestions}
-                    onSelect={(suggestion) =>
-                      populateComposerFromSuggestion(suggestion, setDraft, () =>
-                        document.getElementById("evry-message")?.focus()
-                      )
-                    }
-                  />
+              {pendingMessage.status === "failed" ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-muted-foreground text-sm">
+                    Not sent
+                  </span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="min-h-11 cursor-pointer"
+                    onClick={() => {
+                      document.getElementById("evry-message")?.focus();
+                      void sendMessageText(pendingMessage.body);
+                    }}
+                  >
+                    Retry
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="min-h-11 cursor-pointer"
+                    onClick={() => {
+                      document.getElementById("evry-message")?.focus();
+                      discardPendingMessage();
+                    }}
+                  >
+                    Discard
+                  </Button>
                 </div>
               ) : null}
             </div>
-          )}
+          ) : null}
+          <div className="mt-4 space-y-1">
+            <div
+              className={cn(
+                !error &&
+                  (workState.phase === "complete" ||
+                    workState.phase === "confirmation") &&
+                  "sr-only focus-within:not-sr-only"
+              )}
+            >
+              <EvryWorkStatus
+                acknowledgement={acknowledgement}
+                activeRequestId={workRequestId}
+                state={
+                  error && workState.phase !== "failed"
+                    ? { phase: "failed", message: error }
+                    : workState
+                }
+              />
+            </div>
+            {canStopWatching || isWatchingDetached ? (
+              <Button
+                type="button"
+                variant="link"
+                size="sm"
+                className="min-h-11 px-0"
+                onClick={isWatchingDetached ? resumeWatching : stopWatching}
+              >
+                {isWatchingDetached ? "Reconnect to this run" : "Stop watching"}
+              </Button>
+            ) : null}
+          </div>
           <div ref={endRef} />
         </div>
       </div>
 
-      <div className="bg-background shrink-0 border-t px-4 pt-4 sm:px-5 sm:pt-5">
-        <div className="mx-auto w-full max-w-3xl">
-          <EvryPeopleFileWorkflow />
-        </div>
-      </div>
-
       <form
-        className="bg-background mx-auto w-full max-w-3xl shrink-0 space-y-3 p-4 sm:p-5"
+        ref={composerRef}
+        data-slot="evry-composer"
+        className="bg-background focus-within:ring-ring absolute inset-x-3 bottom-[calc(0.75rem+env(safe-area-inset-bottom))] z-10 mx-auto max-w-3xl space-y-2 rounded-2xl border p-2 shadow-lg focus-within:ring-2 sm:inset-x-5"
         onSubmit={(event) => {
           event.preventDefault();
           followTranscriptRef.current = true;
@@ -279,51 +335,43 @@ export function ConversationSurface({ className }: { className?: string }) {
         ) : null}
 
         <div className="space-y-2">
-          <label htmlFor="evry-message" className="text-sm font-medium">
+          <label htmlFor="evry-message" className="sr-only">
             Message Evry
           </label>
           <Textarea
             id="evry-message"
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
-            placeholder="Ask Evry about your work"
-            rows={3}
+            placeholder="Message Evry…"
+            rows={1}
+            onKeyDown={(event) => {
+              if (
+                event.key === "Enter" &&
+                !event.shiftKey &&
+                !event.nativeEvent.isComposing
+              ) {
+                event.preventDefault();
+                if (!isSending && !isComposerBlocked && draft.trim())
+                  event.currentTarget.form?.requestSubmit();
+              }
+            }}
             required
             maxLength={8_000}
             aria-busy={isSending}
-            className="max-h-40 min-h-20 resize-y text-base sm:text-sm"
+            className="field-sizing-content max-h-40 min-h-12 resize-none border-0 bg-transparent px-3 py-3 text-base shadow-none focus-visible:ring-0 sm:text-sm dark:bg-transparent"
           />
         </div>
 
         <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0 flex-1 space-y-1">
-            <EvryWorkStatus
-              acknowledgement={acknowledgement}
-              activeRequestId={workRequestId}
-              state={
-                error && workState.phase !== "failed"
-                  ? { phase: "failed", message: error }
-                  : workState
-              }
-            />
-            {canStopWatching || isWatchingDetached ? (
-              <Button
-                type="button"
-                variant="link"
-                size="sm"
-                className="h-auto min-h-6 cursor-pointer px-0 py-0.5"
-                onClick={isWatchingDetached ? resumeWatching : stopWatching}
-              >
-                {isWatchingDetached ? "Reconnect to this run" : "Stop watching"}
-              </Button>
-            ) : null}
-          </div>
+          <EvryPeopleFileWorkflow />
           <Button
             type="submit"
             disabled={
               draft.trim().length === 0 || isSending || isComposerBlocked
             }
-            className="cursor-pointer active:scale-[0.96]"
+            aria-label="Send message"
+            size="icon"
+            className="size-11 cursor-pointer rounded-full"
           >
             {isSending ? (
               <LoaderCircle
@@ -331,9 +379,8 @@ export function ConversationSurface({ className }: { className?: string }) {
                 className="animate-spin motion-reduce:animate-none"
               />
             ) : (
-              <Send aria-hidden="true" />
+              <ArrowUp aria-hidden="true" />
             )}
-            {isSending ? "Sending…" : "Send"}
           </Button>
         </div>
       </form>

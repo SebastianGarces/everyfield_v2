@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { INITIAL_MEETING_CONFIRMATION } from "@/lib/evry/artifacts/fixtures";
+import { continueEvryHelpConversation } from "./help";
 import { storedEvryClarificationArtifactDocument } from "@/lib/evry/conversations/artifacts";
 import type { EvryStoredConversation } from "@/lib/evry/conversations/repository";
 
@@ -235,7 +236,7 @@ test("a durable request result is recovered before match or append work", async 
 test("interrupted, empty, and corrupt deterministic rows do not count as durable results", () => {
   const malformed = [
     durableResultMessage({ deliveryStatus: "interrupted" }),
-    durableResultMessage({ artifacts: [] }),
+    durableResultMessage({ body: "", artifacts: [] }),
     durableResultMessage({
       artifacts: [
         {
@@ -257,6 +258,34 @@ test("interrupted, empty, and corrupt deterministic rows do not count as durable
       false
     );
   }
+});
+
+test("help appends a plain reply, preserves a pending plan, and replays without duplication", async () => {
+  const appendCalls: unknown[] = [];
+  const dispatcher = composeEvryCapabilityConversationContinuations([
+    continueEvryHelpConversation,
+  ]);
+  const input = selectionInput({ appendCalls });
+  Object.assign(input, { literalUserText: "What can you do for me?" });
+  assert.equal(dispatcher.matchesBeforeReferences(input), true);
+  await dispatcher(input);
+  assert.equal(appendCalls.length, 1);
+  const result = appendCalls[0] as {
+    body: string;
+    artifacts: unknown[];
+    activePlan: unknown;
+  };
+  assert.match(result.body, /find people who need follow-up/);
+  assert.deepEqual(result.artifacts, []);
+  assert.deepEqual(result.activePlan, { mode: "preserve" });
+  const current = conversation([
+    durableResultMessage({ body: result.body, artifacts: [] }),
+  ]);
+  assert.equal(
+    await dispatcher(selectionInput({ current, appendCalls })),
+    current
+  );
+  assert.equal(appendCalls.length, 1);
 });
 
 test("an active plan is one-to-one with one exact trusted confirmation", async () => {

@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { parseEvryActionPlanCandidate } from "@/lib/evry/plans";
-import { EVRY_SUGGESTION_CATALOG } from "@/components/evry/suggestions/catalog";
 import { boundaryArtifactFor } from "@/lib/evry/policy/artifacts";
+import { EVRY_HELP_REQUESTS } from "./help";
 
 import { continueCommunicationEvryConversation } from "./communication/conversation";
 import communicationInventory from "./communication/inventory.generated.json";
@@ -36,9 +36,9 @@ const PRODUCTION_CAPABILITIES = [
   ...taskInventory.capabilities,
 ];
 
-test("every displayed suggestion and boundary example matches exactly one installed conversation capability", () => {
+test("every help question and boundary example matches exactly one installed conversation capability", () => {
   for (const request of [
-    ...EVRY_SUGGESTION_CATALOG.map(({ request }) => request),
+    ...EVRY_HELP_REQUESTS,
     ...boundaryArtifactFor("ambiguous").examples,
   ]) {
     const matches = PRODUCTION_EVRY_CAPABILITY_CONTINUATIONS.filter(
