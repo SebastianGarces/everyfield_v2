@@ -1,6 +1,7 @@
 "use client";
 
 import { AlertCircle, LoaderCircle } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 import type { PublicEvryConversation } from "@/components/evry/client-contract";
@@ -208,6 +209,7 @@ export function EvryProductionArtifact({
   const confirmation = detailedConfirmation(artifact);
   const progress = detailedProgress(artifact);
   const receipt = detailedReceipt(artifact);
+  const router = useRouter();
   const {
     applyWorkConversation,
     beginWork,
@@ -341,6 +343,12 @@ export function EvryProductionArtifact({
         finishWork(requestKey, 3);
       } else {
         finishWork(requestKey, 2);
+      }
+      if (action === "execute" || action === "retry") {
+        // Evry stays on the current application page. Re-read that page and its
+        // shared layouts after an effect so domain content and shell counters
+        // reconcile exactly as their owning staying actions do.
+        router.refresh();
       }
       setState({ status: "complete", action });
       if (action === "edit" && confirmation) onEdit(confirmation);

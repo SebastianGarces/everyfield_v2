@@ -14,6 +14,10 @@ import {
   PLANT_INTELLIGENCE_CAPABILITIES,
 } from "@/lib/evry/capabilities/plant-intelligence/catalog";
 import {
+  PLATFORM_AUTHORITATIVE_SURFACES,
+  PLATFORM_CAPABILITIES,
+} from "@/lib/evry/capabilities/platform/catalog";
+import {
   ALL_CAPABILITIES,
   holdsSeatFor,
   type Capability,
@@ -340,6 +344,15 @@ const REGISTRY = createEvryCapabilityRegistry({
     ...MEETINGS_OPERATION_REGISTRATIONS,
     ...TASK_CAPABILITY_REGISTRATIONS,
     ...TEAMS_CAPABILITY_REGISTRATIONS,
+    ...PLATFORM_CAPABILITIES.map((capability) =>
+      defineEvryCapabilityRegistration({
+        identity: capability.identity,
+        surfaceIdentities: capability.surfaceIdentities,
+        parityCapability: capability.parityCapability,
+        operationKind: capability.operationKind,
+        applicationCapability: capability.applicationCapability,
+      })
+    ),
     ...REFERENCE_REGISTRATIONS,
   ],
   authoritativeSurfaces: [
@@ -351,6 +364,7 @@ const REGISTRY = createEvryCapabilityRegistry({
     ...generatedMeetingsSurfaces(),
     ...TASK_AUTHORITATIVE_SURFACES,
     ...TEAMS_AUTHORITATIVE_SURFACES,
+    ...PLATFORM_AUTHORITATIVE_SURFACES,
     ...referenceSurfaces(),
   ],
 });

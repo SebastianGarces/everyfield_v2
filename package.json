@@ -33,6 +33,8 @@
     "evry:teams-inventory:check": "tsx ops/evry/generate-teams-inventory.ts --check",
     "evry:plant-intelligence-inventory": "tsx ops/evry/generate-plant-intelligence-inventory.ts",
     "evry:plant-intelligence-inventory:check": "tsx ops/evry/generate-plant-intelligence-inventory.ts --check",
+    "evry:platform-inventory": "tsx ops/evry/generate-platform-inventory.ts",
+    "evry:platform-inventory:check": "tsx ops/evry/generate-platform-inventory.ts --check",
     "evry:cost:audit": "node ops/evry-cost-audit.mjs",
     "evry:benchmark": "tsx --env-file-if-exists=.env.local scripts/evry-model-benchmark.ts",
     "evry:verify-selected-model": "node --no-warnings --experimental-test-module-mocks --import tsx --env-file-if-exists=.env.local src/app/api/evry/requests/selected-model-live-proof.ts",

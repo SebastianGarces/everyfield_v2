@@ -61,6 +61,7 @@ export const TASK_EFFECT_LIVE_SUITE =
   "src/lib/evry/capabilities/tasks/effect-live.test.ts" as const;
 
 export const NESTED_PROOF_LIVE_SUITES = [
+  "src/lib/evry/capabilities/platform/effect-live.test.ts",
   "src/lib/evry/capabilities/plant-intelligence/effect-live.test.ts",
   DOCUMENTS_WIKI_EFFECT_LIVE_SUITE,
   PEOPLE_EFFECT_LIVE_SUITE,
@@ -91,6 +92,7 @@ export const LIVE_SUITES = [
   "src/lib/evry/capabilities/teams/effect-live.test.ts",
   "src/lib/evry/executor/executor-live.test.ts",
   "src/lib/evry/capabilities/launch/effect-live.test.ts",
+  "src/lib/evry/capabilities/platform/effect-live.test.ts",
   "src/lib/evry/recipes/recipe-live.test.ts",
   "src/lib/evry/runs/runs-live.test.ts",
   "src/lib/ministry-teams/leader-sync-live.test.ts",

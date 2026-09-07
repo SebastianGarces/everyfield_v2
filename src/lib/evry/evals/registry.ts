@@ -1,3 +1,4 @@
+import platformInventory from "@/lib/evry/capabilities/platform/inventory.generated.json";
 import { PLANT_INTELLIGENCE_EVAL_FIXTURES } from "@/lib/evry/capabilities/plant-intelligence/eval-fixtures";
 import {
   ADD_GUESTS_IDENTITY,
@@ -165,6 +166,30 @@ export const EVRY_EVAL_PROOFS: readonly EvryEvalProof[] = Object.freeze([
       "plan_approval_mismatch",
       "cross_tenant_access",
     ],
+  },
+  {
+    id: "platform-capability-contract",
+    testFile: "src/lib/evry/capabilities/platform/eval-fixtures.test.ts",
+    lane: "deterministic",
+    safetyGates: [],
+  },
+  {
+    id: "platform-read-contract",
+    testFile: "src/lib/evry/capabilities/platform/reads.test.ts",
+    lane: "deterministic",
+    safetyGates: [],
+  },
+  {
+    id: "platform-behavior-contract",
+    testFile: "src/lib/evry/capabilities/platform/eval-behavior.test.ts",
+    lane: "deterministic",
+    safetyGates: [],
+  },
+  {
+    id: "platform-effect-live",
+    testFile: "src/lib/evry/capabilities/platform/effect-live.test.ts",
+    lane: "live_database",
+    safetyGates: [],
   },
   {
     id: "candidate-plan-probe-contract",
@@ -394,6 +419,70 @@ function teamsCapabilityFixture(
  * this release corpus. Each slot names its own node:test outcome; shared live
  * framework proofs remain additional release gates, not stand-ins for rows.
  */
+function platformCapabilityFixture(
+  capabilityIdentity: string,
+  operationKind: string
+): EvryCapabilityEvalFixture {
+  if (operationKind !== "read" && operationKind !== "effect") {
+    throw new Error(
+      `Platform capability ${capabilityIdentity} has an invalid operation kind`
+    );
+  }
+  const liveLayers = new Set<EvryCapabilityEvalLayer>([
+    "tenancy",
+    "permission",
+    "execution",
+    "idempotency",
+    "errors",
+  ]);
+  const evalCase = (layer: EvryCapabilityEvalLayer) => {
+    const live = operationKind === "effect" && liveLayers.has(layer);
+    const behavior =
+      layer === "policy" ||
+      layer === "selection" ||
+      layer === "arguments" ||
+      layer === "confirmation" ||
+      layer === "ui_artifact" ||
+      (operationKind === "read" &&
+        (layer === "tenancy" || layer === "permission"));
+    const readRuntime = operationKind === "read" && liveLayers.has(layer);
+    return [
+      Object.freeze({
+        id: `${capabilityIdentity}:${layer}`,
+        proofId: live
+          ? "platform-effect-live"
+          : behavior
+            ? "platform-behavior-contract"
+            : readRuntime
+              ? "platform-read-contract"
+              : "platform-capability-contract",
+        testName: live
+          ? `${capabilityIdentity}:${layer}:live`
+          : behavior
+            ? `${capabilityIdentity}:${layer}:behavior`
+            : readRuntime
+              ? `${capabilityIdentity}:${layer}:read`
+              : `${capabilityIdentity}:${layer}`,
+      }),
+    ];
+  };
+  return defineEvryCapabilityEvalFixture({
+    capabilityIdentity,
+    cases: {
+      policy: evalCase("policy"),
+      selection: evalCase("selection"),
+      arguments: evalCase("arguments"),
+      tenancy: evalCase("tenancy"),
+      permission: evalCase("permission"),
+      confirmation: evalCase("confirmation"),
+      execution: evalCase("execution"),
+      idempotency: evalCase("idempotency"),
+      errors: evalCase("errors"),
+      ui_artifact: evalCase("ui_artifact"),
+    },
+  });
+}
+
 export const EVRY_CAPABILITY_EVAL_FIXTURES = Object.freeze([
   ...[CREATE_MEETING_IDENTITY, ADD_GUESTS_IDENTITY, SEND_MESSAGE_IDENTITY]
     .filter(
@@ -416,6 +505,7 @@ export const EVRY_CAPABILITY_EVAL_FIXTURES = Object.freeze([
   ...PEOPLE_CAPABILITY_EVAL_FIXTURES,
   ...DOCUMENTS_WIKI_CAPABILITY_EVAL_FIXTURES,
   ...PLANT_INTELLIGENCE_EVAL_FIXTURES,
+  ...platformInventory.capabilities.map(({identity, operationKind}) => platformCapabilityFixture(identity, operationKind)),
   ...TASK_CAPABILITY_EVAL_FIXTURES,
   ...teamsInventory.capabilities.map(({ identity, operationKind }) =>
     teamsCapabilityFixture(identity, operationKind)
