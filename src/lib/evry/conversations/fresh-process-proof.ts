@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { mock } from "node:test";
+import type { EvryCapabilityConversationRunner } from "@/lib/evry/capabilities/conversation";
 
 const START = new Date("2026-08-20T12:00:00.000Z");
 const RETURN = new Date("2026-08-28T12:00:00.000Z");
@@ -52,6 +53,20 @@ async function response(result: Response) {
   };
 }
 
+// Preserve production replay semantics while isolating this DB proof from paid generation.
+const storageOnlyContinuation: EvryCapabilityConversationRunner = async (
+  input
+) => {
+  const { hasDurableEvryCapabilityConversationResult } =
+    await import("@/lib/evry/capabilities/conversation");
+  return hasDurableEvryCapabilityConversationResult({
+    conversation: input.conversation,
+    userRequestKey: input.userRequestKey,
+  })
+    ? input.conversation
+    : null;
+};
+
 async function createProof(): Promise<void> {
   const contract = await import("./contract");
   const artifacts = await import("./artifacts");
@@ -86,7 +101,7 @@ async function createProof(): Promise<void> {
           return await service.createEvryConversation({
             ...input,
             // This proof owns real persistence, not paid provider behavior.
-            continueCapabilityConversation: async () => null,
+            continueCapabilityConversation: storageOnlyContinuation,
           });
         } catch (error) {
           console.error("fresh-process create cause", error);
@@ -372,7 +387,7 @@ async function resumeProof(): Promise<void> {
     now: () => RETURN,
     continueConversation: (input) =>
       service.continueEvryConversation({
-        continueCapabilityConversation: async () => null,
+        continueCapabilityConversation: storageOnlyContinuation,
         ...input,
         revalidatePlan,
       }),
