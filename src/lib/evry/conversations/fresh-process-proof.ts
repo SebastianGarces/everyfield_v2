@@ -83,7 +83,11 @@ async function createProof(): Promise<void> {
       now: () => START,
       create: async (input) => {
         try {
-          return await service.createEvryConversation(input);
+          return await service.createEvryConversation({
+            ...input,
+            // This proof owns real persistence, not paid provider behavior.
+            continueCapabilityConversation: async () => null,
+          });
         } catch (error) {
           console.error("fresh-process create cause", error);
           throw error;
@@ -368,6 +372,7 @@ async function resumeProof(): Promise<void> {
     now: () => RETURN,
     continueConversation: (input) =>
       service.continueEvryConversation({
+        continueCapabilityConversation: async () => null,
         ...input,
         revalidatePlan,
       }),
