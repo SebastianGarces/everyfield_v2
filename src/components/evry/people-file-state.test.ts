@@ -6,6 +6,7 @@ import {
   evryPeopleFilePlanBody,
   pendingPeopleFileSubmissionFor,
   preparedEvryPeopleFileFromStage,
+  preparedEvryPeopleUploadFromResponse,
 } from "./people-file-state";
 
 test("file retries retain their request key only for the same semantic input", () => {
@@ -109,6 +110,41 @@ test("prepared file identity is bound to the staged SHA-256", () => {
     }),
     null
   );
+});
+
+test("prepared upload accepts only the closed chunk transport contract", () => {
+  const reference = "r".repeat(512);
+  assert.deepEqual(
+    preparedEvryPeopleUploadFromResponse({
+      status: "prepared",
+      reference,
+      chunkBytes: 3 * 1024 * 1024,
+      chunkCount: 4,
+    }),
+    { reference, chunkBytes: 3 * 1024 * 1024, chunkCount: 4 }
+  );
+  for (const hostile of [
+    {
+      status: "prepared",
+      reference,
+      chunkBytes: 4 * 1024 * 1024,
+      chunkCount: 3,
+    },
+    {
+      status: "prepared",
+      reference,
+      chunkBytes: 3 * 1024 * 1024,
+      chunkCount: 5,
+    },
+    {
+      status: "prepared",
+      reference: "",
+      chunkBytes: 3 * 1024 * 1024,
+      chunkCount: 1,
+    },
+  ]) {
+    assert.equal(preparedEvryPeopleUploadFromResponse(hostile), null);
+  }
 });
 
 test("reads duplicate row numbers only from the typed staging artifact", () => {

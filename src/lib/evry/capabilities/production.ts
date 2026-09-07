@@ -44,6 +44,15 @@ import {
   meetingsPlanTargetIsCurrent,
 } from "./meetings/runtime";
 import { continuePeopleCoreConversation } from "./people/core-conversation";
+import { continueDocumentsWikiEffectConversation } from "./documents-wiki/effect-conversation";
+import { continueDocumentsWikiReadConversation } from "./documents-wiki/read-conversation";
+import {
+  DOCUMENTS_WIKI_EFFECT_IDENTITIES,
+  DOCUMENTS_WIKI_EXECUTIONS,
+  DOCUMENTS_WIKI_REVIEWS,
+  documentsWikiTargetIsCurrent,
+} from "./documents-wiki/effects";
+import { DOCUMENTS_WIKI_READ_REGISTRATIONS } from "./documents-wiki/reads";
 import {
   PEOPLE_CORE_EXECUTIONS,
   PEOPLE_CORE_IDENTITIES,
@@ -136,6 +145,7 @@ export const PRODUCTION_EVRY_ARTIFACT_REVIEWS = Object.freeze([
   ...HOUSEHOLD_REVIEWS,
   ...MILESTONE_REVIEWS,
   ...PEOPLE_FILE_REVIEWS,
+  ...DOCUMENTS_WIKI_REVIEWS,
   ...TASK_ARTIFACT_REVIEWS,
   ...TEAMS_ARTIFACT_REVIEWS,
 ]);
@@ -152,6 +162,8 @@ export const PRODUCTION_EVRY_CAPABILITY_CONTINUATIONS = Object.freeze([
   continuePeopleTaxonomyConversation,
   continuePeopleHouseholdConversation,
   continuePeopleMilestoneConversation,
+  continueDocumentsWikiReadConversation,
+  continueDocumentsWikiEffectConversation,
   continueTaskEvryConversation,
   continueTeamsEvryConversation,
 ]);
@@ -185,6 +197,7 @@ export const PRODUCTION_EVRY_EXECUTION_REGISTRY =
     ...MEETINGS_EXECUTION_CAPABILITIES,
     ...LAUNCH_EVRY_EXECUTIONS,
     ...PRODUCTION_PEOPLE_EFFECT_EXECUTIONS,
+    ...DOCUMENTS_WIKI_EXECUTIONS,
     ...TASK_EXECUTION_CAPABILITIES,
     ...TEAMS_EXECUTION_CAPABILITIES,
   ]);
@@ -193,19 +206,23 @@ export const PRODUCTION_EVRY_PLAN_REGISTRY =
 export const PRODUCTION_EVRY_REVIEW_REGISTRY = createEvryArtifactReviewRegistry(
   PRODUCTION_EVRY_ARTIFACT_REVIEWS
 );
-export const PRODUCTION_EVRY_READ_REGISTRATIONS = Object.freeze([
+const PRODUCTION_PEOPLE_READ_REGISTRATIONS = Object.freeze([
   PEOPLE_EVRY_LIST_READ,
   PEOPLE_EVRY_ACTIVITIES_READ,
   PEOPLE_EVRY_MORE_ACTIVITIES_READ,
   ...PEOPLE_DOMAIN_READ_REGISTRATIONS,
   ...PEOPLE_FILE_READ_REGISTRATIONS,
 ]);
+export const PRODUCTION_EVRY_READ_REGISTRATIONS = Object.freeze([
+  ...PRODUCTION_PEOPLE_READ_REGISTRATIONS,
+  ...DOCUMENTS_WIKI_READ_REGISTRATIONS,
+]);
 export const PRODUCTION_EVRY_PEOPLE_CAPABILITY_IDENTITIES = Object.freeze(
   [
     ...PRODUCTION_PEOPLE_EFFECT_EXECUTIONS.map(
       ({ planCapability }) => planCapability.identity
     ),
-    ...PRODUCTION_EVRY_READ_REGISTRATIONS.map(
+    ...PRODUCTION_PEOPLE_READ_REGISTRATIONS.map(
       ({ capabilityIdentity }) => capabilityIdentity
     ),
   ].toSorted()
@@ -341,6 +358,9 @@ const MILESTONE_IDENTITY_SET = new Set<string>(
 const FILE_IDENTITY_SET = new Set<string>(
   Object.values(PEOPLE_FILE_IDENTITIES)
 );
+const DOCUMENTS_WIKI_IDENTITY_SET = new Set<string>(
+  Object.values(DOCUMENTS_WIKI_EFFECT_IDENTITIES)
+);
 
 type PeopleTargetValidationInput = Parameters<
   typeof peopleCoreTargetIsCurrent
@@ -378,6 +398,7 @@ export async function productionEvryPlanTargetIsCurrent(
     return milestoneTargetIsCurrent(input);
   }
   if (FILE_IDENTITY_SET.has(identity)) return peopleFileTargetIsCurrent(input);
+  if (DOCUMENTS_WIKI_IDENTITY_SET.has(identity)) return documentsWikiTargetIsCurrent(input);
   if (!hasPersistedPlanContext(input)) return false;
   if (TEAMS_EFFECT_IDENTITIES.has(identity)) {
     return teamsEvryPlanTargetIsCurrent(input);

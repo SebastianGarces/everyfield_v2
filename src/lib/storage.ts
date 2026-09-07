@@ -49,6 +49,55 @@ export async function uploadFile(
   return key;
 }
 
+export type CreateFileResult = "created" | "exists";
+
+type PutObjectSender = (command: PutObjectCommand) => Promise<unknown>;
+
+function storageStatus(error: unknown): number | null {
+  if (typeof error !== "object" || error === null) return null;
+  const metadata = "$metadata" in error ? error.$metadata : null;
+  return typeof metadata === "object" &&
+    metadata !== null &&
+    "httpStatusCode" in metadata &&
+    typeof metadata.httpStatusCode === "number"
+    ? metadata.httpStatusCode
+    : null;
+}
+
+/**
+ * Create a private object exactly once. S3's If-None-Match precondition is the
+ * production concurrency boundary: 412 means another caller already won; 409
+ * is an in-flight conditional race and must be retried, never misreported as
+ * either a successful create or an existing durable object.
+ */
+export async function createFileIfAbsent(
+  key: string,
+  body: Buffer,
+  contentType: string,
+  send: PutObjectSender = (command) => s3Client.send(command)
+): Promise<CreateFileResult> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await send(
+        new PutObjectCommand({
+          Bucket: BUCKET_NAME,
+          Key: key,
+          Body: body,
+          ContentType: contentType,
+          IfNoneMatch: "*",
+        })
+      );
+      return "created";
+    } catch (error) {
+      const status = storageStatus(error);
+      if (status === 412) return "exists";
+      if (status === 409 && attempt < 2) continue;
+      throw error;
+    }
+  }
+  throw new Error("Unreachable conditional create state");
+}
+
 // ============================================================================
 // File Deletion
 // ============================================================================

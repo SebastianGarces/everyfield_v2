@@ -57,7 +57,11 @@ test("production composes every generated People read exactly once", () => {
     ({ capabilityIdentity }) => capabilityIdentity
   ).toSorted();
   assert.equal(new Set(registrations).size, registrations.length);
-  assert.deepEqual(registrations, reads);
+  const peopleReads = new Set(reads);
+  assert.deepEqual(
+    registrations.filter((identity) => peopleReads.has(identity)),
+    reads
+  );
   assert.deepEqual(
     [...PRODUCTION_EVRY_PEOPLE_CAPABILITY_IDENTITIES],
     generated.capabilities.map(({ identity }) => identity).toSorted()

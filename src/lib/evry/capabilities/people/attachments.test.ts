@@ -3,13 +3,17 @@ import { createHash } from "node:crypto";
 import { test } from "node:test";
 
 import {
-  EVRY_PEOPLE_ATTACHMENT_MAX_AGE_MS,
   EVRY_PEOPLE_CSV_MAX_BYTES,
+  evryPeopleStagedAttachmentChunkStorageKey,
   evryPeopleStagedAttachmentStorageKey,
+  finalizeEvryPeopleAttachmentUpload,
   openEvryPeopleAttachmentReference,
+  prepareEvryPeopleAttachmentUpload,
   readExactEvryPeopleAttachment,
   removeEvryPeopleAttachment,
+  sealEvryPeopleAttachmentReference,
   stageEvryPeopleAttachment,
+  storeEvryPeopleAttachmentChunk,
   sweepExpiredEvryPeopleAttachments,
 } from "./attachments";
 
@@ -43,11 +47,28 @@ function file(
   };
 }
 
+function memoryStorage() {
+  const objects = new Map<
+    string,
+    Readonly<{ body: Buffer; contentType: string }>
+  >();
+  return {
+    objects,
+    create: async (key: string, body: Buffer, contentType: string) => {
+      if (objects.has(key)) return "exists" as const;
+      objects.set(key, { body: Buffer.from(body), contentType });
+      return "created" as const;
+    },
+    read: async (key: string) => objects.get(key) ?? null,
+    remove: async (key: string) => void objects.delete(key),
+  };
+}
+
 test("malformed, oversize, and foreign attachments refuse before storage", async () => {
   let stores = 0;
-  const store = async () => {
+  const create = async () => {
     stores++;
-    return "stored";
+    return "created" as const;
   };
   assert.equal(
     await stageEvryPeopleAttachment({
@@ -61,7 +82,7 @@ test("malformed, oversize, and foreign attachments refuse before storage", async
         EVRY_PEOPLE_CSV_MAX_BYTES + 1
       ),
       secret: SECRET,
-      store,
+      create,
     }),
     null
   );
@@ -72,7 +93,7 @@ test("malformed, oversize, and foreign attachments refuse before storage", async
       personId: ACTOR.userId,
       file: file("photo.pdf", "application/pdf", Buffer.from("pdf")),
       secret: SECRET,
-      store,
+      create,
     }),
     null
   );
@@ -83,7 +104,7 @@ test("malformed, oversize, and foreign attachments refuse before storage", async
       personId: ACTOR.userId,
       file: file("photo.png", "image/png", Buffer.from("png")),
       secret: SECRET,
-      store,
+      create,
       loadPerson: async () => null,
     }),
     null
@@ -91,9 +112,73 @@ test("malformed, oversize, and foreign attachments refuse before storage", async
   assert.equal(stores, 0);
 });
 
-test("CSV staging returns an immutable actor and plant scoped digest reference", async () => {
+test("persisted-plan execution can still read exact legacy v1 and v2 references", async () => {
+  const bytes = Buffer.from("legacy pending plan bytes");
+  const digest = createHash("sha256").update(bytes).digest("hex");
+  const v2Reference = sealEvryPeopleAttachmentReference(
+    {
+      version: 2,
+      kind: "commitment_document",
+      actorUserId: ACTOR.userId,
+      plantId: ACTOR.plantId,
+      personId: ACTOR.userId,
+      digest,
+      contentType: "application/pdf",
+      size: bytes.length,
+      originalName: "legacy.pdf",
+      expiresAt: "2099-08-30T12:00:00.000Z",
+      uploadId: "10000000-0000-4000-8000-000000000099",
+      bytesBase64Url: bytes.toString("base64url"),
+    },
+    SECRET
+  );
+  const storageKey = evryPeopleStagedAttachmentStorageKey({
+    actor: ACTOR,
+    expiresAt: new Date("2099-08-30T12:00:00.000Z"),
+    uploadId: "10000000-0000-4000-8000-000000000098",
+    digest,
+    extension: "pdf",
+  });
+  const v1Reference = sealEvryPeopleAttachmentReference(
+    {
+      version: 1,
+      kind: "commitment_document",
+      actorUserId: ACTOR.userId,
+      plantId: ACTOR.plantId,
+      personId: ACTOR.userId,
+      digest,
+      contentType: "application/pdf",
+      size: bytes.length,
+      originalName: "legacy.pdf",
+      expiresAt: "2099-08-30T12:00:00.000Z",
+      storageKey,
+    },
+    SECRET
+  );
+  for (const reference of [v1Reference, v2Reference]) {
+    assert.deepEqual(
+      (
+        await readExactEvryPeopleAttachment({
+          reference,
+          actor: ACTOR,
+          expectedKind: "commitment_document",
+          expectedDigest: digest,
+          now: NOW,
+          secret: SECRET,
+          read: async (key) => {
+            assert.equal(key, storageKey);
+            return { body: bytes, contentType: "application/pdf" };
+          },
+        })
+      )?.bytes,
+      bytes
+    );
+  }
+});
+
+test("CSV preview uses only an expiring staged chunk and verifies its bytes", async () => {
   const bytes = Buffer.from("First Name *,Last Name *\nAda,Lovelace");
-  const storedEvents: { key: string; bytes: Buffer; type: string }[] = [];
+  const storage = memoryStorage();
   const result = await stageEvryPeopleAttachment({
     actor: ACTOR,
     kind: "people_csv",
@@ -107,13 +192,12 @@ test("CSV staging returns an immutable actor and plant scoped digest reference",
       invalidRows: [],
       duplicateRows: [],
     }),
-    store: async (key, body, type) => {
-      storedEvents.push({ key, bytes: body, type });
-      return key;
-    },
+    create: storage.create,
+    read: storage.read,
   });
-  const stored = storedEvents[0];
-  assert.ok(result && stored);
+  assert.ok(result);
+  assert.equal(storage.objects.size, 1);
+  assert.ok([...storage.objects.keys()][0]?.startsWith("evry-inputs/"));
   assert.equal(
     result.metadata.digest,
     createHash("sha256").update(bytes).digest("hex")
@@ -155,23 +239,64 @@ test("CSV staging returns an immutable actor and plant scoped digest reference",
       expectedDigest: result.metadata.digest,
       now: NOW,
       secret: SECRET,
-      read: async (key) =>
-        stored && key === stored.key
-          ? { body: stored.bytes, contentType: stored.type }
-          : null,
+      read: storage.read,
     })
-  );
-  assert.match(
-    stored.key,
-    new RegExp(
-      `^evry-inputs/${ACTOR.plantId}/${ACTOR.userId}/${NOW.getTime() + EVRY_PEOPLE_ATTACHMENT_MAX_AGE_MS}-[0-9a-f-]{36}-[0-9a-f]{64}\\.csv$`
-    )
   );
 });
 
-test("concurrent identical uploads own distinct staged objects", async () => {
+test("photo and commitment previews use temporary chunks, never permanent keys", async () => {
+  const cases = [
+    {
+      kind: "person_photo" as const,
+      file: file("photo.png", "image/png", Buffer.from("photo-bytes")),
+    },
+    {
+      kind: "commitment_document" as const,
+      file: file(
+        "commitment.pdf",
+        "application/pdf",
+        Buffer.from("commitment-bytes")
+      ),
+    },
+  ];
+  const storage = memoryStorage();
+  for (const candidate of cases) {
+    const result = await stageEvryPeopleAttachment({
+      actor: ACTOR,
+      kind: candidate.kind,
+      personId: ACTOR.userId,
+      file: candidate.file,
+      now: NOW,
+      secret: SECRET,
+      loadPerson: async () => ({}) as never,
+      create: storage.create,
+      read: storage.read,
+    });
+    assert.ok(result);
+    const exact = await readExactEvryPeopleAttachment({
+      reference: result.reference,
+      actor: ACTOR,
+      expectedKind: candidate.kind,
+      expectedDigest: result.metadata.digest,
+      now: NOW,
+      secret: SECRET,
+      read: storage.read,
+    });
+    assert.ok(exact);
+    assert.deepEqual(
+      exact.bytes,
+      Buffer.from(await candidate.file.arrayBuffer())
+    );
+  }
+  assert.equal(storage.objects.size, 2);
+  assert.ok(
+    [...storage.objects.keys()].every((key) => key.startsWith("evry-inputs/"))
+  );
+});
+
+test("concurrent identical previews own distinct staged chunks", async () => {
   const bytes = Buffer.from("First Name *,Last Name *\nAda,Lovelace");
-  const stored: string[] = [];
+  const storage = memoryStorage();
   const stage = () =>
     stageEvryPeopleAttachment({
       actor: ACTOR,
@@ -186,26 +311,24 @@ test("concurrent identical uploads own distinct staged objects", async () => {
         invalidRows: [],
         duplicateRows: [],
       }),
-      store: async (key) => {
-        stored.push(key);
-        return key;
-      },
+      create: storage.create,
+      read: storage.read,
     });
   const [first, second] = await Promise.all([stage(), stage()]);
   assert.ok(first && second);
-  assert.notEqual(stored[0], stored[1]);
-  const remaining = new Set(stored);
+  assert.notEqual(first.reference, second.reference);
+  assert.equal(storage.objects.size, 2);
   assert.equal(
     await removeEvryPeopleAttachment({
       actor: ACTOR,
       reference: first.reference,
       expectedKind: "people_csv",
       secret: SECRET,
-      remove: async (key) => void remaining.delete(key),
+      remove: storage.remove,
     }),
     true
   );
-  assert.deepEqual([...remaining], [stored[1]]);
+  assert.equal(storage.objects.size, 1);
   assert.ok(
     await readExactEvryPeopleAttachment({
       actor: ACTOR,
@@ -214,14 +337,14 @@ test("concurrent identical uploads own distinct staged objects", async () => {
       expectedDigest: second.metadata.digest,
       now: NOW,
       secret: SECRET,
-      read: async (key) =>
-        remaining.has(key) ? { body: bytes, contentType: "text/csv" } : null,
+      read: storage.read,
     })
   );
 });
 
-test("exact staged removal remains actor-scoped after reference expiry", async () => {
+test("staged chunk cleanup remains actor-scoped after expiry", async () => {
   const bytes = Buffer.from("First Name *,Last Name *\nAda,Lovelace");
+  const storage = memoryStorage();
   const result = await stageEvryPeopleAttachment({
     actor: ACTOR,
     kind: "people_csv",
@@ -235,7 +358,8 @@ test("exact staged removal remains actor-scoped after reference expiry", async (
       invalidRows: [],
       duplicateRows: [],
     }),
-    store: async (key) => key,
+    create: storage.create,
+    read: storage.read,
   });
   assert.ok(result);
   const removed: string[] = [];
@@ -260,6 +384,90 @@ test("exact staged removal remains actor-scoped after reference expiry", async (
     true
   );
   assert.equal(removed.length, 1);
+  assert.ok(removed[0]?.startsWith("evry-inputs/"));
+});
+
+test("same-index evil replay cannot overwrite a correct immutable chunk", async () => {
+  const expected = Buffer.from("good");
+  const storage = memoryStorage();
+  const prepared = await prepareEvryPeopleAttachmentUpload({
+    actor: ACTOR,
+    kind: "commitment_document",
+    personId: ACTOR.userId,
+    name: "commitment.pdf",
+    type: "application/pdf",
+    size: expected.length,
+    digest: createHash("sha256").update(expected).digest("hex"),
+    now: NOW,
+    secret: SECRET,
+    loadPerson: async () => ({}) as never,
+  });
+  assert.ok(prepared);
+  assert.equal(
+    await storeEvryPeopleAttachmentChunk({
+      actor: ACTOR,
+      kind: "commitment_document",
+      reference: prepared.reference,
+      chunkIndex: 0,
+      bytes: expected,
+      now: NOW,
+      secret: SECRET,
+      create: storage.create,
+      read: storage.read,
+    }),
+    true
+  );
+  assert.equal(
+    await storeEvryPeopleAttachmentChunk({
+      actor: ACTOR,
+      kind: "commitment_document",
+      reference: prepared.reference,
+      chunkIndex: 0,
+      bytes: expected,
+      now: NOW,
+      secret: SECRET,
+      create: storage.create,
+      read: storage.read,
+    }),
+    true
+  );
+  assert.equal(
+    await storeEvryPeopleAttachmentChunk({
+      actor: ACTOR,
+      kind: "commitment_document",
+      reference: prepared.reference,
+      chunkIndex: 0,
+      bytes: Buffer.from("evil"),
+      now: NOW,
+      secret: SECRET,
+      create: storage.create,
+      read: storage.read,
+    }),
+    false
+  );
+  const finalized = await finalizeEvryPeopleAttachmentUpload({
+    actor: ACTOR,
+    kind: "commitment_document",
+    reference: prepared.reference,
+    now: NOW,
+    secret: SECRET,
+    read: storage.read,
+  });
+  assert.ok(finalized);
+  assert.deepEqual(
+    (
+      await readExactEvryPeopleAttachment({
+        actor: ACTOR,
+        reference: prepared.reference,
+        expectedKind: "commitment_document",
+        expectedDigest: finalized.metadata.digest,
+        now: NOW,
+        secret: SECRET,
+        read: storage.read,
+      })
+    )?.bytes,
+    expected
+  );
 });
 
 test("expired unclaimed attachments sweep idempotently and retry failed deletes", async () => {
@@ -297,5 +505,40 @@ test("expired unclaimed attachments sweep idempotently and retry failed deletes"
 
   assert.deepEqual(await sweep(), { removed: 0, failed: 1 });
   assert.deepEqual(await sweep(), { removed: 1, failed: 0 });
+  assert.deepEqual(removed, [expired]);
+});
+
+test("global expiry sweep parses production plant/actor chunk paths safely", async () => {
+  const expired = evryPeopleStagedAttachmentChunkStorageKey({
+    actor: ACTOR,
+    expiresAt: new Date(NOW.getTime() - 1),
+    uploadId: "10000000-0000-4000-8000-000000000020",
+    digest: "c".repeat(64),
+    chunkIndex: 0,
+    chunkCount: 1,
+  });
+  const live = evryPeopleStagedAttachmentChunkStorageKey({
+    actor: OTHER_ACTOR,
+    expiresAt: new Date(NOW.getTime() + 1),
+    uploadId: "10000000-0000-4000-8000-000000000021",
+    digest: "d".repeat(64),
+    chunkIndex: 0,
+    chunkCount: 1,
+  });
+  const malformed = `evry-inputs/${ACTOR.plantId}/${ACTOR.userId}/not-an-expiry.part`;
+  const foreign = `people/${ACTOR.plantId}/photo.jpg`;
+  const removed: string[] = [];
+
+  assert.deepEqual(
+    await sweepExpiredEvryPeopleAttachments({
+      now: NOW,
+      list: async (prefix) => {
+        assert.equal(prefix, "evry-inputs/");
+        return [expired, live, malformed, foreign];
+      },
+      remove: async (key) => void removed.push(key),
+    }),
+    { removed: 1, failed: 0 }
+  );
   assert.deepEqual(removed, [expired]);
 });

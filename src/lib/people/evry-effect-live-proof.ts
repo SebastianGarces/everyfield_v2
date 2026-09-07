@@ -2717,8 +2717,23 @@ async function main(proofStorage: EvryPeopleEffectProofStorage): Promise<void> {
     "people.crm.tags.list-tags": {},
   };
   const provenReads = new Set<string>();
+  const peopleReadIdentities = generatedPeopleInventory.capabilities
+    .filter(({ operationKind }) => operationKind === "read")
+    .map(({ identity }) => identity)
+    .sort();
+  const peopleReadIdentitySet = new Set(peopleReadIdentities);
+  const productionPeopleReads = PRODUCTION_EVRY_READ_REGISTRATIONS.filter(
+    ({ capabilityIdentity }) => peopleReadIdentitySet.has(capabilityIdentity)
+  );
+  assert.deepEqual(
+    productionPeopleReads
+      .map(({ capabilityIdentity }) => capabilityIdentity)
+      .sort(),
+    peopleReadIdentities,
+    "Every People read capability must have exactly one production registration"
+  );
   try {
-    for (const registration of PRODUCTION_EVRY_READ_REGISTRATIONS) {
+    for (const registration of productionPeopleReads) {
       const input = readInputs[registration.capabilityIdentity];
       assert.notEqual(
         input,
@@ -2777,13 +2792,7 @@ async function main(proofStorage: EvryPeopleEffectProofStorage): Promise<void> {
       expectedKind: "people_csv",
     });
   }
-  assert.deepEqual(
-    [...provenReads].sort(),
-    generatedPeopleInventory.capabilities
-      .filter(({ operationKind }) => operationKind === "read")
-      .map(({ identity }) => identity)
-      .sort()
-  );
+  assert.deepEqual([...provenReads].sort(), peopleReadIdentities);
   assert.deepEqual([...provenEffects].sort(), [...EFFECT_IDENTITIES].sort());
   for (const identity of EFFECT_IDENTITIES) {
     const registration =

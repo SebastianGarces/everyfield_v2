@@ -1,3 +1,4 @@
+import documentsWikiInventory from "@/lib/evry/capabilities/documents-wiki/inventory.generated.json";
 import communicationInventory from "@/lib/evry/capabilities/communication/inventory.generated.json";
 import launchInventory from "@/lib/evry/capabilities/launch/inventory.generated.json";
 import peopleInventory from "@/lib/evry/capabilities/people/inventory.generated.json";
@@ -268,10 +269,56 @@ function generatedMeetingsSurfaces(): EvryAuthoritativeCapabilitySurface[] {
   });
 }
 
+function generatedDocumentsWikiRegistrations(): EvryCapabilityRegistration[] {
+  return documentsWikiInventory.capabilities.map((capability) => {
+    const [firstSurface, ...otherSurfaces] = capability.surfaceIdentities;
+    if (
+      !isApplicationCapability(capability.applicationCapability) ||
+      !firstSurface ||
+      (capability.operationKind !== "read" &&
+        capability.operationKind !== "effect")
+    ) {
+      throw new Error(
+        `Invalid generated Documents/wiki capability: ${capability.identity}`
+      );
+    }
+    return defineEvryCapabilityRegistration({
+      identity: capability.identity,
+      surfaceIdentities: [firstSurface, ...otherSurfaces],
+      parityCapability: capability.parityCapability,
+      operationKind: capability.operationKind,
+      applicationCapability: capability.applicationCapability,
+    });
+  });
+}
+
+function generatedDocumentsWikiSurfaces(): EvryAuthoritativeCapabilitySurface[] {
+  return documentsWikiInventory.entries.flatMap((entry) => {
+    if (
+      entry.classification.state !== "supported" ||
+      (entry.operationKind !== "read" && entry.operationKind !== "effect") ||
+      entry.applicationCapability === null ||
+      !isApplicationCapability(entry.applicationCapability)
+    )
+      return [];
+    return [
+      {
+        identity: entry.identity,
+        capabilityIdentity: entry.capabilityIdentity,
+        parityCapability:
+          entry.domain === "documents" ? "documents-and-files" : "wiki",
+        operationKind: entry.operationKind,
+        applicationCapability: entry.applicationCapability,
+      },
+    ];
+  });
+}
+
 const REGISTRY = createEvryCapabilityRegistry({
   registrations: [
     ...generatedPeopleRegistrations(),
     ...generatedCommunicationRegistrations(),
+    ...generatedDocumentsWikiRegistrations(),
     ...generatedLaunchRegistrations(),
     ...MEETINGS_OPERATION_REGISTRATIONS,
     ...TASK_CAPABILITY_REGISTRATIONS,
@@ -281,6 +328,7 @@ const REGISTRY = createEvryCapabilityRegistry({
   authoritativeSurfaces: [
     ...generatedPeopleSurfaces(),
     ...generatedCommunicationSurfaces(),
+    ...generatedDocumentsWikiSurfaces(),
     ...generatedLaunchSurfaces(),
     ...generatedMeetingsSurfaces(),
     ...TASK_AUTHORITATIVE_SURFACES,

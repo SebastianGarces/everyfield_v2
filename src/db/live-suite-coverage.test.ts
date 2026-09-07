@@ -6,6 +6,7 @@ import { test } from "node:test";
 import {
   DEDICATED_LIVE_SUITES,
   databaseForSuite,
+  DOCUMENTS_WIKI_EFFECT_LIVE_SUITE,
   LIVE_SUITE_PHASES,
   liveSuiteDatabases,
   LIVE_SUITES,
@@ -223,6 +224,7 @@ test("every live suite derives its own database, and no two collide", () => {
 
 test("each nested proof wrapper owns a phase without dropping a live suite", () => {
   assert.deepEqual(NESTED_PROOF_LIVE_SUITES, [
+    DOCUMENTS_WIKI_EFFECT_LIVE_SUITE,
     PEOPLE_EFFECT_LIVE_SUITE,
     "src/lib/communication/evry-effect-live.test.ts",
     "src/lib/evry/conversations/conversations-live.test.ts",

@@ -11,6 +11,10 @@
 
 import { getCurrentSession, getCurrentUserChurch } from "@/lib/auth/session";
 import { getLaunchForChurch } from "@/lib/launch/queries";
+import { and, eq, isNotNull, isNull } from "drizzle-orm";
+import { db } from "@/db";
+import { churches, users } from "@/db/schema";
+import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
 
 import type { MergeContext } from "./merge";
 
@@ -52,6 +56,36 @@ export async function resolveDocumentMergeContext(): Promise<ResolvedDocumentCon
     merge: {
       churchName: church.name,
       userName: user?.name ?? null,
+      launchDate: launch?.targetDate ?? null,
+    },
+  };
+}
+
+/** Resolve the same merge context from a freshly authorized Evry plant actor. */
+export async function resolveDocumentMergeContextForActor(
+  actor: EvryPlantActor
+): Promise<ResolvedDocumentContext | null> {
+  const [row] = await db
+    .select({ churchName: churches.name, userName: users.name })
+    .from(users)
+    .innerJoin(churches, eq(churches.id, users.churchId))
+    .where(
+      and(
+        eq(users.id, actor.userId),
+        eq(users.churchId, actor.plantId),
+        isNotNull(users.seat),
+        isNull(users.sendingChurchId),
+        isNull(users.sendingNetworkId)
+      )
+    )
+    .limit(1);
+  if (!row) return null;
+  const launch = await getLaunchForChurch(actor.plantId);
+  return {
+    churchId: actor.plantId,
+    merge: {
+      churchName: row.churchName,
+      userName: row.userName,
       launchDate: launch?.targetDate ?? null,
     },
   };

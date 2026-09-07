@@ -22,6 +22,8 @@
     "evry:people-inventory:check": "tsx ops/evry/generate-people-inventory.ts --check",
     "evry:launch-inventory": "tsx ops/evry/generate-launch-inventory.ts",
     "evry:launch-inventory:check": "tsx ops/evry/generate-launch-inventory.ts --check",
+    "evry:documents-wiki-inventory": "tsx ops/evry/generate-documents-wiki-inventory.ts",
+    "evry:documents-wiki-inventory:check": "tsx ops/evry/generate-documents-wiki-inventory.ts --check",
     "evry:people-file-cleanup": "tsx --env-file-if-exists=.env.local scripts/evry-people-file-cleanup.ts",
     "evry:meetings-inventory": "tsx ops/evry/generate-meetings-inventory.ts",
     "evry:meetings-inventory:check": "tsx ops/evry/generate-meetings-inventory.ts --check",

@@ -33,6 +33,7 @@ import {
   openEvryPeopleAttachmentReference,
   readExactEvryPeopleAttachment,
 } from "@/lib/evry/capabilities/people/attachments";
+import { EVRY_PEOPLE_ATTACHMENT_REFERENCE_MAX_LENGTH } from "@/lib/evry/capabilities/people/attachment-contract";
 import {
   claimEvryBulkImport,
   type EvryImportPersonRow,
@@ -53,7 +54,10 @@ export const PEOPLE_FILE_IDENTITIES = {
 } as const;
 
 const digest = z.string().regex(/^[0-9a-f]{64}$/);
-const reference = z.string().min(1).max(4_000);
+const reference = z
+  .string()
+  .min(1)
+  .max(EVRY_PEOPLE_ATTACHMENT_REFERENCE_MAX_LENGTH);
 const photoSchema = z.strictObject({
   personId: z.string().uuid(),
   personLabel: z.string().min(1).max(511),

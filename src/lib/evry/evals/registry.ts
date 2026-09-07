@@ -26,6 +26,10 @@ import {
   assertPeopleCapabilityEvalRegistryComplete,
   PEOPLE_CAPABILITY_EVAL_FIXTURES,
 } from "./people-capabilities";
+import {
+  assertDocumentsWikiCapabilityEvalRegistryComplete,
+  DOCUMENTS_WIKI_CAPABILITY_EVAL_FIXTURES,
+} from "./documents-wiki-capabilities";
 
 export const EVRY_EVAL_PROOFS: readonly EvryEvalProof[] = Object.freeze([
   ...TASK_EVAL_PROOFS,
@@ -130,6 +134,18 @@ export const EVRY_EVAL_PROOFS: readonly EvryEvalProof[] = Object.freeze([
     testFile: "src/lib/evry/capabilities/teams/effect-live.test.ts",
     lane: "live_database",
     safetyGates: [],
+  },
+  {
+    id: "documents-wiki-capability-contract",
+    testFile: "src/lib/evry/capabilities/documents-wiki/runtime.test.ts",
+    lane: "deterministic",
+    safetyGates: [],
+  },
+  {
+    id: "documents-wiki-capability-live-outcomes",
+    testFile: "src/lib/evry/capabilities/documents-wiki/effect-live.test.ts",
+    lane: "live_database",
+    safetyGates: ["cross_tenant_access"],
   },
   {
     id: "candidate-plan-probe-contract",
@@ -379,6 +395,7 @@ export const EVRY_CAPABILITY_EVAL_FIXTURES = Object.freeze([
   ),
   ...MEETINGS_CAPABILITY_EVAL_FIXTURES,
   ...PEOPLE_CAPABILITY_EVAL_FIXTURES,
+  ...DOCUMENTS_WIKI_CAPABILITY_EVAL_FIXTURES,
   ...TASK_CAPABILITY_EVAL_FIXTURES,
   ...teamsInventory.capabilities.map(({ identity, operationKind }) =>
     teamsCapabilityFixture(identity, operationKind)
@@ -416,6 +433,7 @@ function assertUnique(values: readonly string[], subject: string): void {
 
 export function assertEvryEvalRegistryComplete(): void {
   assertPeopleCapabilityEvalRegistryComplete();
+  assertDocumentsWikiCapabilityEvalRegistryComplete();
   assertUnique(
     EVRY_EVAL_PROOFS.map(({ id }) => id),
     "proof"

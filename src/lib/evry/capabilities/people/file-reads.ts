@@ -5,6 +5,7 @@ import {
   buildEvryReadArtifact,
   trustedEvryApplicationSourceLink,
 } from "@/lib/evry/artifacts/core";
+import { EVRY_PEOPLE_ATTACHMENT_REFERENCE_MAX_LENGTH } from "@/lib/evry/capabilities/people/attachment-contract";
 import { readExactEvryPeopleAttachment } from "@/lib/evry/capabilities/people/attachments";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
 import { defineEvryReadRegistration } from "@/lib/evry/reads/contract";
@@ -207,7 +208,10 @@ export const IMPORT_PREVIEW_READ = defineEvryReadRegistration({
   id: "people.import-preview",
   capabilityIdentity: PEOPLE_FILE_READ_IDENTITIES.preview,
   inputShape: {
-    attachmentReference: z.string().min(1).max(4_000),
+    attachmentReference: z
+      .string()
+      .min(1)
+      .max(EVRY_PEOPLE_ATTACHMENT_REFERENCE_MAX_LENGTH),
     attachmentDigest: digest,
   },
   run: ({ authorization }, input) =>

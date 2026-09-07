@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
 import {
+  createFileIfAbsent,
   deleteFile,
   getFileBytes,
   listFileKeys,
@@ -11,6 +12,7 @@ import {
 export type EvryPeopleFileStorage = Readonly<{
   signingSecret(): string;
   store: typeof uploadFile;
+  create: typeof createFileIfAbsent;
   read: typeof getFileBytes;
   remove: typeof deleteFile;
   listKeys: typeof listFileKeys;
@@ -24,6 +26,7 @@ const LIVE_EVRY_PEOPLE_FILE_STORAGE: EvryPeopleFileStorage = {
     return value;
   },
   store: uploadFile,
+  create: createFileIfAbsent,
   read: getFileBytes,
   remove: deleteFile,
   listKeys: listFileKeys,

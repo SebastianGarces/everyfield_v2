@@ -14,6 +14,7 @@ import {
   openEvryPeopleAttachmentReference,
   readExactEvryPeopleAttachment,
 } from "@/lib/evry/capabilities/people/attachments";
+import { EVRY_PEOPLE_ATTACHMENT_REFERENCE_MAX_LENGTH } from "@/lib/evry/capabilities/people/attachment-contract";
 import {
   createEvryArtifactReviewRegistry,
   defineEvryArtifactReview,
@@ -114,7 +115,10 @@ const witnessJson = z.string().refine((value) => {
 });
 const commitmentAttachmentSchema = z
   .strictObject({
-    reference: z.string().min(1).max(4_000),
+    reference: z
+      .string()
+      .min(1)
+      .max(EVRY_PEOPLE_ATTACHMENT_REFERENCE_MAX_LENGTH),
     digest: z.string().regex(/^[0-9a-f]{64}$/),
     contentType: z.enum([
       "application/pdf",
@@ -524,7 +528,7 @@ export const MILESTONE_REVIEWS = Object.values(MILESTONE_IDENTITIES).map(
           title: `Record commitment for ${args.personLabel}`,
           actionLabel: "Record commitment",
           consequences: [
-            `Creates one permanent commitment${attachment ? " with the exact staged attachment" : " without an attachment"} and advances the person to core group status.`,
+            `Creates one permanent commitment${attachment ? " with the exact reviewed attachment" : " without an attachment"} and advances the person to core group status.`,
           ],
           steps: [
             {
