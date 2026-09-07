@@ -49,6 +49,7 @@ import {
   visibleEvryPageContextFor,
   type VisibleEvryPageContext,
 } from "./page-context";
+import { visibleEvryInsightHandoff } from "./insight-handoff";
 import { evryWorkStateForConversation } from "./streaming/conversation-state";
 import type { EvryAcknowledgementTarget } from "./streaming/work-status";
 import {
@@ -118,6 +119,7 @@ type EvryShellValue = Readonly<{
   }) => Promise<"started" | "unavailable">;
   openPanel: (trigger: HTMLButtonElement) => void;
   observeWork: (requestId: string, controller: AbortController) => void;
+  openInsightHandoff: (handoff: unknown, trigger: HTMLButtonElement) => boolean;
   resetConversation: () => void;
   restoreLauncherFocus: () => void;
   resumeWatching: () => void;
@@ -608,6 +610,21 @@ export function EvryShell({
       setPanelOpen(true);
     },
     [pathname, visibleContext]
+  );
+
+  const openInsightHandoff = useCallback(
+    (handoff: unknown, trigger: HTMLButtonElement) => {
+      const context = visibleEvryInsightHandoff(handoff);
+      if (!enabled || context === null) return false;
+
+      launcherRef.current = trigger;
+      setActiveContext(context);
+      setError(null);
+      setHasOpenedPanel(true);
+      setPanelOpen(true);
+      return true;
+    },
+    [enabled]
   );
 
   const closePanel = useCallback(() => setPanelOpen(false), []);
@@ -1568,6 +1585,7 @@ export function EvryShell({
       isWatchingDetached: detachedRequestId !== null,
       loadConversation,
       startRecipeReuse,
+      openInsightHandoff,
       openPanel,
       observeWork: observeWith,
       resetConversation,
@@ -1604,6 +1622,7 @@ export function EvryShell({
       isWorking,
       detachedRequestId,
       loadConversation,
+      openInsightHandoff,
       openPanel,
       observeWith,
       observedRequestId,

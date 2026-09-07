@@ -371,6 +371,34 @@ async function main() {
     null,
     "a caller-supplied assessment id is never a cross-plant page-context selector"
   );
+  assert.deepEqual(
+    await resolveAuthorizedEvryPageContext({
+      actor: {
+        userId: owner.id,
+        plantId: plant.id,
+        seat: "owner",
+      } as unknown as EvryPlantActor,
+      pageContext: { kind: "plant_insight", recordId: insight.id },
+    }),
+    {
+      kind: "plant_insight",
+      recordId: insight.id,
+      label: "Observation: Stored local insight",
+    },
+    "the server names an insight from the plant-scoped row, not browser display text"
+  );
+  assert.equal(
+    await resolveAuthorizedEvryPageContext({
+      actor: {
+        userId: owner.id,
+        plantId: plant.id,
+        seat: "owner",
+      } as unknown as EvryPlantActor,
+      pageContext: { kind: "plant_insight", recordId: foreignInsight.id },
+    }),
+    null,
+    "a foreign insight id is indistinguishable from a missing source"
+  );
 
   // Each step was authorized and confirmed while the actor held an exact plant
   // tenancy. A second tenancy appears before the atomic adapter runs. Every SQL

@@ -207,7 +207,6 @@ test("production execution dispatches the installed recipe through its closed pr
   await dispatch(input);
   assert.deepEqual(calls, ["recipe", "generic", "generic"]);
 });
-
 test("every Task effect has its trusted review in the production registry", () => {
   for (const [exportName, contract] of Object.entries(TASK_ACTION_CONTRACTS)) {
     if (contract.operationKind !== "effect") continue;

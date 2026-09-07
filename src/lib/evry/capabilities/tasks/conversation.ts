@@ -41,7 +41,6 @@ function taskReadMessage(count: number): string {
   if (count === 0) return "No matches for this request.";
   return `I found ${count.toLocaleString()} matching result${count === 1 ? "" : "s"}.`;
 }
-
 function unavailableTaskResult() {
   const clarification = {
     kind: "clarification" as const,

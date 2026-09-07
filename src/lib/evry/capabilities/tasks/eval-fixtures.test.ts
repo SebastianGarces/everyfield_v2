@@ -135,7 +135,6 @@ test("task results use the Tasks page labels, a date-only due date, and the assi
     new RegExp(`${TASK_FIXTURE_ID}|not_started|follow_up`)
   );
 });
-
 test("Task list and count selectors preserve every legal UI filter", () => {
   const tuple = {
     view: "all" as const,
@@ -225,7 +224,6 @@ test("follow-up ownership filters accept user language and preserve the filter a
     null
   );
 });
-
 test("Task assignments route only through follow-up ownership", () => {
   assert.deepEqual(selectTaskEvryRead("Show task assignments"), {
     kind: "follow_up_ownership",

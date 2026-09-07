@@ -129,7 +129,6 @@ async function taskQueryScope(
     ...(input.assignedToId ? { assignedToId: input.assignedToId } : {}),
   };
 }
-
 type TaskReadBoundaries = Readonly<{
   getTask: typeof getTask;
   getTaskCounts: typeof getTaskCounts;

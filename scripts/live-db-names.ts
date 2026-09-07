@@ -75,7 +75,6 @@ export const NESTED_PROOF_LIVE_SUITES = [
   "src/lib/evry/capabilities/launch/effect-live.test.ts",
   "src/lib/evry/recipes/recipe-live.test.ts",
 ] as const;
-
 export const LIVE_SUITES = [
   "src/lib/evry/capabilities/tasks/query-filters.test.ts",
   "src/db/seat-owner-uniqueness.test.ts",

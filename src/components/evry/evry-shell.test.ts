@@ -27,6 +27,8 @@ const historyList = read(
   "history-list.tsx"
 );
 const surface = read("components", "evry", "conversation-surface.tsx");
+const insightAction = read("components", "evry", "insight-handoff-action.tsx");
+const insightCard = read("components", "phase-engine", "insight-card.tsx");
 const workStatus = read("components", "evry", "streaming", "work-status.tsx");
 const runRecoveryFixture = read(
   "components",
@@ -339,6 +341,16 @@ test("removing context removes it from the request body", () => {
   assert.match(interaction, /pageContext: submission\.pageContext/);
 });
 
+test("an eligible insight opens the ordinary composer with removable source context only", () => {
+  assert.match(insightCard, /isPositive\(insight\) \? null/);
+  assert.match(insightCard, /<InsightToEvryAction/);
+  assert.match(insightAction, /Work on this with Evry/);
+  assert.match(insightAction, /openInsightHandoff\(/);
+  assert.doesNotMatch(insightAction, /setDraft|sendMessage|confirmation|toolChoice|effectArguments/);
+  assert.match(shell, /const context = visibleEvryInsightHandoff\(handoff\)[\s\S]*context === null[\s\S]*setActiveContext\(context\)[\s\S]*setPanelOpen\(true\)/);
+  assert.match(surface, /<EvryContextChip context=\{activeContext\}/);
+});
+
 test("conversation writes authenticate first and continuation replay precedes context resolution", () => {
   const createAuth = createRoute.indexOf(
     "const actor = await requireEvryPlantViewer()"
@@ -387,6 +399,8 @@ test("conversation writes authenticate first and continuation replay precedes co
   assert.match(resolver, /eq\(churchMeetings\.churchId, actor\.plantId\)/);
   assert.match(resolver, /eq\(ministryTeams\.churchId, actor\.plantId\)/);
   assert.match(resolver, /eq\(tasks\.churchId, actor\.plantId\)/);
+  assert.match(resolver, /eq\(plantInsights\.churchId, actor\.plantId\)/);
+  assert.match(resolver, /eq\(plantInsights\.audience, "planter"\)/);
   assert.match(resolver, /eq\(launches\.churchId, actor\.plantId\)/);
   assert.match(resolver, /record === null[\s\S]*\? null/);
   assert.match(resolver, /firstName: persons\.firstName/);
