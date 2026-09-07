@@ -281,7 +281,8 @@ export function createModelEvryConversation({
             ],
           });
         case "read": {
-          const read = catalog.find(({ id }) => id === decision.id);
+          const readId = decision.id;
+          const read = catalog.find(({ id }) => id === readId);
           if (!read || !read.inputSchema.safeParse(decision.input).success)
             break readLoop;
           const authorization = await authorizeRead(read.capabilityIdentity);

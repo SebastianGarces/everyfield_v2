@@ -21,6 +21,12 @@
 // imports `@/db`. node:test's own file runner does both, propagating execArgv
 // to the children it forks, so the job here is to hand it the right argv and
 // pass its exit code through.
+//
+// WHY PHASES. The proof wrappers that spawn another Node or Next process each
+// get a singleton phase, so the small GitHub runner and neon-http proxy cannot
+// starve their child deadlines. Ordinary suites retain file-level parallelism;
+// every suite still owns a separate database, and concurrency inside each
+// proof still exercises the intended PostgreSQL races.
 // ============================================================================
 
 import { spawnSync } from "node:child_process";

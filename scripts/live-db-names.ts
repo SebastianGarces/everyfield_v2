@@ -65,12 +65,14 @@ export const NESTED_PROOF_LIVE_SUITES = [
   "src/lib/evry/capabilities/meetings/effect-live.test.ts",
   "src/lib/evry/capabilities/meetings/read-live.test.ts",
   TASK_EFFECT_LIVE_SUITE,
+  "src/lib/evry/capabilities/teams/effect-live.test.ts",
   "src/lib/evry/executor/executor-live.test.ts",
   "src/lib/evry/capabilities/launch/effect-live.test.ts",
   "src/lib/evry/recipes/recipe-live.test.ts",
 ] as const;
 
 export const LIVE_SUITES = [
+  "src/lib/evry/capabilities/tasks/query-filters.test.ts",
   "src/db/seat-owner-uniqueness.test.ts",
   "src/lib/auth/access.test.ts",
   "src/lib/auth/email-change-live.test.ts",
@@ -82,6 +84,7 @@ export const LIVE_SUITES = [
   "src/lib/evry/capabilities/meetings/effect-live.test.ts",
   "src/lib/evry/capabilities/meetings/read-live.test.ts",
   TASK_EFFECT_LIVE_SUITE,
+  "src/lib/evry/capabilities/teams/effect-live.test.ts",
   "src/lib/evry/executor/executor-live.test.ts",
   "src/lib/evry/capabilities/launch/effect-live.test.ts",
   "src/lib/evry/recipes/recipe-live.test.ts",

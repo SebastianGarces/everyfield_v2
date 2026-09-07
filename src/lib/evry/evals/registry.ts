@@ -11,6 +11,7 @@ import {
   TASK_CAPABILITY_EVAL_FIXTURES,
   TASK_EVAL_PROOFS,
 } from "@/lib/evry/capabilities/tasks/eval-fixtures";
+import teamsInventory from "@/lib/evry/capabilities/teams/inventory.generated.json";
 
 import {
   defineEvryCapabilityEvalFixture,
@@ -101,6 +102,12 @@ export const EVRY_EVAL_PROOFS: readonly EvryEvalProof[] = Object.freeze([
     safetyGates: [],
   },
   {
+    id: "teams-capability-contract",
+    testFile: "src/lib/evry/capabilities/teams/eval-fixtures.test.ts",
+    lane: "deterministic",
+    safetyGates: [],
+  },
+  {
     id: "launch-capability-live",
     testFile: "src/lib/evry/capabilities/launch/effect-live.test.ts",
     lane: "live_database",
@@ -117,6 +124,12 @@ export const EVRY_EVAL_PROOFS: readonly EvryEvalProof[] = Object.freeze([
     testFile: "src/lib/evry/capabilities/meetings/effect-live.test.ts",
     lane: "live_database",
     safetyGates: ["cross_tenant_access", "unconfirmed_effect"],
+  },
+  {
+    id: "teams-effect-live",
+    testFile: "src/lib/evry/capabilities/teams/effect-live.test.ts",
+    lane: "live_database",
+    safetyGates: [],
   },
   {
     id: "candidate-plan-probe-contract",
@@ -301,6 +314,46 @@ function launchCapabilityFixture(
   });
 }
 
+function teamsCapabilityFixture(
+  capabilityIdentity: string,
+  operationKind: string
+): EvryCapabilityEvalFixture {
+  if (operationKind !== "read" && operationKind !== "effect") {
+    throw new Error(
+      `Teams capability ${capabilityIdentity} has an invalid operation kind`
+    );
+  }
+  const evalCase = (layer: EvryCapabilityEvalLayer) => {
+    const live =
+      operationKind === "effect" &&
+      (layer === "execution" || layer === "idempotency" || layer === "errors");
+    return [
+      {
+        id: `${capabilityIdentity}:${layer}`,
+        proofId: live ? "teams-effect-live" : "teams-capability-contract",
+        testName: live
+          ? `${capabilityIdentity}:${layer}:live`
+          : `${capabilityIdentity}:${layer}`,
+      },
+    ];
+  };
+  return defineEvryCapabilityEvalFixture({
+    capabilityIdentity,
+    cases: {
+      policy: evalCase("policy"),
+      selection: evalCase("selection"),
+      arguments: evalCase("arguments"),
+      tenancy: evalCase("tenancy"),
+      permission: evalCase("permission"),
+      confirmation: evalCase("confirmation"),
+      execution: evalCase("execution"),
+      idempotency: evalCase("idempotency"),
+      errors: evalCase("errors"),
+      ui_artifact: evalCase("ui_artifact"),
+    },
+  });
+}
+
 /**
  * Only concrete effect registrations exercised by the reference recipe enter
  * this release corpus. Each slot names its own node:test outcome; shared live
@@ -327,6 +380,9 @@ export const EVRY_CAPABILITY_EVAL_FIXTURES = Object.freeze([
   ...MEETINGS_CAPABILITY_EVAL_FIXTURES,
   ...PEOPLE_CAPABILITY_EVAL_FIXTURES,
   ...TASK_CAPABILITY_EVAL_FIXTURES,
+  ...teamsInventory.capabilities.map(({ identity, operationKind }) =>
+    teamsCapabilityFixture(identity, operationKind)
+  ),
 ]);
 
 export const EVRY_RECIPE_EVAL_FIXTURES: readonly EvryRecipeEvalFixture[] =

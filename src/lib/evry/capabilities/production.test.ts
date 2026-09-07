@@ -22,6 +22,7 @@ import { continueTaskEvryConversation } from "./tasks/conversation";
 import { TASK_ACTION_CONTRACTS } from "./tasks/contracts";
 import type { TaskEffectExport } from "./tasks/effect-contracts";
 import taskInventory from "./tasks/inventory.generated.json";
+import teamsInventory from "./teams/inventory.generated.json";
 import {
   TASK_EFFECT_SELECTION_FIXTURES,
   taskEffectPlanFixture,
@@ -33,6 +34,7 @@ const PRODUCTION_CAPABILITIES = [
   ...meetingsInventory.capabilities,
   ...peopleInventory.capabilities,
   ...taskInventory.capabilities,
+  ...teamsInventory.capabilities,
 ];
 
 test("boundary examples still have one internal adapter", () => {

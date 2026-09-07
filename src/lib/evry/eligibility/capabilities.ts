@@ -6,6 +6,8 @@ import { MEETINGS_OPERATION_REGISTRATIONS } from "@/lib/evry/capabilities/meetin
 import parityInventory from "@/lib/evry/capabilities/inventory.generated.json";
 import { TASK_AUTHORITATIVE_SURFACES } from "@/lib/evry/capabilities/tasks/catalog";
 import { TASK_CAPABILITY_REGISTRATIONS } from "@/lib/evry/capabilities/tasks/registrations";
+import { TEAMS_AUTHORITATIVE_SURFACES } from "@/lib/evry/capabilities/teams/catalog";
+import { TEAMS_CAPABILITY_REGISTRATIONS } from "@/lib/evry/capabilities/teams/registrations";
 import {
   ALL_CAPABILITIES,
   holdsSeatFor,
@@ -273,6 +275,7 @@ const REGISTRY = createEvryCapabilityRegistry({
     ...generatedLaunchRegistrations(),
     ...MEETINGS_OPERATION_REGISTRATIONS,
     ...TASK_CAPABILITY_REGISTRATIONS,
+    ...TEAMS_CAPABILITY_REGISTRATIONS,
     ...REFERENCE_REGISTRATIONS,
   ],
   authoritativeSurfaces: [
@@ -281,6 +284,7 @@ const REGISTRY = createEvryCapabilityRegistry({
     ...generatedLaunchSurfaces(),
     ...generatedMeetingsSurfaces(),
     ...TASK_AUTHORITATIVE_SURFACES,
+    ...TEAMS_AUTHORITATIVE_SURFACES,
     ...referenceSurfaces(),
   ],
 });

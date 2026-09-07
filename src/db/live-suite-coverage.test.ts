@@ -229,6 +229,7 @@ test("each nested proof wrapper owns a phase without dropping a live suite", () 
     "src/lib/evry/capabilities/meetings/effect-live.test.ts",
     "src/lib/evry/capabilities/meetings/read-live.test.ts",
     TASK_EFFECT_LIVE_SUITE,
+    "src/lib/evry/capabilities/teams/effect-live.test.ts",
     "src/lib/evry/executor/executor-live.test.ts",
     "src/lib/evry/capabilities/launch/effect-live.test.ts",
     "src/lib/evry/recipes/recipe-live.test.ts",

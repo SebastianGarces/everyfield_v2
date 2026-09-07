@@ -96,6 +96,12 @@ import {
   taxonomyTargetIsCurrent,
 } from "./people/taxonomies";
 import { continueTaskEvryConversation } from "./tasks/conversation";
+import { continueTeamsEvryConversation } from "./teams/conversation";
+import { TEAMS_ARTIFACT_REVIEWS } from "./teams/review";
+import {
+  TEAMS_EXECUTION_CAPABILITIES,
+  teamsEvryPlanTargetIsCurrent,
+} from "./teams/runtime";
 import { TASK_ARTIFACT_REVIEWS } from "./tasks/review";
 import {
   TASK_EXECUTION_CAPABILITIES,
@@ -131,6 +137,7 @@ export const PRODUCTION_EVRY_ARTIFACT_REVIEWS = Object.freeze([
   ...MILESTONE_REVIEWS,
   ...PEOPLE_FILE_REVIEWS,
   ...TASK_ARTIFACT_REVIEWS,
+  ...TEAMS_ARTIFACT_REVIEWS,
 ]);
 
 export const PRODUCTION_EVRY_CAPABILITY_CONTINUATIONS = Object.freeze([
@@ -146,6 +153,7 @@ export const PRODUCTION_EVRY_CAPABILITY_CONTINUATIONS = Object.freeze([
   continuePeopleHouseholdConversation,
   continuePeopleMilestoneConversation,
   continueTaskEvryConversation,
+  continueTeamsEvryConversation,
 ]);
 
 const COMMUNICATION_EFFECT_IDENTITIES = new Set(
@@ -166,6 +174,9 @@ const TASK_EFFECT_IDENTITIES = new Set(
     ({ planCapability }) => planCapability.identity
   )
 );
+const TEAMS_EFFECT_IDENTITIES = new Set(
+  TEAMS_EXECUTION_CAPABILITIES.map(({ planCapability }) => planCapability.identity)
+);
 
 /** The one production composition seam capability packs extend. */
 export const PRODUCTION_EVRY_EXECUTION_REGISTRY =
@@ -175,6 +186,7 @@ export const PRODUCTION_EVRY_EXECUTION_REGISTRY =
     ...LAUNCH_EVRY_EXECUTIONS,
     ...PRODUCTION_PEOPLE_EFFECT_EXECUTIONS,
     ...TASK_EXECUTION_CAPABILITIES,
+    ...TEAMS_EXECUTION_CAPABILITIES,
   ]);
 export const PRODUCTION_EVRY_PLAN_REGISTRY =
   PRODUCTION_EVRY_EXECUTION_REGISTRY.planRegistry;
@@ -367,6 +379,9 @@ export async function productionEvryPlanTargetIsCurrent(
   }
   if (FILE_IDENTITY_SET.has(identity)) return peopleFileTargetIsCurrent(input);
   if (!hasPersistedPlanContext(input)) return false;
+  if (TEAMS_EFFECT_IDENTITIES.has(identity)) {
+    return teamsEvryPlanTargetIsCurrent(input);
+  }
   if (TASK_EFFECT_IDENTITIES.has(identity)) {
     return taskEvryPlanTargetIsCurrent(input);
   }
