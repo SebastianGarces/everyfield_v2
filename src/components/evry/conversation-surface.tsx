@@ -344,6 +344,7 @@ export function ConversationSurface({ className }: { className?: string }) {
           </label>
           <Textarea
             id="evry-message"
+            autoFocus={draft.length > 0}
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             placeholder="Message Evry…"

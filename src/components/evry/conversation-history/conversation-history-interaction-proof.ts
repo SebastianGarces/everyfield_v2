@@ -504,9 +504,18 @@ test("real shell state survives stale route remounts for first and repeated New 
   });
   await act(async () => {
     form.props.onSubmit({ preventDefault: () => {} });
+    textarea.props.onChange({ target: { value: "Keep my next draft" } });
     await new Promise((resolve) => setTimeout(resolve, 20));
   });
   assert.equal(conversationCreates, 1);
+  assert.equal(
+    composerForm(mountedRenderer).findByType("textarea").props.value,
+    "Keep my next draft"
+  );
+  assert.equal(
+    composerForm(mountedRenderer).findByType("textarea").props.autoFocus,
+    true
+  );
   assert.equal(renderedText(mountedRenderer, "Second request"), true);
   assert.equal(
     replacedHref,
