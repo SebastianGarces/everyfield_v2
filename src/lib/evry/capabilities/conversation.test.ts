@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { INITIAL_MEETING_CONFIRMATION } from "@/lib/evry/artifacts/fixtures";
-import { continueEvryHelpConversation } from "./help";
 import { storedEvryClarificationArtifactDocument } from "@/lib/evry/conversations/artifacts";
 import type { EvryStoredConversation } from "@/lib/evry/conversations/repository";
 
@@ -260,10 +259,18 @@ test("interrupted, empty, and corrupt deterministic rows do not count as durable
   }
 });
 
-test("help appends a plain reply, preserves a pending plan, and replays without duplication", async () => {
+test("plain replies preserve a pending plan and replay without duplication", async () => {
   const appendCalls: unknown[] = [];
   const dispatcher = composeEvryCapabilityConversationContinuations([
-    continueEvryHelpConversation,
+    {
+      identity: "plain-reply-test",
+      referencePolicy: "self_contained",
+      matches: () => true,
+      continue: async () => ({
+        body: "I can help you find people who need follow-up.",
+        artifacts: [],
+      }),
+    },
   ]);
   const input = selectionInput({ appendCalls });
   Object.assign(input, { literalUserText: "What can you do for me?" });

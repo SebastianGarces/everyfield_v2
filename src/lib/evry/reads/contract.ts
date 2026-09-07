@@ -25,6 +25,7 @@ type EvryReadInvocationContext = Readonly<
 export type EvryReadRegistration = Readonly<{
   id: string;
   capabilityIdentity: string;
+  inputSchema: z.ZodType;
   execute: (
     context: EvryReadInvocationContext,
     untrustedInput: unknown
@@ -83,6 +84,7 @@ export function defineEvryReadRegistration<Shape extends z.ZodRawShape>({
   return Object.freeze({
     id,
     capabilityIdentity,
+    inputSchema,
     async execute(context, untrustedInput) {
       const parsed = inputSchema.safeParse(untrustedInput);
       if (!parsed.success) return null;

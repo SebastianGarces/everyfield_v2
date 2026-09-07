@@ -460,3 +460,9 @@ Sebastian ruled in alpha programme task `01a0876e-ceb0-7f32-a6f8-8806b1400213` t
 | # | Decision | Consequence |
 |---|----------|-------------|
 | 758 / 825 | **Remove automatic sample-request lists; offer capability help when asked.** Sebastian requested a clean new conversation, one compact header, and a floating composer with progress in the transcript. | EV-042 describes help on request. The transcript owns immediate message feedback and work status; attachment workflows open from the composer rather than occupying a permanent strip. |
+
+## 2026-09-07 — Evry model-first conversation
+
+| # | Decision | Consequence |
+|---|----------|-------------|
+| 758 / 825 (1) | **Every new chat message reaches the working model; user wording is not gated by hardcoded phrases.** Sebastian requested natural-language interpretation and model-written replies, and explicitly authorized sending the current message, relevant conversation history, and visible page context to OpenAI through the configured API account with provider storage disabled. | Help and clarification are generated responses. Policy classification still precedes domain access; reads use registered schemas and fresh tenant-bound authorization. Model output cannot confirm or execute a plan. This replaces fixed conversational boundary wording, not the application-only scope or confirmation policy. |

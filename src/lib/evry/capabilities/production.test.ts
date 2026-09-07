@@ -3,7 +3,6 @@ import test from "node:test";
 
 import { parseEvryActionPlanCandidate } from "@/lib/evry/plans";
 import { boundaryArtifactFor } from "@/lib/evry/policy/artifacts";
-import { EVRY_HELP_REQUESTS } from "./help";
 
 import { continueCommunicationEvryConversation } from "./communication/conversation";
 import communicationInventory from "./communication/inventory.generated.json";
@@ -36,11 +35,8 @@ const PRODUCTION_CAPABILITIES = [
   ...taskInventory.capabilities,
 ];
 
-test("every help question and boundary example matches exactly one installed conversation capability", () => {
-  for (const request of [
-    ...EVRY_HELP_REQUESTS,
-    ...boundaryArtifactFor("ambiguous").examples,
-  ]) {
+test("boundary examples still have one internal adapter", () => {
+  for (const request of [...boundaryArtifactFor("ambiguous").examples]) {
     const matches = PRODUCTION_EVRY_CAPABILITY_CONTINUATIONS.filter(
       (continuation) =>
         continuation.matches({

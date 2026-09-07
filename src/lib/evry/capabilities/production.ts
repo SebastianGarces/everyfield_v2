@@ -22,8 +22,15 @@ import {
   COMMUNICATION_EVRY_REVIEWS,
   communicationEvryPlanTargetIsCurrent,
 } from "./communication/runtime";
-import { composeEvryCapabilityConversationContinuations } from "./conversation";
-import { continueEvryHelpConversation } from "./help";
+import {
+  createModelEvryConversation,
+  type EvryModelRead,
+} from "./model-conversation";
+import { executeAuthorizedEvryRead } from "@/lib/evry/reads/contract";
+import { COMMUNICATION_EVRY_READ_REGISTRATIONS } from "./communication/reads";
+import { LAUNCH_READ_REGISTRATIONS } from "./launch/reads";
+import { TASK_EVRY_READ_REGISTRATIONS } from "./tasks/reads";
+import { MEETINGS_READ_CONTRACTS, executeMeetingsRead } from "./meetings/reads";
 import { continueLaunchEvryConversation } from "./launch/conversation";
 import {
   LAUNCH_EVRY_EXECUTIONS,
@@ -127,7 +134,6 @@ export const PRODUCTION_EVRY_ARTIFACT_REVIEWS = Object.freeze([
 ]);
 
 export const PRODUCTION_EVRY_CAPABILITY_CONTINUATIONS = Object.freeze([
-  continueEvryHelpConversation,
   continueMeetingInvitationConversation,
   continueCommunicationEvryConversation,
   continueMeetingsEvryConversation,
@@ -192,10 +198,46 @@ export const PRODUCTION_EVRY_PEOPLE_CAPABILITY_IDENTITIES = Object.freeze(
     ),
   ].toSorted()
 );
+export const PRODUCTION_EVRY_MODEL_READS: readonly EvryModelRead[] =
+  Object.freeze([
+    ...[
+      ...PRODUCTION_EVRY_READ_REGISTRATIONS,
+      ...COMMUNICATION_EVRY_READ_REGISTRATIONS,
+      ...LAUNCH_READ_REGISTRATIONS,
+      ...TASK_EVRY_READ_REGISTRATIONS,
+    ].map(
+      (read): EvryModelRead => ({
+        id: read.id,
+        capabilityIdentity: read.capabilityIdentity,
+        inputSchema: read.inputSchema,
+        run: (authorization, input, argumentsValue) =>
+          executeAuthorizedEvryRead(
+            read,
+            authorization,
+            {
+              literalUserText: input.literalUserText,
+              pageContext: input.requestPageContext,
+            },
+            argumentsValue
+          ),
+      })
+    ),
+    ...MEETINGS_READ_CONTRACTS.map(
+      (read): EvryModelRead => ({
+        id: read.identity,
+        capabilityIdentity: read.identity,
+        inputSchema: read.inputSchema,
+        run: (authorization, _input, untrustedInput) =>
+          executeMeetingsRead({ authorization, untrustedInput }),
+      })
+    ),
+  ]);
+
 export const continueProductionEvryCapabilityConversation =
-  composeEvryCapabilityConversationContinuations(
-    PRODUCTION_EVRY_CAPABILITY_CONTINUATIONS
-  );
+  createModelEvryConversation({
+    continuations: PRODUCTION_EVRY_CAPABILITY_CONTINUATIONS,
+    reads: PRODUCTION_EVRY_MODEL_READS,
+  });
 
 type ProductionDispatcherDependencies = Readonly<{
   findPlan: typeof findExactEvryActionPlan;

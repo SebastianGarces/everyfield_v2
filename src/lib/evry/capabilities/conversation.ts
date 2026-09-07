@@ -216,7 +216,7 @@ function isCompleteCapabilityResultMessage(
   });
 }
 
-async function appendResult(input: {
+export async function appendEvryCapabilityConversationResult(input: {
   selection: EvryCapabilityConversationSelectionInput;
   store: EvryCapabilityConversationStore;
   identity: EvryCapabilityConversationResultIdentity;
@@ -294,7 +294,7 @@ export function composeEvryCapabilityConversationContinuations(
       if (!selected) return null;
       const result = await selected.continue(selectionInput);
       if (!result) return null;
-      return appendResult({
+      return appendEvryCapabilityConversationResult({
         selection: selectionInput,
         store: input.store,
         identity: evryCapabilityConversationResultIdentity({

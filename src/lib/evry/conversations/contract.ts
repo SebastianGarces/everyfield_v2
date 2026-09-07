@@ -358,6 +358,13 @@ export const evryConversationStateDocumentSchema = z
     explicitChoices: z.array(evryExplicitChoiceSchema).max(16),
     activeRecipe: evryActiveRecipeSchema.nullable(),
     pendingClarification: evryPendingClarificationSchema.nullable(),
+    pendingModelPreparation: z
+      .strictObject({
+        userRequestKey: evryConversationRequestKeySchema,
+        capabilityIdentity: z.string().min(1).max(200),
+      })
+      .nullable()
+      .optional(),
     completedSteps: z.array(evryCompletedStepSchema).max(32),
     summary: evryConversationSummarySchema.nullable(),
   })

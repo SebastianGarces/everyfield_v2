@@ -100,7 +100,7 @@ export async function observeEvryConversationRequest<T>(input: {
             input: traceInput,
             metadata: {
               requestKey: input.trace.requestKey,
-              deterministic: true,
+              routing: "model_assisted",
             },
           });
         } catch {

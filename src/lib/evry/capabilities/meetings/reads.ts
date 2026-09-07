@@ -408,6 +408,10 @@ export const MEETINGS_READ_ADAPTER_IDENTITIES = Object.freeze(
   READ_ADAPTERS.map(({ identity }) => identity).toSorted()
 );
 
+export const MEETINGS_READ_CONTRACTS = Object.freeze(
+  READ_ADAPTERS.map(({ identity, inputSchema }) => ({ identity, inputSchema }))
+);
+
 /** Parse untrusted selection input, then run only a fixed plant-scoped adapter. */
 export async function executeMeetingsRead(input: {
   authorization: MeetingsReadAuthorization;

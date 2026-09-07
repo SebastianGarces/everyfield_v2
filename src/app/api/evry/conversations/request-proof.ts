@@ -360,6 +360,8 @@ function messageWithBody(
 }
 
 async function main(): Promise<void> {
+  const { hasDurableEvryCapabilityConversationResult } =
+    await import("@/lib/evry/capabilities/conversation");
   const artifactContract = await import("@/lib/evry/conversations/artifacts");
   parseArtifactDocument =
     artifactContract.parseEvryConversationArtifactDocument;
@@ -446,7 +448,17 @@ async function main(): Promise<void> {
     resolvePageContext,
     create: async (input) => {
       capturedActor = input.actor;
-      return conversations.createEvryConversation({ ...input, store });
+      return conversations.createEvryConversation({
+        ...input,
+        store,
+        continueCapabilityConversation: async (request) =>
+          hasDurableEvryCapabilityConversationResult({
+            conversation: request.conversation,
+            userRequestKey: request.userRequestKey,
+          })
+            ? request.conversation
+            : null,
+      });
     },
   });
   const loadPlan = async () => {
@@ -496,6 +508,13 @@ async function main(): Promise<void> {
         ...input,
         store,
         revalidatePlan,
+        continueCapabilityConversation: async (request) =>
+          hasDurableEvryCapabilityConversationResult({
+            conversation: request.conversation,
+            userRequestKey: request.userRequestKey,
+          })
+            ? request.conversation
+            : null,
       }),
   });
 
