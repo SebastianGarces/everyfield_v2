@@ -56,6 +56,74 @@ const conversation: EvryStoredConversation = {
 };
 const requestKey = "40000000-0000-4000-8000-000000000001";
 
+test("a lookup can feed a second freshly authorized read without another user message", async () => {
+  const f = fixture();
+  let generations = 0;
+  let authorizations = 0;
+  const dispatch = createModelEvryConversation({
+    reads: [f.read],
+    continuations: [],
+    authorizeRead: async () => {
+      authorizations++;
+      return f.authorization;
+    },
+    generate: async (input) => {
+      generations++;
+      if (generations === 2) {
+        assert.match(JSON.stringify(input.context), /freshReadResults/);
+        assert.match(JSON.stringify(input.context), /People needing follow-up/);
+      }
+      return {
+        kind: "read",
+        id: f.read.id,
+        input: {
+          section: generations === 1 ? "contacts" : "unowned_contacts",
+          cursor: null,
+        },
+        ...(generations === 1 ? { continueReading: true as const } : {}),
+      };
+    },
+  });
+  await dispatch(f.input);
+  assert.equal(generations, 2);
+  assert.equal(authorizations, 2);
+  assert.equal(f.runs.length, 2);
+  assert.equal(f.appends.length, 1);
+});
+
+test("lookup chains stop after four reads and never prepare an effect after reading", async () => {
+  for (const attemptsPreparation of [false, true]) {
+    const f = fixture();
+    let generations = 0;
+    const dispatch = createModelEvryConversation({
+      reads: [f.read],
+      continuations: [],
+      authorizeRead: async () => f.authorization,
+      generate: async () => {
+        generations++;
+        if (attemptsPreparation && generations === 2)
+          return { kind: "prepare" };
+        if (attemptsPreparation && generations === 3)
+          return {
+            kind: "reply",
+            body: "Please ask for the change separately.",
+          };
+        return {
+          kind: "read",
+          id: f.read.id,
+          input: { section: "contacts", cursor: null },
+          continueReading: true,
+        };
+      },
+    });
+    await dispatch(f.input);
+    assert.equal(f.runs.length, attemptsPreparation ? 1 : 4);
+    assert.equal(f.appends.length, 1);
+    if (!attemptsPreparation)
+      assert.match(JSON.stringify(f.appends), /lookup limit/);
+  }
+});
+
 function userMessage(
   body: string,
   createdAt = now

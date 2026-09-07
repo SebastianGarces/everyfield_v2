@@ -18,6 +18,10 @@ import {
 import { defineEvryReadRegistration } from "@/lib/evry/reads/contract";
 import { createEvryReadContinuation } from "@/lib/evry/reads/core";
 import {
+  evryDateRangeSchema,
+  resolveEvryDateRange,
+} from "@/lib/evry/reads/date-range";
+import {
   listPrerequisiteCandidates,
   listTaskPrerequisites,
 } from "@/lib/tasks/dependencies";
@@ -79,6 +83,53 @@ async function readPlantPhase(plantId: string) {
   return plant ?? null;
 }
 
+async function readTaskPlantTimeZone(plantId: string) {
+  const [plant] = await db
+    .select({ timeZone: churches.timeZone })
+    .from(churches)
+    .where(eq(churches.id, plantId))
+    .limit(1);
+  if (!plant) throw new Error("Task plant unavailable");
+  return plant.timeZone;
+}
+
+const taskQueryInput = {
+  due: evryDateRangeSchema.nullable().optional(),
+  search: z
+    .string()
+    .trim()
+    .max(160)
+    .nullable()
+    .optional()
+    .describe("Task title or description search, not a date or status filter."),
+  assignedToId: uuid
+    .nullable()
+    .optional()
+    .describe(
+      "Exact account id from assignee lookup. Use view my_tasks for the current user; use all with this id for another assignee."
+    ),
+};
+
+async function taskQueryScope(
+  input: z.infer<z.ZodObject<typeof taskQueryInput>>,
+  plantId: string,
+  now: Date
+) {
+  const range = input.due
+    ? resolveEvryDateRange(
+        input.due,
+        now,
+        await taskReadBoundaries().readTaskPlantTimeZone(plantId)
+      )
+    : {};
+  return {
+    ...(range.from ? { dueDateFrom: range.from } : {}),
+    ...(range.through ? { dueDateTo: range.through } : {}),
+    ...(input.search ? { search: input.search } : {}),
+    ...(input.assignedToId ? { assignedToId: input.assignedToId } : {}),
+  };
+}
+
 type TaskReadBoundaries = Readonly<{
   getTask: typeof getTask;
   getTaskCounts: typeof getTaskCounts;
@@ -92,6 +143,7 @@ type TaskReadBoundaries = Readonly<{
   readPhaseTemplatePrompt: typeof readPhaseTemplatePrompt;
   readPlantPhase: typeof readPlantPhase;
   readTaskListPage: typeof readTaskListPage;
+  readTaskPlantTimeZone: typeof readTaskPlantTimeZone;
 }>;
 export type TaskReadBoundaryName = keyof TaskReadBoundaries;
 
@@ -108,6 +160,7 @@ const TASK_READ_BOUNDARIES: TaskReadBoundaries = {
   readPhaseTemplatePrompt,
   readPlantPhase,
   readTaskListPage,
+  readTaskPlantTimeZone,
 };
 const taskReadBoundaryScope = new AsyncLocalStorage<
   Partial<TaskReadBoundaries>
@@ -378,6 +431,7 @@ export const TASK_LIST_READ = defineEvryReadRegistration({
   id: "tasks.list",
   capabilityIdentity: TASK_READ_IDENTITIES.list,
   inputShape: {
+    ...taskQueryInput,
     view: standardTaskListViewSchema,
     showCompleted: z.boolean(),
     status: z.array(taskStatusSchema).max(taskStatuses.length),
@@ -385,7 +439,8 @@ export const TASK_LIST_READ = defineEvryReadRegistration({
     category: z.array(taskCategorySchema).max(taskCategories.length),
     cursor: uuid.nullable(),
   },
-  async run({ authorization }, input) {
+  async run({ authorization, now = new Date() }, input) {
+    const query = await taskQueryScope(input, authorization.actor.plantId, now);
     const result = await taskReadBoundaries().readTaskListPage(
       authorization.actor.plantId,
       authorization.actor.userId,
@@ -395,6 +450,7 @@ export const TASK_LIST_READ = defineEvryReadRegistration({
         status: input.status,
         priority: input.priority,
         category: input.category,
+        ...query,
       },
       input.cursor ?? undefined
     );
@@ -405,8 +461,18 @@ export const TASK_LIST_READ = defineEvryReadRegistration({
       });
     }
     return buildEvryReadArtifact({
-      title: "Tasks",
+      title:
+        input.due?.kind === "relative" && input.due.period === "today"
+          ? "Tasks due today"
+          : "Tasks",
       filters: [
+        ...(query.dueDateFrom
+          ? [{ label: "Due on or after", value: query.dueDateFrom }]
+          : []),
+        ...(query.dueDateTo
+          ? [{ label: "Due on or before", value: query.dueDateTo }]
+          : []),
+        ...(query.search ? [{ label: "Search", value: query.search }] : []),
         { label: "View", value: input.view },
         {
           label: "Completed",
@@ -465,6 +531,7 @@ export const TASK_LIST_READ = defineEvryReadRegistration({
 });
 
 const taskListScopeInput = {
+  ...taskQueryInput,
   view: standardTaskListViewSchema,
   status: z.array(taskStatusSchema).max(taskStatuses.length),
   priority: z.array(taskPrioritySchema).max(taskPriorities.length),
@@ -475,12 +542,16 @@ export const TASK_COUNTS_READ = defineEvryReadRegistration({
   id: "tasks.counts",
   capabilityIdentity: TASK_READ_IDENTITIES.counts,
   inputShape: taskListScopeInput,
-  async run({ authorization }, input) {
+  async run({ authorization, now = new Date() }, input) {
+    const query = await taskQueryScope(input, authorization.actor.plantId, now);
     const counts = await taskReadBoundaries().getTaskCounts(
       authorization.actor.plantId,
       taskListScope(authorization.actor.userId, {
         ...input,
+        search: input.search ?? undefined,
+        assignedToId: input.assignedToId ?? undefined,
         showCompleted: false,
+        ...query,
       })
     );
     return buildEvryReadArtifact({

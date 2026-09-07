@@ -62,7 +62,10 @@ export function taskListScope(
     status: parsed.status,
     priority: parsed.priority,
     category: parsed.category,
-    assignedToId: parsed.view === "my_tasks" ? userId : undefined,
+    assignedToId: parsed.view === "my_tasks" ? userId : parsed.assignedToId,
+    ...(parsed.dueDateFrom ? { dueDateFrom: parsed.dueDateFrom } : {}),
+    ...(parsed.dueDateTo ? { dueDateTo: parsed.dueDateTo } : {}),
+    ...(parsed.search ? { search: parsed.search } : {}),
   };
 }
 

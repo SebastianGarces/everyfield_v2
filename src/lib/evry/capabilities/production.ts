@@ -217,6 +217,7 @@ export const PRODUCTION_EVRY_MODEL_READS: readonly EvryModelRead[] =
             {
               literalUserText: input.literalUserText,
               pageContext: input.requestPageContext,
+              now: input.now,
             },
             argumentsValue
           ),

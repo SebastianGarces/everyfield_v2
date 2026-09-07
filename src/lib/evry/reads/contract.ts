@@ -16,6 +16,8 @@ export type EvryReadExecutionContext = Readonly<{
   authorization: EvryReadCapabilityAuthorization;
   literalUserText: string;
   pageContext: EvryPageContext | null;
+  /** Server-owned request instant. Never parsed from tool arguments. */
+  now?: Date;
 }>;
 
 type EvryReadInvocationContext = Readonly<

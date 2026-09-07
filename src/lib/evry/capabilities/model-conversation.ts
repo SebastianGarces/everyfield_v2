@@ -55,6 +55,8 @@ export function evryVisibleReadContext(
           ? [
               {
                 title: artifact.title,
+                filters: artifact.filters,
+                counts: artifact.counts,
                 items: artifact.items.slice(0, 12).map((item) => ({
                   id: item.id,
                   label: item.label.slice(0, 160),
@@ -252,54 +254,109 @@ export function createModelEvryConversation({
         schema: z.toJSONSchema(read.inputSchema, { unrepresentable: "any" }),
       })),
     };
-    const decision = await generate(modelInput);
-    switch (decision.kind) {
-      case "reply":
-        return finish({ body: decision.body, artifacts: [] });
-      case "settings":
-        return finish({
-          body: decision.body,
-          artifacts: [
-            { kind: "settings_handoff", sectionId: decision.sectionId },
-          ],
-        });
-      case "read": {
-        const read = catalog.find(({ id }) => id === decision.id);
-        if (!read || !read.inputSchema.safeParse(decision.input).success) break;
-        const authorization = await authorizeRead(read.capabilityIdentity);
-        if (
-          !authorization ||
-          authorization.actor.userId !== input.actor.userId ||
-          authorization.actor.plantId !== input.actor.plantId
-        )
-          break;
-        const artifact = await read.run(
-          authorization,
-          selection,
-          decision.input
-        );
-        if (!artifact) break;
-        return finish(
-          artifact.kind === "read"
-            ? {
-                body:
-                  artifact.counts.returned === 0
-                    ? "No matches for this request."
-                    : "I found " +
-                      artifact.counts.returned +
-                      " matching result" +
-                      (artifact.counts.returned === 1 ? "." : "s."),
-                artifacts: [storedEvryReadArtifactDocument(artifact)],
-              }
-            : {
-                body: artifact.prompt,
-                artifacts: [storedEvryClarificationArtifactDocument(artifact)],
-              }
-        );
+    let decision = await generate(modelInput);
+    const freshReadResults: {
+      readId: string;
+      input: unknown;
+      artifact: EvryReadContinuationArtifact;
+    }[] = [];
+    readLoop: for (let readCount = 0; readCount < 4; readCount++) {
+      switch (decision.kind) {
+        case "reply":
+          return finish({
+            body: decision.body,
+            artifacts: freshReadResults
+              .slice(-1)
+              .flatMap(({ artifact }) =>
+                artifact.kind === "read"
+                  ? [storedEvryReadArtifactDocument(artifact)]
+                  : []
+              ),
+          });
+        case "settings":
+          return finish({
+            body: decision.body,
+            artifacts: [
+              { kind: "settings_handoff", sectionId: decision.sectionId },
+            ],
+          });
+        case "read": {
+          const read = catalog.find(({ id }) => id === decision.id);
+          if (!read || !read.inputSchema.safeParse(decision.input).success)
+            break readLoop;
+          const authorization = await authorizeRead(read.capabilityIdentity);
+          if (
+            !authorization ||
+            authorization.actor.userId !== input.actor.userId ||
+            authorization.actor.plantId !== input.actor.plantId
+          )
+            break readLoop;
+          const artifact = await read.run(
+            authorization,
+            selection,
+            decision.input
+          );
+          if (!artifact) break readLoop;
+          freshReadResults.push({
+            readId: read.id,
+            input: decision.input,
+            artifact,
+          });
+          if (
+            decision.continueReading &&
+            artifact.kind === "read" &&
+            readCount < 3
+          ) {
+            decision = await generate({
+              ...modelInput,
+              context: {
+                ...modelInput.context,
+                originalRequestCanBePrepared: false,
+                freshReadResults: freshReadResults.map(
+                  ({ readId, input, artifact }) => ({
+                    readId,
+                    input,
+                    ...(artifact.kind === "read"
+                      ? {
+                          title: artifact.title,
+                          counts: artifact.counts,
+                          filters: artifact.filters,
+                          items: artifact.items.slice(0, 25),
+                          truncated: artifact.items.length > 25,
+                        }
+                      : { clarification: artifact.prompt }),
+                  })
+                ),
+                remainingReads: 3 - readCount,
+              },
+            });
+            continue readLoop;
+          }
+          return finish(
+            artifact.kind === "read"
+              ? {
+                  body: decision.continueReading
+                    ? "I reached this request's lookup limit. These are the latest results; you can ask me to continue."
+                    : artifact.counts.returned === 0
+                      ? "No matches for this request."
+                      : "I found " +
+                        artifact.counts.returned +
+                        " matching result" +
+                        (artifact.counts.returned === 1 ? "." : "s."),
+                  artifacts: [storedEvryReadArtifactDocument(artifact)],
+                }
+              : {
+                  body: artifact.prompt,
+                  artifacts: [
+                    storedEvryClarificationArtifactDocument(artifact),
+                  ],
+                }
+          );
+        }
+        case "prepare":
+          if (readCount === 0 && selected) return prepare(selection, selected);
+          break readLoop;
       }
-      case "prepare":
-        if (selected) return prepare(selection, selected);
-        break;
     }
     const clarification = await generate({
       ...modelInput,

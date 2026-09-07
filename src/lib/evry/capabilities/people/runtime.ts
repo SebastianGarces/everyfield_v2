@@ -42,6 +42,7 @@ import {
   getEvryAuthoredNote,
 } from "@/lib/people/activity";
 import { listPeople, getPerson } from "@/lib/people/service";
+import { personStatuses, personSources } from "@/db/schema/people";
 
 export const PEOPLE_EVRY_LIST_IDENTITY = "people.crm.people.list-people";
 export const PEOPLE_EVRY_ADD_NOTE_IDENTITY = "people.crm.notes.add-note";
@@ -54,6 +55,19 @@ export const PEOPLE_EVRY_MORE_ACTIVITIES_IDENTITY =
 
 const peopleListInputSchema = z.strictObject({
   search: z.string().trim().max(160),
+  status: z
+    .array(z.enum(personStatuses))
+    .optional()
+    .describe("People stages to include. Empty means any stage."),
+  source: z.array(z.enum(personSources)).optional(),
+  tagIds: z
+    .array(z.string().uuid())
+    .max(30)
+    .optional()
+    .describe(
+      "Require all these tags. Resolve tag names with people.tags first."
+    ),
+  cursor: z.string().uuid().nullable().optional(),
 });
 
 const peopleAddNoteArgumentsSchema = z.strictObject({
@@ -175,6 +189,10 @@ export const PEOPLE_EVRY_LIST_READ = defineEvryReadRegistration({
   async run({ authorization }, input) {
     const page = await listPeople(authorization.actor.plantId, {
       search: input.search || undefined,
+      status: input.status,
+      source: input.source,
+      tagIds: input.tagIds,
+      cursor: input.cursor ?? undefined,
       limit: 24,
     });
     const peopleLink = {
@@ -184,16 +202,26 @@ export const PEOPLE_EVRY_LIST_READ = defineEvryReadRegistration({
         : "/people",
     };
     const sourceLink = trustedEvryApplicationSourceLink(peopleLink);
-    const hidden = Math.max(0, page.total - page.people.length);
     return buildEvryReadArtifact({
       title: input.search ? `People matching “${input.search}”` : "People",
-      filters: input.search
-        ? [{ label: "Search", value: input.search }]
-        : [{ label: "Plant", value: "Current plant" }],
-      exclusions:
-        hidden > 0
-          ? [{ reason: "Not shown on this result page", count: hidden }]
-          : [],
+      filters: [
+        ...(input.search ? [{ label: "Search", value: input.search }] : []),
+        ...(input.status?.length
+          ? [{ label: "Stages", value: input.status.join(", ") }]
+          : []),
+        ...(input.source?.length
+          ? [{ label: "Sources", value: input.source.join(", ") }]
+          : []),
+        ...(input.tagIds?.length
+          ? [{ label: "Tags", value: input.tagIds.join(", ") }]
+          : []),
+        { label: "Matching people", value: String(page.total) },
+        {
+          label: "Next page cursor",
+          value: page.nextCursor ?? "End of results",
+        },
+      ],
+      exclusions: [],
       items: page.people.map((person) => ({
         id: person.id,
         label: personLabel(person.firstName, person.lastName),

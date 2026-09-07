@@ -41,7 +41,7 @@ import {
   taskPrioritySchema,
   taskStatusSchema,
 } from "@/lib/validations/tasks";
-import type { z } from "zod";
+import { z } from "zod";
 
 /** What Next hands a page: one value, several, or none. */
 export type SearchParamValue = string | string[] | undefined;
@@ -134,6 +134,10 @@ export interface TaskListSearchParams {
   status?: TaskStatus[];
   priority?: TaskPriority[];
   category?: TaskCategory[];
+  dueDateFrom?: string;
+  dueDateTo?: string;
+  search?: string;
+  assignedToId?: string;
   cursor?: string;
 }
 
@@ -182,5 +186,17 @@ export function parseTaskListSearchParams(params: {
     priority: parseEnumParam(params.priority, taskPrioritySchema),
     category: parseEnumParam(params.category, taskCategorySchema),
     cursor: typeof params.cursor === "string" ? params.cursor : undefined,
+    ...(z.string().date().safeParse(params.dueDateFrom).success
+      ? { dueDateFrom: z.string().date().parse(params.dueDateFrom) }
+      : {}),
+    ...(z.string().date().safeParse(params.dueDateTo).success
+      ? { dueDateTo: z.string().date().parse(params.dueDateTo) }
+      : {}),
+    ...(typeof params.search === "string" && params.search.trim()
+      ? { search: params.search.trim().slice(0, 160) }
+      : {}),
+    ...(z.string().uuid().safeParse(params.assignedToId).success
+      ? { assignedToId: z.string().uuid().parse(params.assignedToId) }
+      : {}),
   };
 }
