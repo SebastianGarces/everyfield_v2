@@ -23,6 +23,7 @@ import { TASK_ACTION_CONTRACTS } from "./tasks/contracts";
 import type { TaskEffectExport } from "./tasks/effect-contracts";
 import taskInventory from "./tasks/inventory.generated.json";
 import teamsInventory from "./teams/inventory.generated.json";
+import plantIntelligenceInventory from "./plant-intelligence/inventory.generated.json";
 import documentsWikiInventory from "./documents-wiki/inventory.generated.json";
 import {
   TASK_EFFECT_SELECTION_FIXTURES,
@@ -36,6 +37,7 @@ const PRODUCTION_CAPABILITIES = [
   ...peopleInventory.capabilities,
   ...taskInventory.capabilities,
   ...teamsInventory.capabilities,
+  ...plantIntelligenceInventory.capabilities,
   ...documentsWikiInventory.capabilities,
 ];
 

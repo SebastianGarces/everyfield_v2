@@ -115,12 +115,23 @@ export async function claimEvryDatabaseEffectDecision(input: {
   /** Trusted owner-specific authority/source predicate evaluated atomically. */
   eligibility?: SQL;
   /** Additional top-level CTEs owned by a compound domain writer. */
-  mutationCtes?: SQL;
-  mutation: SQL;
+  mutationCtes?: SQL | (() => SQL | Promise<SQL>);
+  mutation: SQL | (() => SQL | Promise<SQL>);
   targetIsCurrent(): Promise<boolean>;
 }): Promise<EvryDatabaseEffectClaim> {
   const replay = await findExactEvryDatabaseEffectClaim(input);
   if (replay) return { result: replay, disposition: "replayed" };
+
+  // Replays must not depend on mutable domain state. Resolve any source reads
+  // used to build the mutation only after exact immutable recovery.
+  const mutationCtes =
+    typeof input.mutationCtes === "function"
+      ? await input.mutationCtes()
+      : input.mutationCtes;
+  const mutation =
+    typeof input.mutation === "function"
+      ? await input.mutation()
+      : input.mutation;
 
   let result: Awaited<ReturnType<typeof db.execute<CompletedEffectRow>>>;
   try {
@@ -152,8 +163,8 @@ export async function claimEvryDatabaseEffectDecision(input: {
           and s.status = 'executing'
           and (${input.eligibility ?? sql`true`})
           and not exists (select 1 from existing)
-      )${input.mutationCtes ? sql`, ${input.mutationCtes}` : sql``}, mutation as materialized (
-        ${input.mutation}
+      )${mutationCtes ? sql`, ${mutationCtes}` : sql``}, mutation as materialized (
+        ${mutation}
       ), claimed as (
         insert into evry_execution_effect_claims (
           attempt_id, plan_id, church_id, actor_user_id, plan_fingerprint,

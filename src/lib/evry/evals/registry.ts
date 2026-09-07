@@ -1,3 +1,4 @@
+import { PLANT_INTELLIGENCE_EVAL_FIXTURES } from "@/lib/evry/capabilities/plant-intelligence/eval-fixtures";
 import {
   ADD_GUESTS_IDENTITY,
   CREATE_MEETING_IDENTITY,
@@ -146,6 +147,24 @@ export const EVRY_EVAL_PROOFS: readonly EvryEvalProof[] = Object.freeze([
     testFile: "src/lib/evry/capabilities/documents-wiki/effect-live.test.ts",
     lane: "live_database",
     safetyGates: ["cross_tenant_access"],
+  },
+  {
+    id: "plant-intelligence-capability-contract",
+    testFile:
+      "src/lib/evry/capabilities/plant-intelligence/eval-fixtures.test.ts",
+    lane: "deterministic",
+    safetyGates: ["prohibited_tool_access"],
+  },
+  {
+    id: "plant-intelligence-capability-live",
+    testFile:
+      "src/lib/evry/capabilities/plant-intelligence/effect-live.test.ts",
+    lane: "live_database",
+    safetyGates: [
+      "unconfirmed_effect",
+      "plan_approval_mismatch",
+      "cross_tenant_access",
+    ],
   },
   {
     id: "candidate-plan-probe-contract",
@@ -396,6 +415,7 @@ export const EVRY_CAPABILITY_EVAL_FIXTURES = Object.freeze([
   ...MEETINGS_CAPABILITY_EVAL_FIXTURES,
   ...PEOPLE_CAPABILITY_EVAL_FIXTURES,
   ...DOCUMENTS_WIKI_CAPABILITY_EVAL_FIXTURES,
+  ...PLANT_INTELLIGENCE_EVAL_FIXTURES,
   ...TASK_CAPABILITY_EVAL_FIXTURES,
   ...teamsInventory.capabilities.map(({ identity, operationKind }) =>
     teamsCapabilityFixture(identity, operationKind)

@@ -224,6 +224,7 @@ test("every live suite derives its own database, and no two collide", () => {
 
 test("each nested proof wrapper owns a phase without dropping a live suite", () => {
   assert.deepEqual(NESTED_PROOF_LIVE_SUITES, [
+    "src/lib/evry/capabilities/plant-intelligence/effect-live.test.ts",
     DOCUMENTS_WIKI_EFFECT_LIVE_SUITE,
     PEOPLE_EFFECT_LIVE_SUITE,
     "src/lib/communication/evry-effect-live.test.ts",

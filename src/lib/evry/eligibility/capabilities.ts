@@ -10,6 +10,10 @@ import { TASK_CAPABILITY_REGISTRATIONS } from "@/lib/evry/capabilities/tasks/reg
 import { TEAMS_AUTHORITATIVE_SURFACES } from "@/lib/evry/capabilities/teams/catalog";
 import { TEAMS_CAPABILITY_REGISTRATIONS } from "@/lib/evry/capabilities/teams/registrations";
 import {
+  PLANT_INTELLIGENCE_AUTHORITATIVE_SURFACES,
+  PLANT_INTELLIGENCE_CAPABILITIES,
+} from "@/lib/evry/capabilities/plant-intelligence/catalog";
+import {
   ALL_CAPABILITIES,
   holdsSeatFor,
   type Capability,
@@ -314,11 +318,24 @@ function generatedDocumentsWikiSurfaces(): EvryAuthoritativeCapabilitySurface[] 
   });
 }
 
+function generatedPlantIntelligenceRegistrations(): EvryCapabilityRegistration[] {
+  return PLANT_INTELLIGENCE_CAPABILITIES.map((capability) =>
+    defineEvryCapabilityRegistration({
+      identity: capability.identity,
+      surfaceIdentities: capability.surfaceIdentities,
+      parityCapability: capability.parityCapability,
+      operationKind: capability.operationKind,
+      applicationCapability: capability.applicationCapability,
+    })
+  );
+}
+
 const REGISTRY = createEvryCapabilityRegistry({
   registrations: [
     ...generatedPeopleRegistrations(),
     ...generatedCommunicationRegistrations(),
     ...generatedDocumentsWikiRegistrations(),
+    ...generatedPlantIntelligenceRegistrations(),
     ...generatedLaunchRegistrations(),
     ...MEETINGS_OPERATION_REGISTRATIONS,
     ...TASK_CAPABILITY_REGISTRATIONS,
@@ -329,6 +346,7 @@ const REGISTRY = createEvryCapabilityRegistry({
     ...generatedPeopleSurfaces(),
     ...generatedCommunicationSurfaces(),
     ...generatedDocumentsWikiSurfaces(),
+    ...PLANT_INTELLIGENCE_AUTHORITATIVE_SURFACES,
     ...generatedLaunchSurfaces(),
     ...generatedMeetingsSurfaces(),
     ...TASK_AUTHORITATIVE_SURFACES,

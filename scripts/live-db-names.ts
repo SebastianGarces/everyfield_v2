@@ -61,6 +61,7 @@ export const TASK_EFFECT_LIVE_SUITE =
   "src/lib/evry/capabilities/tasks/effect-live.test.ts" as const;
 
 export const NESTED_PROOF_LIVE_SUITES = [
+  "src/lib/evry/capabilities/plant-intelligence/effect-live.test.ts",
   DOCUMENTS_WIKI_EFFECT_LIVE_SUITE,
   PEOPLE_EFFECT_LIVE_SUITE,
   "src/lib/communication/evry-effect-live.test.ts",
@@ -103,6 +104,7 @@ export const LIVE_SUITES = [
   "src/lib/people/duplicate-match-live.test.ts",
   PEOPLE_EFFECT_LIVE_SUITE,
   DOCUMENTS_WIKI_EFFECT_LIVE_SUITE,
+  "src/lib/evry/capabilities/plant-intelligence/effect-live.test.ts",
   "src/lib/phase-engine/transitions/declaration-race.test.ts",
   "src/lib/seats/seat-removal-live.test.ts",
   "src/lib/tasks/follow-up-race.test.ts",

@@ -1,3 +1,6 @@
+import { continuePlantIntelligenceEvryConversation } from "./plant-intelligence/conversation";
+import { PLANT_INTELLIGENCE_READ_REGISTRATIONS } from "./plant-intelligence/reads";
+import { PLANT_INTELLIGENCE_EXECUTIONS, PLANT_INTELLIGENCE_REVIEWS, plantIntelligenceEvryPlanTargetIsCurrent } from "./plant-intelligence/runtime";
 import { createEvryArtifactReviewRegistry } from "@/lib/evry/artifacts/trusted-plan-review";
 import type { EvryConversationPlanTargetValidator } from "@/lib/evry/conversations/plan-resume";
 import {
@@ -146,6 +149,7 @@ export const PRODUCTION_EVRY_ARTIFACT_REVIEWS = Object.freeze([
   ...MILESTONE_REVIEWS,
   ...PEOPLE_FILE_REVIEWS,
   ...DOCUMENTS_WIKI_REVIEWS,
+  ...PLANT_INTELLIGENCE_REVIEWS,
   ...TASK_ARTIFACT_REVIEWS,
   ...TEAMS_ARTIFACT_REVIEWS,
 ]);
@@ -164,6 +168,7 @@ export const PRODUCTION_EVRY_CAPABILITY_CONTINUATIONS = Object.freeze([
   continuePeopleMilestoneConversation,
   continueDocumentsWikiReadConversation,
   continueDocumentsWikiEffectConversation,
+  continuePlantIntelligenceEvryConversation,
   continueTaskEvryConversation,
   continueTeamsEvryConversation,
 ]);
@@ -181,6 +186,7 @@ const MEETINGS_EFFECT_IDENTITIES = new Set(
 const LAUNCH_EFFECT_IDENTITIES = new Set(
   LAUNCH_EVRY_EXECUTIONS.map(({ planCapability }) => planCapability.identity)
 );
+const PLANT_INTELLIGENCE_EFFECT_IDENTITIES = new Set(PLANT_INTELLIGENCE_EXECUTIONS.map(({planCapability}) => planCapability.identity));
 const TASK_EFFECT_IDENTITIES = new Set(
   TASK_EXECUTION_CAPABILITIES.map(
     ({ planCapability }) => planCapability.identity
@@ -198,6 +204,7 @@ export const PRODUCTION_EVRY_EXECUTION_REGISTRY =
     ...LAUNCH_EVRY_EXECUTIONS,
     ...PRODUCTION_PEOPLE_EFFECT_EXECUTIONS,
     ...DOCUMENTS_WIKI_EXECUTIONS,
+    ...PLANT_INTELLIGENCE_EXECUTIONS,
     ...TASK_EXECUTION_CAPABILITIES,
     ...TEAMS_EXECUTION_CAPABILITIES,
   ]);
@@ -215,6 +222,7 @@ const PRODUCTION_PEOPLE_READ_REGISTRATIONS = Object.freeze([
 ]);
 export const PRODUCTION_EVRY_READ_REGISTRATIONS = Object.freeze([
   ...PRODUCTION_PEOPLE_READ_REGISTRATIONS,
+  ...PLANT_INTELLIGENCE_READ_REGISTRATIONS,
   ...DOCUMENTS_WIKI_READ_REGISTRATIONS,
 ]);
 export const PRODUCTION_EVRY_PEOPLE_CAPABILITY_IDENTITIES = Object.freeze(
@@ -400,6 +408,7 @@ export async function productionEvryPlanTargetIsCurrent(
   if (FILE_IDENTITY_SET.has(identity)) return peopleFileTargetIsCurrent(input);
   if (DOCUMENTS_WIKI_IDENTITY_SET.has(identity)) return documentsWikiTargetIsCurrent(input);
   if (!hasPersistedPlanContext(input)) return false;
+  if (PLANT_INTELLIGENCE_EFFECT_IDENTITIES.has(identity)) return plantIntelligenceEvryPlanTargetIsCurrent(input);
   if (TEAMS_EFFECT_IDENTITIES.has(identity)) {
     return teamsEvryPlanTargetIsCurrent(input);
   }

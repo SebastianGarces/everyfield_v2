@@ -1,4 +1,4 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/db";
@@ -7,6 +7,7 @@ import {
   launches,
   ministryTeams,
   persons,
+  plantAssessments,
   tasks,
 } from "@/db/schema";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
@@ -136,6 +137,32 @@ async function scopedRecord(
         .where(eq(launches.churchId, actor.plantId))
         .limit(1);
       return record ? { recordId: record.id, label: "Launch Sunday" } : null;
+    }
+    case "plant_intelligence": {
+      if (pageContext.recordId !== "current") return null;
+      const [record] = await db
+        .select({
+          id: plantAssessments.id,
+          generatedAt: plantAssessments.generatedAt,
+        })
+        .from(plantAssessments)
+        .where(
+          and(
+            eq(plantAssessments.churchId, actor.plantId),
+            eq(plantAssessments.status, "complete")
+          )
+        )
+        .orderBy(desc(plantAssessments.generatedAt), desc(plantAssessments.id))
+        .limit(1);
+      return record
+        ? {
+            recordId: record.id,
+            label: safeEvryPageContextLabel(
+              `Plant Intelligence · ${record.generatedAt.toISOString()}`,
+              "Plant Intelligence assessment"
+            ),
+          }
+        : null;
     }
   }
 }
