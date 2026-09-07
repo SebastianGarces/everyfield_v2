@@ -29,6 +29,18 @@ type RouteState = Readonly<{
 class RouteRemountController {
   #setRoute: Dispatch<SetStateAction<RouteState>> | null = null;
   pushes: string[] = [];
+  serverHistory: readonly EvryConversationHistoryItem[] = [];
+  refreshes = 0;
+
+  refresh(): void {
+    this.refreshes++;
+    this.#setRoute?.((current) => ({
+      ...current,
+      revision: current.revision + 1,
+      conversationId: this.serverHistory[0]?.id ?? current.conversationId,
+      newConversation: false,
+    }));
+  }
 
   observe(setRoute: Dispatch<SetStateAction<RouteState>>): void {
     this.#setRoute = setRoute;
@@ -53,6 +65,8 @@ class RouteRemountController {
   reset(): void {
     this.#setRoute = null;
     this.pushes.length = 0;
+    this.serverHistory = [HISTORY_A];
+    this.refreshes = 0;
   }
 }
 
@@ -66,6 +80,7 @@ mock.module("next/navigation", {
     useRouter: () => ({
       back: () => {},
       push: (href: string) => route.push(href),
+      refresh: () => route.refresh(),
     }),
   },
 });
@@ -203,7 +218,7 @@ function RemountingRoute({
   useEffect(() => route.observe(setRouteState), []);
   return createElement(Workspace, {
     key: routeState.revision,
-    conversations: [HISTORY_A],
+    conversations: route.serverHistory,
     conversationId: routeState.conversationId,
     conversationSurface: createElement(Surface),
     newConversation: routeState.newConversation,
@@ -359,7 +374,19 @@ test("real shell state survives stale route remounts for first and repeated New 
       if (url.endsWith("/api/evry/conversations") && init?.method === "POST") {
         conversationCreates += 1;
         const body = JSON.parse(String(init.body)) as { requestKey: string };
-        return streamedConversation(body.requestKey, CONVERSATION_B);
+        const created =
+          conversationCreates === 1
+            ? CONVERSATION_B
+            : conversation(
+                `20000000-0000-4000-8000-${String(conversationCreates + 10).padStart(12, "0")}`,
+                `Conversation ${conversationCreates}`,
+                `Request ${conversationCreates}`
+              );
+        route.serverHistory = [
+          { ...HISTORY_A, id: created.id, title: created.title },
+          ...route.serverHistory,
+        ];
+        return streamedConversation(body.requestKey, created);
       }
       throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${url}`);
     }
@@ -530,6 +557,57 @@ test("real shell state survives stale route remounts for first and repeated New 
     "/evry",
     `/evry?conversation=${CONVERSATION_A_ID}`,
   ]);
+
+  const createdRow = mountedRenderer.root.find(
+    (node) =>
+      node.type === "a" &&
+      node.props["data-testid"] === `evry-history-row-${CONVERSATION_B_ID}`
+  );
+  await act(async () => {
+    activate(createdRow);
+  });
+  assert.equal(
+    renderedText(mountedRenderer, "Second request"),
+    true,
+    "a newly created conversation stays in history after switching away"
+  );
+  assert.equal(conversationCreates, 1);
+  assert.equal(
+    conversationLoads,
+    1,
+    "returning to the created conversation uses its loaded transcript"
+  );
+
+  for (let index = 2; index <= 9; index++) {
+    await act(async () => {
+      activate(newLink(mountedRenderer));
+    });
+    const nextForm = composerForm(mountedRenderer);
+    await act(async () => {
+      nextForm
+        .findByType("textarea")
+        .props.onChange({ target: { value: `Request ${index}` } });
+    });
+    await act(async () => {
+      nextForm.props.onSubmit({ preventDefault() {} });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+  }
+  assert.equal(conversationCreates, 9);
+  assert.equal(
+    route.refreshes,
+    9,
+    "each creation reconciles authoritative history once"
+  );
+  assert.equal(
+    mountedRenderer.root.findAll(
+      (node) =>
+        node.type === "a" &&
+        node.props["data-testid"] === `evry-history-row-${CONVERSATION_B_ID}`
+    ).length,
+    1,
+    "history membership survives the eight-transcript cache limit"
+  );
 
   await act(async () => mountedRenderer.unmount());
 });

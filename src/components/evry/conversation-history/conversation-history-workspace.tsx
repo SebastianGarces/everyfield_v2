@@ -1,7 +1,15 @@
 "use client";
 
 import { ArrowLeft, LoaderCircle, MessagesSquare } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+  type ReactNode,
+} from "react";
+import { useRouter } from "next/navigation";
 
 import { useEvryShell } from "@/components/evry/evry-shell";
 import { syncEvryWorkspaceConversationHistory } from "@/components/evry/interaction-state";
@@ -52,6 +60,9 @@ export function ConversationHistoryWorkspace({
     resetConversation,
     sendMessageText,
   } = useEvryShell();
+  const router = useRouter();
+  const historyNeedsRefreshRef = useRef(false);
+  const [isRefreshingHistory, startHistoryRefresh] = useTransition();
   const [routeConversationId, setRouteConversationId] =
     useState(conversationId);
   const [routeNewConversation, setRouteNewConversation] =
@@ -97,6 +108,7 @@ export function ConversationHistoryWorkspace({
     ownsNewConversation && selectedConversationId === null && !isNewComposer;
   const hasDetail = selectedConversationId !== null || ownsNewConversation;
   const blocked =
+    isRefreshingHistory ||
     pendingMessage?.status === "failed" ||
     isLoading ||
     isSending ||
@@ -216,6 +228,7 @@ export function ConversationHistoryWorkspace({
     createdConversationSyncMarkerRef.current = decision.nextMarker;
     if (decision.conversationIdToSync === null) return;
 
+    historyNeedsRefreshRef.current = true;
     setRouteConversationId(decision.conversationIdToSync);
     setRouteNewConversation(false);
 
@@ -233,6 +246,12 @@ export function ConversationHistoryWorkspace({
       searchQuery
     );
   }, [conversation?.id, routeConversationId, searchQuery]);
+
+  useEffect(() => {
+    if (!historyNeedsRefreshRef.current || isSending || isWorking) return;
+    historyNeedsRefreshRef.current = false;
+    startHistoryRefresh(() => router.refresh());
+  }, [conversation?.id, isSending, isWorking, router]);
 
   function showConversationList(): void {
     if (blocked) return;
