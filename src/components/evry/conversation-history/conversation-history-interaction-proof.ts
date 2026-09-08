@@ -630,7 +630,9 @@ test("real shell state survives stale route remounts for first and repeated New 
   });
   assert.equal(renderedText(mountedRenderer, "Conversation unavailable"), true);
   assert.equal(renderedText(mountedRenderer, "Opening conversation…"), false);
-  await act(async () => activate(newLink(mountedRenderer)));
+  await act(async () => {
+    activate(newLink(mountedRenderer));
+  });
   await act(async () => {
     composerForm(mountedRenderer)
       .findByType("textarea")
