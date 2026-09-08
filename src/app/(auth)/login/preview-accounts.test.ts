@@ -138,6 +138,23 @@ test("every filled address is one a seed script creates", () => {
   for (const account of previewRoster()) {
     const [local, domain] = account.email.split("@");
 
+    if (["evry-test", "evry-test-admin", "evry-test-member"].includes(local)) {
+      assert.equal(domain, "everyfield.app");
+      assert.ok(
+        readFileSync(
+          path.join(process.cwd(), "scripts/evry-test-fixtures.ts"),
+          "utf8"
+        ).includes(`email: "${account.email}"`)
+      );
+      assert.ok(
+        readFileSync(
+          path.join(process.cwd(), "scripts/seed-evry-test.ts"),
+          "utf8"
+        ).includes(`const PASSWORD = "${account.password}"`)
+      );
+      continue;
+    }
+
     if (domain === "eval.phase-engine.everyfield.app") {
       if (local === "network-admin") {
         assert.ok(
