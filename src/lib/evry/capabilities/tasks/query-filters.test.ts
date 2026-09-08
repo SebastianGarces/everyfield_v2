@@ -6,17 +6,20 @@ import type { EvryReadCapabilityAuthorization } from "@/lib/evry/eligibility/cap
 import { parseTaskListSearchParams } from "@/lib/tasks/list-params";
 import { taskListScope } from "@/lib/tasks/list-page";
 
-test("the production task read carries due-today, owner and pending filters into the real list pipeline", { skip: process.env.LIVE_DB_TESTS !== "1" }, async () => {
-  const actor = {
-    plantId: "30000000-0000-4000-8000-000000000001",
-    userId: "20000000-0000-4000-8000-000000000001",
-    seat: "owner",
-  };
-  const authorization = {
-    actor,
-    registration: { identity: TASK_LIST_READ.capabilityIdentity },
-  } as EvryReadCapabilityAuthorization;
-  let calls = 0;
+test(
+  "the production task read carries due-today, owner and pending filters into the real list pipeline",
+  { skip: process.env.LIVE_DB_TESTS !== "1" },
+  async () => {
+    const actor = {
+      plantId: "30000000-0000-4000-8000-000000000001",
+      userId: "20000000-0000-4000-8000-000000000001",
+      seat: "owner",
+    };
+    const authorization = {
+      actor,
+      registration: { identity: TASK_LIST_READ.capabilityIdentity },
+    } as EvryReadCapabilityAuthorization;
+    let calls = 0;
     const artifact = await withTaskReadProofBoundaries(
       {
         async readTaskPlantTimeZone(plantId) {
@@ -69,7 +72,8 @@ test("the production task read carries due-today, owner and pending filters into
     assert.equal(artifact?.kind, "read");
     if (artifact?.kind === "read")
       assert.equal(artifact.title, "Tasks due today");
-});
+  }
+);
 
 test("invalid dates fail before any read; own view cannot be widened by an assignee argument", () => {
   assert.equal(

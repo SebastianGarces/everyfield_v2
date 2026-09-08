@@ -127,7 +127,6 @@ export const PARALLEL_LIVE_SUITES = LIVE_SUITES.filter(
   (suite) => !dedicatedLiveSuites.has(suite)
 );
 
-
 /** Ordered, fail-fast phases: each monolithic proof runs without a sibling. */
 export const LIVE_SUITE_PHASES = [
   ...DEDICATED_LIVE_SUITES.map((suite) => [suite] as const),

@@ -346,8 +346,14 @@ test("an eligible insight opens the ordinary composer with removable source cont
   assert.match(insightCard, /<InsightToEvryAction/);
   assert.match(insightAction, /Work on this with Evry/);
   assert.match(insightAction, /openInsightHandoff\(/);
-  assert.doesNotMatch(insightAction, /setDraft|sendMessage|confirmation|toolChoice|effectArguments/);
-  assert.match(shell, /const context = visibleEvryInsightHandoff\(handoff\)[\s\S]*context === null[\s\S]*setActiveContext\(context\)[\s\S]*setPanelOpen\(true\)/);
+  assert.doesNotMatch(
+    insightAction,
+    /setDraft|sendMessage|confirmation|toolChoice|effectArguments/
+  );
+  assert.match(
+    shell,
+    /const context = visibleEvryInsightHandoff\(handoff\)[\s\S]*context === null[\s\S]*setActiveContext\(context\)[\s\S]*setPanelOpen\(true\)/
+  );
   assert.match(surface, /<EvryContextChip context=\{activeContext\}/);
 });
 

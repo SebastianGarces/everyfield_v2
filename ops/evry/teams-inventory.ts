@@ -36,7 +36,10 @@ const FIXTURE_CLASSES = [
 
 type Classification =
   | Readonly<{ state: "supported" }>
-  | Readonly<{ state: "excluded"; reason: "ui_navigation_only" | "owned_by_meetings" }>;
+  | Readonly<{
+      state: "excluded";
+      reason: "ui_navigation_only" | "owned_by_meetings";
+    }>;
 
 export type TeamsEvrySurface = Readonly<{
   kind: "action" | "route" | "rsc_operation";

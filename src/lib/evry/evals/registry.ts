@@ -505,7 +505,9 @@ export const EVRY_CAPABILITY_EVAL_FIXTURES = Object.freeze([
   ...PEOPLE_CAPABILITY_EVAL_FIXTURES,
   ...DOCUMENTS_WIKI_CAPABILITY_EVAL_FIXTURES,
   ...PLANT_INTELLIGENCE_EVAL_FIXTURES,
-  ...platformInventory.capabilities.map(({identity, operationKind}) => platformCapabilityFixture(identity, operationKind)),
+  ...platformInventory.capabilities.map(({ identity, operationKind }) =>
+    platformCapabilityFixture(identity, operationKind)
+  ),
   ...TASK_CAPABILITY_EVAL_FIXTURES,
   ...teamsInventory.capabilities.map(({ identity, operationKind }) =>
     teamsCapabilityFixture(identity, operationKind)
