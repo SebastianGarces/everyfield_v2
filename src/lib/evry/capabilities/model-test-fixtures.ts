@@ -6,6 +6,7 @@ export function modelDecision(overrides: Record<string, unknown> = {}) {
     response: "How can I help with your work?",
     readId: null,
     readInputJson: null,
+    continueReading: false,
     prepareOriginalRequest: false,
     settingsSectionId: null,
     ...overrides,

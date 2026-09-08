@@ -1,10 +1,34 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { z } from "zod";
 import { generateEvryModelTurn, parseEvryModelTurn } from "./model-turn";
 import {
   modelDecision,
   scriptedConversationModel,
 } from "./model-test-fixtures";
+
+test("the actual provider response schema requires every field for OpenAI strict output", async () => {
+  const scripted = scriptedConversationModel(modelDecision());
+  await generateEvryModelTurn({ context: {}, reads: [] }, () => scripted.model);
+  const { responseFormat } = z
+    .object({
+      responseFormat: z.object({
+        type: z.literal("json"),
+        schema: z.object({
+          type: z.literal("object"),
+          properties: z.record(z.string(), z.unknown()),
+          required: z.array(z.string()),
+          additionalProperties: z.literal(false),
+        }),
+      }),
+    })
+    .parse(scripted.calls[0]);
+  assert.deepEqual(
+    [...responseFormat.schema.required].sort(),
+    Object.keys(responseFormat.schema.properties).sort(),
+    "Defaults make input fields optional, which OpenAI rejects before generation"
+  );
+});
 
 test("help and arbitrary paraphrases reach a real model boundary with storage disabled", async () => {
   for (const latestRequest of [

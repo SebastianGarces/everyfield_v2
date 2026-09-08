@@ -23,7 +23,7 @@ export const evryModelTurnSchema = z.strictObject({
   response: z.string().trim().min(1).max(8000),
   readId: z.string().nullable(),
   readInputJson: z.string().max(16000).nullable(),
-  continueReading: z.boolean().default(false),
+  continueReading: z.boolean(),
   prepareOriginalRequest: z.boolean(),
   settingsSectionId: evrySettingsSectionIdSchema.nullable(),
 });
