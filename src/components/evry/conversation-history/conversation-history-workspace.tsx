@@ -97,7 +97,8 @@ export function ConversationHistoryWorkspace({
   });
   const isConversationNavigationPending =
     selectedConversationId !== null &&
-    conversation?.id !== selectedConversationId;
+    conversation?.id !== selectedConversationId &&
+    error === null;
   const selectedConversation =
     conversation?.id === selectedConversationId ? conversation : null;
   const isNewComposer = canUseEvryNewComposer({

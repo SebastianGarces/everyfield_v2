@@ -358,12 +358,18 @@ test("real shell state survives stale route remounts for first and repeated New 
   });
   let conversationLoads = 0;
   let conversationCreates = 0;
+  const unavailableConversationId = "30000000-0000-4000-8000-000000000099";
   const secondLoad = Promise.withResolvers<void>();
   t.mock.method(
     globalThis,
     "fetch",
     async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
+      if (
+        url.endsWith(`/api/evry/conversations/${unavailableConversationId}`)
+      ) {
+        return Response.json({ status: "unavailable" }, { status: 404 });
+      }
       if (url.endsWith(`/api/evry/conversations/${CONVERSATION_A_ID}`)) {
         conversationLoads += 1;
         if (conversationLoads === 2) {
@@ -617,6 +623,29 @@ test("real shell state survives stale route remounts for first and repeated New 
     1,
     "history membership survives the eight-transcript cache limit"
   );
+
+  await act(async () => route.commit(unavailableConversationId));
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+  assert.equal(renderedText(mountedRenderer, "Conversation unavailable"), true);
+  assert.equal(renderedText(mountedRenderer, "Opening conversation…"), false);
+  await act(async () => activate(newLink(mountedRenderer)));
+  await act(async () => {
+    composerForm(mountedRenderer)
+      .findByType("textarea")
+      .props.onChange({
+        target: { value: "A new request after an unavailable conversation" },
+      });
+  });
+  assert.equal(
+    mountedRenderer.root.find(
+      (node) =>
+        node.type === "button" && node.props["aria-label"] === "Send message"
+    ).props.disabled,
+    false
+  );
+  assert.equal(renderedText(mountedRenderer, "New conversation"), true);
 
   await act(async () => mountedRenderer.unmount());
 });
