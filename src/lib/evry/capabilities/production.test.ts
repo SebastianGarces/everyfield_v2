@@ -16,6 +16,7 @@ import {
   PRODUCTION_EVRY_CAPABILITY_CONTINUATIONS,
   PRODUCTION_EVRY_EXECUTION_REGISTRY,
   PRODUCTION_EVRY_PLAN_REGISTRY,
+  PRODUCTION_EVRY_MODEL_READS,
   PRODUCTION_EVRY_REVIEW_REGISTRY,
 } from "./production";
 import { continueTaskEvryConversation } from "./tasks/conversation";
@@ -61,7 +62,24 @@ test("boundary examples still have one internal adapter", () => {
   }
 });
 
-test("production installs every Communication, Launch, Meetings, People, and Tasks effect together", () => {
+test("production exposes every installed pack read to the model", () => {
+  const expected = PRODUCTION_CAPABILITIES.filter(
+    ({ operationKind }) => operationKind === "read"
+  ).map(({ identity }) => identity);
+  const actual = PRODUCTION_EVRY_MODEL_READS.map(
+    ({ capabilityIdentity }) => capabilityIdentity
+  );
+  assert.deepEqual(
+    [...new Set(actual)].toSorted(),
+    [...new Set(expected)].toSorted()
+  );
+  assert.equal(
+    new Set(PRODUCTION_EVRY_MODEL_READS.map(({ id }) => id)).size,
+    PRODUCTION_EVRY_MODEL_READS.length
+  );
+});
+
+test("production installs every capability pack effect together", () => {
   const identities = PRODUCTION_CAPABILITIES.map(({ identity }) => identity);
   assert.equal(new Set(identities).size, identities.length);
 

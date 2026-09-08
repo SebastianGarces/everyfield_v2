@@ -83,12 +83,12 @@ export function customerContentPreviews(
     const readable = readableLabel(preview.label);
     if (
       INTERNAL_PREVIEW.test(readable) ||
-      looksLikeStructuredData(preview.content)
+      (preview.format === undefined && looksLikeStructuredData(preview.content))
     ) {
       return [];
     }
     let content = preview.content;
-    if (preview.format !== "rich_text") {
+    if (preview.format === undefined) {
       try {
         const parsed: unknown = JSON.parse(content);
         if (typeof parsed === "string") content = parsed;

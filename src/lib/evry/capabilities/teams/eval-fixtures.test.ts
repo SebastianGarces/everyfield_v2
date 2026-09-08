@@ -2,6 +2,13 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { test } from "node:test";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import {
+  EvryArtifactRenderer,
+  renderableEvryArtifact,
+} from "@/components/evry/artifacts/artifact-renderer";
+import { evryPublicArtifactSchema } from "@/lib/evry/artifacts/public";
 
 import teamsInventory from "./inventory.generated.json";
 import { trustedReviewForEvryPlanDocument } from "@/lib/evry/artifacts/trusted-plan-review";
@@ -140,7 +147,10 @@ function effectInput(
   } as unknown as EvryEffectInput;
 }
 
-function confirmationFor(identity: string) {
+function confirmationFor(
+  identity: string,
+  argumentsValue?: Record<string, unknown>
+) {
   const fixture = TEAMS_EVAL_FIXTURES.find(
     (candidate) => candidate.identity === identity
   );
@@ -151,7 +161,7 @@ function confirmationFor(identity: string) {
         {
           id: fixture.identity,
           capabilityIdentity: fixture.identity,
-          arguments: fixture.arguments,
+          arguments: argumentsValue ?? fixture.arguments,
           dependsOn: [],
         },
       ],
@@ -376,9 +386,11 @@ test("full literal meeting notification intent is disclosed while raw F11 rows s
     reviewRegistry: TEAMS_REVIEW_REGISTRY,
   });
   assert.ok(review);
-  const preview = review.confirmation.steps[0]!.contentPreviews.map(
-    ({ content }) => content
-  ).join("");
+  const preview = review.confirmation.steps[0]!.contentPreviews.filter(
+    ({ label }) => label.startsWith("Complete immutable plan")
+  )
+    .map(({ content }) => content)
+    .join("");
   assert.equal(preview, JSON.stringify(arguments_));
   for (const value of [
     literal.category,
@@ -777,9 +789,95 @@ test("multi-row and giant-grapheme plans remain reviewable and lossless", () => 
     step.contentPreviews.every(({ content }) => content.length <= 4_000)
   );
   assert.equal(
-    step.contentPreviews.map(({ content }) => content).join(""),
+    step.contentPreviews
+      .filter(({ label }) => label.startsWith("Complete immutable plan"))
+      .map(({ content }) => content)
+      .join(""),
     JSON.stringify(arguments_)
   );
+});
+
+test("single-team edits visibly disclose renames, clears, icons and literal text before confirmation", () => {
+  const fixture = TEAMS_EVAL_FIXTURES.find(
+    ({ operation }) => operation === "updateTeamAction"
+  )!;
+  const original = fixture.arguments.mutations[0]!;
+  const before = {
+    ...original.before!,
+    name: "Old team",
+    description: "Previous description",
+    icon: "music",
+  };
+  for (const description of [null, "", '{"note":"literal description"}']) {
+    const after = { ...before, name: "New team", description, icon: "heart" };
+    const args = {
+      ...fixture.arguments,
+      expected: [{ table: original.table, id: original.id, state: before }],
+      mutations: [{ ...original, before, after }],
+      disclosure: {
+        ...fixture.arguments.disclosure,
+        targets: [{ label: "Team", value: "Old team", href: "/teams" }],
+      },
+    };
+    const review = confirmationFor(fixture.identity, args);
+    assert.ok(review);
+    const html = renderToStaticMarkup(
+      createElement(EvryArtifactRenderer, {
+        model: renderableEvryArtifact(
+          evryPublicArtifactSchema.parse(review.confirmation)
+        ),
+      })
+    );
+    for (const value of [
+      "New team",
+      "heart",
+      description ? "literal description" : "Remove existing description",
+    ])
+      assert.ok(html.includes(value), value);
+    assert.doesNotMatch(html, /church_id|Complete immutable plan/);
+  }
+});
+
+test("new Teams records disclose supplied fields rather than only their parent team", () => {
+  for (const operation of [
+    "createTeamAction",
+    "createTrainingProgramAction",
+  ] as const) {
+    const fixture = TEAMS_EVAL_FIXTURES.find(
+      (fixture) => fixture.operation === operation
+    )!;
+    const mutation = fixture.arguments.mutations[0]!;
+    const fields =
+      operation === "createTeamAction"
+        ? { name: "Hospitality", description: "Welcome guests", icon: "heart" }
+        : {
+            name: "Guest safety",
+            description: "Practice safe check-in",
+            is_required: true,
+          };
+    const args = {
+      ...fixture.arguments,
+      mutations: [{ ...mutation, after: { ...mutation.after!, ...fields } }],
+      disclosure: {
+        ...fixture.arguments.disclosure,
+        targets: [
+          { label: "Team", value: "Existing parent team", href: "/teams" },
+        ],
+      },
+    };
+    const review = confirmationFor(fixture.identity, args);
+    assert.ok(review);
+    const html = renderToStaticMarkup(
+      createElement(EvryArtifactRenderer, {
+        model: renderableEvryArtifact(
+          evryPublicArtifactSchema.parse(review.confirmation)
+        ),
+      })
+    );
+    for (const value of Object.values(fields))
+      assert.ok(html.includes(value === true ? "Yes" : value), String(value));
+    assert.doesNotMatch(html, /church_id|is_required|Complete immutable plan/);
+  }
 });
 
 for (const { identity } of teamsInventory.capabilities) {

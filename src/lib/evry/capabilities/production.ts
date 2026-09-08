@@ -1,8 +1,21 @@
 import { continuePlatformEvryConversation } from "./platform/conversation";
-import { PLATFORM_ARTIFACT_REVIEWS, PLATFORM_EXECUTION_CAPABILITIES, platformEvryTargetIsCurrent } from "./platform/effects";
+import {
+  PLATFORM_READ_CONTRACTS,
+  continuePlatformEvryRead,
+} from "./platform/reads";
+import { TEAMS_READ_CONTRACTS, executeTeamsRead } from "./teams/reads";
+import {
+  PLATFORM_ARTIFACT_REVIEWS,
+  PLATFORM_EXECUTION_CAPABILITIES,
+  platformEvryTargetIsCurrent,
+} from "./platform/effects";
 import { continuePlantIntelligenceEvryConversation } from "./plant-intelligence/conversation";
 import { PLANT_INTELLIGENCE_READ_REGISTRATIONS } from "./plant-intelligence/reads";
-import { PLANT_INTELLIGENCE_EXECUTIONS, PLANT_INTELLIGENCE_REVIEWS, plantIntelligenceEvryPlanTargetIsCurrent } from "./plant-intelligence/runtime";
+import {
+  PLANT_INTELLIGENCE_EXECUTIONS,
+  PLANT_INTELLIGENCE_REVIEWS,
+  plantIntelligenceEvryPlanTargetIsCurrent,
+} from "./plant-intelligence/runtime";
 import { createEvryArtifactReviewRegistry } from "@/lib/evry/artifacts/trusted-plan-review";
 import type { EvryConversationPlanTargetValidator } from "@/lib/evry/conversations/plan-resume";
 import {
@@ -190,15 +203,25 @@ const MEETINGS_EFFECT_IDENTITIES = new Set(
 const LAUNCH_EFFECT_IDENTITIES = new Set(
   LAUNCH_EVRY_EXECUTIONS.map(({ planCapability }) => planCapability.identity)
 );
-const PLANT_INTELLIGENCE_EFFECT_IDENTITIES = new Set(PLANT_INTELLIGENCE_EXECUTIONS.map(({planCapability}) => planCapability.identity));
-const PLATFORM_EFFECT_IDENTITIES = new Set(PLATFORM_EXECUTION_CAPABILITIES.map(({planCapability}) => planCapability.identity));
+const PLANT_INTELLIGENCE_EFFECT_IDENTITIES = new Set(
+  PLANT_INTELLIGENCE_EXECUTIONS.map(
+    ({ planCapability }) => planCapability.identity
+  )
+);
+const PLATFORM_EFFECT_IDENTITIES = new Set(
+  PLATFORM_EXECUTION_CAPABILITIES.map(
+    ({ planCapability }) => planCapability.identity
+  )
+);
 const TASK_EFFECT_IDENTITIES = new Set(
   TASK_EXECUTION_CAPABILITIES.map(
     ({ planCapability }) => planCapability.identity
   )
 );
 const TEAMS_EFFECT_IDENTITIES = new Set(
-  TEAMS_EXECUTION_CAPABILITIES.map(({ planCapability }) => planCapability.identity)
+  TEAMS_EXECUTION_CAPABILITIES.map(
+    ({ planCapability }) => planCapability.identity
+  )
 );
 
 /** The one production composition seam capability packs extend. */
@@ -273,6 +296,31 @@ export const PRODUCTION_EVRY_MODEL_READS: readonly EvryModelRead[] =
         inputSchema: read.inputSchema,
         run: (authorization, _input, untrustedInput) =>
           executeMeetingsRead({ authorization, untrustedInput }),
+      })
+    ),
+    ...TEAMS_READ_CONTRACTS.map(
+      (read): EvryModelRead => ({
+        id: read.identity,
+        capabilityIdentity: read.identity,
+        inputSchema: read.inputSchema,
+        run: (authorization, _input, untrustedInput) =>
+          executeTeamsRead({ authorization, untrustedInput }),
+      })
+    ),
+    ...PLATFORM_READ_CONTRACTS.map(
+      (read): EvryModelRead => ({
+        id: read.identity,
+        capabilityIdentity: read.identity,
+        inputSchema: read.inputSchema,
+        run: async (authorization, _input, untrustedInput) => {
+          const parsed = read.inputSchema.safeParse(untrustedInput);
+          return parsed.success
+            ? continuePlatformEvryRead({
+                actor: authorization.actor,
+                selection: parsed.data,
+              })
+            : null;
+        },
       })
     ),
   ]);
@@ -412,10 +460,13 @@ export async function productionEvryPlanTargetIsCurrent(
     return milestoneTargetIsCurrent(input);
   }
   if (FILE_IDENTITY_SET.has(identity)) return peopleFileTargetIsCurrent(input);
-  if (DOCUMENTS_WIKI_IDENTITY_SET.has(identity)) return documentsWikiTargetIsCurrent(input);
+  if (DOCUMENTS_WIKI_IDENTITY_SET.has(identity))
+    return documentsWikiTargetIsCurrent(input);
   if (!hasPersistedPlanContext(input)) return false;
-  if (PLATFORM_EFFECT_IDENTITIES.has(identity)) return platformEvryTargetIsCurrent(input);
-  if (PLANT_INTELLIGENCE_EFFECT_IDENTITIES.has(identity)) return plantIntelligenceEvryPlanTargetIsCurrent(input);
+  if (PLATFORM_EFFECT_IDENTITIES.has(identity))
+    return platformEvryTargetIsCurrent(input);
+  if (PLANT_INTELLIGENCE_EFFECT_IDENTITIES.has(identity))
+    return plantIntelligenceEvryPlanTargetIsCurrent(input);
   if (TEAMS_EFFECT_IDENTITIES.has(identity)) {
     return teamsEvryPlanTargetIsCurrent(input);
   }

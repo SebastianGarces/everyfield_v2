@@ -12,6 +12,8 @@ import {
   tasks,
 } from "@/db/schema";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
+import { eligibleEvryCapabilitiesFor } from "@/lib/evry/eligibility/capabilities";
+import { PLANT_INTELLIGENCE_READ_IDENTITIES } from "@/lib/evry/capabilities/plant-intelligence/catalog";
 import { meetingDisplayTitle } from "@/lib/meetings/labels";
 
 import {
@@ -204,6 +206,15 @@ export async function resolveAuthorizedEvryPageContext(input: {
   pageContext: EvryPageContext | null;
 }): Promise<EvryResolvedPageContext | null> {
   if (input.pageContext === null) return null;
+  if (
+    (input.pageContext.kind === "plant_intelligence" ||
+      input.pageContext.kind === "plant_insight") &&
+    !eligibleEvryCapabilitiesFor(input.actor).some(
+      ({ identity }) =>
+        identity === PLANT_INTELLIGENCE_READ_IDENTITIES.assessments
+    )
+  )
+    return null;
   const record = await scopedRecord(input.actor, input.pageContext);
   return record === null ? null : { kind: input.pageContext.kind, ...record };
 }

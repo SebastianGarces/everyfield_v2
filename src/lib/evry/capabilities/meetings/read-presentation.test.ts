@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { meetingReadDateTime } from "./reads";
+import { meetingReadDateTime } from "@/lib/evry/reads/meeting-date-time";
 
 test("meeting reads preserve the stored wall clock and use the church's seasonal time zone", () => {
   assert.equal(

@@ -3,6 +3,7 @@ import inventory from "@/lib/evry/capabilities/inventory.generated.json";
 import {
   PRODUCTION_EVRY_MODEL_READS,
   PRODUCTION_EVRY_EXECUTION_REGISTRY,
+  PRODUCTION_EVRY_ARTIFACT_REVIEWS,
 } from "@/lib/evry/capabilities/production";
 import { evryCapabilityRegistrationFor } from "@/lib/evry/eligibility/capabilities";
 
@@ -23,15 +24,26 @@ const report = families.map((family) => {
     id: read.id,
     schema: z.toJSONSchema(read.inputSchema, { unrepresentable: "any" }),
   }));
+  const effects = PRODUCTION_EVRY_ARTIFACT_REVIEWS.flatMap(({ source }) =>
+    source.kind === "generic" ? [...source.capabilityIdentities] : []
+  ).filter(
+    (identity) =>
+      evryCapabilityRegistrationFor(identity)?.parityCapability === family.id &&
+      PRODUCTION_EVRY_EXECUTION_REGISTRY.registrationFor(identity)
+  );
   return {
     family: family.id,
     declaredSurfaces: surfaces.length,
     modelReadCount: reads.length,
     modelReads: reads,
+    confirmedEffectCount: effects.length,
+    confirmedEffects: effects,
     // A source declaration is not evidence of natural-language execution parity.
     coverage: reads.length
       ? "partial: verify filters and workflows"
-      : "missing model reads",
+      : effects.length
+        ? "effect-only: verify natural-language preparation"
+        : "missing reads and effects",
   };
 });
 console.log(
@@ -62,6 +74,6 @@ console.log(
 );
 if (
   process.argv.includes("--require-all-families") &&
-  report.some((r) => r.modelReadCount === 0)
+  report.some((r) => r.modelReadCount === 0 && r.confirmedEffectCount === 0)
 )
   process.exitCode = 1;

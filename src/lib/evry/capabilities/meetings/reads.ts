@@ -2,12 +2,7 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { churches } from "@/db/schema";
-import {
-  formatDateTime,
-  formatDateTimeWithZone,
-  instantsAtZonedTime,
-  toCalendarDate,
-} from "@/lib/datetime";
+import { meetingReadDateTime } from "@/lib/evry/reads/meeting-date-time";
 
 import { buildEvryReadArtifact } from "@/lib/evry/artifacts/core";
 import {
@@ -78,19 +73,6 @@ type MeetingsReadAdapter = Readonly<{
     input: never
   ): Promise<EvryReadContinuationArtifact>;
 }>;
-
-/** Meeting rows store wall-clock values, not UTC instants. Preserve the hour. */
-export function meetingReadDateTime(value: Date, timeZone: string): string {
-  const instants = instantsAtZonedTime(
-    toCalendarDate(value, "UTC"),
-    value.getUTCHours(),
-    value.getUTCMinutes(),
-    timeZone
-  );
-  return instants.length === 1
-    ? formatDateTimeWithZone(instants[0], timeZone)
-    : `${formatDateTime(value, "long", "UTC")} (${timeZone}; time needs review)`;
-}
 
 async function readPlantTimeZone(plantId: string) {
   const [plant] = await db

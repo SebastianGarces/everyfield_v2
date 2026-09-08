@@ -39,7 +39,11 @@ import {
 import { createEvryActionPlanRecord } from "@/lib/evry/plans/repository";
 import { defineEvryPlanCapability } from "@/lib/evry/plans/registry";
 import { emitPhaseChanged } from "@/lib/phase-engine/events";
-import { MANUAL_SIGNAL_KEYS } from "@/lib/phase-engine/manual-signals";
+import {
+  MANUAL_SIGNAL_KEYS,
+  MANUAL_SIGNALS,
+} from "@/lib/phase-engine/manual-signals";
+import { formatDate } from "@/lib/datetime";
 import {
   CHECKIN_NOTE_MAX,
   weekStartOf,
@@ -642,7 +646,7 @@ async function refreshClaimed(
   refresh: PlantIntelligenceRefresh,
   paths: readonly string[]
 ) {
-  if (claim.disposition === "claimed") await refresh(paths);
+  if (claim.result.status === "completed") await refresh(paths);
   return claim.result;
 }
 
@@ -690,7 +694,9 @@ async function executeTransition(
         ["owner"]
       )) && transitionIsCurrent(input.execution.plantId, args),
   });
-  if (claim.disposition === "claimed") {
+  if (claim.result.status === "completed") {
+    // Both subscribers tolerate replay for the same plant/phase. Emission is
+    // advisory, as in the canonical transition service, not guaranteed delivery.
     await emitPhaseChanged({
       churchId: input.execution.plantId,
       fromPhase: args.expected.currentPhase,
@@ -974,12 +980,19 @@ function reviewedStep(input: {
         value: input.target,
         sourceLink: { label: "Open Plant Intelligence", href: "/phase" },
       },
+      { label: "Proposed change", value: input.after, sourceLink: null },
     ],
     counts: [{ label: "Records", count: 1 }],
     exclusions: [],
     dateTime: null,
     contentPreviews: input.preview
-      ? [{ label: "Exact content", content: input.preview }]
+      ? [
+          {
+            label: "Content",
+            content: input.preview,
+            format: "plain_text" as const,
+          },
+        ]
       : [],
     beforeAfter: [
       {
@@ -1010,7 +1023,7 @@ export const PLANT_INTELLIGENCE_REVIEWS = Object.freeze([
         title: `Change the plant phase to ${args.toPhase}`,
         actionLabel: "Change phase",
         consequences: [
-          "This writes an immutable phase-history row, changes the plant's current phase, and emits the canonical phase-changed event. Readiness remains advisory.",
+          "This changes your plant's phase and records the change in its history. Your oversight team may be notified. Readiness is advisory.",
         ],
         steps: [
           reviewedStep({
@@ -1040,16 +1053,16 @@ export const PLANT_INTELLIGENCE_REVIEWS = Object.freeze([
         kind: "confirmation",
         artifactVersion: 1,
         plan,
-        title: "Acknowledge this stored assessment",
+        title: "Acknowledge this assessment",
         actionLabel: "Acknowledge assessment",
         consequences: [
-          "This records the first planter view and releases this stored assessment to eligible oversight reads. It does not create or change a judgment.",
+          "This marks the assessment as reviewed and makes it available to your authorized oversight team. The assessment itself will not change.",
         ],
         steps: [
           reviewedStep({
             stepId: step.id,
-            title: "Assessment first view",
-            target: `${args.expected.id} · generated ${args.expected.generatedAt}`,
+            title: "Review assessment",
+            target: `Assessment from ${formatDate(new Date(args.expected.generatedAt), "long", "UTC")}`,
             before: "Not acknowledged",
             after: "Acknowledged and eligible for oversight release",
             difficult: true,
@@ -1071,21 +1084,27 @@ export const PLANT_INTELLIGENCE_REVIEWS = Object.freeze([
       const before = args.expected
         ? JSON.stringify(args.expected.value)
         : "Not attested";
-      const after = JSON.stringify(args.value);
+      const after =
+        typeof args.value === "boolean"
+          ? args.value
+            ? "Yes"
+            : "No"
+          : String(args.value);
       return buildEvryConfirmationArtifact({
         kind: "confirmation",
         artifactVersion: 1,
         plan,
-        title: "Save a manual attestation",
+        title: "Save your progress update",
         actionLabel: "Save attestation",
         consequences: [
-          "This stores the attestation with actor and time, then marks the plant for a future assessment. It does not run an assessment now.",
+          "This saves your answer for the next assessment. It does not run an assessment now.",
         ],
         steps: [
           reviewedStep({
             stepId: step.id,
-            title: "Manual attestation",
-            target: args.signalKey,
+            title: "Progress update",
+            target: MANUAL_SIGNALS.find(({ key }) => key === args.signalKey)!
+              .label,
             before,
             after,
             preview: typeof args.value === "string" ? args.value : null,
@@ -1107,7 +1126,7 @@ export const PLANT_INTELLIGENCE_REVIEWS = Object.freeze([
       const before = args.expected
         ? `${args.expected.rating}; comment ${JSON.stringify(args.expected.comment)}`
         : "No feedback";
-      const after = `${args.rating}; comment ${JSON.stringify(args.comment)}`;
+      const after = `${args.rating === "useful" ? "Useful" : "Not useful"}${!args.comment && args.expected?.comment ? ". Remove existing comment." : ""}`;
       return buildEvryConfirmationArtifact({
         kind: "confirmation",
         artifactVersion: 1,
@@ -1121,7 +1140,7 @@ export const PLANT_INTELLIGENCE_REVIEWS = Object.freeze([
           reviewedStep({
             stepId: step.id,
             title: "Insight feedback",
-            target: `${args.insight.title} (${args.insight.id}; assessment ${args.insight.assessmentId}; rubric ${args.insight.rubricVersion})`,
+            target: args.insight.title,
             before,
             after,
             preview: args.comment,
@@ -1138,12 +1157,12 @@ export const PLANT_INTELLIGENCE_REVIEWS = Object.freeze([
     build({ plan, document }) {
       const step = document.steps[0]!;
       const args = checkinArgumentsSchema.parse(step.arguments);
-      const after = `${args.spiritually} / ${args.marriageFamily} / ${args.financially} / ${args.pace}; note ${JSON.stringify(args.note)}`;
+      const after = `Spiritual life: ${args.spiritually}. Marriage and family: ${args.marriageFamily}. Finances: ${args.financially}. Pace: ${args.pace}.${!args.note && args.expected?.note ? " Remove existing private note." : ""}`;
       return buildEvryConfirmationArtifact({
         kind: "confirmation",
         artifactVersion: 1,
         plan,
-        title: `Save the private check-in for ${args.weekStart}`,
+        title: `Save the private check-in for ${formatDate(new Date(`${args.weekStart}T12:00:00Z`), "long", "UTC")}`,
         actionLabel: "Save private check-in",
         consequences: [
           "This stores the private weekly check-in. It never feeds an assessment, signal, judgment, or oversight read.",
@@ -1152,7 +1171,7 @@ export const PLANT_INTELLIGENCE_REVIEWS = Object.freeze([
           reviewedStep({
             stepId: step.id,
             title: "Private weekly check-in",
-            target: args.weekStart,
+            target: `Week of ${formatDate(new Date(`${args.weekStart}T12:00:00Z`), "long", "UTC")}`,
             before: args.expected
               ? `${args.expected.spiritually} / ${args.expected.marriageFamily} / ${args.expected.financially} / ${args.expected.pace}; note ${JSON.stringify(args.expected.note)}`
               : "Not answered",

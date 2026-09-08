@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import {
+  EvryArtifactRenderer,
+  renderableEvryArtifact,
+} from "@/components/evry/artifacts/artifact-renderer";
+import { evryPublicArtifactSchema } from "@/lib/evry/artifacts/public";
 
 import { evryConversationPlanIdentitySchema } from "@/lib/evry/conversations/contract";
 import {
@@ -108,14 +115,17 @@ function argumentsFor(identity: string): Record<string, unknown> {
   }
 }
 
-function confirmationFor(identity: string) {
+function confirmationFor(
+  identity: string,
+  argumentsValue = argumentsFor(identity)
+) {
   const document = parseEvryActionPlanCandidate({
     candidate: {
       steps: [
         {
           id: identity,
           capabilityIdentity: identity,
-          arguments: argumentsFor(identity),
+          arguments: argumentsValue,
           dependsOn: [],
         },
       ],
@@ -237,6 +247,86 @@ function deterministicProof(identity: string, layer: string) {
     }
   }
 }
+
+test("rendered Plant Intelligence confirmation exposes the proposed answer and all check-in values", () => {
+  function render(identity: string) {
+    const review = confirmationFor(identity);
+    assert.ok(review);
+    return renderToStaticMarkup(
+      createElement(EvryArtifactRenderer, {
+        model: renderableEvryArtifact(
+          evryPublicArtifactSchema.parse(review.confirmation)
+        ),
+      })
+    );
+  }
+  const attestation = render("plant-intelligence.attestations.set");
+  assert.match(attestation, /Proposed change/);
+  assert.match(attestation, /Yes/);
+  assert.doesNotMatch(attestation, /values_documented/);
+  const checkin = render("plant-intelligence.checkins.save");
+  for (const value of [
+    "Spiritual life: steady",
+    "Marriage and family: strained",
+    "Finances: steady",
+    "Pace: struggling",
+    "Exact private note",
+  ])
+    assert.ok(checkin.includes(value), value);
+  assert.doesNotMatch(checkin, /2030-01-01|marriageFamily/);
+});
+
+test("PI review discloses comment and private-note removal and preserves literal JSON-looking content", () => {
+  for (const value of [null, "", '{"message":"literal content"}']) {
+    for (const kind of ["feedback", "checkin"] as const) {
+      const identity =
+        kind === "feedback"
+          ? "plant-intelligence.feedback.submit"
+          : "plant-intelligence.checkins.save";
+      const args = argumentsFor(identity);
+      const expected =
+        kind === "feedback"
+          ? {
+              id: ID,
+              rating: "useful",
+              comment: "Previous comment",
+              updatedAt: NOW,
+            }
+          : {
+              id: ID,
+              spiritually: "steady",
+              marriageFamily: "steady",
+              financially: "steady",
+              pace: "steady",
+              note: "Previous note",
+              answeredById: ID,
+              updatedAt: NOW,
+            };
+      const review = confirmationFor(identity, {
+        ...args,
+        expected,
+        [kind === "feedback" ? "comment" : "note"]: value,
+      });
+      assert.ok(review);
+      const html = renderToStaticMarkup(
+        createElement(EvryArtifactRenderer, {
+          model: renderableEvryArtifact(
+            evryPublicArtifactSchema.parse(review.confirmation)
+          ),
+        })
+      );
+      if (value) assert.match(html, /literal content/);
+      else
+        assert.ok(
+          html.includes(
+            kind === "feedback"
+              ? "Remove existing comment"
+              : "Remove existing private note"
+          )
+        );
+    }
+  }
+});
 
 for (const capability of inventory.capabilities) {
   for (const layer of EVRY_CAPABILITY_EVAL_LAYERS) {

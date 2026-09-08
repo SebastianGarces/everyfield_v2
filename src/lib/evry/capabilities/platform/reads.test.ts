@@ -75,6 +75,7 @@ function dependencies(
     }),
     olderNotificationPage: async () => ({ rows: [], nextCursor: null }),
     unreadBadge: async () => 7,
+    timeZone: async () => "America/New_York",
     ...overrides,
   };
 }
@@ -138,11 +139,18 @@ test("notifications.feed.list:execution:read", async () => {
       ?.value ?? "",
     /^show unread notifications before 2030-01-02T03:04:05\.000Z\|30000000-/
   );
-  assert.equal(artifact.items[0]?.facts[3]?.value, "Bring the guest list.");
   assert.equal(
-    artifact.items[0]?.facts.find(({ label }) => label === "Mark-read command")
-      ?.value,
-    "mark notification 30000000-0000-4000-8000-000000000001 read"
+    artifact.items[0]?.facts.find(({ label }) => label === "Message")?.value,
+    "Bring the guest list."
+  );
+  assert.match(
+    artifact.items[0]?.facts.find(({ label }) => label === "Received")?.value ??
+      "",
+    /EST/
+  );
+  assert.doesNotMatch(
+    JSON.stringify(artifact.items[0]?.facts),
+    /Mark-read command|meeting\.reminder|UTF-16|2030-01-02T/
   );
   assert.equal(
     artifact.items[0]?.sourceLink.href,
@@ -258,9 +266,8 @@ test("legal notification copy stays within the bounded public read artifact", as
   assert.ok(messagePreview && messagePreview.length <= 500);
   assert.ok(messagePreview.endsWith("…"));
   assert.match(
-    artifact.items[0]?.facts.find(({ label }) => label === "Message size")
-      ?.value ?? "",
-    /open notifications for the full message/
+    artifact.items[0]?.facts.find(({ label }) => label === "More")?.value ?? "",
+    /Open notifications for the full message/
   );
   assert.equal(artifact.items[0]?.sourceLink.href, "/notifications");
   assert.doesNotThrow(() => storedEvryReadArtifactDocument(artifact));

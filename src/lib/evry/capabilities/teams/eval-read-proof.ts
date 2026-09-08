@@ -70,6 +70,10 @@ const scoped =
     return result;
   };
 
+mock.module("@/lib/evry/reads/plant-time-zone", {
+  namedExports: { readEvryPlantTimeZone: scoped("America/New_York") },
+});
+
 mock.module("@/lib/ministry-teams/service", {
   namedExports: {
     listTeams: scoped([{ ...team, roles: undefined }]),

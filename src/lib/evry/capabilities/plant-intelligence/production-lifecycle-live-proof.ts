@@ -27,7 +27,18 @@ let sessionUser: {
 };
 let sessionAuthorizations = 0;
 let freshAuthorizations = 0;
+let modelTurns = 0;
 const revalidatedPaths: string[] = [];
+
+// Keep the production request/confirmation/executor path, with no paid provider.
+mock.module("@/lib/evry/capabilities/model-turn", {
+  namedExports: {
+    generateEvryModelTurn: async () => {
+      modelTurns++;
+      return { kind: "prepare" as const };
+    },
+  },
+});
 
 mock.module("@/lib/auth/session", {
   namedExports: {
@@ -113,10 +124,7 @@ async function main() {
       ...sessionUser,
       sendingChurchId: randomUUID(),
     };
-    await assert.rejects(
-      () => reads.executePlantIntelligenceEvryRead(selected),
-      /Evry is unavailable for this account/
-    );
+    assert.equal(await reads.executePlantIntelligenceEvryRead(selected), null);
     sessionUser = {
       ...sessionUser,
       sendingChurchId: null,
@@ -143,6 +151,11 @@ async function main() {
   assert.equal(created.status, 201);
   assert.equal((created.body as { status?: string }).status, "created");
   assert.match(JSON.stringify(created.body), /"kind":"confirmation"/);
+  assert.equal(
+    modelTurns,
+    1,
+    "the integrated chat gives the model the request"
+  );
 
   const [plan] = await db
     .select({

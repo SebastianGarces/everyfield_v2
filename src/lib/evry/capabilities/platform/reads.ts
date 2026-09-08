@@ -13,12 +13,39 @@ import {
   notificationViewer,
 } from "@/lib/notifications/feed";
 import { notificationEntityHref } from "@/lib/notifications/entity-links";
+import { formatDateTimeWithZone } from "@/lib/datetime";
+import { readEvryPlantTimeZone } from "@/lib/evry/reads/plant-time-zone";
 
 import type { PlatformEvrySelection } from "./selection";
+import { z } from "zod";
 
 export const DASHBOARD_SUMMARY_IDENTITY = "dashboard.summary.get";
 export const NOTIFICATION_FEED_IDENTITY = "notifications.feed.list";
 export const NOTIFICATION_COUNT_IDENTITY = "notifications.badge.unread-count";
+
+export const PLATFORM_READ_CONTRACTS = Object.freeze([
+  {
+    identity: DASHBOARD_SUMMARY_IDENTITY,
+    inputSchema: z.strictObject({ kind: z.literal("dashboard") }),
+  },
+  {
+    identity: NOTIFICATION_COUNT_IDENTITY,
+    inputSchema: z.strictObject({ kind: z.literal("notification_count") }),
+  },
+  {
+    identity: NOTIFICATION_FEED_IDENTITY,
+    inputSchema: z.strictObject({
+      kind: z.literal("notifications"),
+      unreadOnly: z.boolean(),
+      before: z
+        .strictObject({
+          createdAt: z.iso.datetime({ offset: true }),
+          id: z.uuid(),
+        })
+        .nullable(),
+    }),
+  },
+]);
 
 const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
@@ -52,6 +79,7 @@ export type PlatformReadDependencies = Readonly<{
   firstNotificationPage: typeof loadNotificationFeedScreen;
   olderNotificationPage: typeof loadOlderNotifications;
   unreadBadge: typeof loadUnreadBadgeCount;
+  timeZone: typeof readEvryPlantTimeZone;
 }>;
 
 const productionDependencies: PlatformReadDependencies = {
@@ -61,6 +89,7 @@ const productionDependencies: PlatformReadDependencies = {
   firstNotificationPage: loadNotificationFeedScreen,
   olderNotificationPage: loadOlderNotifications,
   unreadBadge: loadUnreadBadgeCount,
+  timeZone: readEvryPlantTimeZone,
 };
 
 async function authorizedActor(
@@ -92,9 +121,10 @@ export async function continuePlatformEvryRead(input: {
       dependencies.authorize
     );
     if (!actor) return null;
-    const [metrics, activity] = await Promise.all([
+    const [metrics, activity, timeZone] = await Promise.all([
       dependencies.dashboardMetrics(actor.plantId, actor.userId),
       dependencies.recentActivity(actor.plantId),
+      dependencies.timeZone(actor.plantId),
     ]);
     return buildEvryReadArtifact({
       title: "Dashboard summary",
@@ -122,17 +152,19 @@ export async function continuePlatformEvryRead(input: {
           id: item.id,
           label: boundedText(item.description, 160),
           facts: [
-            { label: "Type", value: item.type.replaceAll("_", " ") },
             { label: "Description", value: boundedText(item.description, 500) },
             ...(item.description.length > 500
               ? [
                   {
-                    label: "Description size",
-                    value: `${item.description.length} UTF-16 code units; open the dashboard for the full text`,
+                    label: "More",
+                    value: "Open the dashboard for the full description.",
                   },
                 ]
               : []),
-            { label: "Recorded", value: item.timestamp.toISOString() },
+            {
+              label: "When",
+              value: formatDateTimeWithZone(item.timestamp, timeZone),
+            },
           ],
           sourceLink: trustedEvryApplicationSourceLink({
             label: "Open dashboard",
@@ -223,6 +255,7 @@ export async function continuePlatformEvryRead(input: {
         now,
       });
   const rows = page.rows;
+  const timeZone = await dependencies.timeZone(actor.plantId);
   const next = page.nextCursor;
   return buildEvryReadArtifact({
     title: input.selection.unreadOnly
@@ -249,24 +282,23 @@ export async function continuePlatformEvryRead(input: {
         id: row.id,
         label: boundedText(row.title, 160),
         facts: [
-          { label: "Category", value: row.category },
-          { label: "Type", value: row.type },
-          { label: "Title", value: row.title },
+          ...(row.title.length > 160
+            ? [{ label: "Title", value: row.title }]
+            : []),
           { label: "Message", value: boundedText(row.body, 500) },
           ...(row.body.length > 500
             ? [
                 {
-                  label: "Message size",
-                  value: `${row.body.length} UTF-16 code units; open notifications for the full message`,
+                  label: "More",
+                  value: "Open notifications for the full message.",
                 },
               ]
             : []),
           {
-            label: "Mark-read command",
-            value: `mark notification ${row.id} read`,
+            label: "Received",
+            value: formatDateTimeWithZone(row.createdAt, timeZone),
           },
-          { label: "Created", value: row.createdAt.toISOString() },
-          { label: "Read", value: row.readAt ? "Yes" : "No" },
+          { label: "Status", value: row.readAt ? "Read" : "Unread" },
         ],
         sourceLink: trustedEvryApplicationSourceLink({
           label: entityHref ? "Open referenced record" : "Open notifications",

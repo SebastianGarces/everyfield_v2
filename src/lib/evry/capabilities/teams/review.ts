@@ -8,6 +8,8 @@ import {
 } from "@/lib/evry/artifacts/trusted-plan-review";
 import type { EvryConversationPlanIdentity } from "@/lib/evry/conversations/contract";
 import type { EvryActionStep } from "@/lib/evry/plans";
+import { toWords } from "@/lib/phase-engine/fact-phrases";
+import { exactEvryContentPages } from "@/lib/evry/artifacts/exact-content-pages";
 
 import { TEAMS_CAPABILITIES } from "./catalog";
 import {
@@ -104,14 +106,44 @@ function changeSummary(
   args: TeamsEffectArguments,
   side: "before" | "after"
 ): string {
-  const summary = JSON.stringify(
-    args.disclosure.changes.map((change) => ({
-      label: change.label,
-      value: change[side],
-    }))
-  );
+  const summary = args.mutations
+    .map((change) => {
+      const row = change[side];
+      if (!row)
+        return side === "before" ? "Not yet created" : "Will be removed";
+      const fields = Object.entries(row).filter(
+        ([key, value]) =>
+          key !== "id" &&
+          !key.endsWith("_id") &&
+          ![
+            "created_by",
+            "created_at",
+            "updated_at",
+            "sort_order",
+            "template_key",
+            "responsibilities_seeded_at",
+          ].includes(key) &&
+          (value === null ||
+            typeof value === "string" ||
+            typeof value === "number" ||
+            typeof value === "boolean") &&
+          (change.mode !== "update" ||
+            change.before?.[key] !== change.after?.[key])
+      );
+      if (!fields.length)
+        return side === "before"
+          ? "Current assignment"
+          : "Assignment as reviewed above";
+      return fields
+        .map(
+          ([key, value]) =>
+            `${toWords(key)}: ${value === null || value === "" ? "Not set" : typeof value === "boolean" ? (value ? "Yes" : "No") : key === "status" ? toWords(String(value)) : String(value)}`
+        )
+        .join("; ");
+    })
+    .join("\n");
   if (summary.length <= MAX_PREVIEW) return summary;
-  return `${args.mutations.length} exact row ${side} states; see the complete immutable plan pages below.`;
+  return `${args.mutations.length.toLocaleString()} changes across the reviewed teams. ${side === "before" ? "Current team records" : "The proposed team structure"}.`;
 }
 
 const OPERATION_BY_IDENTITY = new Map(
@@ -120,6 +152,58 @@ const OPERATION_BY_IDENTITY = new Map(
   )
 );
 
+function proposedEdits(args: TeamsEffectArguments) {
+  const fields = new Map<string, string[]>();
+  for (const mutation of args.mutations) {
+    if (!mutation.after) continue;
+    for (const [key, value] of Object.entries(mutation.after)) {
+      if (
+        key === "id" ||
+        key.endsWith("_id") ||
+        [
+          "created_by",
+          "created_at",
+          "updated_at",
+          "responsibilities_seeded_at",
+          "sort_order",
+          "template_key",
+          "phase_introduced",
+        ].includes(key) ||
+        value === mutation.before?.[key] ||
+        (!mutation.before && (value === null || value === "")) ||
+        (value !== null && typeof value === "object")
+      )
+        continue;
+      const label = `Proposed ${toWords(key)}`;
+      let content =
+        value === null || value === ""
+          ? `Remove existing ${toWords(key)}.`
+          : typeof value === "boolean"
+            ? value
+              ? "Yes"
+              : "No"
+            : String(value);
+      const name = mutation.after.name ?? mutation.after.title;
+      if (
+        args.mutations.length > 1 &&
+        typeof name === "string" &&
+        key !== "name" &&
+        key !== "title"
+      )
+        content = `${name}: ${content}`;
+      const values = fields.get(label) ?? [];
+      values.push(content);
+      fields.set(label, values);
+    }
+  }
+  return [...fields].flatMap(([label, values]) =>
+    exactEvryContentPages(values.join("\n")).map((content, index) => ({
+      label: index === 0 ? label : `${label} continued ${index + 1}`,
+      content,
+      format: "plain_text" as const,
+    }))
+  );
+}
 function review(input: {
   plan: EvryConversationPlanIdentity;
   step: EvryActionStep;
@@ -133,6 +217,15 @@ function review(input: {
   const changesExistingRows = args.mutations.some(
     ({ before }) => before !== null
   );
+  const counts = args.disclosure.counts
+    .filter(({ label }) => !/database|^rows$|^total rows$/i.test(label))
+    .map(({ label, count }) => ({
+      label: label
+        .replace(/ created$/, " to create")
+        .replace(/ added$/, " to add")
+        .replace(/Role rows/, "Roles"),
+      count,
+    }));
   return buildEvryConfirmationArtifact({
     kind: "confirmation",
     artifactVersion: 1,
@@ -160,17 +253,19 @@ function review(input: {
             ? { label: `Open ${target.label.toLowerCase()}`, href: target.href }
             : null,
         })),
-        counts: args.disclosure.counts,
+        counts: counts.length
+          ? counts
+          : [{ label: "Changes", count: args.mutations.length }],
         exclusions: [],
         dateTime: dateTime(args),
-        contentPreviews: planPages(args),
+        contentPreviews: [...planPages(args), ...proposedEdits(args)],
         beforeAfter:
           destructive || bulk || changesExistingRows
             ? [
                 {
                   label: destructive
-                    ? "Destructive scope"
-                    : "Exact multi-row scope",
+                    ? "What will be removed"
+                    : "Proposed changes",
                   before: changeSummary(args, "before"),
                   after: changeSummary(args, "after"),
                   count: args.mutations.length,

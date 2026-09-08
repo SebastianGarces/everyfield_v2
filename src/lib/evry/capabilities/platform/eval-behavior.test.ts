@@ -145,6 +145,7 @@ function readHarness(
     createdAt: new Date(CHECKED_AT),
   };
   const dependencies: PlatformReadDependencies = {
+    timeZone: async () => "America/New_York",
     authorize,
     async dashboardMetrics() {
       calls += 1;

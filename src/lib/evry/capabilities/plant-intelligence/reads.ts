@@ -1,4 +1,10 @@
 import { createHash } from "node:crypto";
+import { formatDateTimeWithZone, formatDate } from "@/lib/datetime";
+import { readEvryPlantTimeZone } from "@/lib/evry/reads/plant-time-zone";
+import { formatCitedFacts } from "@/lib/phase-engine/fact-format";
+import { toWords } from "@/lib/phase-engine/fact-phrases";
+import type { EvryReadArtifact } from "@/lib/evry/artifacts/types";
+import { EVRY_READ_ITEM_MAX_FACTS } from "@/lib/evry/conversations/contract";
 
 import { and, asc, desc, eq } from "drizzle-orm";
 import { z } from "zod";
@@ -111,10 +117,44 @@ export function plantIntelligenceDisplayChunks(
   return chunks;
 }
 
+function textFacts(label: string, value: string | null | undefined) {
+  return plantIntelligenceDisplayChunks(value).map((value, index) => ({
+    label: index === 0 ? label : `${label} continued ${index + 1}`,
+    value,
+  }));
+}
+
+/** Keep one ordinary record together. Exceptionally long text continues without loss. */
+function readRecordItems(
+  record: EvryReadArtifact["items"][number]
+): EvryReadArtifact["items"] {
+  const title =
+    plantIntelligenceDisplayChunks(record.label, 145)[0] ?? "Plant insight";
+  const facts =
+    record.label.length > 145
+      ? [...textFacts("Title", record.label), ...record.facts]
+      : record.facts;
+  const items: EvryReadArtifact["items"][number][] = [];
+  for (
+    let offset = 0;
+    offset < Math.max(1, facts.length);
+    offset += EVRY_READ_ITEM_MAX_FACTS
+  ) {
+    items.push({
+      ...record,
+      id: offset === 0 ? record.id : `${record.id}:part:${offset}`,
+      label: offset === 0 ? title : `${title} (continued)`,
+      facts: facts.slice(offset, offset + EVRY_READ_ITEM_MAX_FACTS),
+    });
+  }
+  return items;
+}
+
 function displayValue(value: unknown): string {
   if (value === null || value === undefined) return "Not recorded";
   if (typeof value === "string") return value;
-  return JSON.stringify(value);
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  return String(value);
 }
 
 function continuationFilter(
@@ -168,7 +208,7 @@ export async function readPlantIntelligenceAssessmentForPlant(input: {
   const resolved = await scopedAssessment(input.plantId, input.assessmentId);
   if (!resolved) {
     return buildEvryReadArtifact({
-      title: "Stored Plant Intelligence assessment",
+      title: "Plant Intelligence insights",
       filters: [{ label: "Plant", value: "Current plant" }],
       exclusions: [
         {
@@ -184,45 +224,43 @@ export async function readPlantIntelligenceAssessmentForPlant(input: {
   const articles = new Map(
     articleRefs.map((article) => [article.slug, article])
   );
-  const assessmentItem = {
-    id: `${resolved.assessment.id}:assessment`,
-    label: "Stored assessment output",
-    facts: [
-      { label: "Assessment ID", value: resolved.assessment.id },
-      {
-        label: "Generated",
-        value: resolved.assessment.generatedAt.toISOString(),
-      },
-      { label: "Phase", value: String(resolved.assessment.phase) },
-      { label: "Rubric version", value: resolved.assessment.rubricVersion },
-      {
-        label: "Planter first opened",
-        value:
-          resolved.assessment.planterSeenAt?.toISOString() ??
-          "Not acknowledged",
-      },
-      {
-        label: "Scope",
-        value:
-          "Stored progress-toward-launch output; not a new church-health judgment.",
-      },
-    ],
-    sourceLink: phaseLink,
-  };
-  const insightItems = resolved.insights.flatMap((insight) => {
-    const title = plantIntelligenceDisplayChunks(insight.title);
-    const body = plantIntelligenceDisplayChunks(insight.body);
-    const citedFacts = plantIntelligenceDisplayChunks(
-      insight.citedFacts === null ? null : JSON.stringify(insight.citedFacts)
-    );
-    const articleLinks = (insight.relatedArticleSlugs ?? []).flatMap((slug) => {
+  const timeZone = await readEvryPlantTimeZone(input.plantId);
+  const allItems = resolved.insights.flatMap((insight) => [
+    ...readRecordItems({
+      id: insight.id,
+      label: insight.title,
+      facts: [
+        { label: "Phase", value: String(resolved.assessment.phase) },
+        {
+          label: "Assessed",
+          value: formatDateTimeWithZone(
+            resolved.assessment.generatedAt,
+            timeZone
+          ),
+        },
+        { label: "Priority", value: toWords(insight.severity) },
+        ...textFacts("Summary", insight.body),
+        ...formatCitedFacts(insight.citedFacts).flatMap((value, index) =>
+          textFacts(`Evidence ${index + 1}`, value)
+        ),
+      ],
+      sourceLink: phaseLink,
+    }),
+    ...(insight.relatedArticleSlugs ?? []).flatMap((slug) => {
       const article = articles.get(slug);
       return article
         ? [
             {
               id: `${insight.id}:article:${slug}`,
-              label: `Stored source: ${article.title}`,
-              facts: [{ label: "Article slug", value: slug }],
+              label: article.title,
+              facts: [
+                {
+                  label: "Related to",
+                  value:
+                    plantIntelligenceDisplayChunks(insight.title)[0] ??
+                    "Plant insight",
+                },
+              ],
               sourceLink: trustedEvryApplicationSourceLink({
                 label: article.title,
                 href: wikiHref(slug),
@@ -230,42 +268,9 @@ export async function readPlantIntelligenceAssessmentForPlant(input: {
             },
           ]
         : [];
-    });
-    return [
-      {
-        id: `${insight.id}:summary`,
-        label: "Stored insight",
-        facts: [
-          { label: "Insight ID", value: insight.id },
-          { label: "Category", value: insight.category },
-          { label: "Severity", value: insight.severity },
-          { label: "Stored rank", value: String(insight.rank) },
-        ],
-        sourceLink: phaseLink,
-      },
-      ...title.map((value, index) => ({
-        id: `${insight.id}:title:${index}`,
-        label: `Stored title ${index + 1} of ${title.length}`,
-        facts: [{ label: "Exact stored text", value }],
-        sourceLink: phaseLink,
-      })),
-      ...body.map((value, index) => ({
-        id: `${insight.id}:body:${index}`,
-        label: `Stored body ${index + 1} of ${body.length}`,
-        facts: [{ label: "Exact stored text", value }],
-        sourceLink: phaseLink,
-      })),
-      ...citedFacts.map((value, index) => ({
-        id: `${insight.id}:citation:${index}`,
-        label: `Stored cited facts ${index + 1} of ${citedFacts.length}`,
-        facts: [{ label: "Exact stored JSON", value }],
-        sourceLink: phaseLink,
-      })),
-      ...articleLinks,
-    ];
-  });
-  const allItems = [assessmentItem, ...insightItems];
-  const fingerprint = sourceFingerprint(allItems);
+    }),
+  ]);
+  const fingerprint = sourceFingerprint({ resolved, articleRefs });
   if (
     !cursorMatches(
       input.cursor,
@@ -275,11 +280,11 @@ export async function readPlantIntelligenceAssessmentForPlant(input: {
     )
   )
     return changedPageArtifact(
-      "Stored Plant Intelligence assessment",
+      "Plant Intelligence insights",
       "The stored assessment changed; start again"
     );
   const offset = input.cursor?.offset ?? 0;
-  const visible = allItems.slice(offset, offset + PAGE_SIZE);
+  const visible = allItems.slice(offset, offset + 3);
   const remaining = Math.max(0, allItems.length - offset - visible.length);
   const next =
     remaining > 0
@@ -291,7 +296,7 @@ export async function readPlantIntelligenceAssessmentForPlant(input: {
         }
       : null;
   return buildEvryReadArtifact({
-    title: "Stored Plant Intelligence assessment",
+    title: "Plant Intelligence insights",
     filters: [
       { label: "Plant", value: "Current plant" },
       { label: "Assessment", value: resolved.assessment.id },
@@ -318,10 +323,13 @@ export async function readPlantIntelligenceAssessmentForPlant(input: {
 export async function readPlantIntelligenceAttestationsForPlant(
   plantId: string
 ) {
-  const rows = await listManualSignals(plantId);
+  const [rows, timeZone] = await Promise.all([
+    listManualSignals(plantId),
+    readEvryPlantTimeZone(plantId),
+  ]);
   const byKey = new Map(rows.map((row) => [row.signalKey, row]));
   return buildEvryReadArtifact({
-    title: "Stored Plant Intelligence attestations",
+    title: "Progress updates",
     filters: [{ label: "Plant", value: "Current plant" }],
     exclusions: [],
     items: MANUAL_SIGNALS.map((definition) => {
@@ -330,11 +338,12 @@ export async function readPlantIntelligenceAttestationsForPlant(
         id: row?.id ?? `unanswered:${definition.key}`,
         label: definition.label,
         facts: [
-          { label: "Signal key", value: definition.key },
-          { label: "Stored value", value: displayValue(row?.value) },
+          ...textFacts("Your answer", displayValue(row?.value)),
           {
             label: "Attested",
-            value: row?.attestedAt.toISOString() ?? "Never",
+            value: row
+              ? formatDateTimeWithZone(row.attestedAt, timeZone)
+              : "Not answered",
           },
           {
             label: "Reaffirmation",
@@ -354,11 +363,12 @@ export async function readPlantIntelligenceCheckinsForPlant(plantId: string) {
     new Date(),
     CHECKIN_HISTORY_WEEKS
   );
+  const timeZone = await readEvryPlantTimeZone(plantId);
   const levelLabels = new Map(
     CHECKIN_LEVELS.map((level) => [level.value, level.label])
   );
   return buildEvryReadArtifact({
-    title: "Private stored planter check-ins",
+    title: "Your private check-ins",
     filters: [
       { label: "Plant", value: "Current plant" },
       {
@@ -367,38 +377,33 @@ export async function readPlantIntelligenceCheckinsForPlant(plantId: string) {
       },
     ],
     exclusions: [],
-    items: rows.flatMap((row) => {
-      const note = plantIntelligenceDisplayChunks(row.note);
-      return [
-        {
-          id: `${row.id}:summary`,
-          label: row.weekStart.slice(0, 10),
-          facts: [
-            {
-              label: "Spiritually",
-              value: levelLabels.get(row.spiritually) ?? row.spiritually,
-            },
-            {
-              label: "Marriage & family",
-              value: levelLabels.get(row.marriageFamily) ?? row.marriageFamily,
-            },
-            {
-              label: "Financially",
-              value: levelLabels.get(row.financially) ?? row.financially,
-            },
-            { label: "Pace", value: levelLabels.get(row.pace) ?? row.pace },
-            { label: "Updated", value: row.updatedAt.toISOString() },
-          ],
-          sourceLink: phaseLink,
-        },
-        ...note.map((value, index) => ({
-          id: `${row.id}:note:${index}`,
-          label: `Private note ${index + 1} of ${note.length}`,
-          facts: [{ label: "Exact stored text", value }],
-          sourceLink: phaseLink,
-        })),
-      ];
-    }),
+    items: rows.flatMap((row) =>
+      readRecordItems({
+        id: row.id,
+        label: `Week of ${formatDate(new Date(`${row.weekStart.slice(0, 10)}T12:00:00Z`), "long", "UTC")}`,
+        facts: [
+          {
+            label: "Spiritual life",
+            value: levelLabels.get(row.spiritually) ?? row.spiritually,
+          },
+          {
+            label: "Marriage and family",
+            value: levelLabels.get(row.marriageFamily) ?? row.marriageFamily,
+          },
+          {
+            label: "Finances",
+            value: levelLabels.get(row.financially) ?? row.financially,
+          },
+          { label: "Pace", value: levelLabels.get(row.pace) ?? row.pace },
+          {
+            label: "Updated",
+            value: formatDateTimeWithZone(row.updatedAt, timeZone),
+          },
+          ...textFacts("Private note", row.note),
+        ],
+        sourceLink: phaseLink,
+      })
+    ),
     sourceLinks: [phaseLink],
   });
 }
@@ -433,40 +438,29 @@ export async function readPlantIntelligenceFeedbackForPlant(input: {
       )
     )
     .orderBy(desc(insightFeedback.updatedAt), desc(insightFeedback.id));
-  const flattened = rows.flatMap((row) => {
-    const title = plantIntelligenceDisplayChunks(row.title);
-    const comment = plantIntelligenceDisplayChunks(row.comment);
-    return [
-      {
-        id: `${row.id}:summary`,
-        label: "Stored insight feedback",
-        facts: [
-          { label: "Feedback ID", value: row.id },
-          { label: "Insight ID", value: row.insightId },
-          { label: "Rating", value: row.rating },
-          { label: "Rubric version", value: row.rubricVersion },
-          { label: "Updated", value: row.updatedAt.toISOString() },
-        ],
-        sourceLink: phaseLink,
-      },
-      ...title.map((value, index) => ({
-        id: `${row.id}:title:${index}`,
-        label: `Stored insight title ${index + 1} of ${title.length}`,
-        facts: [{ label: "Exact stored text", value }],
-        sourceLink: phaseLink,
-      })),
-      ...comment.map((value, index) => ({
-        id: `${row.id}:comment:${index}`,
-        label: `Stored comment ${index + 1} of ${comment.length}`,
-        facts: [{ label: "Exact stored text", value }],
-        sourceLink: phaseLink,
-      })),
-    ];
-  });
-  const fingerprint = sourceFingerprint(flattened);
+  const timeZone = await readEvryPlantTimeZone(input.plantId);
+  const flattened = rows.flatMap((row) =>
+    readRecordItems({
+      id: row.id,
+      label: row.title,
+      facts: [
+        {
+          label: "Your rating",
+          value: row.rating === "useful" ? "Useful" : "Not useful",
+        },
+        {
+          label: "Updated",
+          value: formatDateTimeWithZone(row.updatedAt, timeZone),
+        },
+        ...textFacts("Your comment", row.comment),
+      ],
+      sourceLink: phaseLink,
+    })
+  );
+  const fingerprint = sourceFingerprint(rows);
   if (!cursorMatches(input.cursor, "feedback", input.userId, fingerprint))
     return changedPageArtifact(
-      "Your stored Plant Intelligence feedback",
+      "Your insight feedback",
       "The stored feedback changed; start again"
     );
   const offset = input.cursor?.offset ?? 0;
@@ -482,7 +476,7 @@ export async function readPlantIntelligenceFeedbackForPlant(input: {
         }
       : null;
   return buildEvryReadArtifact({
-    title: "Your stored Plant Intelligence feedback",
+    title: "Your insight feedback",
     filters: [
       { label: "Plant", value: "Current plant" },
       ...continuationFilter(
@@ -519,39 +513,32 @@ export async function readPlantIntelligenceDeclarationsForPlant(input: {
     .from(phaseTransitions)
     .where(eq(phaseTransitions.churchId, input.plantId))
     .orderBy(desc(phaseTransitions.createdAt), desc(phaseTransitions.id));
-  const flattened = rows.flatMap((row) => {
-    const reason = plantIntelligenceDisplayChunks(row.reason);
-    return [
-      {
-        id: `${row.id}:summary`,
-        label:
-          row.kind === "initial_declaration"
-            ? `Initial declaration · Phase ${row.toPhase}`
-            : `Phase ${row.fromPhase} → ${row.toPhase}`,
-        facts: [
-          { label: "Transition ID", value: row.id },
-          { label: "Kind", value: row.kind },
-          { label: "Recorded", value: row.createdAt.toISOString() },
-          { label: "Rubric version", value: row.rubricVersion },
-        ],
-        sourceLink: phaseLink,
-      },
-      ...reason.map((value, index) => ({
-        id: `${row.id}:reason:${index}`,
-        label: `Stored reason ${index + 1} of ${reason.length}`,
-        facts: [{ label: "Exact stored text", value }],
-        sourceLink: phaseLink,
-      })),
-    ];
-  });
+  const timeZone = await readEvryPlantTimeZone(input.plantId);
+  const flattened = rows.flatMap((row) =>
+    readRecordItems({
+      id: row.id,
+      label:
+        row.kind === "initial_declaration"
+          ? `Starting phase: ${row.toPhase}`
+          : `Phase ${row.fromPhase} to ${row.toPhase}`,
+      facts: [
+        {
+          label: "Changed",
+          value: formatDateTimeWithZone(row.createdAt, timeZone),
+        },
+        ...textFacts("Reason", row.reason),
+      ],
+      sourceLink: phaseLink,
+    })
+  );
   const recordId = rows[0]?.id ?? "00000000-0000-0000-0000-000000000000";
   const fingerprint = sourceFingerprint({
     currentPhase: church?.currentPhase ?? null,
-    items: flattened,
+    items: rows,
   });
   if (!cursorMatches(input.cursor, "declarations", recordId, fingerprint))
     return changedPageArtifact(
-      "Stored Plant Intelligence phase history",
+      "Phase history",
       "The stored phase history changed; start again"
     );
   const offset = input.cursor?.offset ?? 0;
@@ -567,7 +554,7 @@ export async function readPlantIntelligenceDeclarationsForPlant(input: {
         }
       : null;
   return buildEvryReadArtifact({
-    title: "Stored Plant Intelligence phase history",
+    title: "Phase history",
     filters: [
       { label: "Plant", value: "Current plant" },
       {
@@ -604,135 +591,77 @@ export async function readPlantIntelligenceSignalsForPlant(input: {
     getPlantTrends(input.plantId, latest, "planter"),
     getMilestoneTimeline(input.plantId, latest, "planter"),
   ]);
-  const readinessHeadline = plantIntelligenceDisplayChunks(readiness.headline);
-  const readinessDetail = plantIntelligenceDisplayChunks(readiness.detail);
+  const timeZone = await readEvryPlantTimeZone(input.plantId);
   const allItems = [
-    {
+    ...readRecordItems({
       id: "readiness",
-      label: "Stored readiness projection",
-      facts: [
-        { label: "State", value: readiness.state },
-        { label: "Assessment ID", value: readiness.assessmentId ?? "None" },
-      ],
+      label: readiness.headline ?? "Phase readiness",
+      facts: textFacts("Readiness", readiness.detail),
       sourceLink: phaseLink,
-    },
-    ...readinessHeadline.map((value, index) => ({
-      id: `readiness:headline:${index}`,
-      label: `Stored readiness headline ${index + 1} of ${readinessHeadline.length}`,
-      facts: [{ label: "Exact stored text", value }],
-      sourceLink: phaseLink,
-    })),
-    ...readinessDetail.map((value, index) => ({
-      id: `readiness:detail:${index}`,
-      label: `Stored readiness detail ${index + 1} of ${readinessDetail.length}`,
-      facts: [{ label: "Exact stored text", value }],
-      sourceLink: phaseLink,
-    })),
-    ...(trends?.metrics ?? []).flatMap((metric) => {
-      const alertTitle = plantIntelligenceDisplayChunks(
-        metric.alert.insightTitle
-      );
-      return [
-        {
-          id: `trend:${metric.key}`,
-          label: metric.label,
-          facts: [
-            { label: "Description", value: metric.description },
-            {
-              label: "Value",
-              value: metric.value === null ? "Unknown" : String(metric.value),
-            },
-            {
-              label: "Value at",
-              value: metric.valueAt?.toISOString() ?? "Unknown",
-            },
-            { label: "Stale", value: String(metric.valueIsStale) },
-            { label: "Unit", value: metric.unit },
-            { label: "Reading", value: metric.reading ?? "Unknown" },
-            {
-              label: "Delta",
-              value: metric.delta === null ? "Unknown" : String(metric.delta),
-            },
-            {
-              label: "Direction",
-              value: metric.direction ?? "No measured trend",
-            },
-            { label: "Since", value: metric.since?.toISOString() ?? "Unknown" },
-            { label: "Fact paths", value: metric.factPaths.join(", ") },
-            { label: "Stored alert", value: metric.alert.standing },
-            {
-              label: "Alert insight ID",
-              value: metric.alert.insightId ?? "None",
-            },
-          ],
-          sourceLink: phaseLink,
-        },
-        ...alertTitle.map((value, index) => ({
-          id: `trend:${metric.key}:alert-title:${index}`,
-          label: `Stored alert title ${index + 1} of ${alertTitle.length}`,
-          facts: [{ label: "Exact stored text", value }],
-          sourceLink: phaseLink,
-        })),
-        ...metric.points.map((point, index) => ({
-          id: `trend:${metric.key}:point:${index}`,
-          label: `Stored trend point ${index + 1} of ${metric.points.length}`,
-          facts: [
-            { label: "When", value: point.at.toISOString() },
-            { label: "Value", value: String(point.value) },
-          ],
-          sourceLink: phaseLink,
-        })),
-      ];
     }),
-    ...timeline.events.flatMap((event) => {
-      const label = plantIntelligenceDisplayChunks(event.label);
-      const detail = plantIntelligenceDisplayChunks(event.detail);
-      const alertTitle = plantIntelligenceDisplayChunks(
-        event.alert.insightTitle
-      );
-      return [
-        {
-          id: `milestone:${event.id}`,
-          label: "Stored milestone",
-          facts: [
-            { label: "Kind", value: event.kind },
-            { label: "When", value: event.at.toISOString() },
-            { label: "State", value: event.state },
-            { label: "Stored alert", value: event.alert.standing },
-            {
-              label: "Alert insight ID",
-              value: event.alert.insightId ?? "None",
-            },
-          ],
-          sourceLink: phaseLink,
-        },
-        ...label.map((value, index) => ({
-          id: `milestone:${event.id}:label:${index}`,
-          label: `Stored label ${index + 1} of ${label.length}`,
-          facts: [{ label: "Exact stored text", value }],
-          sourceLink: phaseLink,
-        })),
-        ...detail.map((value, index) => ({
-          id: `milestone:${event.id}:detail:${index}`,
-          label: `Stored detail ${index + 1} of ${detail.length}`,
-          facts: [{ label: "Exact stored text", value }],
-          sourceLink: phaseLink,
-        })),
-        ...alertTitle.map((value, index) => ({
-          id: `milestone:${event.id}:alert-title:${index}`,
-          label: `Stored alert title ${index + 1} of ${alertTitle.length}`,
-          facts: [{ label: "Exact stored text", value }],
-          sourceLink: phaseLink,
-        })),
-      ];
-    }),
+    ...(trends?.metrics ?? []).flatMap((metric) =>
+      readRecordItems({
+        id: `trend:${metric.key}`,
+        label: metric.label,
+        facts: [
+          { label: "About", value: metric.description },
+          {
+            label: "Current",
+            value:
+              metric.value === null
+                ? "Not recorded"
+                : `${metric.value} ${toWords(metric.unit)}`,
+          },
+          {
+            label: "Measured",
+            value: metric.valueAt
+              ? formatDateTimeWithZone(metric.valueAt, timeZone)
+              : "Not recorded",
+          },
+          {
+            label: "Trend",
+            value: metric.direction
+              ? toWords(metric.direction)
+              : "Not enough history",
+          },
+          ...(metric.valueIsStale
+            ? [
+                {
+                  label: "Freshness",
+                  value: "This measurement needs an update.",
+                },
+              ]
+            : []),
+          ...textFacts("Related insight", metric.alert.insightTitle),
+          ...metric.points.map((point, index) => ({
+            label: `History ${index + 1}`,
+            value: `${formatDateTimeWithZone(point.at, timeZone)}: ${point.value}`,
+          })),
+        ],
+        sourceLink: phaseLink,
+      })
+    ),
+    ...timeline.events.flatMap((event) =>
+      readRecordItems({
+        id: `milestone:${event.id}`,
+        label: event.label,
+        facts: [
+          { label: "When", value: formatDateTimeWithZone(event.at, timeZone) },
+          { label: "Status", value: toWords(event.state) },
+          ...textFacts("Details", event.detail),
+          ...textFacts("Related insight", event.alert.insightTitle),
+        ],
+        sourceLink: phaseLink,
+      })
+    ),
   ];
   const recordId =
     latest?.assessment.id ?? "00000000-0000-0000-0000-000000000000";
+  // Readiness includes a per-request clock. Bind stable result data, not that clock.
   const fingerprint = sourceFingerprint(allItems);
   if (!cursorMatches(input.cursor, "signals", recordId, fingerprint))
     return changedPageArtifact(
-      "Stored and deterministic Plant Intelligence signals",
+      "Plant progress and history",
       "The stored signal page changed; start again"
     );
   const offset = input.cursor?.offset ?? 0;
@@ -748,7 +677,7 @@ export async function readPlantIntelligenceSignalsForPlant(input: {
         }
       : null;
   return buildEvryReadArtifact({
-    title: "Stored and deterministic Plant Intelligence signals",
+    title: "Plant progress and history",
     filters: [
       { label: "Plant", value: "Current plant" },
       {

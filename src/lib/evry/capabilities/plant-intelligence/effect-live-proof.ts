@@ -11,6 +11,7 @@ import {
   evryActionPlans,
   evryActionPlanStates,
   evryExecutionAttempts,
+  evryExecutionEffectClaims,
   evryExecutionOutcomes,
   evryPlanConfirmations,
   evryProductAuditEvents,
@@ -67,8 +68,14 @@ const FINGERPRINT = "a".repeat(64);
 const effectOutcomes = new Set<string>();
 const identities = PLANT_INTELLIGENCE_EFFECT_IDENTITIES;
 const refreshes: string[][] = [];
+let failNextRefresh = false;
+let completedCalls = 0;
 const liveExecutionRegistry = createEvryExecutionCapabilityRegistry(
   createPlantIntelligenceExecutions((paths) => {
+    if (failNextRefresh) {
+      failNextRefresh = false;
+      throw new Error("proof: crash after durable claim");
+    }
     refreshes.push([...paths]);
   })
 );
@@ -194,7 +201,9 @@ async function execute(input: EvryEffectInput): Promise<EvryEffectResult> {
     input.execution.capabilityIdentity
   );
   assert.ok(registration);
-  return registration.executeIfCurrent(input);
+  const result = await registration.executeIfCurrent(input);
+  if (result.status === "completed") completedCalls++;
+  return result;
 }
 
 function continuationCommand(
@@ -564,6 +573,8 @@ async function main() {
       reason: "Exact phase reason",
     }),
   });
+  failNextRefresh = true;
+  await assert.rejects(execute(transitionInput), /crash after durable claim/);
   const transitionRace = await Promise.all([
     execute(transitionInput),
     execute(transitionInput),
@@ -1077,18 +1088,22 @@ async function main() {
 
   const [outcomeCount] = await db
     .select({ count: sql<number>`count(*)::integer` })
-    .from(evryExecutionOutcomes)
-    .where(eq(evryExecutionOutcomes.churchId, plant.id));
+    .from(evryExecutionEffectClaims)
+    .where(eq(evryExecutionEffectClaims.churchId, plant.id));
   assert.equal(
     outcomeCount?.count,
     8,
-    "replay/race/refusal/retry must not duplicate or falsely claim outcomes"
+    "replay/race/refusal/retry must not duplicate or falsely claim effects"
   );
-  assert.equal(refreshes.length, 8, "only newly claimed effects refresh");
+  assert.equal(
+    refreshes.length,
+    completedCalls,
+    "every completed call reconciles refresh, including recovered claims"
+  );
   assert.equal(
     refreshes.filter((paths) => paths.includes("/dashboard")).length,
-    2,
-    "each claimed phase transition invalidates the dashboard"
+    3,
+    "recovered and newly claimed phase transitions invalidate the dashboard"
   );
   assert.equal(
     refreshes.every((paths) => paths.includes("/phase")),
@@ -1158,10 +1173,14 @@ async function main() {
     );
     for (const item of artifact.items) {
       if (item.sourceLink) assessmentLinks.set(item.id, item.sourceLink.href);
-      const exact = item.facts.find(
-        ({ label }) => label === "Exact stored text"
-      );
-      if (exact) assessmentValues.set(item.id, exact.value);
+      const body = item.facts
+        .filter(
+          ({ label }) =>
+            label === "Summary" || label.startsWith("Summary continued ")
+        )
+        .map(({ value }) => value)
+        .join("");
+      if (body) assessmentValues.set(item.id, body);
     }
     const command = continuationCommand(
       artifact,
@@ -1174,11 +1193,7 @@ async function main() {
     assessmentCursor = selected?.input.cursor as AssessmentCursor;
   }
   const rebuiltBody = [...assessmentItems]
-    .filter((id) => id.startsWith(`${insight.id}:body:`))
-    .sort(
-      (left, right) =>
-        Number(left.split(":").at(-1)) - Number(right.split(":").at(-1))
-    )
+    .filter((id) => id === insight.id || id.startsWith(`${insight.id}:part:`))
     .map((id) => assessmentValues.get(id))
     .join("");
   assert.equal(
@@ -1235,10 +1250,7 @@ async function main() {
     historyCursor = selected?.input.cursor as HistoryCursor;
   }
   for (const row of insertedHistory)
-    assert.ok(
-      historyItems.has(`${row.id}:summary`),
-      `missing phase history ${row.id}`
-    );
+    assert.ok(historyItems.has(row.id), `missing phase history ${row.id}`);
 
   type SignalCursor = NonNullable<
     Parameters<typeof readPlantIntelligenceSignalsForPlant>[0]["cursor"]
@@ -1377,10 +1389,7 @@ async function main() {
     feedbackCursor = selected?.input.cursor as FeedbackCursor;
   }
   for (const row of feedbackRows)
-    assert.ok(
-      feedbackItems.has(`${row.id}:summary`),
-      `missing stored feedback ${row.id}`
-    );
+    assert.ok(feedbackItems.has(row.id), `missing stored feedback ${row.id}`);
 
   const productionProof = spawnSync(
     process.execPath,

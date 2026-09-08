@@ -1,4 +1,8 @@
 import { z } from "zod";
+import { formatDateTimeWithZone } from "@/lib/datetime";
+import { readEvryPlantTimeZone } from "@/lib/evry/reads/plant-time-zone";
+import { meetingReadDateTime } from "@/lib/evry/reads/meeting-date-time";
+import { toWords } from "@/lib/phase-engine/fact-phrases";
 
 import { listMeetings } from "@/lib/meetings/service";
 import {
@@ -68,6 +72,13 @@ const IDENTITY_BY_KIND = {
   read_person_training: "teams.read.person-training",
 } as const;
 
+export const TEAMS_READ_CONTRACTS = Object.freeze(
+  inputSchema.options.map((schema) => ({
+    identity: IDENTITY_BY_KIND[schema.shape.kind.value],
+    inputSchema: schema,
+  }))
+);
+
 function exactAuthorization(
   authorization: EvryReadCapabilityAuthorization,
   input: Input
@@ -117,7 +128,7 @@ export async function executeTeamsRead(input: {
         ? [{ label: "Status", value: request.status }]
         : [],
       counts: {
-        matched: filtered.length + 1,
+        matched: teams.length + 1,
         returned: filtered.length + 1,
         excluded: teams.length - filtered.length,
       },
@@ -136,11 +147,9 @@ export async function executeTeamsRead(input: {
           id: team.id,
           label: team.name,
           facts: [
-            { label: "Status", value: team.status },
-            { label: "Type", value: team.type },
+            { label: "Status", value: toWords(team.status) },
+            { label: "Type", value: toWords(team.type) },
             { label: "Description", value: team.description ?? "None" },
-            { label: "Template", value: team.templateKey ?? "Custom" },
-            { label: "Icon", value: team.icon ?? "Default" },
             {
               label: "Roles",
               value: `${team.filledRoles} of ${team.totalRoles} filled`,
@@ -179,10 +188,9 @@ export async function executeTeamsRead(input: {
           id: team.id,
           label: "Team summary",
           facts: [
-            { label: "Status", value: team.status },
-            { label: "Type", value: team.type },
+            { label: "Status", value: toWords(team.status) },
+            { label: "Type", value: toWords(team.type) },
             { label: "Description", value: team.description ?? "None" },
-            { label: "Icon", value: team.icon ?? "Default" },
             { label: "Leader", value: team.leaderName ?? "Not assigned" },
             {
               label: "Staffing",
@@ -332,7 +340,10 @@ export async function executeTeamsRead(input: {
     });
   }
   if (request.kind === "read_person_training") {
-    const rows = await getPersonTraining(plantId, request.personId);
+    const [rows, timeZone] = await Promise.all([
+      getPersonTraining(plantId, request.personId),
+      readEvryPlantTimeZone(plantId),
+    ]);
     return artifact({
       title: "Ministry training progress",
       filters: [{ label: "Person", value: request.personId }],
@@ -346,7 +357,9 @@ export async function executeTeamsRead(input: {
           { label: "Required", value: row.isRequired ? "Yes" : "No" },
           {
             label: "Completed at",
-            value: row.completedAt?.toISOString() ?? "Incomplete",
+            value: row.completedAt
+              ? formatDateTimeWithZone(row.completedAt, timeZone)
+              : "Incomplete",
           },
         ],
         sourceLink: trustedEvryApplicationSourceLink({
@@ -480,7 +493,10 @@ export async function executeTeamsRead(input: {
     });
   }
   if (request.kind === "read_responsibilities") {
-    const rows = await listStoredResponsibilities(plantId, team.id);
+    const [rows, timeZone] = await Promise.all([
+      listStoredResponsibilities(plantId, team.id),
+      readEvryPlantTimeZone(plantId),
+    ]);
     return artifact({
       title: `${team.name} responsibilities`,
       filters: [{ label: "Team", value: team.name }],
@@ -493,9 +509,10 @@ export async function executeTeamsRead(input: {
           { label: "Completed", value: row.completedAt ? "Yes" : "No" },
           {
             label: "Completed at",
-            value: row.completedAt?.toISOString() ?? "Not completed",
+            value: row.completedAt
+              ? formatDateTimeWithZone(row.completedAt, timeZone)
+              : "Not completed",
           },
-          { label: "Order", value: String(row.sortOrder) },
         ],
         sourceLink: trustedEvryApplicationSourceLink({
           label: "Open responsibilities",
@@ -510,7 +527,10 @@ export async function executeTeamsRead(input: {
       ],
     });
   }
-  const { meetings, total } = await listMeetings(plantId, { teamId: team.id });
+  const [{ meetings, total }, timeZone] = await Promise.all([
+    listMeetings(plantId, { teamId: team.id }),
+    readEvryPlantTimeZone(plantId),
+  ]);
   return artifact({
     title: `${team.name} meetings`,
     filters: [{ label: "Team", value: team.name }],
@@ -532,9 +552,15 @@ export async function executeTeamsRead(input: {
       id: meeting.id,
       label: meeting.title ?? "Team meeting",
       facts: [
-        { label: "Starts", value: meeting.datetime.toISOString() },
-        { label: "Status", value: meeting.status },
-        { label: "Subtype", value: meeting.meetingSubtype ?? "regular" },
+        {
+          label: "When",
+          value: meetingReadDateTime(meeting.datetime, timeZone),
+        },
+        { label: "Status", value: toWords(meeting.status) },
+        {
+          label: "Meeting type",
+          value: toWords(meeting.meetingSubtype ?? "regular"),
+        },
         {
           label: "Duration",
           value: meeting.durationMinutes
