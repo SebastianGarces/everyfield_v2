@@ -463,6 +463,14 @@ async function main() {
     assert.equal(attendanceExists, true);
     count++;
   }
+  reset();
+  actor = null;
+  await assert.rejects(
+    () => a.removeAttendeeAction(MEETING, PERSON),
+    /Unauthorized/
+  );
+  assert.equal(writes, 0);
+  count++;
   console.log(
     `Attendance authorization proof passed: ${count} cases; mocked persistence boundaries, not database proof`
   );

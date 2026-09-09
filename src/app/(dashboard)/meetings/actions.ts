@@ -514,8 +514,8 @@ export async function removeAttendeeAction(
   meetingId: string,
   personId: string
 ): Promise<ActionResult<void>> {
+  const { user } = await requireSeat("meetings.attendance");
   try {
-    const { user } = await requireSeat("meetings.attendance");
     await requireAttendanceWrite(user, meetingId);
     if (!user.churchId)
       return {
