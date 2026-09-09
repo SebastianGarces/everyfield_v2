@@ -1,5 +1,10 @@
 "use server";
 
+import { holdsSeatFor, SeatRefusalError } from "@/lib/auth/seat-rules";
+import {
+  requireAttendanceWrite,
+  requireAttendancePeople,
+} from "@/lib/meetings/attendance-authorization";
 import { requireSeat } from "@/lib/auth/seats";
 import { rethrowUnauthorized } from "@/lib/auth/unauthorized";
 import { and, eq } from "drizzle-orm";
@@ -397,7 +402,8 @@ export async function addAttendeeAction(
   formData: FormData
 ): Promise<ActionResult<MeetingAttendanceRecord>> {
   try {
-    const { user } = await requireSeat("meetings.write");
+    const { user } = await requireSeat("meetings.attendance");
+    await requireAttendanceWrite(user, meetingId);
     if (!user.churchId)
       return {
         success: false,
@@ -417,6 +423,17 @@ export async function addAttendeeAction(
       };
     }
 
+    if (
+      !holdsSeatFor(user, "meetings.write") &&
+      (parsed.data.responseStatus !== undefined ||
+        parsed.data.invitedById !== undefined)
+    ) {
+      throw new SeatRefusalError("meetings.write");
+    }
+    await requireAttendancePeople(user.churchId, [
+      parsed.data.personId,
+      ...(parsed.data.invitedById ? [parsed.data.invitedById] : []),
+    ]);
     const record = await addAttendee(user.churchId, meetingId, parsed.data);
     revalidatePath("/meetings");
     revalidatePath(`/meetings/${meetingId}`);
@@ -498,14 +515,35 @@ export async function removeAttendeeAction(
   personId: string
 ): Promise<ActionResult<void>> {
   try {
-    const { user } = await requireSeat("meetings.write");
+    const { user } = await requireSeat("meetings.attendance");
+    await requireAttendanceWrite(user, meetingId);
     if (!user.churchId)
       return {
         success: false,
         error: "You must be associated with a church to manage attendance",
       };
 
-    await removeAttendee(user.churchId, meetingId, personId);
+    await requireAttendancePeople(user.churchId, [personId]);
+    if (holdsSeatFor(user, "meetings.write")) {
+      await removeAttendee(user.churchId, meetingId, personId);
+    } else {
+      // Leaders can clear attendance, but cannot delete the guest-list entry,
+      // its RSVP/inviter, or a response card they are not allowed to edit.
+      await db
+        .update(meetingAttendance)
+        .set({
+          status: "absent",
+          attendanceType: null,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(meetingAttendance.churchId, user.churchId),
+            eq(meetingAttendance.meetingId, meetingId),
+            eq(meetingAttendance.personId, personId)
+          )
+        );
+    }
     revalidatePath("/meetings");
     revalidatePath(`/meetings/${meetingId}`);
     return { success: true, data: undefined };
@@ -546,7 +584,8 @@ export async function finalizeAttendanceAction(
   meetingId: string
 ): Promise<ActionResult<FinalizeAttendanceResult>> {
   try {
-    const { user } = await requireSeat("meetings.write");
+    const { user } = await requireSeat("meetings.attendance");
+    await requireAttendanceWrite(user, meetingId);
     if (!user.churchId)
       return {
         success: false,
@@ -579,7 +618,8 @@ export async function recordAttendanceBatchAction(
   records: { personId: string; status: "attended" | "absent" | "excused" }[]
 ): Promise<ActionResult<void>> {
   try {
-    const { user } = await requireSeat("meetings.write");
+    const { user } = await requireSeat("meetings.attendance");
+    await requireAttendanceWrite(user, meetingId);
     if (!user.churchId)
       return {
         success: false,
@@ -591,6 +631,10 @@ export async function recordAttendanceBatchAction(
       return { success: false, error: "Validation failed" };
     }
 
+    await requireAttendancePeople(
+      user.churchId,
+      parsed.data.records.map((record) => record.personId)
+    );
     await recordAttendanceBatch(
       user.churchId,
       meetingId,
@@ -858,8 +902,12 @@ export async function toggleAttendanceStatusAction(
   attended: boolean
 ): Promise<ActionResult<null>> {
   try {
-    const { user } = await requireSeat("meetings.write");
+    const { user } = await requireSeat("meetings.attendance");
+    await requireAttendanceWrite(user, meetingId);
     if (!user.churchId) return { success: false, error: "No church" };
+    if (typeof attended !== "boolean")
+      return { success: false, error: "Invalid attendance status" };
+    await requireAttendancePeople(user.churchId, [personId]);
 
     // Only set attendance_type when marking attended; clear it when un-marking.
     const attendanceType = attended
@@ -899,8 +947,10 @@ export async function addWalkInAttendeeAction(
   personId: string
 ): Promise<ActionResult<MeetingAttendanceRecord>> {
   try {
-    const { user } = await requireSeat("meetings.write");
+    const { user } = await requireSeat("meetings.attendance");
+    await requireAttendanceWrite(user, meetingId);
     if (!user.churchId) return { success: false, error: "No church" };
+    await requireAttendancePeople(user.churchId, [personId]);
 
     const record = await addToGuestList(
       user.churchId,

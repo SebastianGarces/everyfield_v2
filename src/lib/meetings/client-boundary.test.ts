@@ -122,6 +122,7 @@ const SERVICE = path.join(SRC, "lib/meetings/service.ts");
 const DB_MODULES = [
   SERVICE,
   path.join(SRC, "lib/meetings/response-queries.ts"),
+  path.join(SRC, "lib/meetings/attendance-authorization.ts"),
 ];
 
 test("no client component reaches a meetings data-access module", () => {

@@ -254,6 +254,8 @@ const CAPABILITIES = {
   "tasks.own": { seats: SEATED, tenancy: "plant" },
   /** AS-006: the team leader subject is checked through persons.user_id. */
   "teams.own": { seats: SEATED, tenancy: "plant" },
+  /** The stored meeting must belong to a team the Member leads. */
+  "meetings.attendance": { seats: SEATED, tenancy: "plant" },
   /**
    * Ticking a launch milestone or one of its tasks. LS-007 splits this from
    * `launch.schedule` on purpose: milestone completion follows normal task

@@ -174,6 +174,7 @@ test("a Member's own-duty writes still succeed (AS-006)", () => {
   for (const capability of [
     "tasks.own",
     "teams.own",
+    "meetings.attendance",
     "launch.milestone",
   ] as const) {
     only(capability, [plantOwner, plantAdmin, plantMember]);
@@ -257,6 +258,7 @@ const EVERY_STATE_CHANGING_CAPABILITY = [
   "phase.signal",
   "tasks.own",
   "teams.own",
+  "meetings.attendance",
   "launch.milestone",
   "seat.invitation.manage",
   "coach.assignment.manage",

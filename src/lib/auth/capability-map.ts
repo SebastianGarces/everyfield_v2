@@ -55,13 +55,13 @@ export const CAPABILITY_BY_EXPORT: Readonly<Record<string, string>> = {
   "src/app/(dashboard)/launch/actions.ts → updateLaunchOutcomeAction":
     "launch.schedule",
   "src/app/(dashboard)/meetings/actions.ts → addAttendeeAction":
-    "meetings.write",
+    "meetings.attendance",
   "src/app/(dashboard)/meetings/actions.ts → addAttendeeNoteAction":
     "meetings.write",
   "src/app/(dashboard)/meetings/actions.ts → addToGuestListAction":
     "meetings.write",
   "src/app/(dashboard)/meetings/actions.ts → addWalkInAttendeeAction":
-    "meetings.write",
+    "meetings.attendance",
   "src/app/(dashboard)/meetings/actions.ts → clearResponseCardAction":
     "meetings.write",
   "src/app/(dashboard)/meetings/actions.ts → createEvaluationAction":
@@ -73,7 +73,7 @@ export const CAPABILITY_BY_EXPORT: Readonly<Record<string, string>> = {
   "src/app/(dashboard)/meetings/actions.ts → deleteMeetingAction":
     "meetings.write",
   "src/app/(dashboard)/meetings/actions.ts → finalizeAttendanceAction":
-    "meetings.write",
+    "meetings.attendance",
   "src/app/(dashboard)/meetings/actions.ts → quickAddAttendeeAction":
     "meetings.write",
   "src/app/(dashboard)/meetings/actions.ts → quickAddPersonToGuestListAction":
@@ -81,17 +81,17 @@ export const CAPABILITY_BY_EXPORT: Readonly<Record<string, string>> = {
   "src/app/(dashboard)/meetings/actions.ts → quickAddWalkInAction":
     "meetings.write",
   "src/app/(dashboard)/meetings/actions.ts → recordAttendanceBatchAction":
-    "meetings.write",
+    "meetings.attendance",
   "src/app/(dashboard)/meetings/actions.ts → recordResponseCardAction":
     "meetings.write",
   "src/app/(dashboard)/meetings/actions.ts → removeAttendeeAction":
-    "meetings.write",
+    "meetings.attendance",
   "src/app/(dashboard)/meetings/actions.ts → removeFromGuestListAction":
     "meetings.write",
   "src/app/(dashboard)/meetings/actions.ts → saveAgendaAction":
     "meetings.write",
   "src/app/(dashboard)/meetings/actions.ts → toggleAttendanceStatusAction":
-    "meetings.write",
+    "meetings.attendance",
   "src/app/(dashboard)/meetings/actions.ts → toggleChecklistItemAction":
     "meetings.write",
   "src/app/(dashboard)/meetings/actions.ts → updateChecklistItemAction":
