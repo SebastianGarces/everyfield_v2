@@ -10,6 +10,11 @@ for (const unsafe of [
   { ownerName: "name}}", subject: "From {{first_{{pastor_name}}" },
   { ownerName: "first_name", subject: "From {{{{pastor_name}}}}" },
   { ownerName: "", subject: "From {{first_{{pastor_name}}name}}" },
+  {
+    ownerName: "",
+    subject: "Hello",
+    body: '<p><a href="https://example.invalid/{{first_name}}">{{pastor_name}}</a></p><p><a href="https://example.invalid/{{first_{{pastor_name}}name}}">Click</a></p>',
+  },
 ]) {
   test(`unsafe Owner value ${JSON.stringify(unsafe.ownerName)} refuses before persistence/provider calls`, async () => {
     let reads = 0;
@@ -46,7 +51,7 @@ for (const unsafe of [
       await assert.rejects(
         sendCommunication("828-plant", "828-actor", {
           subject: unsafe.subject,
-          body: "<p>Hello {{first_name}}</p>",
+          body: unsafe.body ?? "<p>Hello {{first_name}}</p>",
           channel: "email",
           recipientIds: ["828-recipient"],
         }),

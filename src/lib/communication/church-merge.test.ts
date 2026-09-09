@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { richTextToPlainText } from "@/lib/rich-text/format";
+import { toRichTextHtml, richTextToPlainText } from "@/lib/rich-text/format";
 import { churchMergeFactsQuery } from "./church-merge";
 import {
   buildResolvedChurchMergeData,
@@ -196,3 +196,76 @@ for (const [ownerName, text] of [
     }
   });
 }
+
+test("a dropped link cannot authorize a new token assembled in another link", () => {
+  const bodyHtml = toRichTextHtml(
+    '<p><a href="https://example.invalid/{{first_name}}">{{pastor_name}}</a></p>' +
+      '<p><a href="https://example.invalid/{{first_{{pastor_name}}name}}">Click</a></p>'
+  );
+  assert.match(
+    bodyHtml,
+    /href="https:\/\/example.invalid\/\{\{first_name\}\}"/
+  );
+  assert.throws(
+    () =>
+      freezeChurchMergeFields(
+        { subject: "Hello", bodyHtml },
+        buildResolvedChurchMergeData({ ...plant, ownerName: "" })
+      ),
+    /Cannot send with plant merge fields/
+  );
+});
+
+test("valid adjacent tokens and unrelated literal braces remain accepted", () => {
+  const stored = freezeChurchMergeFields(
+    {
+      subject: "{News} {{pastor_name}}{{first_name}}",
+      bodyHtml: toRichTextHtml(
+        '<p>{News}</p><p>{{pastor_name}}{{first_name}}</p><p><a href="https://example.invalid/{{first_name}}">Click</a></p>'
+      ),
+    },
+    buildResolvedChurchMergeData(plant)
+  );
+  assert.equal(stored.subject, "{News} Alex <Smith>{{first_name}}");
+  assert.match(
+    stored.bodyHtml,
+    /href="https:\/\/example.invalid\/\{\{first_name\}\}"/
+  );
+});
+
+for (const [ownerName, html] of [
+  [
+    "name",
+    "{{first_<p>{{launch_date}}</p>{{pastor_name}}<p>{{launch_date}}</p>}}",
+  ],
+  ["", "{{first_<p>{{pastor_name}}</p>name}}"],
+  ["", "{<p>{{pastor_name}}</p>{first_name}<p>{{launch_date}}</p>}"],
+]) {
+  test(`empty cleanup cannot assemble a token from ${JSON.stringify(html)}`, () => {
+    assert.throws(
+      () =>
+        freezeChurchMergeFields(
+          { subject: "Hello", bodyHtml: toRichTextHtml(html) },
+          buildResolvedChurchMergeData({
+            ...plant,
+            ownerName,
+            targetDate: null,
+          })
+        ),
+      /Cannot send with plant merge fields/
+    );
+  });
+}
+
+test("unrelated sends do not gain new template validation", () => {
+  const template = {
+    subject: "Hello",
+    bodyHtml: toRichTextHtml("<p>{{first_<em>name</em>}}</p>"),
+  };
+  assert.doesNotThrow(() =>
+    freezeChurchMergeFields(
+      template,
+      buildResolvedChurchMergeData({ ...plant, ownerName: "{{first_" })
+    )
+  );
+});

@@ -357,33 +357,34 @@ export function freezeChurchMergeFields(
     // Even a single brace can join the surrounding template into another token.
     if (referenced.has(name) && /[{}]/.test(value)) throw refusal();
   }
-  const frozen = {
+  if (Object.keys(fields).some((name) => referenced.has(name))) {
+    // Mark each original non-plant token in a diagnostic copy. Run the same
+    // cleanup/substitution as delivery: any token remaining afterward was newly
+    // assembled, even if cleanup removed a different original token or paragraph.
+    // The marker never enters stored content and cannot form a merge delimiter.
+    const markOriginalTokens = (text: string) =>
+      text.replace(/\{\{(\w+)\}\}/g, (token, name: string) =>
+        Object.hasOwn(fields, name) ? token : "\uFFFC"
+      );
+    const markedSubject = renderSubject(
+      markOriginalTokens(template.subject),
+      fields
+    );
+    const markedHtml = renderEmailBodyHtml(
+      markOriginalTokens(template.bodyHtml),
+      fields
+    );
+    if (
+      [markedSubject, markedHtml, richTextToPlainText(markedHtml)].some(
+        (text) => /\{\{\w+\}\}/.test(text)
+      )
+    )
+      throw refusal();
+  }
+  return {
     subject: renderSubject(template.subject, fields),
     bodyHtml: renderEmailBodyHtml(template.bodyHtml, fields),
   };
-  // A brace-free value (or an empty one) can also complete a token whose
-  // delimiters are in the template. Preserve the count of every unfrozen token
-  // across each subsequent rendering input, including flattened plain text.
-  for (const [before, after] of [
-    [template.subject, frozen.subject],
-    [template.bodyHtml, frozen.bodyHtml],
-    [
-      richTextToPlainText(template.bodyHtml),
-      richTextToPlainText(frozen.bodyHtml),
-    ],
-  ]) {
-    const remaining = new Map<string, number>();
-    for (const [, name] of before.matchAll(/\{\{(\w+)\}\}/g)) {
-      if (!Object.hasOwn(fields, name))
-        remaining.set(name, (remaining.get(name) ?? 0) + 1);
-    }
-    for (const [, name] of after.matchAll(/\{\{(\w+)\}\}/g)) {
-      const count = remaining.get(name) ?? 0;
-      if (count === 0) throw refusal();
-      remaining.set(name, count - 1);
-    }
-  }
-  return frozen;
 }
 
 export function buildMeetingMergeData(meeting: {
