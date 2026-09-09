@@ -21,7 +21,7 @@ export const PAGE_SIZE = {
 
 export const colors = {
   ink: "#111827",
-  muted: "#465766",
+  muted: "#6b7280",
   line: "#d1d5db",
   faint: "#f3f4f6",
 };
