@@ -330,7 +330,7 @@ export const READ_ONLY_SURFACE_CHECKLIST: readonly ChecklistRow[] = [
     surface:
       "Meeting detail and its attendance, evaluation, invitations, logistics, outcomes and analytics tabs",
     mustNotRender:
-      "Edit meeting, submit evaluation, send invitations, edit logistics, record outcomes; attendance controls require a stored team-leader grant, and own RSVP stays",
+      "Edit meeting, submit evaluation, send invitations, edit logistics, record outcomes; attendance controls are available only for team meetings the Member leads, and own RSVP remains available",
     governedBy: ["meetings.write", "meetings.attendance"],
     reachedBy: ["plant-member"],
     verdict: "fixed-here",
