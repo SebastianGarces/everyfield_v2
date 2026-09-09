@@ -9,7 +9,7 @@ import {
   or,
   sql,
 } from "drizzle-orm";
-import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
+import type { Database } from "@/db";
 
 import { users, wikiArticles, wikiProgress } from "@/db/schema";
 
@@ -19,8 +19,8 @@ import { users, wikiArticles, wikiProgress } from "@/db/schema";
  * EXISTS keeps a global article plus its local override from counting twice.
  * No account identity, article slug or reading timestamp leaves this query.
  */
-export function wikiProgressAggregateQuery<T extends PgQueryResultHKT>(
-  database: PgDatabase<T>,
+export function wikiProgressAggregateQuery(
+  database: Database,
   churchId: string
 ) {
   return database

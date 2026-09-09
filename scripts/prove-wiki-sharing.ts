@@ -28,7 +28,7 @@ async function main() {
   } = await import("../src/db/schema");
   const { canAccessFeatureData, privacyColumnFor } =
     await import("../src/lib/auth/access");
-  const { holdsSeatFor } = await import("../src/lib/auth/seats");
+  const { holdsSeatFor } = await import("../src/lib/auth/seat-rules");
   const { allSharingOn } = await import("../src/lib/privacy/sharing-defaults");
   const { setSharingToggle } =
     await import("../src/lib/notifications/oversight-sharing");
