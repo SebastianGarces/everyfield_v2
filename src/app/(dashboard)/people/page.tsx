@@ -7,13 +7,11 @@ import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
 import {
   ExportButton,
   ImportWizard,
-  PeopleFilters,
   PeopleList,
-  PeopleSearch,
   PipelineWrapper,
   QuickAddForm,
-  ViewToggle,
 } from "@/components/people";
+import { PeopleToolbar } from "@/components/people/people-toolbar";
 import { Button } from "@/components/ui/button";
 import { holdsSeatFor } from "@/lib/auth/seat-rules";
 import { verifySession } from "@/lib/auth/session";
@@ -133,23 +131,11 @@ export default async function PeoplePage({ searchParams }: PeoplePageProps) {
               </div>
             </div>
 
-            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-              <div className="flex flex-1 flex-col gap-4 md:flex-row md:items-center">
-                {!isPipelineView && (
-                  <>
-                    <PeopleSearch />
-                    <PeopleFilters availableTags={availableTags} />
-                  </>
-                )}
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                <ViewToggle currentView={view} />
-                <div className="text-muted-foreground text-sm font-medium tabular-nums">
-                  {total} total
-                </div>
-              </div>
-            </div>
+            <PeopleToolbar
+              view={view}
+              availableTags={availableTags}
+              total={total}
+            />
           </div>
 
           <div

@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
+import { peopleListQueryWith } from "@/lib/people/list-params";
 import { cn } from "@/lib/utils";
 import { useRouter, useSearchParams } from "next/navigation";
 
@@ -10,21 +11,16 @@ import type { PeopleView } from "@/lib/people/list-params";
 
 interface ViewToggleProps {
   currentView: PeopleView;
+  beforeNavigate: () => void;
 }
 
-export function ViewToggle({ currentView }: ViewToggleProps) {
+export function ViewToggle({ currentView, beforeNavigate }: ViewToggleProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
 
   const handleViewChange = (view: PeopleView) => {
-    const params = new URLSearchParams(searchParams.toString());
-    if (view === "list") {
-      params.delete("view");
-    } else {
-      params.set("view", view);
-    }
-    // Clear cursor when switching views
-    params.delete("cursor");
+    beforeNavigate();
+    const params = peopleListQueryWith(searchParams.toString(), { view });
     router.push(`/people?${params.toString()}`);
   };
 

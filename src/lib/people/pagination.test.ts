@@ -103,7 +103,10 @@ test("the page and Load more read the same filters out of one URL", () => {
     search: "smith",
     status: ["prospect", "bogus", "prospect"],
     source: "personal_referral",
-    tag: ["tag-a", "tag-b"],
+    tag: [
+      "00000000-0000-4000-8000-000000000001",
+      "00000000-0000-4000-8000-000000000002",
+    ],
     cursor: "person-07",
     view: "list",
   };
@@ -113,7 +116,10 @@ test("the page and Load more read the same filters out of one URL", () => {
   // An unrecognised member is DROPPED, not refused, and duplicates collapse.
   assert.deepEqual(parsed.status, ["prospect"]);
   assert.deepEqual(parsed.source, ["personal_referral"]);
-  assert.deepEqual(parsed.tagIds, ["tag-a", "tag-b"]);
+  assert.deepEqual(parsed.tagIds, [
+    "00000000-0000-4000-8000-000000000001",
+    "00000000-0000-4000-8000-000000000002",
+  ]);
   assert.equal(parsed.search, "smith");
   assert.equal(parsed.view, "list");
 
