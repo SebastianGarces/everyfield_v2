@@ -10,6 +10,7 @@
 // `recipient-groups.ts`, so neither drags this dependency set with it.
 // ============================================================================
 
+import { getChurchMergeData } from "@/lib/communication/church-merge";
 import { and, count, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import {
@@ -19,7 +20,6 @@ import {
   type RecipientStatus,
 } from "@/db/schema/communication";
 import { persons } from "@/db/schema/people";
-import { churches } from "@/db/schema/church";
 import { churchMeetings } from "@/db/schema/meetings";
 import { render } from "@react-email/components";
 import { resend, EMAIL_FROM } from "@/lib/email/client";
@@ -31,7 +31,7 @@ import {
 } from "@/lib/email/components/communication-email";
 import {
   buildPersonMergeData,
-  buildChurchMergeData,
+  freezeChurchMergeFields,
   buildMeetingMergeData,
   renderEmailBodyHtml,
   renderEmailBodyText,
@@ -66,15 +66,7 @@ export async function sendCommunication(
   userId: string,
   input: ComposeMessageInput
 ): Promise<Communication> {
-  // 1. Load church for merge data
-  const [church] = await db
-    .select()
-    .from(churches)
-    .where(eq(churches.id, churchId))
-    .limit(1);
-  if (!church) throw new Error("Church not found");
-
-  const churchMergeData = buildChurchMergeData(church);
+  const churchMergeData = await getChurchMergeData(churchId);
 
   // COM-017. The body is rich text, and THIS is the gate — not the editor.
   // Every export of the compose action is a POSTable endpoint, so the markup
@@ -83,7 +75,11 @@ export async function sendCommunication(
   // the sanitised form: nothing downstream re-derives it and gets it wrong.
   // A legacy plain-text body (a system template, a resend of an older message)
   // is converted rather than escaped into gibberish — `toRichTextHtml` decides.
-  const safeBodyHtml = toRichTextHtml(input.body);
+  const frozen = freezeChurchMergeFields(
+    { subject: input.subject, bodyHtml: toRichTextHtml(input.body) },
+    churchMergeData
+  );
+  const safeBodyHtml = frozen.bodyHtml;
   // The text/plain half of the email is flattened from the SAME safe HTML, so
   // the two halves can never say different things. It is also what is STORED in
   // `communications.body` — see the insert below.
@@ -138,7 +134,7 @@ export async function sendCommunication(
     .insert(communications)
     .values({
       churchId,
-      subject: input.subject,
+      subject: frozen.subject,
       body: safeBodyText,
       bodyHtml: safeBodyHtml,
       channel: input.channel,
@@ -203,7 +199,7 @@ export async function sendCommunication(
       recipientId: crypto.randomUUID(),
       personId: person.id,
       email: person.email,
-      subject: input.subject ? renderSubject(input.subject, mergeData) : "",
+      subject: renderSubject(frozen.subject, mergeData),
       // Escaping, line breaks and the empty-paragraph collapse are all
       // `renderEmailBodyHtml`'s — the compose preview calls the same door, so
       // what a planter previewed is what the recipient gets.
@@ -225,14 +221,14 @@ export async function sendCommunication(
           bodyHtml: p.bodyHtml,
           confirmUrl: p.confirmUrl,
           declineUrl: p.declineUrl,
-          churchName: church.name,
+          churchName: churchMergeData.church_name,
           previewText: p.subject,
         })
       ),
       text: await render(
         CommunicationEmailText({
           body: p.bodyText,
-          churchName: church.name,
+          churchName: churchMergeData.church_name,
         }),
         { plainText: true }
       ),

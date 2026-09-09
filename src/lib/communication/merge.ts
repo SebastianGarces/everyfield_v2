@@ -7,7 +7,11 @@
 // and by the UI to render live previews with sample data.
 // ============================================================================
 
-import { formatDateTime } from "@/lib/datetime";
+import { formatDateTime, formatDateWithoutWeekday } from "@/lib/datetime";
+import {
+  churchHasNoPlanter,
+  type ChurchLeadership,
+} from "@/lib/onboarding/leadership";
 import { meetingTypeLabel } from "@/lib/meetings/labels";
 import { parseAgenda, type AgendaSection } from "@/lib/meetings/agenda";
 import {
@@ -165,7 +169,7 @@ export const MERGE_FIELDS: MergeFieldDefinition[] = [
     description: "Senior pastor's name",
     group: "church",
     sampleValue: "Pastor John Smith",
-    // No church-profile field sources it yet — always "" today.
+    // A plant may explicitly have no pastor.
     optional: true,
   },
   {
@@ -174,7 +178,7 @@ export const MERGE_FIELDS: MergeFieldDefinition[] = [
     description: "Target launch Sunday date",
     group: "church",
     sampleValue: "September 14, 2026",
-    // `buildChurchMergeData` takes only a name, so always "" today (#203).
+    // A launch may not have a target day yet.
     optional: true,
   },
   // Meeting fields (available when triggered from a meeting context)
@@ -307,16 +311,58 @@ export function buildChurchMergeData(church: {
 }): Record<string, string> {
   return {
     church_name: church.name,
-    // Both still render empty, for two DIFFERENT reasons — worth keeping
-    // straight now that one of them is no longer "the column doesn't exist":
-    //   pastor_name — no church-profile field sources it yet.
-    //   launch_date — the day exists and is readable
-    //     (`launches.target_date`, LS-001; `churches.launch_date` was dropped by
-    //     migration 0032), but this builder takes only a church name, and
-    //     widening it to fetch is #203's call. The FRD's own note
-    //     (`communication-hub/frd.md`) says these two render empty.
+    // Legacy name-only callers, including Evri, have no resolved plant facts.
     pastor_name: "",
     launch_date: "",
+  };
+}
+
+/** Ordinary Communication Hub facts, loaded once per plant, never per recipient. */
+export function buildResolvedChurchMergeData(church: {
+  name: string;
+  ownerName: string | null;
+  leadershipStatus: ChurchLeadership["leadershipStatus"];
+  targetDate: string | null;
+}): Record<string, string> {
+  return {
+    church_name: church.name,
+    pastor_name: churchHasNoPlanter(church)
+      ? ""
+      : (church.ownerName?.trim() ?? ""),
+    // A date column names a calendar day, not an instant in the church's zone.
+    // Pin both parsing and formatting to UTC so no timezone shifts that day.
+    launch_date: church.targetDate
+      ? formatDateWithoutWeekday(new Date(`${church.targetDate}T00:00:00Z`))
+      : "",
+  };
+}
+
+/** Freeze plant facts at send time; recipient and meeting tokens remain unresolved. */
+export function freezeChurchMergeFields(
+  template: { subject: string; bodyHtml: string },
+  churchData: Record<string, string>
+): { subject: string; bodyHtml: string } {
+  const fields = {
+    pastor_name: churchData.pastor_name,
+    launch_date: churchData.launch_date,
+  };
+  const referenced = new Set(
+    extractMergeFields(`${template.subject} ${template.bodyHtml}`)
+  );
+  const known = new Set(MERGE_FIELDS.map((field) => field.name));
+  for (const [name, value] of Object.entries(fields)) {
+    if (
+      referenced.has(name) &&
+      extractMergeFields(value).some((field) => known.has(field))
+    ) {
+      throw new Error(
+        `Cannot send with {{${name}}}: its saved value contains a merge field. Remove merge-field placeholders from the plant Owner's name or replace {{${name}}} in this message with plain text.`
+      );
+    }
+  }
+  return {
+    subject: renderSubject(template.subject, fields),
+    bodyHtml: renderEmailBodyHtml(template.bodyHtml, fields),
   };
 }
 

@@ -1,0 +1,174 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { richTextToPlainText } from "@/lib/rich-text/format";
+import { churchMergeFactsQuery } from "./church-merge";
+import {
+  buildResolvedChurchMergeData,
+  freezeChurchMergeFields,
+  buildPersonMergeData,
+  buildChurchMergeData,
+  renderSubject,
+  renderEmailBodyHtml,
+  renderEmailBodyText,
+} from "./merge";
+
+const plant = {
+  name: "828 Test Church",
+  ownerName: "Alex <Smith>",
+  leadershipStatus: "planter_confirmed" as const,
+  targetDate: "2026-09-13",
+};
+
+test("canonical plant facts populate subject, HTML and text without trusting name markup", () => {
+  const data = buildResolvedChurchMergeData(plant);
+  assert.equal(
+    renderSubject("{{pastor_name}} | {{launch_date}}", data),
+    "Alex <Smith> | September 13, 2026"
+  );
+  const body = "<p>{{pastor_name}}</p><p>{{launch_date}}</p>";
+  assert.equal(
+    renderEmailBodyHtml(body, data),
+    "<p>Alex &lt;Smith&gt;</p><p>September 13, 2026</p>"
+  );
+  assert.equal(
+    renderEmailBodyText(richTextToPlainText(body), data),
+    "Alex <Smith>\n\nSeptember 13, 2026"
+  );
+});
+
+test("no planter and missing launch drop optional lines without sample facts", () => {
+  const data = buildResolvedChurchMergeData({
+    ...plant,
+    leadershipStatus: "no_planter",
+    targetDate: null,
+  });
+  assert.equal(data.pastor_name, "");
+  assert.equal(data.launch_date, "");
+  assert.equal(
+    renderEmailBodyHtml(
+      "<p>Hello</p><p>{{pastor_name}}</p><p>{{launch_date}}</p>",
+      data
+    ),
+    "<p>Hello</p>"
+  );
+});
+
+test("legacy unanswered leadership retains its Owner; absent or blank Owner names stay empty", () => {
+  assert.equal(
+    buildResolvedChurchMergeData({ ...plant, leadershipStatus: null })
+      .pastor_name,
+    plant.ownerName
+  );
+  for (const ownerName of [null, "", "   "]) {
+    assert.equal(
+      buildResolvedChurchMergeData({ ...plant, ownerName }).pastor_name,
+      ""
+    );
+  }
+});
+
+test("calendar launch day is stable across runtime zones and DST dates", () => {
+  const previous = process.env.TZ;
+  try {
+    for (const zone of ["Pacific/Kiritimati", "America/Los_Angeles", "UTC"]) {
+      process.env.TZ = zone;
+      assert.equal(
+        buildResolvedChurchMergeData(plant).launch_date,
+        "September 13, 2026"
+      );
+      assert.equal(
+        buildResolvedChurchMergeData({ ...plant, targetDate: "2026-03-08" })
+          .launch_date,
+        "March 8, 2026"
+      );
+    }
+  } finally {
+    if (previous === undefined) delete process.env.TZ;
+    else process.env.TZ = previous;
+  }
+});
+
+test("church and Owner join are tenant-scoped and exclude oversight owners", () => {
+  const query = churchMergeFactsQuery("828-church-a").toSQL();
+  assert.match(query.sql, /"users"\."church_id" = "churches"\."id"/);
+  assert.match(query.sql, /"users"\."sending_church_id" is null/);
+  assert.match(query.sql, /"users"\."sending_network_id" is null/);
+  assert.match(query.sql, /where "churches"\."id" = \$/);
+  assert.deepEqual(query.params, ["owner", "828-church-a", 1]);
+});
+
+test("legacy name-only builder retains the excluded Evri contract", () => {
+  assert.deepEqual(buildChurchMergeData({ name: plant.name }), {
+    church_name: plant.name,
+    pastor_name: "",
+    launch_date: "",
+  });
+});
+
+test("stored plant facts survive a leadership/date change and preserve recipient tokens", () => {
+  const churchData = buildResolvedChurchMergeData(plant);
+  const template = {
+    subject: "{{pastor_name}} invites {{first_name}} on {{launch_date}}",
+    bodyHtml:
+      "<p>{{first_name}}</p><p>{{pastor_name}}</p><p>{{launch_date}}</p>",
+  };
+  const stored = freezeChurchMergeFields(template, churchData);
+  assert.equal(
+    stored.subject,
+    "Alex <Smith> invites {{first_name}} on September 13, 2026"
+  );
+  const recipient = buildPersonMergeData({
+    firstName: "Jo",
+    lastName: "Test",
+    email: null,
+  });
+  // Shared history still uses its legacy church builder, as do Evri messages.
+  const historyData = {
+    ...buildChurchMergeData({ name: plant.name }),
+    ...recipient,
+  };
+  assert.equal(
+    renderSubject(stored.subject, historyData),
+    renderSubject(template.subject, { ...churchData, ...recipient })
+  );
+  assert.equal(
+    renderEmailBodyHtml(stored.bodyHtml, historyData),
+    renderEmailBodyHtml(template.bodyHtml, { ...churchData, ...recipient })
+  );
+  const changedPlant = buildResolvedChurchMergeData({
+    ...plant,
+    ownerName: "New Pastor",
+    targetDate: "2027-01-03",
+  });
+  assert.equal(
+    renderSubject(stored.subject, { ...changedPlant, ...recipient }),
+    "Alex <Smith> invites Jo on September 13, 2026"
+  );
+});
+
+test("only a referenced value introducing a recognized merge token refuses freezing", () => {
+  const data = buildResolvedChurchMergeData({
+    ...plant,
+    ownerName: "Pastor {{first_name}}",
+  });
+  assert.throws(
+    () =>
+      freezeChurchMergeFields(
+        { subject: "{{pastor_name}}", bodyHtml: "<p>Hello</p>" },
+        data
+      ),
+    /Cannot send with.*pastor_name/
+  );
+  assert.doesNotThrow(() =>
+    freezeChurchMergeFields(
+      { subject: "Hello {{first_name}}", bodyHtml: "<p>{{launch_date}}</p>" },
+      data
+    )
+  );
+  assert.doesNotThrow(() =>
+    freezeChurchMergeFields(
+      { subject: "{{pastor_name}}", bodyHtml: "<p>Hello</p>" },
+      { ...data, pastor_name: "Pastor {{not_a_merge_field}}" }
+    )
+  );
+});
