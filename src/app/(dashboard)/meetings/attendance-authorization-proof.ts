@@ -19,6 +19,7 @@ let meetingType = "team_meeting";
 let teamId: string | null = TEAM;
 let leaderUserId: string | null = USER;
 let peopleExist = true;
+let attendanceExists = true;
 let writes = 0;
 let attendance = {
   status: "attended",
@@ -48,6 +49,14 @@ const database = {
             ]
           : [];
       if (table === "ministry_teams") return [{ id: TEAM, leaderUserId }];
+      if (table === "meeting_attendance") {
+        assert.match(predicate.sql, /"meeting_attendance"\."meeting_id" =/);
+        assert.match(predicate.sql, /"meeting_attendance"\."person_id" =/);
+        assert.deepEqual(predicate.params.slice(0, 2), [CHURCH, MEETING]);
+        return attendanceExists && predicate.params[2] === PERSON
+          ? [{ id: PERSON }]
+          : [];
+      }
       assert.equal(table, "persons");
       assert.match(predicate.sql, /"persons"\."deleted_at" is null/);
       return peopleExist && predicate.params.includes(PERSON)
@@ -137,7 +146,16 @@ mock.module("@/lib/meetings/service", {
         "setMeetingAgenda",
       ].map((name) => [name, effect])
     ),
-    removeAttendee: async () => {
+    removeAttendee: async (
+      churchId: string,
+      meetingId: string,
+      personId: string
+    ) => {
+      assert.deepEqual(
+        [churchId, meetingId, personId],
+        [CHURCH, MEETING, PERSON]
+      );
+      attendanceExists = false;
       writes++;
       fullRemovals++;
       responseCardExists = false;
@@ -184,6 +202,7 @@ function reset(seat: User["seat"] = "member") {
   teamId = TEAM;
   leaderUserId = USER;
   peopleExist = true;
+  attendanceExists = true;
   writes = 0;
   fullRemovals = 0;
   attendance = {
@@ -316,7 +335,9 @@ async function main() {
       await check(call, allowed, `${name}: ${scenario}`);
       count++;
     }
-  for (const [name, call] of cases.filter(([name]) => name !== "finalize")) {
+  for (const [name, call] of cases.filter(
+    ([name]) => name !== "finalize" && name !== "remove"
+  )) {
     reset();
     peopleExist = false;
     await check(call, false, `${name}: deleted or foreign person`);
@@ -401,6 +422,47 @@ async function main() {
   assert.equal(fullRemovals, 1);
   assert.equal(responseCardExists, false);
   count++;
+  for (const [seat, fullRemoval] of [
+    ["admin", true],
+    ["member", false],
+  ] as const) {
+    reset(seat);
+    peopleExist = false;
+    await check(
+      () => a.removeAttendeeAction(MEETING, PERSON),
+      true,
+      `${seat}: existing soft-deleted attendee`
+    );
+    assert.equal(attendanceExists, !fullRemoval);
+    assert.equal(responseCardExists, !fullRemoval);
+    assert.equal(fullRemovals, fullRemoval ? 1 : 0);
+    if (!fullRemoval) {
+      assert.equal(attendance.status, "absent");
+      assert.equal(attendance.attendanceType, null);
+      assert.equal(attendance.responseStatus, "confirmed");
+      assert.equal(attendance.invitedById, FOREIGN);
+    }
+    count++;
+    reset(seat);
+    attendanceExists = false;
+    await check(
+      () => a.removeAttendeeAction(MEETING, PERSON),
+      false,
+      `${seat}: missing or foreign attendance`
+    );
+    assert.equal(responseCardExists, true);
+    assert.equal(fullRemovals, 0);
+    count++;
+    reset(seat);
+    await check(
+      () => a.removeAttendeeAction(MEETING, FOREIGN),
+      false,
+      `${seat}: another person's foreign attendance`
+    );
+    assert.equal(responseCardExists, true);
+    assert.equal(attendanceExists, true);
+    count++;
+  }
   console.log(
     `Attendance authorization proof passed: ${count} cases; mocked persistence boundaries, not database proof`
   );

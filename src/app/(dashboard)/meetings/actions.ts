@@ -523,7 +523,23 @@ export async function removeAttendeeAction(
         error: "You must be associated with a church to manage attendance",
       };
 
-    await requireAttendancePeople(user.churchId, [personId]);
+    if (!attendanceCreateSchema.safeParse({ personId }).success) {
+      return { success: false, error: "Validation failed" };
+    }
+    // A soft-deleted Person can still have attendance and a response card.
+    // Removal targets that existing attendance, not an active-person roster.
+    const [existing] = await db
+      .select({ id: meetingAttendance.id })
+      .from(meetingAttendance)
+      .where(
+        and(
+          eq(meetingAttendance.churchId, user.churchId),
+          eq(meetingAttendance.meetingId, meetingId),
+          eq(meetingAttendance.personId, personId)
+        )
+      )
+      .limit(1);
+    if (!existing) throw new Error("Attendance record not found");
     if (holdsSeatFor(user, "meetings.write")) {
       await removeAttendee(user.churchId, meetingId, personId);
     } else {
