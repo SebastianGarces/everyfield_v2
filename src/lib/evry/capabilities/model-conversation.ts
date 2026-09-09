@@ -275,17 +275,13 @@ export function createModelEvryConversation({
                     artifact.kind === "read"
                       ? {
                           ...artifact,
-                          items: artifact.items
-                            .slice(0, 25)
-                            .map((item) => ({
-                              ...item,
-                              facts: item.facts
-                                .slice(0, 8)
-                                .map((fact) => ({
-                                  label: fact.label,
-                                  value: fact.value.slice(0, 500),
-                                })),
+                          items: artifact.items.slice(0, 25).map((item) => ({
+                            ...item,
+                            facts: item.facts.slice(0, 8).map((fact) => ({
+                              label: fact.label,
+                              value: fact.value.slice(0, 500),
                             })),
+                          })),
                           explanationSampleIsPartial:
                             artifact.items.length > 25 ||
                             artifact.items.some(

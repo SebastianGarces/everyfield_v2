@@ -6,7 +6,12 @@ import type {
   OpenFollowUpTask,
 } from "@/lib/tasks/follow-up-ownership.shared";
 
-import { followUpContactRows } from "./follow-up-presentation";
+import {
+  followUpContactRows,
+  FOLLOW_UP_CONTACT_CRITERIA,
+  FOLLOW_UP_OWNER_CRITERIA,
+} from "./follow-up-presentation";
+import { FOLLOW_UP_STATUSES, STATUS_LABELS } from "@/lib/people/status.shared";
 
 const contacts: FollowUpContact[] = [
   "owned",
@@ -57,6 +62,12 @@ test("unowned filter includes missing tasks and former owners, but excludes live
   );
   assert.ok(rows.every(({ facts }) => facts[1]?.value === "Needs owner"));
   assert.deepEqual(followUpContactRows([contacts[0]!], [task], true), []);
+  for (const status of FOLLOW_UP_STATUSES) {
+    assert.ok(FOLLOW_UP_CONTACT_CRITERIA.includes(STATUS_LABELS[status]));
+  }
+  assert.match(FOLLOW_UP_CONTACT_CRITERIA, /open task is not required/);
+  assert.match(FOLLOW_UP_OWNER_CRITERIA, /people with no task/);
+  assert.match(FOLLOW_UP_OWNER_CRITERIA, /separate totals/);
 });
 
 test("multiple follow-up tasks show each current owner once", () => {

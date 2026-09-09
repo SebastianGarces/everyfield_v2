@@ -5,6 +5,7 @@ cd "$(dirname "$0")/.."
 export DATABASE_URL=postgresql://ci:ci@localhost:5432/ci
 export RESEND_API_KEY=re_ci_placeholder
 pnpm exec tsx --test \
+  src/lib/evry/capabilities/tasks/follow-up-presentation.test.ts \
   src/lib/evry/capabilities/model-conversation.test.ts \
   src/lib/evry/capabilities/model-response.test.ts \
   src/lib/evry/capabilities/response-parts.test.ts \

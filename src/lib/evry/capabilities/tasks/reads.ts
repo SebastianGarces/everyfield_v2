@@ -48,7 +48,11 @@ import {
 } from "@/lib/tasks/presentation";
 import type { TaskWithAssignee } from "@/lib/tasks/types";
 
-import { followUpContactRows } from "./follow-up-presentation";
+import {
+  followUpContactRows,
+  FOLLOW_UP_CONTACT_CRITERIA,
+  FOLLOW_UP_OWNER_CRITERIA,
+} from "./follow-up-presentation";
 
 export const TASK_READ_IDENTITIES = {
   counts: "tasks.read.counts",
@@ -686,6 +690,11 @@ export const TASK_FOLLOW_UP_OWNERSHIP_READ = defineEvryReadRegistration({
       filters: [
         { label: "Section", value: input.section },
         { label: "Open follow-up tasks", value: String(openTasks.length) },
+        {
+          label: "Contact selection criteria",
+          value: FOLLOW_UP_CONTACT_CRITERIA,
+        },
+        { label: "Ownership criteria", value: FOLLOW_UP_OWNER_CRITERIA },
         { label: "Follow-up contacts", value: String(contacts.length) },
         { label: "Eligible assignees", value: String(assignees.length) },
         {

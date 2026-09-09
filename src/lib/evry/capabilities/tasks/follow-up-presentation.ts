@@ -1,10 +1,14 @@
-import { STATUS_LABELS } from "@/lib/people/status.shared";
+import { FOLLOW_UP_STATUSES, STATUS_LABELS } from "@/lib/people/status.shared";
 import {
   isOwned,
   selectUnownedContacts,
   type FollowUpContact,
   type OpenFollowUpTask,
 } from "@/lib/tasks/follow-up-ownership.shared";
+
+export const FOLLOW_UP_CONTACT_CRITERIA = `People in ${FOLLOW_UP_STATUSES.map((status) => STATUS_LABELS[status]).join(", ")} status. An existing open task is not required.`;
+export const FOLLOW_UP_OWNER_CRITERIA =
+  "Needs owner means the person has no linked open follow-up task assigned to a currently committed member. This includes people with no task; task and contact counts are separate totals, not one-to-one matches.";
 
 /** Keep the same ownership definition as Tasks; expose names, not storage fields. */
 export function followUpContactRows(
