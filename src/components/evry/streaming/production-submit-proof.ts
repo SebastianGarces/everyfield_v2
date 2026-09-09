@@ -1,14 +1,15 @@
 import assert from "node:assert/strict";
 import { mock, test } from "node:test";
 
-import { createElement, useEffect, type ReactNode } from "react";
+import { createElement, Fragment, useEffect, type ReactNode } from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 
 const emptySearchParams = new URLSearchParams();
+let pathname = "/dashboard";
 
 mock.module("next/navigation", {
   namedExports: {
-    usePathname: () => "/dashboard",
+    usePathname: () => pathname,
     useSearchParams: () => emptySearchParams,
     useRouter: () => ({ back() {}, push() {} }),
   },
@@ -113,11 +114,15 @@ test("the real composer commits a request-keyed acknowledgement before its POST 
       })
   );
 
-  const [{ EvryShell, useEvryShell }, { ConversationSurface }] =
-    await Promise.all([
-      import("@/components/evry/evry-shell"),
-      import("@/components/evry/conversation-surface"),
-    ]);
+  const [
+    { EvryShell, useEvryShell },
+    { ConversationSurface },
+    { EvryLauncher },
+  ] = await Promise.all([
+    import("@/components/evry/evry-shell"),
+    import("@/components/evry/conversation-surface"),
+    import("@/components/evry/evry-launcher"),
+  ]);
   const workSnapshots: boolean[] = [];
   let currentShell!: ReturnType<typeof useEvryShell>;
   function SurfaceWithWorkProbe() {
@@ -126,7 +131,12 @@ test("the real composer commits a request-keyed acknowledgement before its POST 
       currentShell = shell;
     }, [shell]);
     workSnapshots.push(shell.isWorking);
-    return createElement(ConversationSurface);
+    return createElement(
+      Fragment,
+      null,
+      createElement(EvryLauncher),
+      createElement(ConversationSurface)
+    );
   }
   let renderer: ReactTestRenderer | null = null;
   await act(() => {
@@ -499,6 +509,41 @@ test("the real composer commits a request-keyed acknowledgement before its POST 
   });
   assert.equal(textarea.props.value, "Taylor Adams");
   assert.equal(activeElement, textarea.instance);
+
+  // A chat opened directly (including after reload) follows its result links,
+  // even if it did not originate by expanding a panel.
+  assert.equal(currentShell.isPanelOpen, false);
+  for (const destination of ["/people", "/tasks"]) {
+    await act(() => {
+      currentShell.closePanel();
+      pathname = "/evry";
+      mounted.update(
+        createElement(EvryShell, {
+          enabled: true,
+          children: createElement(SurfaceWithWorkProbe),
+        })
+      );
+    });
+    await act(() => {
+      pathname = destination;
+      mounted.update(
+        createElement(EvryShell, {
+          enabled: true,
+          children: createElement(SurfaceWithWorkProbe),
+        })
+      );
+    });
+    assert.equal(currentShell.isPanelOpen, true);
+    assert.equal(currentShell.conversation?.id, nextConversation.id);
+    assert.equal(currentShell.draft, "Taylor Adams");
+    const launcherNode = mounted.root
+      .findByType(EvryLauncher)
+      .findByType("button").instance;
+    await act(() => currentShell.closePanel());
+    currentShell.restoreLauncherFocus();
+    assert.equal(activeElement, launcherNode);
+  }
+  textarea.instance.focus();
 
   // Radix's closing panel remains mounted through its exit animation. Its
   // cleanup must not revoke the workspace that mounted in the meantime.

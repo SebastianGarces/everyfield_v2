@@ -600,12 +600,19 @@ export function EvryShell({
     previousPathnameRef.current = pathname;
     if (previousPathname === "/evry" && pathname !== "/evry") {
       cancelActiveConversationLoads();
-      if (expandedFromPanel) {
+      if (expandedFromPanel || conversation !== null || draft.length > 0) {
         setExpandedFromPanel(false);
+        setHasOpenedPanel(true);
         setPanelOpen(true);
       }
     }
-  }, [cancelActiveConversationLoads, expandedFromPanel, pathname]);
+  }, [
+    cancelActiveConversationLoads,
+    conversation,
+    draft,
+    expandedFromPanel,
+    pathname,
+  ]);
 
   const openPanel = useCallback(
     (trigger: HTMLButtonElement) => {
@@ -638,10 +645,11 @@ export function EvryShell({
   );
 
   const closePanel = useCallback(() => setPanelOpen(false), []);
-  const restoreLauncherFocus = useCallback(
-    () => launcherRef.current?.focus(),
-    []
-  );
+  const restoreLauncherFocus = useCallback(() => {
+    const trigger = launcherRef.current;
+    if (trigger?.isConnected) trigger.focus();
+    else document.getElementById("evry-launcher")?.focus();
+  }, []);
 
   const expandToWorkspace = useCallback(() => {
     setExpandedFromPanel(true);

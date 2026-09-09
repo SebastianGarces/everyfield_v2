@@ -12,6 +12,7 @@ export function EvryLauncher() {
 
   return (
     <Button
+      id="evry-launcher"
       type="button"
       variant="ghost"
       size="sm"
