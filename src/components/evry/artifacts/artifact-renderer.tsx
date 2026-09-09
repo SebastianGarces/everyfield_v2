@@ -385,6 +385,7 @@ function ReadResults({ artifact }: { artifact: ArtifactByVariant["read"] }) {
                     disabled={page === 0}
                     onClick={() => {
                       setPage(page - 1);
+                      resultsRef.current?.focus({ preventScroll: true });
                       resultsRef.current?.scrollTo({ top: 0 });
                     }}
                   >
@@ -397,6 +398,7 @@ function ReadResults({ artifact }: { artifact: ArtifactByVariant["read"] }) {
                     disabled={(page + 1) * pageSize >= total}
                     onClick={() => {
                       setPage(page + 1);
+                      resultsRef.current?.focus({ preventScroll: true });
                       resultsRef.current?.scrollTo({ top: 0 });
                     }}
                   >
