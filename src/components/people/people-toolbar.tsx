@@ -16,8 +16,9 @@ export function PeopleToolbar({
   availableTags: Tag[];
   total: number;
 }) {
-  const cancelSearchRef = useRef<(() => void) | null>(null);
-  const beforeNavigate = () => cancelSearchRef.current?.();
+  const cancelSearchRef = useRef<((destination?: string) => void) | null>(null);
+  const beforeNavigate = (destination: string) =>
+    cancelSearchRef.current?.(destination);
 
   return (
     <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">

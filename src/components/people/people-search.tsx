@@ -18,7 +18,7 @@ import {
 export function PeopleSearch({
   cancelSearchRef,
 }: {
-  cancelSearchRef: RefObject<(() => void) | null>;
+  cancelSearchRef: RefObject<((destination?: string) => void) | null>;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -36,7 +36,9 @@ export function PeopleSearch({
     setDraft(reconcilePeopleSearchDraft(draft, query, search));
 
   const handleSearch = useDebouncedCallback((term: string) => {
-    const params = peopleListQueryWith(query, { search: term });
+    const params = peopleListQueryWith(draft.submitted.at(-1) ?? query, {
+      search: term,
+    });
     setDraft((current) => ({
       ...current,
       submitted: [...current.submitted, params.toString()],
@@ -53,15 +55,19 @@ export function PeopleSearch({
     [draft.navigation, handleSearch]
   );
   useEffect(() => {
-    const onPopState = () => {
+    const beforeNavigate = (destination?: string) => {
       handleSearch.cancel();
       setDraft((current) => ({
         ...current,
-        value: parsePeopleListQuery(current.query).search ?? "",
-        submitted: [],
+        value: parsePeopleListQuery(destination ?? current.query).search ?? "",
+        submitted:
+          destination !== undefined && destination !== current.query
+            ? [destination]
+            : [],
       }));
     };
-    cancelSearchRef.current = onPopState;
+    const onPopState = () => beforeNavigate();
+    cancelSearchRef.current = beforeNavigate;
     window.addEventListener("popstate", onPopState);
     return () => {
       cancelSearchRef.current = null;

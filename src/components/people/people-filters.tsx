@@ -23,7 +23,7 @@ import { personSources, personStatuses, Tag } from "@/lib/people/types";
 
 interface PeopleFiltersProps {
   availableTags?: Tag[];
-  beforeNavigate: () => void;
+  beforeNavigate: (destination: string) => void;
 }
 
 export function PeopleFilters({
@@ -43,20 +43,20 @@ export function PeopleFilters({
     name: "status" | "source" | "tag",
     value: string | null
   ) => {
-    beforeNavigate();
-    router.push(`?${peopleListFilterQuery(query, name, value)}`);
+    const destination = peopleListFilterQuery(query, name, value).toString();
+    beforeNavigate(destination);
+    router.push(`?${destination}`);
   };
 
   const clearFilters = () => {
-    beforeNavigate();
-    router.push(
-      `?${peopleListQueryWith(query, {
-        status: undefined,
-        source: undefined,
-        tagIds: undefined,
-        search: undefined,
-      })}`
-    );
+    const destination = peopleListQueryWith(query, {
+      status: undefined,
+      source: undefined,
+      tagIds: undefined,
+      search: undefined,
+    }).toString();
+    beforeNavigate(destination);
+    router.push(`?${destination}`);
   };
 
   const hasFilters =

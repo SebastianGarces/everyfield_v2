@@ -11,7 +11,7 @@ import type { PeopleView } from "@/lib/people/list-params";
 
 interface ViewToggleProps {
   currentView: PeopleView;
-  beforeNavigate: () => void;
+  beforeNavigate: (destination: string) => void;
 }
 
 export function ViewToggle({ currentView, beforeNavigate }: ViewToggleProps) {
@@ -19,8 +19,8 @@ export function ViewToggle({ currentView, beforeNavigate }: ViewToggleProps) {
   const searchParams = useSearchParams();
 
   const handleViewChange = (view: PeopleView) => {
-    beforeNavigate();
     const params = peopleListQueryWith(searchParams.toString(), { view });
+    beforeNavigate(params.toString());
     router.push(`/people?${params.toString()}`);
   };
 

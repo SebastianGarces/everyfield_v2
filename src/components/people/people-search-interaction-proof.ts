@@ -31,7 +31,9 @@ test("real search input preserves newer typing and cancels before a slow filter 
   });
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   const { PeopleSearch } = await import("./people-search");
-  const cancelSearchRef = { current: null as (() => void) | null };
+  const cancelSearchRef = {
+    current: null as ((destination?: string) => void) | null,
+  };
   let mounted!: ReactTestRenderer;
   await act(() => {
     mounted = create(createElement(PeopleSearch, { cancelSearchRef }));
@@ -88,6 +90,33 @@ test("real search input preserves newer typing and cancels before a slow filter 
     2,
     "pending search overrode browser history"
   );
+  // Start a filter navigation, then type while useSearchParams still exposes the old URL.
+  await act(() => cancelSearchRef.current?.("status=prospect"));
+  await act(() => input().props.onChange({ target: { value: "After" } }));
+  await act(() => t.mock.timers.tick(300));
+  assert.equal(replacements[2], "?search=After&status=prospect");
+  // Even if the earlier filter response commits first, the newer draft survives.
+  query = "status=prospect";
+  await act(() =>
+    mounted.update(createElement(PeopleSearch, { cancelSearchRef }))
+  );
+  assert.equal(input().props.value, "After");
+  query = replacements[2].slice(1);
+  await act(() =>
+    mounted.update(createElement(PeopleSearch, { cancelSearchRef }))
+  );
+  assert.equal(input().props.value, "After");
+
+  // Also cover a filter commit before the new typing's debounce fires.
+  await act(() => cancelSearchRef.current?.("status=attendee"));
+  await act(() => input().props.onChange({ target: { value: "Later" } }));
+  query = "status=attendee";
+  await act(() =>
+    mounted.update(createElement(PeopleSearch, { cancelSearchRef }))
+  );
+  assert.equal(input().props.value, "Later");
+  await act(() => t.mock.timers.tick(300));
+  assert.equal(replacements[3], "?search=Later&status=attendee");
   await act(() => mounted.unmount());
   assert.equal(cancelSearchRef.current, null);
 });
