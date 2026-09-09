@@ -21,7 +21,7 @@ export function handout(
       default: {
         document: {
           run: { font: "Calibri", size: 22, color: "000000" },
-          paragraph: { spacing: { after: 120, line: 276 }, widowControl: true },
+          paragraph: { spacing: { after: 120, line: 276 } },
         },
       },
       paragraphStyles: [

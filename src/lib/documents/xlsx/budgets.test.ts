@@ -12,7 +12,9 @@ for (const [name, build, width] of [
 ] as const) {
   test(`${name} exports editable currency inputs, frozen context and separate income and expense totals`, async () => {
     const wb = new ExcelJS.Workbook();
-    await wb.xlsx.load(await build({ church_name: "Test Church" }));
+    await wb.xlsx.load(
+      Uint8Array.from(await build({ church_name: "Test Church" })).buffer
+    );
     const ws = wb.worksheets[0];
     assert.equal(ws.views[0].state, "frozen");
     assert.ok("xSplit" in ws.views[0] && ws.views[0].xSplit === 1);

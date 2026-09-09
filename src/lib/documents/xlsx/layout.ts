@@ -1,5 +1,13 @@
 import ExcelJS from "exceljs";
 
+// ExcelJS accepts OOXML paper size 1 at runtime, but its published enum omits
+// Letter. Complete the declaration instead of casting a valid value away.
+declare module "exceljs" {
+  const enum PaperSize {
+    Letter = 1,
+  }
+}
+
 export const CURRENCY_FORMAT = '"$"#,##0.00;[Red]("$"#,##0.00);"$"0.00';
 
 /** Shared print and editing conventions for the two blank budget planners. */
