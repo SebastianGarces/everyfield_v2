@@ -345,7 +345,7 @@ export const READ_ONLY_SURFACE_CHECKLIST: readonly ChecklistRow[] = [
     ],
     note: "TWO DEFECTS THIS ROW FOUND THAT THE FRD'S WORDING DOES NOT NAME, both ruled in for #499. `attendee-notes.tsx` mounts DIRECTLY on the evaluation tab rather than inside the evaluation form, so gating the form left its Add Note control — an `addAttendeeNoteAction` call, `meetings.write` — rendering for a Member; it is gated on its own now. And the materials checklist's read-only path originally OMITTED the view's `renderControl` slot, which falls back to a default built for the marketing embed: a handler-less Radix `<Checkbox>`, which renders `<button role=\"checkbox\">` and is focusable and announced. That is a disabled control in better clothing, so the read-only render now passes a marker that carries the state and is not a control.",
     survives:
-      "A Member's OWN RSVP is untouched because it is not on this surface: it is answered from the emailed link at /rsvp/[token], a page outside (dashboard) authorised by the token and holding no session. The in-dashboard RSVP toggle on the guest list is staff recording somebody ELSE's answer — `updateRsvpStatusAction` is `meetings.write` — so it is hidden with the rest. The own-duty RSVP verb AS-006 describes cannot exist yet: the guest list references `persons.id` and nothing links a person row to an account (the residual recorded in memory/invariants.md).",
+      "A Member's own RSVP is available on meeting details through meetings.rsvp, scoped to their live linked Person on that meeting's guest list. Public /rsvp/[token] remains sessionless. Staff recording another person's answer stays under meetings.write.",
   },
   {
     surface: "Tasks (list, detail, templates)",
