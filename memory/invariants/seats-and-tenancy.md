@@ -326,3 +326,10 @@ the phase engine's own rule, and the seven `isOrgOwner` arms in
 `invitations/core.ts` stay Owner-only — the ruling's list names the association
 verbs, and those arms are the argument-side half of the same rule, reached only
 after the endpoint's own `requireSeat` has already refused everyone else.
+
+
+## Team leader duties (#22)
+
+`teams.own` checks a seated plant account first, then resolves the target's team from stored, tenant-scoped rows. The team's leader must be the caller's non-deleted linked Person. Role/roster changes preserve their existing derived leadership effects, so clearing leadership also removes permission on the next request. Training completion requires an active membership in the program's own team; a church-wide program grants no team subject. The UI receives only the authorized team id, never persons.user_id or a widened global capability.
+
+First-view Playbook seeding remains existing system initialization with fixed template contents. Explicit responsibility writes use the leader check. Team-meeting attendance is a separate pending integration with the meetings action owner; creating a team meeting does not grant general meeting edits or other people's RSVP writes.

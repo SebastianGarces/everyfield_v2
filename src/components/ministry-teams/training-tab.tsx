@@ -1,8 +1,10 @@
 "use client";
 
+import { toast } from "sonner";
 import { GraduationCap, Plus } from "lucide-react";
 
 import { useCan } from "@/components/shared/viewer-capabilities";
+import { useCanManageTeam } from "./team-write-context";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -46,11 +48,9 @@ export function TrainingTab({ teamId, programs, matrix }: TrainingTabProps) {
     submit: submitAddProgram,
   } = useDialogSaveLifecycle();
 
-  // `createTrainingProgramAction` and `markTrainingCompleteAction` are both
-  // `teams.write` (AS-020, #499). The MATRIX is the read — who has completed
-  // what — and it survives whole, because the grid already takes its one
-  // interactive cell as a render prop.
-  const canWrite = useCan("teams.write");
+  // AS-006: authority is resolved for this team, using the server's subject check.
+  const canWrite = useCanManageTeam(teamId);
+  const canWriteAllTeams = useCan("teams.write");
 
   async function handleAddProgram(formData: FormData) {
     formData.set("teamId", teamId);
@@ -58,7 +58,8 @@ export function TrainingTab({ teamId, programs, matrix }: TrainingTabProps) {
   }
 
   async function handleMarkComplete(personId: string, programId: string) {
-    await markTrainingCompleteAction({ personId, programId });
+    const result = await markTrainingCompleteAction({ personId, programId });
+    if (!result.success) toast.error(result.error);
   }
 
   if (programs.length === 0 && matrix.length === 0) {
@@ -118,17 +119,24 @@ export function TrainingTab({ teamId, programs, matrix }: TrainingTabProps) {
         matrix={matrix}
         incompleteCell={
           canWrite
-            ? ({ personId, personName, programId, programName }) => (
-                <button
-                  type="button"
-                  className="hover:bg-muted inline-flex cursor-pointer items-center justify-center rounded p-1 transition-colors"
-                  onClick={() => handleMarkComplete(personId, programId)}
-                  aria-label={`Mark ${personName} as complete for ${programName}`}
-                  title={`Mark ${personName} as complete for ${programName}`}
-                >
+            ? ({ personId, personName, programId, programName }) =>
+                canWriteAllTeams ||
+                programs.some(
+                  (program) =>
+                    program.id === programId && program.teamId === teamId
+                ) ? (
+                  <button
+                    type="button"
+                    className="hover:bg-muted inline-flex cursor-pointer items-center justify-center rounded p-1 transition-colors"
+                    onClick={() => handleMarkComplete(personId, programId)}
+                    aria-label={`Mark ${personName} as complete for ${programName}`}
+                    title={`Mark ${personName} as complete for ${programName}`}
+                  >
+                    <TrainingMatrixIncompleteMarker />
+                  </button>
+                ) : (
                   <TrainingMatrixIncompleteMarker />
-                </button>
-              )
+                )
             : undefined
         }
       />

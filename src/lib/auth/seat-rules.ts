@@ -248,24 +248,12 @@ const CAPABILITIES = {
   /**
    * Completing, reopening or restatusing a task ASSIGNED TO THE CALLER.
    *
-   * THE ONLY OWN-DUTY VERB THAT SHIPS, because it is the only one whose subject
-   * can be derived: `tasks.assigned_to_id` references `users.id`, so
-   * `assertMayActOnTask` (`@/lib/tasks/service`) can ask "is this yours?" after
-   * the row is loaded. `SEATED` is therefore a real floor here and not a
-   * fail-open one — the seat half refuses a coach and oversight, the subject
-   * half refuses a Member acting on somebody else's task.
-   *
-   * AS-006's other two own-duty writes — a Member's meeting RSVP and their own
-   * ministry team — have NO such column. `ministry_teams.leader_id` and the
-   * meeting guest list reference `persons.id`, and nothing links a person row
-   * to an account until AS-013's registration link lands. A `SEATED` capability
-   * for them would be a floor with nothing above it: every Member in the plant
-   * would reach every team and every RSVP, which is wider than today. So those
-   * writes sit at `teams.write` / `meetings.write` until the link exists —
-   * narrower than AS-006 describes, and the residual is recorded in
-   * `memory/invariants.md`.
+   * The service checks assigned_to_id against the authenticated account.
+   * A seat alone never authorizes another person's task.
    */
   "tasks.own": { seats: SEATED, tenancy: "plant" },
+  /** AS-006: the team leader subject is checked through persons.user_id. */
+  "teams.own": { seats: SEATED, tenancy: "plant" },
   /**
    * Ticking a launch milestone or one of its tasks. LS-007 splits this from
    * `launch.schedule` on purpose: milestone completion follows normal task

@@ -273,19 +273,19 @@ export const CAPABILITY_BY_EXPORT: Readonly<Record<string, string>> = {
     "phase.signal",
   "src/app/(dashboard)/tasks/phase-prompt-actions.ts → importPhaseTemplatesAction":
     "tasks.write",
-  "src/app/(dashboard)/teams/actions.ts → assignMemberAction": "teams.write",
+  "src/app/(dashboard)/teams/actions.ts → assignMemberAction": "teams.own",
   "src/app/(dashboard)/teams/actions.ts → assignTeamLeaderAction":
     "teams.write",
-  "src/app/(dashboard)/teams/actions.ts → createMeetingAction": "teams.write",
+  "src/app/(dashboard)/teams/actions.ts → createMeetingAction": "teams.own",
   "src/app/(dashboard)/teams/actions.ts → createResponsibilityAction":
-    "teams.write",
-  "src/app/(dashboard)/teams/actions.ts → createRoleAction": "teams.write",
+    "teams.own",
+  "src/app/(dashboard)/teams/actions.ts → createRoleAction": "teams.own",
   "src/app/(dashboard)/teams/actions.ts → createTeamAction": "teams.write",
   "src/app/(dashboard)/teams/actions.ts → createTrainingProgramAction":
-    "teams.write",
+    "teams.own",
   "src/app/(dashboard)/teams/actions.ts → deleteResponsibilityAction":
-    "teams.write",
-  "src/app/(dashboard)/teams/actions.ts → deleteRoleAction": "teams.write",
+    "teams.own",
+  "src/app/(dashboard)/teams/actions.ts → deleteRoleAction": "teams.own",
   "src/app/(dashboard)/teams/actions.ts → importRoleTemplatesAction":
     "teams.write",
   "src/app/(dashboard)/teams/actions.ts → initializeTeamsAction": "teams.write",
@@ -293,14 +293,14 @@ export const CAPABILITY_BY_EXPORT: Readonly<Record<string, string>> = {
     "teams.write",
   "src/app/(dashboard)/teams/actions.ts → listTeamsAction": "read",
   "src/app/(dashboard)/teams/actions.ts → markTrainingCompleteAction":
-    "teams.write",
-  "src/app/(dashboard)/teams/actions.ts → removeMemberAction": "teams.write",
+    "teams.own",
+  "src/app/(dashboard)/teams/actions.ts → removeMemberAction": "teams.own",
   "src/app/(dashboard)/teams/actions.ts → searchTeamCandidatesAction": "read",
   "src/app/(dashboard)/teams/actions.ts → setResponsibilityCompleteAction":
-    "teams.write",
+    "teams.own",
   "src/app/(dashboard)/teams/actions.ts → updateResponsibilityAction":
-    "teams.write",
-  "src/app/(dashboard)/teams/actions.ts → updateRoleAction": "teams.write",
+    "teams.own",
+  "src/app/(dashboard)/teams/actions.ts → updateRoleAction": "teams.own",
   "src/app/(dashboard)/teams/actions.ts → updateTeamAction": "teams.write",
   "src/app/(dashboard)/wiki/actions.ts → searchWikiArticles": "read",
   "src/app/(dashboard)/wiki/actions.ts → submitArticleFeedbackAction":

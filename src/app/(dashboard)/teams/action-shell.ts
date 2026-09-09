@@ -15,6 +15,10 @@ import type { z } from "zod";
 
 import { requireSeat } from "@/lib/auth/seats";
 import { SeatRefusalError, type Capability } from "@/lib/auth/seat-rules";
+import {
+  requireTeamWrite,
+  type TeamWriteTarget,
+} from "@/lib/ministry-teams/authorization";
 import { rethrowUnauthorized } from "@/lib/auth/unauthorized";
 import { ExpectedError } from "@/lib/ministry-teams/expected-error";
 
@@ -40,15 +44,31 @@ export interface ChurchActor {
  * internal wording and driver errors never become UI copy. The service side
  * of the contract lives in `src/lib/ministry-teams/expected-error.ts`.
  */
+export function withChurch<T>(
+  capability: Exclude<Capability, "teams.own">,
+  fallbackError: string,
+  run: (actor: ChurchActor) => Promise<ActionResult<T>>
+): Promise<ActionResult<T>>;
+export function withChurch<T>(
+  capability: "teams.own",
+  fallbackError: string,
+  run: (actor: ChurchActor) => Promise<ActionResult<T>>,
+  target: TeamWriteTarget
+): Promise<ActionResult<T>>;
 export async function withChurch<T>(
   capability: Capability,
   fallbackError: string,
-  run: (actor: ChurchActor) => Promise<ActionResult<T>>
+  run: (actor: ChurchActor) => Promise<ActionResult<T>>,
+  target?: TeamWriteTarget
 ): Promise<ActionResult<T>> {
   try {
     const { user } = await requireSeat(capability);
     if (!user.churchId) {
       return { success: false, error: "No church associated" };
+    }
+    if (capability === "teams.own") {
+      if (!target) throw new SeatRefusalError(capability);
+      await requireTeamWrite(user, target);
     }
     return await run({ churchId: user.churchId, userId: user.id });
   } catch (error) {

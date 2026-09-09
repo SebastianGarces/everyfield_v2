@@ -272,7 +272,7 @@ export async function createRoleAction(
   formData: FormData
 ): Promise<ActionResult<TeamRole>> {
   return withChurch(
-    "teams.write",
+    "teams.own",
     "Failed to create role",
     async ({ churchId, userId }) => {
       const parsed = roleCreateSchema.safeParse(formEntries(formData));
@@ -281,7 +281,8 @@ export async function createRoleAction(
       const role = await createRole(churchId, teamId, userId, parsed.data);
       revalidateTeamSurfaces();
       return { success: true, data: role };
-    }
+    },
+    { kind: "team", id: teamId }
   );
 }
 
@@ -290,7 +291,7 @@ export async function updateRoleAction(
   formData: FormData
 ): Promise<ActionResult<TeamRole>> {
   return withChurch(
-    "teams.write",
+    "teams.own",
     "Failed to update role",
     async ({ churchId, userId }) => {
       const parsed = roleUpdateSchema.safeParse({
@@ -308,19 +309,21 @@ export async function updateRoleAction(
       const role = await updateRole(churchId, roleId, userId, parsed.data);
       revalidateTeamSurfaces();
       return { success: true, data: role };
-    }
+    },
+    { kind: "role", id: roleId }
   );
 }
 
 export async function deleteRoleAction(roleId: string): Promise<ActionResult> {
   return withChurch(
-    "teams.write",
+    "teams.own",
     "Failed to delete role",
     async ({ churchId, userId }) => {
       await deleteRole(churchId, roleId, userId);
       revalidateTeamSurfaces();
       return { success: true, data: undefined };
-    }
+    },
+    { kind: "role", id: roleId }
   );
 }
 
@@ -361,7 +364,7 @@ export async function createResponsibilityAction(
   formData: FormData
 ): Promise<ActionResult<TeamResponsibility>> {
   return withChurch(
-    "teams.write",
+    "teams.own",
     "Failed to add responsibility",
     async ({ churchId, userId }) => {
       const parsed = responsibilitySchema.safeParse(formEntries(formData));
@@ -375,7 +378,8 @@ export async function createResponsibilityAction(
       );
       revalidateTeamSurfaces();
       return { success: true, data: responsibility };
-    }
+    },
+    { kind: "team", id: teamId }
   );
 }
 
@@ -384,7 +388,7 @@ export async function updateResponsibilityAction(
   formData: FormData
 ): Promise<ActionResult<TeamResponsibility>> {
   return withChurch(
-    "teams.write",
+    "teams.own",
     "Failed to update responsibility",
     async ({ churchId }) => {
       const parsed = responsibilitySchema.safeParse(formEntries(formData));
@@ -397,7 +401,8 @@ export async function updateResponsibilityAction(
       );
       revalidateTeamSurfaces();
       return { success: true, data: responsibility };
-    }
+    },
+    { kind: "responsibility", id: responsibilityId }
   );
 }
 
@@ -411,7 +416,7 @@ export async function setResponsibilityCompleteAction(
   completed: boolean
 ): Promise<ActionResult<TeamResponsibility>> {
   return withChurch(
-    "teams.write",
+    "teams.own",
     "Failed to update responsibility",
     async ({ churchId }) => {
       const responsibility = await updateResponsibility(
@@ -421,7 +426,8 @@ export async function setResponsibilityCompleteAction(
       );
       revalidateTeamSurfaces();
       return { success: true, data: responsibility };
-    }
+    },
+    { kind: "responsibility", id: responsibilityId }
   );
 }
 
@@ -429,13 +435,14 @@ export async function deleteResponsibilityAction(
   responsibilityId: string
 ): Promise<ActionResult> {
   return withChurch(
-    "teams.write",
+    "teams.own",
     "Failed to delete responsibility",
     async ({ churchId }) => {
       await deleteResponsibility(churchId, responsibilityId);
       revalidateTeamSurfaces();
       return { success: true, data: undefined };
-    }
+    },
+    { kind: "responsibility", id: responsibilityId }
   );
 }
 
@@ -449,7 +456,7 @@ export async function assignMemberAction(
   data: { personId: string; startDate?: string }
 ): Promise<ActionResult<TeamMembership>> {
   return withChurch(
-    "teams.write",
+    "teams.own",
     "Failed to assign member",
     async ({ churchId, userId }) => {
       const parsed = memberAssignSchema.safeParse(data);
@@ -465,7 +472,8 @@ export async function assignMemberAction(
       );
       revalidateTeamSurfaces();
       return { success: true, data: membership };
-    }
+    },
+    { kind: "team", id: teamId }
   );
 }
 
@@ -473,13 +481,14 @@ export async function removeMemberAction(
   membershipId: string
 ): Promise<ActionResult> {
   return withChurch(
-    "teams.write",
+    "teams.own",
     "Failed to remove member",
     async ({ churchId, userId }) => {
       await removeMember(churchId, membershipId, userId);
       revalidateTeamSurfaces();
       return { success: true, data: undefined };
-    }
+    },
+    { kind: "membership", id: membershipId }
   );
 }
 
@@ -492,7 +501,7 @@ export async function createMeetingAction(
   formData: FormData
 ): Promise<ActionResult<ChurchMeeting>> {
   return withChurch(
-    "teams.write",
+    "teams.own",
     "Failed to create meeting",
     async ({ churchId, userId }) => {
       const rawData: Record<string, unknown> = formEntries(formData);
@@ -513,7 +522,8 @@ export async function createMeetingAction(
       revalidatePath(`/teams/${teamId}/meetings`);
       revalidatePath("/meetings");
       return { success: true, data: meeting };
-    }
+    },
+    { kind: "team", id: teamId }
   );
 }
 
@@ -525,7 +535,7 @@ export async function createTrainingProgramAction(
   formData: FormData
 ): Promise<ActionResult<TrainingProgram>> {
   return withChurch(
-    "teams.write",
+    "teams.own",
     "Failed to create program",
     async ({ churchId, userId }) => {
       const parsed = trainingProgramCreateSchema.safeParse(
@@ -540,7 +550,8 @@ export async function createTrainingProgramAction(
       );
       revalidateTeamSurfaces();
       return { success: true, data: program };
-    }
+    },
+    { kind: "team", id: formEntries(formData).teamId }
   );
 }
 
@@ -549,7 +560,7 @@ export async function markTrainingCompleteAction(data: {
   programId: string;
 }): Promise<ActionResult<TrainingCompletion>> {
   return withChurch(
-    "teams.write",
+    "teams.own",
     "Failed to mark complete",
     async ({ churchId, userId }) => {
       const parsed = trainingCompleteSchema.safeParse(data);
@@ -565,6 +576,11 @@ export async function markTrainingCompleteAction(data: {
       );
       revalidateTeamSurfaces();
       return { success: true, data: completion };
+    },
+    {
+      kind: "training-completion",
+      programId: data.programId,
+      personId: data.personId,
     }
   );
 }
