@@ -8,6 +8,8 @@
 
 import ExcelJS from "exceljs";
 
+import { formatBudget } from "./layout";
+
 import { churchNameOf } from "../render-text";
 import type { DocumentMergeValues } from "../types";
 
@@ -50,11 +52,12 @@ export async function buildFirstYearBudget(
 ): Promise<Buffer> {
   const churchName = churchNameOf(values);
   const wb = new ExcelJS.Workbook();
+  wb.calcProperties.fullCalcOnLoad = true;
   const ws = wb.addWorksheet("First-Year Budget");
 
-  ws.getColumn(1).width = 28;
-  MONTH_COLS.forEach((c) => (ws.getColumn(c).width = 9));
-  ws.getColumn(TOTAL_COL).width = 12;
+  ws.getColumn(1).width = 34;
+  MONTH_COLS.forEach((c) => (ws.getColumn(c).width = 15));
+  ws.getColumn(TOTAL_COL).width = 18;
 
   const title = ws.addRow([`${churchName} — First-Year Budget`]);
   title.font = { bold: true, size: 14 };
@@ -65,6 +68,7 @@ export async function buildFirstYearBudget(
 
   const rowTotal = (r: number) => ({
     formula: `SUM(${MONTH_COLS[0]}${r}:${MONTH_COLS[11]}${r})`,
+    result: 0,
   });
 
   // Section helper: writes a bold section label, the category rows, and a
@@ -81,7 +85,10 @@ export async function buildFirstYearBudget(
     const totals = ws.addRow([`Total ${label}`]);
     totals.font = { bold: true };
     MONTH_COLS.forEach((c) => {
-      totals.getCell(c).value = { formula: `SUM(${c}${first}:${c}${last})` };
+      totals.getCell(c).value = {
+        formula: `SUM(${c}${first}:${c}${last})`,
+        result: 0,
+      };
     });
     totals.getCell(TOTAL_COL).value = rowTotal(totals.number);
     return totals.number; // row index of the section total
@@ -97,9 +104,12 @@ export async function buildFirstYearBudget(
   MONTH_COLS.forEach((c) => {
     net.getCell(c).value = {
       formula: `${c}${incomeTotalRow}-${c}${expenseTotalRow}`,
+      result: 0,
     };
   });
   net.getCell(TOTAL_COL).value = rowTotal(net.number);
+
+  formatBudget(ws, 14);
 
   return Buffer.from((await wb.xlsx.writeBuffer()) as unknown as Uint8Array);
 }

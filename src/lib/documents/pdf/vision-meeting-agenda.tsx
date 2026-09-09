@@ -31,7 +31,16 @@ export function VisionMeetingAgendaDocument({
         <Text style={styles.subtitle}>{subtitle}</Text>
 
         {VISION_MEETING_AGENDA.map((item, i) => (
-          <View key={item.title} style={{ marginBottom: 12 }}>
+          <View
+            key={item.title}
+            wrap={false}
+            style={{
+              marginBottom: 12,
+              paddingBottom: 8,
+              borderBottomWidth: 0.5,
+              borderBottomColor: "#d1d5db",
+            }}
+          >
             <Text style={{ fontFamily: PDF_FONT.bold, fontSize: 12 }}>
               {i + 1}. {item.title}
             </Text>

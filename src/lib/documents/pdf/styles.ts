@@ -21,7 +21,7 @@ export const PAGE_SIZE = {
 
 export const colors = {
   ink: "#111827",
-  muted: "#6b7280",
+  muted: "#465766",
   line: "#d1d5db",
   faint: "#f3f4f6",
 };
@@ -83,6 +83,7 @@ export const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.ink,
     marginRight: 7,
+    flexShrink: 0,
     marginTop: 1,
   },
   divider: {
@@ -115,6 +116,8 @@ export const styles = StyleSheet.create({
   },
   td: {
     padding: 6,
-    minHeight: 28,
+    borderRightWidth: 0.5,
+    borderRightColor: colors.line,
+    minHeight: 34,
   },
 });

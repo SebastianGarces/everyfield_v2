@@ -6,7 +6,10 @@
 // body per person before sending.
 // ============================================================================
 
-import { Document, Paragraph, TextRun } from "docx";
+import { HeadingLevel, Paragraph, TextRun } from "docx";
+
+import { handout } from "./layout";
+import type { Document } from "docx";
 
 import { churchNameOf } from "../render-text";
 import type { DocumentMergeValues } from "../types";
@@ -23,30 +26,28 @@ export function buildFollowUpLetter(values: DocumentMergeValues): Document {
     "Grateful for you,",
   ];
 
-  return new Document({
-    sections: [
-      {
-        children: [
+  return handout(
+    [
+      new Paragraph({ text: churchName, heading: HeadingLevel.TITLE }),
+      new Paragraph({
+        spacing: { after: 240 },
+        children: [new TextRun({ text: "Date: ______________" })],
+      }),
+      ...body.map(
+        (text) =>
           new Paragraph({
-            spacing: { after: 240 },
-            children: [new TextRun({ text: "Date: ______________" })],
-          }),
-          ...body.map(
-            (text) =>
-              new Paragraph({
-                text,
-                spacing: { after: 160 },
-              })
-          ),
-          new Paragraph({
-            spacing: { before: 80 },
-            children: [new TextRun({ text: signOff, bold: true })],
-          }),
-          new Paragraph({
-            children: [new TextRun({ text: churchName, italics: true })],
-          }),
-        ],
-      },
+            text,
+            spacing: { after: 160 },
+          })
+      ),
+      new Paragraph({
+        spacing: { before: 80 },
+        children: [new TextRun({ text: signOff, bold: true })],
+      }),
+      new Paragraph({
+        children: [new TextRun({ text: churchName, italics: true })],
+      }),
     ],
-  });
+    ""
+  );
 }
