@@ -66,7 +66,8 @@ export function acceptSeatInvitationStatements(
       ? accountPersonLinkStatements({
           userId,
           churchId: invitation.tenancy.id,
-          ...account,
+          name: account.name,
+          email: account.email,
           matchedPersonId,
           eligible: granted,
         })
