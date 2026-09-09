@@ -10,6 +10,7 @@
 // comment box only appears once a rating is chosen, keeping the surface quiet.
 // ============================================================================
 
+import { usePhaseSavePreview } from "./prototypes/save-preview";
 import { Loader2, MessageSquare, ThumbsDown, ThumbsUp } from "lucide-react";
 import { useOptimistic, useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -61,7 +62,11 @@ export function InsightFeedback({
   // Synchronization). The action calls `revalidatePath("/phase")`; with local
   // state this component ignored the value that came back, and it carried a
   // hand-rolled rollback that `useOptimistic` gives for free.
-  const [rating, setOptimisticRating] = useOptimistic(initialRating);
+  const previewSave = usePhaseSavePreview();
+  const [savedRating, setOptimisticRating] = useOptimistic(initialRating);
+  const [previewRating, setPreviewRating] =
+    useState<InsightFeedbackRating | null>(null);
+  const rating = previewRating ?? savedRating;
   // The COMMENT is different and legitimately stays local: it is a DRAFT the
   // planter is typing, not a mirror of a server field. `initialComment` seeds it
   // once, exactly as any edit form seeds an input.
@@ -70,6 +75,10 @@ export function InsightFeedback({
   const [isPending, startTransition] = useTransition();
 
   function submit(nextRating: InsightFeedbackRating, nextComment: string) {
+    if (previewSave()) {
+      setPreviewRating(nextRating);
+      return;
+    }
     startTransition(async () => {
       setOptimisticRating(nextRating);
 

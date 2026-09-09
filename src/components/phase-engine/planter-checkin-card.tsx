@@ -1,5 +1,6 @@
 "use client";
 
+import { usePhaseSavePreview } from "./prototypes/save-preview";
 import {
   useEffect,
   useOptimistic,
@@ -99,6 +100,7 @@ export function PlanterCheckinCard({
   weeks,
   nudges,
 }: PlanterCheckinCardProps) {
+  const previewSave = usePhaseSavePreview();
   const [isPending, startTransition] = useTransition();
 
   // `useOptimistic` OVER THE SERVER PROP, never `useState` seeded from it
@@ -142,6 +144,7 @@ export function PlanterCheckinCard({
   }, [open]);
 
   function submit(complete: CheckinAnswer) {
+    if (previewSave()) return;
     startTransition(async () => {
       const changing = answeredWeek !== null;
       setAnsweredWeek(complete);
