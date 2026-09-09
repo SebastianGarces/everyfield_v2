@@ -383,6 +383,19 @@ test("a coach-only account can receive its first seat without moving tenancy (#5
   }
 });
 
+test("AS-010 refuses a malformed account naming multiple tenancies", () => {
+  assert.equal(
+    inviteeRefusalFor("seat", {
+      id: USER,
+      seat: null,
+      churchId: PLANT,
+      sendingChurchId: SENDING_CHURCH,
+      sendingNetworkId: NETWORK,
+    }),
+    ACCOUNT_NOT_INVITABLE_MESSAGE
+  );
+});
+
 test("a COACH invitation is never refused with that constant (AS-009)", () => {
   // THE RULED ASYMMETRY, from the SAME predicate the seat rule is read off —
   // which is what makes it one decision rather than two that can drift. A seat

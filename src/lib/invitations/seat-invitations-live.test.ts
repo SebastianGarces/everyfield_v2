@@ -1069,9 +1069,22 @@ test(
       const token = mail.tokenFrom();
       const original = await describeUserInvitationForRegistration(token);
       assert.ok(original);
-      await assert.rejects(
-        acceptSeatInvitationAs({ id: plant.ownerId }, token)
-      );
+      const [wrongAccount] = await db
+        .insert(users)
+        .values({
+          email: scratchEmail(),
+          name: SCRATCH_NAME,
+          passwordHash: "scratch",
+          seat: null,
+        })
+        .returning();
+      await assert.rejects(acceptSeatInvitationAs(wrongAccount, token));
+      const [wrongUnchanged] = await db
+        .select()
+        .from(users)
+        .where(eq(users.id, wrongAccount.id));
+      assert.equal(wrongUnchanged.seat, null);
+      assert.equal(wrongUnchanged.churchId, null);
       await acceptSeatInvitationAs(coach, token);
       const [seated] = await db
         .select()
@@ -1193,6 +1206,16 @@ test(
       "accepted",
       "pending",
     ]);
+    const pendingIndex = rows.findIndex((r) => r[0].status === "pending");
+    assert.ok(pendingIndex >= 0);
+    await assert.rejects(
+      acceptSeatInvitationAs(coach, mails[pendingIndex].tokenFrom())
+    );
+    const [stillPending] = await db
+      .select()
+      .from(userInvitations)
+      .where(eq(userInvitations.id, rows[pendingIndex][0].id));
+    assert.equal(stillPending.status, "pending");
     const linked = await db
       .select()
       .from(persons)
