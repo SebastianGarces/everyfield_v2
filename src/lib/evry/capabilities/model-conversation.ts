@@ -1,10 +1,7 @@
 import { z } from "zod";
 import { compileEvryConversationContext } from "@/lib/evry/conversations/context";
 import { evryConversationRequestKeySchema } from "@/lib/evry/conversations/contract";
-import {
-  storedEvryReadArtifactDocument,
-  storedEvryClarificationArtifactDocument,
-} from "@/lib/evry/conversations/artifacts";
+import { storedEvryClarificationArtifactDocument } from "@/lib/evry/conversations/artifacts";
 import {
   authorizeEvryReadCapability,
   eligibleEvryCapabilitiesFor,
@@ -21,6 +18,8 @@ import {
   type EvryCapabilityConversationSelectionInput,
 } from "./conversation";
 import { generateEvryModelTurn } from "./model-turn";
+import { generateEvryModelResponse } from "./model-response";
+import { storedEvryResponse } from "./response-parts";
 
 export type EvryModelRead = Readonly<{
   id: string;
@@ -78,11 +77,13 @@ export function createModelEvryConversation({
   continuations,
   reads,
   generate = generateEvryModelTurn,
+  compose = generateEvryModelResponse,
   authorizeRead = authorizeEvryReadCapability,
 }: {
   continuations: readonly EvryCapabilityConversationContinuation[];
   reads: readonly EvryModelRead[];
   generate?: typeof generateEvryModelTurn;
+  compose?: typeof generateEvryModelResponse;
   authorizeRead?: typeof authorizeEvryReadCapability;
 }) {
   const run: EvryCapabilityConversationRunner = async (input) => {
@@ -260,19 +261,57 @@ export function createModelEvryConversation({
       input: unknown;
       artifact: EvryReadContinuationArtifact;
     }[] = [];
+    const answer = async (draft: string) =>
+      finish(
+        storedEvryResponse(
+          await compose({
+            context: {
+              ...modelInput.context,
+              freshReadResults: freshReadResults.map(
+                ({ readId, input, artifact }) => ({
+                  readId,
+                  input,
+                  artifact:
+                    artifact.kind === "read"
+                      ? {
+                          ...artifact,
+                          items: artifact.items
+                            .slice(0, 25)
+                            .map((item) => ({
+                              ...item,
+                              facts: item.facts
+                                .slice(0, 8)
+                                .map((fact) => ({
+                                  label: fact.label,
+                                  value: fact.value.slice(0, 500),
+                                })),
+                            })),
+                          explanationSampleIsPartial:
+                            artifact.items.length > 25 ||
+                            artifact.items.some(
+                              (item) =>
+                                item.facts.length > 8 ||
+                                item.facts.some(
+                                  (fact) => fact.value.length > 500
+                                )
+                            ),
+                        }
+                      : artifact,
+                })
+              ),
+            },
+            draft,
+            results: freshReadResults.flatMap(({ artifact }) =>
+              artifact.kind === "read" ? [artifact] : []
+            ),
+            onPreview: input.reportResponse,
+          })
+        )
+      );
     readLoop: for (let readCount = 0; readCount < 4; readCount++) {
       switch (decision.kind) {
         case "reply":
-          return finish({
-            body: decision.body,
-            artifacts: freshReadResults
-              .slice(-1)
-              .flatMap(({ artifact }) =>
-                artifact.kind === "read"
-                  ? [storedEvryReadArtifactDocument(artifact)]
-                  : []
-              ),
-          });
+          return answer(decision.body);
         case "settings":
           return finish({
             body: decision.body,
@@ -333,26 +372,16 @@ export function createModelEvryConversation({
             });
             continue readLoop;
           }
-          return finish(
-            artifact.kind === "read"
-              ? {
-                  body: decision.continueReading
-                    ? "I reached this request's lookup limit. These are the latest results; you can ask me to continue."
-                    : artifact.counts.returned === 0
-                      ? "No matches for this request."
-                      : "I found " +
-                        artifact.counts.returned +
-                        " matching result" +
-                        (artifact.counts.returned === 1 ? "." : "s."),
-                  artifacts: [storedEvryReadArtifactDocument(artifact)],
-                }
-              : {
-                  body: artifact.prompt,
-                  artifacts: [
-                    storedEvryClarificationArtifactDocument(artifact),
-                  ],
-                }
-          );
+          if (artifact.kind === "read")
+            return answer(
+              decision.continueReading
+                ? "The request reached its four-read budget. Explain what the available evidence establishes and any remaining limitations."
+                : "Answer the request using the fresh results and their actual selection criteria."
+            );
+          return finish({
+            body: artifact.prompt,
+            artifacts: [storedEvryClarificationArtifactDocument(artifact)],
+          });
         }
         case "prepare":
           if (readCount === 0 && selected) return prepare(selection, selected);

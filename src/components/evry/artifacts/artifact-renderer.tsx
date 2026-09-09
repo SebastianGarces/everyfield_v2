@@ -19,7 +19,7 @@ import {
   ShieldX,
   UsersRound,
 } from "lucide-react";
-import { useId, type ReactNode } from "react";
+import { useId, useRef, useState, type ReactNode } from "react";
 
 import { EvryBoundaryMessage } from "@/components/evry/boundary-message";
 import { RichText } from "@/components/shared/rich-text";
@@ -32,6 +32,14 @@ import {
   CardHeader,
 } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import {
   EVRY_UNEXPECTED_ERROR_COPY,
   type EvryDetailedConfirmationArtifactDocument,
@@ -255,7 +263,48 @@ function renderClarification(
   );
 }
 
-function renderRead(artifact: ArtifactByVariant["read"]) {
+function ReadResults({ artifact }: { artifact: ArtifactByVariant["read"] }) {
+  const [open, setOpen] = useState(false);
+  const [page, setPage] = useState(0);
+  const resultsRef = useRef<HTMLDivElement>(null);
+  const pageSize = 10;
+  const total = artifact.items.length;
+  const rows = (items: typeof artifact.items, compact: boolean) => (
+    <ul className="divide-y">
+      {items.map((item) => (
+        <li key={item.id} className="py-3 first:pt-0 last:pb-0">
+          <AuthenticatedLink
+            href={item.sourceLink.href}
+            className={linkClassName}
+            onClick={(event) => {
+              if (
+                !event.metaKey &&
+                !event.ctrlKey &&
+                !event.shiftKey &&
+                !event.altKey
+              )
+                setOpen(false);
+            }}
+          >
+            {item.label}
+          </AuthenticatedLink>
+          <dl
+            className={cn(
+              "mt-1 grid gap-x-4 gap-y-1 text-sm",
+              !compact && "sm:grid-cols-2"
+            )}
+          >
+            {(compact ? item.facts.slice(0, 2) : item.facts).map((fact) => (
+              <div key={fact.label} className="min-w-0 break-words">
+                <dt className="text-muted-foreground inline">{fact.label}: </dt>
+                <dd className="inline">{fact.value}</dd>
+              </div>
+            ))}
+          </dl>
+        </li>
+      ))}
+    </ul>
+  );
   const itemLinks = new Set(
     artifact.items.map(({ sourceLink }) => sourceLink.href)
   );
@@ -269,38 +318,96 @@ function renderRead(artifact: ArtifactByVariant["read"]) {
       title={artifact.title}
       icon={<ListChecks className="size-4" />}
     >
-      <p className="text-2xl font-semibold tabular-nums">
-        {readResultLabel(artifact.counts.returned)} shown
+      <p className="text-muted-foreground text-sm tabular-nums">
+        {total > 5 ? `Showing 5 of ${total} results` : readResultLabel(total)}
       </p>
 
       {artifact.items.length ? (
-        <ul className="space-y-2">
-          {artifact.items.map((item) => (
-            <li key={item.id} className="rounded-lg border p-3">
-              <AuthenticatedLink
-                href={item.sourceLink.href}
-                className={linkClassName}
-              >
-                {item.label}
-              </AuthenticatedLink>
-              <dl className="mt-2 grid gap-1 text-sm sm:grid-cols-2">
-                {item.facts.map((fact) => (
-                  <div key={fact.label}>
-                    <dt className="text-muted-foreground inline">
-                      {fact.label}:{" "}
-                    </dt>
-                    <dd className="inline">{fact.value}</dd>
-                  </div>
-                ))}
-              </dl>
-            </li>
-          ))}
-        </ul>
+        rows(artifact.items.slice(0, 5), true)
       ) : (
         <p className="text-muted-foreground text-sm">
           No matches for this request.
         </p>
       )}
+
+      {total > 5 || artifact.items.some((item) => item.facts.length > 2) ? (
+        <Dialog
+          open={open}
+          onOpenChange={(next) => {
+            setOpen(next);
+            if (next) setPage(0);
+          }}
+        >
+          <DialogTrigger asChild>
+            <Button type="button" variant="outline" size="sm">
+              {total > 5 ? `View all ${total}` : "View details"}
+            </Button>
+          </DialogTrigger>
+          <DialogContent
+            className="max-h-[85dvh] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden motion-reduce:animate-none sm:max-w-3xl"
+            onOpenAutoFocus={(event) => {
+              event.preventDefault();
+              resultsRef.current?.focus();
+            }}
+          >
+            <DialogHeader>
+              <DialogTitle>{artifact.title}</DialogTitle>
+              <DialogDescription>
+                {readResultLabel(total)} from this response. These are the saved
+                results, not a live view.
+              </DialogDescription>
+            </DialogHeader>
+            <div
+              ref={resultsRef}
+              tabIndex={-1}
+              aria-label={`${artifact.title} results`}
+              className="min-h-0 overflow-y-auto overscroll-contain p-1 focus-visible:outline-2"
+            >
+              {rows(
+                artifact.items.slice(page * pageSize, (page + 1) * pageSize),
+                false
+              )}
+            </div>
+            {total > pageSize ? (
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p
+                  role="status"
+                  className="text-muted-foreground text-sm tabular-nums"
+                >
+                  {page * pageSize + 1}–{Math.min((page + 1) * pageSize, total)}{" "}
+                  of {total}
+                </p>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={page === 0}
+                    onClick={() => {
+                      setPage(page - 1);
+                      resultsRef.current?.scrollTo({ top: 0 });
+                    }}
+                  >
+                    Previous
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={(page + 1) * pageSize >= total}
+                    onClick={() => {
+                      setPage(page + 1);
+                      resultsRef.current?.scrollTo({ top: 0 });
+                    }}
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+          </DialogContent>
+        </Dialog>
+      ) : null}
 
       {artifact.exclusions.length ? (
         <details className="text-sm">
@@ -949,7 +1056,7 @@ type EvryArtifactRegistry = {
 export const EVRY_ARTIFACT_REGISTRY = {
   context: (artifact, _options) => renderContext(artifact),
   clarification: (artifact, options) => renderClarification(artifact, options),
-  read: (artifact, _options) => renderRead(artifact),
+  read: (artifact, _options) => <ReadResults artifact={artifact} />,
   settings: (artifact, _options) => renderSettings(artifact),
   confirmation: (artifact, options) => renderConfirmation(artifact, options),
   progress: (artifact, options) => renderProgress(artifact, options),

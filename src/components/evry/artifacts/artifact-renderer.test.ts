@@ -72,6 +72,33 @@ test("the renderer registry is exhaustive across every required artifact", () =>
   );
 });
 
+test("long results render only five compact rows and an explicit full-list control", () => {
+  const artifact = buildEvryReadArtifact({
+    title: "Tasks",
+    filters: [],
+    exclusions: [],
+    sourceLinks: [],
+    items: Array.from({ length: 22 }, (_, index) => ({
+      id: `task-${index}`,
+      label: `Task number ${index + 1}`,
+      facts: [
+        { label: "Status", value: "Pending" },
+        { label: "Due", value: "Today" },
+        { label: "Details", value: "Only in the full view" },
+      ],
+      sourceLink: trustedEvryApplicationSourceLink({
+        label: `Task number ${index + 1}`,
+        href: `/tasks/task-${index}`,
+      }),
+    })),
+  });
+  const markup = render(renderableEvryArtifact(publicEvryArtifact(artifact)));
+  assert.match(markup, /Showing 5 of 22 results/);
+  assert.match(markup, /View all 22/);
+  assert.equal((markup.match(/<li /g) ?? []).length, 5);
+  assert.doesNotMatch(markup, /Task number 6|Only in the full view/);
+});
+
 test("read cards distinguish a page from the full result set and retain a way to open the source", () => {
   const sourceLink = trustedEvryApplicationSourceLink({
     label: "Open Task assignments",
@@ -95,7 +122,7 @@ test("read cards distinguish a page from the full result set and retain a way to
     sourceLinks: [sourceLink],
   });
   const markup = render(renderableEvryArtifact(publicEvryArtifact(artifact)));
-  assert.match(markup, /1 result shown/);
+  assert.match(markup, /1 result/);
   assert.match(markup, /Open Task assignments/);
   assert.doesNotMatch(markup, /internal-cursor|Next page cursor/);
   const meetingPage = buildEvryReadArtifact({
@@ -105,7 +132,7 @@ test("read cards distinguish a page from the full result set and retain a way to
   });
   assert.match(
     render(renderableEvryArtifact(publicEvryArtifact(meetingPage))),
-    /1 result shown/
+    /1 result/
   );
   const empty = buildEvryReadArtifact({ ...artifact, filters: [], items: [] });
   const emptyMarkup = render(renderableEvryArtifact(publicEvryArtifact(empty)));

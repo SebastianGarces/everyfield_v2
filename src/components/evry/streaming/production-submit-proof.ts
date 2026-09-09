@@ -295,6 +295,11 @@ test("the real composer commits a request-keyed acknowledgement before its POST 
       },
     ],
   };
+  let responseController!: ReadableStreamDefaultController<Uint8Array>;
+  const emitResponseEvent = (event: unknown) =>
+    responseController.enqueue(
+      new TextEncoder().encode(`${JSON.stringify(event)}\n`)
+    );
   await act(() => {
     assert.ok(postedRequestId);
     const events = [
@@ -313,21 +318,76 @@ test("the real composer commits a request-keyed acknowledgement before its POST 
         code: "compiling_response",
       },
       {
-        type: "conversation",
+        type: "response",
         requestId: postedRequestId,
         sequence: 2,
-        conversation: nextConversation,
+        response: { body: "I checked", artifacts: [] },
       },
     ];
     resolvePost?.(
       new Response(
-        `${events.map((event) => JSON.stringify(event)).join("\n")}\n`,
+        new ReadableStream({
+          start(controller) {
+            responseController = controller;
+            events.forEach(emitResponseEvent);
+          },
+        }),
         {
           headers: { "content-type": "application/x-ndjson" },
         }
       )
     );
   });
+  assert.equal(renderedText(mounted, "I checked"), true);
+  assert.equal(
+    composerIsBusy(),
+    true,
+    "text is shown while the request is still running"
+  );
+  const transcript = mounted.root.findByProps({
+    "data-slot": "evry-transcript",
+  });
+  const transcriptNode = nodes.get("evry-transcript")!;
+  transcriptNode.scrollHeight = 2000;
+  transcriptNode.scrollTop = 300;
+  await act(() => {
+    transcript.props.onScroll({ currentTarget: transcriptNode });
+  });
+  await act(() => {
+    emitResponseEvent({
+      type: "response",
+      requestId: postedRequestId,
+      sequence: 3,
+      response: { body: "I checked the matching people.", artifacts: [] },
+    });
+  });
+  assert.equal(
+    transcriptNode.scrollTop,
+    300,
+    "streaming must leave a reader who scrolled up in place"
+  );
+  const jump = mounted.root
+    .findAllByType("button")
+    .find((node) => node.children.includes("Jump to latest"));
+  assert.ok(jump);
+  await act(() => {
+    jump.props.onClick();
+  });
+  assert.equal(transcriptNode.scrollTop, 2000);
+  await act(() => {
+    emitResponseEvent({
+      type: "conversation",
+      requestId: postedRequestId,
+      sequence: 4,
+      conversation: nextConversation,
+    });
+    responseController.close();
+  });
+  assert.equal(
+    renderedText(mounted, "I checked the matching people."),
+    false,
+    "durable output replaces the transient answer once"
+  );
   for (let attempt = 0; attempt < 20 && composerIsBusy(); attempt++) {
     await act(async () => {
       await new Promise<void>((resolve) => setImmediate(resolve));
@@ -440,6 +500,17 @@ test("the real composer commits a request-keyed acknowledgement before its POST 
   assert.equal(textarea.props.value, "Taylor Adams");
   assert.equal(activeElement, textarea.instance);
 
+  // Radix's closing panel remains mounted through its exit animation. Its
+  // cleanup must not revoke the workspace that mounted in the meantime.
+  const releasePanel = currentShell.acknowledgeConversationMounted(
+    nextConversation.id
+  );
+  const releaseWorkspace = currentShell.acknowledgeConversationMounted(
+    nextConversation.id
+  );
+  releasePanel();
+  const postsBeforeHandoff = postedUrls.length;
+
   // A failed first request must survive a separately edited next draft.
   await act(async () => {
     form.props.onSubmit({ preventDefault() {} });
@@ -447,6 +518,13 @@ test("the real composer commits a request-keyed acknowledgement before its POST 
     textarea.props.onChange({ target: { value: "Show me meetings" } });
     resolvePost?.(new Response("Unavailable", { status: 503 }));
   });
+  assert.equal(
+    postedUrls.length,
+    postsBeforeHandoff + 1,
+    "closing the old panel must not block a message in the workspace"
+  );
+  releaseWorkspace();
+  currentShell.acknowledgeConversationMounted(nextConversation.id);
   for (let attempt = 0; attempt < 20 && composerIsBusy(); attempt++) {
     await act(async () => {
       await new Promise<void>((resolve) => setImmediate(resolve));

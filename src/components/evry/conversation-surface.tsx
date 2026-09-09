@@ -1,7 +1,8 @@
 "use client";
 
-import { ArrowUp, LoaderCircle, MapPin, X } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { ArrowDown, ArrowUp, LoaderCircle, MapPin, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { evryResponseContent } from "./response-content";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -55,6 +56,7 @@ export function ConversationSurface({ className }: { className?: string }) {
     canStopWatching,
     clearContext,
     conversation,
+    streamingResponse,
     draft,
     pendingMessage,
     discardPendingMessage,
@@ -75,6 +77,16 @@ export function ConversationSurface({ className }: { className?: string }) {
   const surfaceRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLFormElement>(null);
   const followTranscriptRef = useRef(true);
+  const conversationId = conversation?.id ?? null;
+  const [scrollback, setScrollback] = useState({
+    conversationId,
+    visible: false,
+  });
+  if (scrollback.conversationId !== conversationId) {
+    setScrollback({ conversationId, visible: false });
+  }
+  const showJumpToLatest =
+    scrollback.conversationId === conversationId && scrollback.visible;
   const latestMessage = conversation?.messages.at(-1);
   useEffect(() => {
     const composer = composerRef.current;
@@ -110,8 +122,7 @@ export function ConversationSurface({ className }: { className?: string }) {
   useEffect(() => {
     const conversationId = conversation?.id ?? null;
     followTranscriptRef.current = true;
-    acknowledgeConversationMounted(conversationId);
-    return () => acknowledgeConversationMounted(null);
+    return acknowledgeConversationMounted(conversationId);
   }, [acknowledgeConversationMounted, conversation?.id]);
 
   useEffect(() => {
@@ -126,6 +137,7 @@ export function ConversationSurface({ className }: { className?: string }) {
     isSending,
     pendingMessage,
     workState,
+    streamingResponse,
   ]);
 
   return (
@@ -148,6 +160,10 @@ export function ConversationSurface({ className }: { className?: string }) {
               transcript.clientHeight -
               transcript.scrollTop,
             focusInComposer: false,
+          });
+          setScrollback({
+            conversationId,
+            visible: !followTranscriptRef.current,
           });
         }}
         className="relative min-h-0 flex-1 scroll-pb-[calc(var(--evry-composer-height,8rem)+2.5rem+env(safe-area-inset-bottom))] overflow-y-auto overscroll-contain px-4 pt-5 pb-[calc(var(--evry-composer-height,8rem)+2.5rem+env(safe-area-inset-bottom))] sm:px-5"
@@ -187,21 +203,51 @@ export function ConversationSurface({ className }: { className?: string }) {
                         message.author === "user" && "flex flex-col items-end"
                       )}
                     >
-                      <div
-                        className={cn(
-                          "rounded-xl px-3.5 py-2.5 text-sm leading-relaxed",
-                          message.author === "user"
-                            ? "bg-primary text-primary-foreground"
-                            : "bg-muted text-foreground"
-                        )}
-                      >
-                        <p className="whitespace-pre-wrap">
-                          <span className="sr-only">
-                            {message.author === "user" ? "You" : "Evry"}:{" "}
-                          </span>
-                          {message.body}
-                        </p>
-                      </div>
+                      {evryResponseContent(message.body, message.artifacts).map(
+                        (part, index) =>
+                          part.kind === "text" ? (
+                            <div
+                              key={`text:${index}`}
+                              className={cn(
+                                "rounded-xl px-3.5 py-2.5 text-sm leading-relaxed",
+                                message.author === "user"
+                                  ? "bg-primary text-primary-foreground"
+                                  : "bg-muted text-foreground"
+                              )}
+                            >
+                              <p className="whitespace-pre-wrap">
+                                <span className="sr-only">
+                                  {message.author === "user" ? "You" : "Evry"}
+                                  :{" "}
+                                </span>
+                                {part.text}
+                              </p>
+                            </div>
+                          ) : (
+                            <EvryProductionArtifact
+                              key={part.entry.id}
+                              artifact={part.entry.artifact}
+                              activePlan={conversation.activePlan}
+                              artifactId={part.entry.id}
+                              conversationId={conversation.id}
+                              conversationStateVersion={
+                                conversation.stateVersion
+                              }
+                              interactive={part.entry.id === activeArtifactId}
+                              messageId={message.id}
+                              onEdit={(confirmation) => {
+                                setDraft(
+                                  "Revise this plan: " + confirmation.title
+                                );
+                                requestAnimationFrame(() =>
+                                  document
+                                    .getElementById("evry-message")
+                                    ?.focus()
+                                );
+                              }}
+                            />
+                          )
+                      )}
 
                       {message.pageContext ? (
                         <EvryArtifactRenderer
@@ -215,25 +261,6 @@ export function ConversationSurface({ className }: { className?: string }) {
                           }}
                         />
                       ) : null}
-
-                      {message.artifacts.map(({ id, artifact }) => (
-                        <EvryProductionArtifact
-                          key={id}
-                          artifact={artifact}
-                          activePlan={conversation.activePlan}
-                          artifactId={id}
-                          conversationId={conversation.id}
-                          conversationStateVersion={conversation.stateVersion}
-                          interactive={id === activeArtifactId}
-                          messageId={message.id}
-                          onEdit={(confirmation) => {
-                            setDraft("Revise this plan: " + confirmation.title);
-                            requestAnimationFrame(() =>
-                              document.getElementById("evry-message")?.focus()
-                            );
-                          }}
-                        />
-                      ))}
                     </div>
                   </li>
                 ))}
@@ -290,6 +317,33 @@ export function ConversationSurface({ className }: { className?: string }) {
               ) : null}
             </div>
           ) : null}
+          {streamingResponse ? (
+            <div
+              aria-label="Evry response in progress"
+              className="mt-4 max-w-[92%] space-y-3 [overflow-wrap:anywhere] sm:max-w-[88%]"
+            >
+              {evryResponseContent(
+                streamingResponse.response.body,
+                streamingResponse.response.artifacts.map((artifact) => ({
+                  artifact,
+                }))
+              ).map((part, index) =>
+                part.kind === "text" ? (
+                  <p
+                    key={`text:${index}`}
+                    className="bg-muted text-foreground rounded-xl px-3.5 py-2.5 text-sm leading-relaxed whitespace-pre-wrap"
+                  >
+                    {part.text}
+                  </p>
+                ) : (
+                  <EvryArtifactRenderer
+                    key={`result:${index}`}
+                    model={{ variant: "read", artifact: part.entry.artifact }}
+                  />
+                )
+              )}
+            </div>
+          ) : null}
           <div className="mt-4 space-y-1">
             <div
               className={cn(
@@ -324,6 +378,23 @@ export function ConversationSurface({ className }: { className?: string }) {
         </div>
       </div>
 
+      {showJumpToLatest ? (
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          className="absolute bottom-[calc(var(--evry-composer-height,7rem)+1.5rem)] left-1/2 z-10 -translate-x-1/2 rounded-full shadow-sm"
+          onClick={() => {
+            followTranscriptRef.current = true;
+            setScrollback({ conversationId, visible: false });
+            const transcript = transcriptRef.current;
+            if (transcript) transcript.scrollTop = transcript.scrollHeight;
+          }}
+        >
+          <ArrowDown aria-hidden="true" className="size-4" />
+          Jump to latest
+        </Button>
+      ) : null}
       <form
         ref={composerRef}
         data-slot="evry-composer"

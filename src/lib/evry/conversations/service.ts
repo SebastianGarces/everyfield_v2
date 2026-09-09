@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { publicReadArtifactSchema } from "@/lib/evry/artifacts/public";
 
 import type {
   EvryConversationAuthor,
@@ -16,7 +17,7 @@ import type {
   EvryPageContext,
   EvryResolvedPageContext,
 } from "@/lib/evry/resolvers/contract";
-import type { EvryConversationStreamStage } from "@/lib/evry/streaming/conversation-wire";
+import type { EvryConversationStreamReport } from "@/lib/evry/streaming/conversation-wire";
 
 import {
   evryBoundaryArtifactDocument,
@@ -174,7 +175,7 @@ export async function createEvryConversation(input: {
   now: Date;
   store?: EvryConversationStore;
   continueCapabilityConversation?: EvryCapabilityConversationRunner;
-  reportStage?: (stage: EvryConversationStreamStage) => void | Promise<void>;
+  reportStage?: (stage: EvryConversationStreamReport) => void | Promise<void>;
 }): Promise<EvryResumedConversation> {
   const requestKey = evryConversationRequestKeySchema.parse(input.requestKey);
   const store = input.store ?? evryConversationStore;
@@ -200,6 +201,16 @@ export async function createEvryConversation(input: {
     requestPageContext: input.requestPageContext,
     now: input.now,
     store,
+    reportResponse: (response) =>
+      input.reportStage?.({
+        type: "response",
+        response: {
+          body: response.body,
+          artifacts: response.artifacts.map((artifact) =>
+            publicReadArtifactSchema.parse(artifact)
+          ),
+        },
+      }),
   });
   if (continued === null) {
     conversation = await appendUnmatchedEvryConversationResult({
@@ -398,7 +409,7 @@ export async function continueEvryConversation(
     continueCapabilityConversation?: EvryCapabilityConversationRunner;
     resolveReference?: typeof resolveEvryConversationReference;
     revalidatePlan?: EvryConversationPlanResumeRevalidator;
-    reportStage?: (stage: EvryConversationStreamStage) => void | Promise<void>;
+    reportStage?: (stage: EvryConversationStreamReport) => void | Promise<void>;
   }> &
     EvryConversationPageContextInput
 ): Promise<EvryConversationContinuation | null> {
@@ -557,6 +568,16 @@ export async function continueEvryConversation(
       requestPageContext: input.requestPageContext,
       now: input.now,
       store,
+      reportResponse: (response) =>
+        input.reportStage?.({
+          type: "response",
+          response: {
+            body: response.body,
+            artifacts: response.artifacts.map((artifact) =>
+              publicReadArtifactSchema.parse(artifact)
+            ),
+          },
+        }),
     });
     appended =
       continued ??

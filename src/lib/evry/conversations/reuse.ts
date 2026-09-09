@@ -9,7 +9,7 @@ import { validateStoredEvryActionPlan } from "@/lib/evry/plans/integrity";
 import { findExactEvryActionPlan } from "@/lib/evry/plans/repository";
 import { PRODUCTION_EVRY_RECIPE_REUSE_REGISTRY } from "@/lib/evry/recipes/production-reuse";
 import type { EvryRecipeReuseRegistry } from "@/lib/evry/recipes/reuse";
-import type { EvryConversationStreamStage } from "@/lib/evry/streaming/conversation-wire";
+import type { EvryConversationStreamReport } from "@/lib/evry/streaming/conversation-wire";
 import { z } from "zod";
 
 import {
@@ -104,7 +104,7 @@ export function createCompletedEvryRecipeReuse(
     recipeIdentity: string;
     requestKey: string;
     now: Date;
-    reportStage?: (stage: EvryConversationStreamStage) => void | Promise<void>;
+    reportStage?: (stage: EvryConversationStreamReport) => void | Promise<void>;
   }): Promise<EvryCompletedRecipeReuseResult> {
     const sourceConversationId = evryConversationIdSchema.safeParse(
       input.sourceConversationId

@@ -64,6 +64,7 @@ const readItemSchema = z
 const readArtifactDocumentSchema = z
   .object({
     kind: z.literal("read"),
+    textOffset: z.number().int().min(0).max(8000).optional(),
     title: titleSchema,
     filters: z.array(readFilterSchema).max(16),
     counts: z
@@ -380,15 +381,20 @@ export function hydrateStoredEvryConversationArtifact(
 ): EvryHydratedConversationArtifact {
   switch (document.kind) {
     case "read":
-      return buildEvryReadArtifact({
-        title: document.title,
-        filters: document.filters,
-        exclusions: document.exclusions,
-        items: document.items.map((item) => ({
-          ...item,
-          sourceLink: trustedLink(item.sourceLink),
-        })),
-        sourceLinks: document.sourceLinks.map(trustedLink),
+      return Object.freeze({
+        ...buildEvryReadArtifact({
+          title: document.title,
+          filters: document.filters,
+          exclusions: document.exclusions,
+          items: document.items.map((item) => ({
+            ...item,
+            sourceLink: trustedLink(item.sourceLink),
+          })),
+          sourceLinks: document.sourceLinks.map(trustedLink),
+        }),
+        ...(document.textOffset === undefined
+          ? {}
+          : { textOffset: document.textOffset }),
       });
     case "clarification":
       return document.mode === "missing"

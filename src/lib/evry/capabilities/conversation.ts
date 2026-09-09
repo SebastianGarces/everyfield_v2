@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 
 import { z } from "zod";
+import type { EvryResponsePreview } from "./response-parts";
+import { validEvryResponseLayout } from "@/lib/evry/conversations/response-layout";
 
 import {
   parseEvryConversationArtifactDocument,
@@ -38,6 +40,7 @@ export type EvryCapabilityConversationSelectionInput = Readonly<{
   pageContext: EvryResolvedPageContext | null;
   requestPageContext: EvryPageContext | null;
   now: Date;
+  reportResponse?: (response: EvryResponsePreview) => void | Promise<void>;
 }>;
 
 export type EvryCapabilityConversationResultIdentity = Readonly<{
@@ -171,6 +174,8 @@ function parseCapabilityResult(
   const artifacts = Object.freeze(
     parsed.artifacts.map(parseEvryConversationArtifactDocument)
   );
+  if (!validEvryResponseLayout(parsed.body, artifacts))
+    throw new Error("Invalid response component placement");
   const confirmationPlans = artifacts.flatMap((artifact) =>
     artifact.kind === "confirmation" ? [artifact.plan] : []
   );

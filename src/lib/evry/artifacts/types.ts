@@ -74,6 +74,8 @@ export type EvryReadItem = Readonly<{
 
 export type EvryReadArtifact = Readonly<{
   kind: "read";
+  /** UTF-16 offset in the assistant message body, computed by the composer. */
+  textOffset?: number;
   title: string;
   filters: readonly EvryReadFilter[];
   counts: Readonly<{

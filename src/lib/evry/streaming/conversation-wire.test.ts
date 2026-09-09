@@ -42,6 +42,40 @@ async function readEvent(reader: ReadableStreamDefaultReader<Uint8Array>) {
   );
 }
 
+test("live response frames cross the real wire while durable completion is still pending", async () => {
+  const durable = Promise.withResolvers<void>();
+  const firstText = Promise.withResolvers<void>();
+  const seen: string[] = [];
+  const response = evryConversationStream({
+    requestId: REQUEST_ID,
+    failureCode: () => "unavailable",
+    run: async (report) => {
+      report({
+        type: "response",
+        response: { body: "I checked", artifacts: [] },
+      });
+      await durable.promise;
+      return { conversation };
+    },
+  });
+  const reading = readEvryConversationStream(response, {
+    requestId: REQUEST_ID,
+    expectedConversationId: CONVERSATION_ID,
+    onEvent(event) {
+      seen.push(event.type);
+      if (event.type === "response") {
+        assert.equal(event.response.body, "I checked");
+        firstText.resolve();
+      }
+    },
+  });
+  await firstText.promise;
+  assert.deepEqual(seen, ["work", "response"]);
+  durable.resolve();
+  await reading;
+  assert.deepEqual(seen, ["work", "response", "conversation", "complete"]);
+});
+
 test("the server stream exposes actual work and durable output before terminal completion", async () => {
   const persistence = Promise.withResolvers<void>();
   const response = evryConversationStream({

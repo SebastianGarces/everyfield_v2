@@ -1,7 +1,7 @@
 import {
   evryConversationStreamEventSchema,
   type EvryConversationStreamEvent,
-  type EvryConversationStreamStage,
+  type EvryConversationStreamReport,
 } from "@/lib/evry/streaming/conversation-wire";
 import type { PublicEvryConversation } from "@/lib/evry/conversations/public-contract";
 
@@ -27,7 +27,7 @@ export function evryConversationStream(
     requestId: string;
     status?: number;
     run: (
-      report: (stage: EvryConversationStreamStage) => void
+      report: (stage: EvryConversationStreamReport) => void
     ) => Promise<
       | Readonly<{ conversation: PublicEvryConversation }>
       | Readonly<{ status: "active" }>
@@ -60,7 +60,11 @@ export function evryConversationStream(
       });
       void input
         .run((code) => {
-          emit({ type: "work", phase: "planning", code });
+          emit(
+            typeof code === "string"
+              ? { type: "work", phase: "planning", code }
+              : code
+          );
         })
         .then((result) => {
           if (result && "status" in result) {

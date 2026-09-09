@@ -18,9 +18,10 @@ import {
 const titleSchema = z.string().trim().min(1).max(200);
 const labelSchema = z.string().trim().min(1).max(160);
 
-const publicReadArtifactSchema = z
+export const publicReadArtifactSchema = z
   .strictObject({
     kind: z.literal("read"),
+    textOffset: z.number().int().min(0).max(8000).optional(),
     title: titleSchema,
     filters: z
       .array(

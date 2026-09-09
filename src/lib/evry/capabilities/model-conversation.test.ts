@@ -18,7 +18,7 @@ import type {
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
 import type { EvryReadCapabilityAuthorization } from "@/lib/evry/eligibility/capabilities";
 import {
-  createModelEvryConversation,
+  createModelEvryConversation as createProductionModelConversation,
   type EvryModelRead,
 } from "./model-conversation";
 import { generateEvryModelTurn } from "./model-turn";
@@ -55,6 +55,16 @@ const conversation: EvryStoredConversation = {
   activePlan: null,
 };
 const requestKey = "40000000-0000-4000-8000-000000000001";
+const createModelEvryConversation = (
+  input: Parameters<typeof createProductionModelConversation>[0]
+) =>
+  createProductionModelConversation({
+    compose: async ({ draft, results }) => ({
+      body: draft,
+      artifacts: results.slice(-1),
+    }),
+    ...input,
+  });
 
 test("a lookup can feed a second freshly authorized read without another user message", async () => {
   const f = fixture();
@@ -120,7 +130,7 @@ test("lookup chains stop after four reads and never prepare an effect after read
     assert.equal(f.runs.length, attemptsPreparation ? 1 : 4);
     assert.equal(f.appends.length, 1);
     if (!attemptsPreparation)
-      assert.match(JSON.stringify(f.appends), /lookup limit/);
+      assert.match(JSON.stringify(f.appends), /four-read budget/);
   }
 });
 

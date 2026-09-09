@@ -26,7 +26,7 @@ import type {
   EvryConversationActiveRunCoordinator,
   PreparedEvryConversationRun,
 } from "@/lib/evry/runs/conversation";
-import type { EvryConversationStreamStage } from "@/lib/evry/streaming/conversation-wire";
+import type { EvryConversationStreamReport } from "@/lib/evry/streaming/conversation-wire";
 import type {
   EvryPageContext,
   EvryResolvedPageContext,
@@ -443,7 +443,7 @@ async function main(): Promise<void> {
     },
     async run(
       prepared: PreparedEvryConversationRun,
-      report: (stage: EvryConversationStreamStage) => void
+      report: (stage: EvryConversationStreamReport) => void
     ) {
       return prepared.input.perform(async (stage) => report(stage));
     },

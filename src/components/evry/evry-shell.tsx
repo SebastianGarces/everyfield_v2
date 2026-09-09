@@ -56,6 +56,7 @@ import {
   EvryConversationStreamFailure,
   evryWorkStateForStreamEvent,
   readEvryConversationStream,
+  type EvryConversationStreamEvent,
 } from "@/lib/evry/streaming/conversation-wire";
 import {
   applyEvrySequencedWork,
@@ -81,6 +82,10 @@ const EvryPanel = dynamic(() =>
 );
 
 type EvryShellValue = Readonly<{
+  streamingResponse: Extract<
+    EvryConversationStreamEvent,
+    { type: "response" }
+  > | null;
   activeContext: VisibleEvryPageContext | null;
   acknowledgement: EvryAcknowledgementTarget | null;
   applyWorkConversation: (
@@ -111,7 +116,7 @@ type EvryShellValue = Readonly<{
   isWorking: boolean;
   isWatchingDetached: boolean;
   loadConversation: (conversationId: string) => Promise<void>;
-  acknowledgeConversationMounted: (conversationId: string | null) => void;
+  acknowledgeConversationMounted: (conversationId: string | null) => () => void;
   startRecipeReuse: (input: {
     sourceConversationId: string;
     resultArtifactId: string;
@@ -197,6 +202,8 @@ export function EvryShell({
     useState<VisibleEvryPageContext | null>(null);
   const [conversation, setConversation] =
     useState<PublicEvryConversation | null>(null);
+  const [streamingResponse, setStreamingResponse] =
+    useState<EvryShellValue["streamingResponse"]>(null);
   const [draft, setDraftState] = useState("");
   const [pendingMessage, setPendingMessage] =
     useState<EvryShellValue["pendingMessage"]>(null);
@@ -239,6 +246,7 @@ export function EvryShell({
   }> | null>(null);
   const navigationHrefFenceRef = useRef<(href: string) => void>(() => {});
   const mountedConversationIdRef = useRef<string | null>(null);
+  const conversationMountOwnerRef = useRef<symbol | null>(null);
   const sequencedWorkRef = useRef<EvrySequencedWorkState | null>(null);
   const pendingWorkRequestIdRef = useRef<string | null>(null);
   const workAbortRef = useRef<Readonly<{
@@ -277,6 +285,7 @@ export function EvryShell({
 
   const beginWork = useCallback(
     (requestId: string, state: EvryWorkState) => {
+      setStreamingResponse(null);
       setAcknowledgement((current) =>
         current?.requestId === requestId ? current : null
       );
@@ -363,6 +372,7 @@ export function EvryShell({
         return false;
       }
       setConversation(nextConversation);
+      setStreamingResponse(null);
       setError(null);
       return true;
     },
@@ -900,10 +910,18 @@ export function EvryShell({
 
   const acknowledgeConversationMounted = useCallback(
     (conversationId: string | null) => {
+      const owner = Symbol("conversation mount");
+      conversationMountOwnerRef.current = owner;
       mountedConversationIdRef.current = conversationId;
-      if (conversationId === null) return;
+      const release = () => {
+        // A closing panel may unmount after the workspace has already mounted.
+        if (conversationMountOwnerRef.current !== owner) return;
+        conversationMountOwnerRef.current = null;
+        mountedConversationIdRef.current = null;
+      };
+      if (conversationId === null) return release;
       const marker = pendingRecipeReuseRef.current;
-      if (!marker || marker.conversationId !== conversationId) return;
+      if (!marker || marker.conversationId !== conversationId) return release;
       if (marker.sourceLocation.pathname === "/evry") {
         if (
           routeLocationRef.current.pathname !== "/evry" ||
@@ -911,15 +929,16 @@ export function EvryShell({
             "conversation"
           ) !== conversationId
         ) {
-          return;
+          return release;
         }
       } else if (
         routeLocationRef.current.pathname !== marker.sourceLocation.pathname ||
         routeLocationRef.current.search !== marker.sourceLocation.search
       ) {
-        return;
+        return release;
       }
       clearPendingRecipeReuse(marker.requestId, 2);
+      return release;
     },
     [clearPendingRecipeReuse]
   );
@@ -1200,6 +1219,14 @@ export function EvryShell({
               event.sequence,
               evryWorkStateForStreamEvent(event)
             );
+          } else if (event.type === "response") {
+            if (
+              updateWork(event.requestId, event.sequence, {
+                phase: "planning",
+                message: "Writing response…",
+              })
+            )
+              setStreamingResponse(event);
           } else if (event.type === "conversation") {
             if (
               applyWorkConversation(
@@ -1277,6 +1304,7 @@ export function EvryShell({
       });
       finishWork(pendingSubmission.requestKey, failureSequence + 1);
     } finally {
+      setStreamingResponse(null);
       if (workAbortRef.current?.requestId === pendingSubmission.requestKey) {
         workAbortRef.current = null;
         setObservedRequestId(null);
@@ -1555,6 +1583,7 @@ export function EvryShell({
 
   const value = useMemo<EvryShellValue>(
     () => ({
+      streamingResponse,
       activeContext,
       acknowledgement,
       acknowledgeConversationMounted,
@@ -1602,6 +1631,7 @@ export function EvryShell({
       workState: sequencedWork?.state ?? { phase: "idle" },
     }),
     [
+      streamingResponse,
       activeContext,
       acknowledgement,
       acknowledgeConversationMounted,
