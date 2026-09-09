@@ -431,12 +431,19 @@ export async function resendToNonOpeners(
   });
   if (!allowed && reason) throw new Error(resendBlockedMessage(reason));
 
+  // Unresolved plant tokens identify legacy content whose delivered values were
+  // empty. Clear them before the ordinary sender can read today's plant facts.
+  // New ordinary records already contain literals, which this leaves intact.
+  const preserved = freezeChurchMergeFields(
+    {
+      subject: original.subject ?? "",
+      bodyHtml: toRichTextHtml(original.bodyHtml ?? original.body),
+    },
+    { pastor_name: "", launch_date: "" }
+  );
   return sendCommunication(churchId, userId, {
-    subject: original.subject ?? "",
-    // The ONE read expression for a stored body: the markup if the row has it,
-    // the plain text if it predates `body_html`. `toRichTextHtml` inside
-    // `sendCommunication` converts the second case; the first is idempotent.
-    body: original.bodyHtml ?? original.body,
+    subject: preserved.subject,
+    body: preserved.bodyHtml,
     channel: original.channel,
     templateId: original.templateId ?? undefined,
     meetingId: original.meetingId ?? undefined,

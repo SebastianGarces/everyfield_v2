@@ -349,21 +349,41 @@ export function freezeChurchMergeFields(
   const referenced = new Set(
     extractMergeFields(`${template.subject} ${template.bodyHtml}`)
   );
-  const known = new Set(MERGE_FIELDS.map((field) => field.name));
+  const refusal = () =>
+    new Error(
+      "Cannot send with plant merge fields: a saved value or its surrounding text forms merge-field syntax. Remove braces from the plant Owner's name or replace the pastor/date field in this message with plain text."
+    );
   for (const [name, value] of Object.entries(fields)) {
-    if (
-      referenced.has(name) &&
-      extractMergeFields(value).some((field) => known.has(field))
-    ) {
-      throw new Error(
-        `Cannot send with {{${name}}}: its saved value contains a merge field. Remove merge-field placeholders from the plant Owner's name or replace {{${name}}} in this message with plain text.`
-      );
-    }
+    // Even a single brace can join the surrounding template into another token.
+    if (referenced.has(name) && /[{}]/.test(value)) throw refusal();
   }
-  return {
+  const frozen = {
     subject: renderSubject(template.subject, fields),
     bodyHtml: renderEmailBodyHtml(template.bodyHtml, fields),
   };
+  // A brace-free value (or an empty one) can also complete a token whose
+  // delimiters are in the template. Preserve the count of every unfrozen token
+  // across each subsequent rendering input, including flattened plain text.
+  for (const [before, after] of [
+    [template.subject, frozen.subject],
+    [template.bodyHtml, frozen.bodyHtml],
+    [
+      richTextToPlainText(template.bodyHtml),
+      richTextToPlainText(frozen.bodyHtml),
+    ],
+  ]) {
+    const remaining = new Map<string, number>();
+    for (const [, name] of before.matchAll(/\{\{(\w+)\}\}/g)) {
+      if (!Object.hasOwn(fields, name))
+        remaining.set(name, (remaining.get(name) ?? 0) + 1);
+    }
+    for (const [, name] of after.matchAll(/\{\{(\w+)\}\}/g)) {
+      const count = remaining.get(name) ?? 0;
+      if (count === 0) throw refusal();
+      remaining.set(name, count - 1);
+    }
+  }
+  return frozen;
 }
 
 export function buildMeetingMergeData(meeting: {

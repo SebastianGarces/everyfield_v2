@@ -146,7 +146,7 @@ test("stored plant facts survive a leadership/date change and preserve recipient
   );
 });
 
-test("only a referenced value introducing a recognized merge token refuses freezing", () => {
+test("only referenced values with delimiter syntax refuse freezing", () => {
   const data = buildResolvedChurchMergeData({
     ...plant,
     ownerName: "Pastor {{first_name}}",
@@ -157,7 +157,7 @@ test("only a referenced value introducing a recognized merge token refuses freez
         { subject: "{{pastor_name}}", bodyHtml: "<p>Hello</p>" },
         data
       ),
-    /Cannot send with.*pastor_name/
+    /Cannot send with plant merge fields/
   );
   assert.doesNotThrow(() =>
     freezeChurchMergeFields(
@@ -165,10 +165,34 @@ test("only a referenced value introducing a recognized merge token refuses freez
       data
     )
   );
-  assert.doesNotThrow(() =>
-    freezeChurchMergeFields(
-      { subject: "{{pastor_name}}", bodyHtml: "<p>Hello</p>" },
-      { ...data, pastor_name: "Pastor {{not_a_merge_field}}" }
-    )
+  assert.throws(
+    () =>
+      freezeChurchMergeFields(
+        { subject: "{{pastor_name}}", bodyHtml: "<p>Hello</p>" },
+        { ...data, pastor_name: "Pastor {{not_a_merge_field}}" }
+      ),
+    /Cannot send with plant merge fields/
   );
 });
+
+for (const [ownerName, text] of [
+  ["{{first_", "From {{pastor_name}}name}}"],
+  ["name}}", "From {{first_{{pastor_name}}"],
+  ["{", "From {{{pastor_name}}first_name}}"],
+  ["}", "From {{first_name}{{pastor_name}}"],
+  ["first_name", "From {{{{pastor_name}}}}"],
+  ["", "From {{first_{{pastor_name}}name}}"],
+]) {
+  test(`refuse token assembly from ${JSON.stringify(ownerName)} in subject and body`, () => {
+    const data = buildResolvedChurchMergeData({ ...plant, ownerName });
+    for (const template of [
+      { subject: text, bodyHtml: "<p>Hello</p>" },
+      { subject: "Hello", bodyHtml: `<p>${text}</p>` },
+    ]) {
+      assert.throws(
+        () => freezeChurchMergeFields(template, data),
+        /Cannot send with plant merge fields/
+      );
+    }
+  });
+}
