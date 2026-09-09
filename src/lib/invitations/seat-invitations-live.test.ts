@@ -1,5 +1,9 @@
 import { createSession } from "@/lib/auth/session";
-import { removeSeat, seatActorFromSession } from "@/lib/seats/roster";
+import {
+  listSeatRoster,
+  removeSeat,
+  seatActorFromSession,
+} from "@/lib/seats/roster";
 import { sessions } from "@/db/schema";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -1052,6 +1056,7 @@ test(
           email: scratchEmail(),
           name: SCRATCH_NAME,
           passwordHash: "scratch",
+          createdAt: new Date("2000-01-01T00:00:00Z"),
           seat: null,
         })
         .returning();
@@ -1096,6 +1101,25 @@ test(
         .from(users)
         .where(eq(users.id, coach.id));
       assert.equal(seated.seat, "member");
+      const [invitingOwner] = await db
+        .select()
+        .from(users)
+        .where(eq(users.id, target.ownerId));
+      const ownerSession = await createSession(randomUUID(), invitingOwner.id);
+      const roster = await listSeatRoster(
+        seatActorFromSession({ user: invitingOwner, session: ownerSession })
+      );
+      const [acceptedInvite] = await db
+        .select()
+        .from(userInvitations)
+        .where(eq(userInvitations.id, original.id));
+      assert.equal(
+        roster.find((row) => row.userId === coach.id)?.joinedAt.getTime(),
+        acceptedInvite.respondedAt?.getTime()
+      );
+      assert.ok(
+        (acceptedInvite.respondedAt?.getTime() ?? 0) > coach.createdAt.getTime()
+      );
       const tenancy =
         "churchId" in target
           ? { type: "church" as const, id: target.churchId }
@@ -1341,6 +1365,7 @@ test(
         email: scratchEmail(),
         name: SCRATCH_NAME,
         passwordHash: "scratch",
+        createdAt: new Date("2000-01-01T00:00:00Z"),
         seat: null,
       })
       .returning();
@@ -1367,7 +1392,16 @@ test(
       .where(eq(persons.userId, coach.id));
     assert.ok(original);
     const session = await createSession(randomUUID(), owner.id);
-    await removeSeat(seatActorFromSession({ user: owner, session }), coach.id);
+    const seatActor = seatActorFromSession({ user: owner, session });
+    const beforeRemoval = await listSeatRoster(seatActor);
+    const firstJoin = beforeRemoval.find((row) => row.userId === coach.id);
+    assert.ok(firstJoin);
+    assert.ok(firstJoin.joinedAt.getTime() > coach.createdAt.getTime());
+    assert.equal(
+      beforeRemoval.find((row) => row.userId === owner.id)?.joinedAt.getTime(),
+      owner.createdAt.getTime()
+    );
+    await removeSeat(seatActor, coach.id);
     const [removed] = await db
       .select()
       .from(users)
@@ -1385,12 +1419,24 @@ test(
       })
       .returning();
     const second = captureTransport();
-    await createUserInvitationAs(
+    const reInvitation = await createUserInvitationAs(
       plant.actor,
       { kind: "seat", inviteeEmail: coach.email, seat: "member" },
       second.deps
     );
     await acceptSeatInvitationAs(coach, second.tokenFrom());
+    const [acceptedAgain] = await db
+      .select()
+      .from(userInvitations)
+      .where(eq(userInvitations.id, reInvitation.invitation.id));
+    const afterRejoin = await listSeatRoster(seatActor);
+    assert.equal(
+      afterRejoin.find((row) => row.userId === coach.id)?.joinedAt.getTime(),
+      acceptedAgain.respondedAt?.getTime()
+    );
+    assert.ok(
+      (acceptedAgain.respondedAt?.getTime() ?? 0) > firstJoin.joinedAt.getTime()
+    );
     const linked = await db
       .select()
       .from(persons)
