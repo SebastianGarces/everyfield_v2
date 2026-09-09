@@ -109,6 +109,12 @@ async function sweep(): Promise<void> {
       select ${churches.id} from ${churches} where ${churches.name} = ${SCRATCH_NAME}
     )
   `);
+  await db.execute(sql`
+    delete from ${coachAssignments}
+    where ${coachAssignments.coachUserId} in (
+      select ${users.id} from ${users} where ${users.name} = ${SCRATCH_NAME}
+    )
+  `);
   await db.delete(users).where(like(users.name, SCRATCH_NAME));
   await db.delete(churches).where(like(churches.name, SCRATCH_NAME));
   // The two org tables an org seat invitation writes into (#500). They come
