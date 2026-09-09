@@ -159,7 +159,7 @@ test("the panel's write is guarded by the capability the panel asks for", () => 
 // The rows, and what they claim (CS-011)
 // ----------------------------------------------------------------------------
 
-test("there are six pull rows, and the seventh toggle is the push one", () => {
+test("there are seven pull rows, and the eighth toggle is the push one", () => {
   assert.deepEqual(
     SHARING_PULL_TOGGLES.map((toggle) => toggle.feature),
     [
@@ -169,6 +169,7 @@ test("there are six pull rows, and the seventh toggle is the push one", () => {
       "financials",
       "ministry_teams",
       "facilities",
+      "wiki",
     ]
   );
 
