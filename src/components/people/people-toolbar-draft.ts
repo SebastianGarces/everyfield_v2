@@ -1,16 +1,16 @@
-export interface PeopleSearchDraft {
+export interface PeopleToolbarDraft {
   query: string;
   value: string;
   submitted: string[];
   navigation: number;
 }
 
-/** An older search response acknowledges a submission, not the latest keystroke. */
-export function reconcilePeopleSearchDraft(
-  draft: PeopleSearchDraft,
+/** An older toolbar response acknowledges a submission, not the latest keystroke. */
+export function reconcilePeopleToolbarDraft(
+  draft: PeopleToolbarDraft,
   query: string,
   search: string
-): PeopleSearchDraft {
+): PeopleToolbarDraft {
   const own = draft.submitted.indexOf(query);
   return own >= 0
     ? { ...draft, query, submitted: draft.submitted.slice(own + 1) }

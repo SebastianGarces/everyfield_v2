@@ -1,7 +1,6 @@
 "use client";
 
 import { Filter, X } from "lucide-react";
-import { useRouter, useSearchParams } from "next/navigation";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,17 +22,15 @@ import { personSources, personStatuses, Tag } from "@/lib/people/types";
 
 interface PeopleFiltersProps {
   availableTags?: Tag[];
-  beforeNavigate: (destination: string) => void;
+  query: string;
+  navigate: (destination: string) => void;
 }
 
 export function PeopleFilters({
   availableTags = [],
-  beforeNavigate,
+  query,
+  navigate,
 }: PeopleFiltersProps) {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-
-  const query = searchParams.toString();
   const filters = parsePeopleListQuery(query);
   const selectedStatuses = filters.status ?? [];
   const selectedSources = filters.source ?? [];
@@ -44,8 +41,7 @@ export function PeopleFilters({
     value: string | null
   ) => {
     const destination = peopleListFilterQuery(query, name, value).toString();
-    beforeNavigate(destination);
-    router.push(`?${destination}`);
+    navigate(destination);
   };
 
   const clearFilters = () => {
@@ -55,8 +51,7 @@ export function PeopleFilters({
       tagIds: undefined,
       search: undefined,
     }).toString();
-    beforeNavigate(destination);
-    router.push(`?${destination}`);
+    navigate(destination);
   };
 
   const hasFilters =

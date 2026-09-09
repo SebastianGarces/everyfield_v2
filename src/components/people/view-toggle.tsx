@@ -3,7 +3,6 @@
 import { Button } from "@/components/ui/button";
 import { peopleListQueryWith } from "@/lib/people/list-params";
 import { cn } from "@/lib/utils";
-import { useRouter, useSearchParams } from "next/navigation";
 
 // The URL is what a view IS, so the name comes from the module that reads it.
 export type { PeopleView } from "@/lib/people/list-params";
@@ -11,17 +10,14 @@ import type { PeopleView } from "@/lib/people/list-params";
 
 interface ViewToggleProps {
   currentView: PeopleView;
-  beforeNavigate: (destination: string) => void;
+  query: string;
+  navigate: (destination: string) => void;
 }
 
-export function ViewToggle({ currentView, beforeNavigate }: ViewToggleProps) {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-
+export function ViewToggle({ currentView, query, navigate }: ViewToggleProps) {
   const handleViewChange = (view: PeopleView) => {
-    const params = peopleListQueryWith(searchParams.toString(), { view });
-    beforeNavigate(params.toString());
-    router.push(`/people?${params.toString()}`);
+    const params = peopleListQueryWith(query, { view });
+    navigate(params.toString());
   };
 
   return (
