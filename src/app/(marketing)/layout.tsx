@@ -1,24 +1,13 @@
 import Link from "next/link";
-import { DM_Mono, DM_Sans, Newsreader, Outfit } from "next/font/google";
+import { Bricolage_Grotesque, DM_Mono } from "next/font/google";
 
 import { Lockup } from "@/components/logo";
 import { MarketingNav } from "./_components/nav";
 import "./marketing.css";
 
-const outfit = Outfit({
+const bricolageGrotesque = Bricolage_Grotesque({
   subsets: ["latin"],
-  variable: "--font-outfit",
-});
-
-const newsreader = Newsreader({
-  subsets: ["latin"],
-  style: ["normal", "italic"],
-  variable: "--font-newsreader",
-});
-
-const dmSans = DM_Sans({
-  subsets: ["latin"],
-  variable: "--font-dm-sans",
+  variable: "--font-bricolage-grotesque",
 });
 
 const dmMono = DM_Mono({
@@ -32,7 +21,7 @@ export default function MarketingLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <div
-      className={`marketing ${outfit.variable} ${newsreader.variable} ${dmSans.variable} ${dmMono.variable}`}
+      className={`marketing ${bricolageGrotesque.variable} ${dmMono.variable}`}
     >
       <MarketingNav />
       <main>{children}</main>

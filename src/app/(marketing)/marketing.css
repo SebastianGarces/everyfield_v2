@@ -26,9 +26,8 @@
   --danger: #b4432f;
   --edge: rgba(24, 29, 25, 0.3);
 
-  --display: var(--font-outfit), "DM Sans", sans-serif;
-  --serif: var(--font-newsreader), Georgia, serif;
-  --sans: var(--font-dm-sans), -apple-system, "Segoe UI", sans-serif;
+  --display: var(--font-bricolage-grotesque), sans-serif;
+  --sans: var(--font-instrument-sans), -apple-system, "Segoe UI", sans-serif;
   --mono: var(--font-dm-mono), "SF Mono", Menlo, monospace;
 
   --ease: cubic-bezier(0.2, 0, 0, 1);
@@ -108,7 +107,7 @@ html:has(.marketing) {
   max-width: 26ch;
 }
 .marketing .lp-body {
-  font-family: var(--serif);
+  font-family: var(--sans);
   font-size: 17.5px;
   line-height: 1.6;
   max-width: 56ch;
@@ -312,7 +311,7 @@ html:has(.marketing) {
   padding: clamp(48px, 6vw, 76px) clamp(20px, 5vw, 56px) 0;
 }
 .marketing .lp-hero-sub {
-  font-family: var(--serif);
+  font-family: var(--sans);
   font-size: 17.5px;
   line-height: 1.6;
   color: var(--text-2);
@@ -462,7 +461,7 @@ html:has(.marketing) {
   background: var(--green);
 }
 .marketing .fs-desc {
-  font-family: var(--serif);
+  font-family: var(--sans);
   font-size: 16.5px;
   color: var(--text-2);
   max-width: 64ch;
@@ -650,7 +649,7 @@ html:has(.marketing) {
   margin-bottom: 18px;
 }
 .marketing .fstack-d {
-  font-family: var(--serif);
+  font-family: var(--sans);
   font-size: 15.5px;
   color: var(--text-2);
   line-height: 1.55;
@@ -726,7 +725,7 @@ html:has(.marketing) {
 }
 .marketing .pdesc {
   margin-top: 10px;
-  font-family: var(--serif);
+  font-family: var(--sans);
   font-size: 16px;
   color: var(--text-2);
   max-width: 52ch;
@@ -906,7 +905,7 @@ html:has(.marketing) {
   background: var(--cream);
 }
 .marketing .engine-pull {
-  font-family: var(--serif);
+  font-family: var(--sans);
   font-style: italic;
   font-size: 22px;
   margin-top: 28px;
@@ -1110,7 +1109,7 @@ html:has(.marketing) {
   font-weight: 600;
 }
 .marketing .invite-done {
-  font-family: var(--serif);
+  font-family: var(--sans);
   font-size: 18px;
   color: var(--ink);
   max-width: 44ch;
@@ -1211,12 +1210,12 @@ html:has(.marketing) {
 
 /* The app's rendering, restored.
    .marketing sets family, size, leading and colour on everything it contains,
-   and this subtree is not marketing DOM: a card inheriting DM Sans at 16/1.6
+   and this subtree is not marketing DOM: a card inheriting marketing text at 16/1.6
    is not the card the product ships. Everything else the app needs is already
    in scope — marketing renders inside the root layout, so Tailwind, the theme
-   tokens and the Geist variable on <body> are all present. */
+   tokens and the working-text variable on <body> are all present. */
 .marketing .vg-app-embed {
-  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  font-family: var(--font-instrument-sans), Arial, Helvetica, sans-serif;
   font-size: 16px;
   line-height: 1.5;
   letter-spacing: normal;
@@ -3008,7 +3007,7 @@ html:has(.marketing) {
   margin: 20px 0 0;
 }
 .marketing .lp-legal-lead {
-  font-family: var(--serif);
+  font-family: var(--sans);
   font-size: 20px;
   line-height: 1.5;
   color: var(--text-2);
@@ -3027,7 +3026,7 @@ html:has(.marketing) {
 }
 .marketing .lp-legal p,
 .marketing .lp-legal li {
-  font-family: var(--serif);
+  font-family: var(--sans);
   font-size: 17.5px;
   line-height: 1.6;
   color: var(--text-2);
