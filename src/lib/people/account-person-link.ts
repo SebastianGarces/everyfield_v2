@@ -135,6 +135,9 @@ export function accountPersonLinkStatements(account: {
           sql`lower(${persons.email}) = ${account.email.trim().toLowerCase()}`,
           isNull(persons.userId),
           isNull(persons.deletedAt),
+          // A removed seat keeps its person identity; rejoining must not claim a duplicate.
+          sql`not exists (select 1 from ${persons} as linked
+            where linked.church_id = ${account.churchId} and linked.user_id = ${account.userId})`,
           account.eligible
         )
       )

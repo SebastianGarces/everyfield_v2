@@ -1,3 +1,6 @@
+import { createSession } from "@/lib/auth/session";
+import { removeSeat, seatActorFromSession } from "@/lib/seats/roster";
+import { sessions } from "@/db/schema";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, test } from "node:test";
@@ -115,6 +118,8 @@ async function sweep(): Promise<void> {
       select ${users.id} from ${users} where ${users.name} = ${SCRATCH_NAME}
     )
   `);
+  await db.execute(sql`delete from ${sessions} where ${sessions.userId} in
+    (select ${users.id} from ${users} where ${users.name} = ${SCRATCH_NAME})`);
   await db.delete(users).where(like(users.name, SCRATCH_NAME));
   await db.delete(churches).where(like(churches.name, SCRATCH_NAME));
   // The two org tables an org seat invitation writes into (#500). They come
@@ -1318,5 +1323,96 @@ test(
       assert.equal(row.seat, null);
       assert.equal(row.churchId, null);
     }
+  }
+);
+
+test(
+  "#568 rejoining preserves the original person despite a duplicate email contact",
+  { skip },
+  async () => {
+    const plant = await scratchPlant();
+    const [owner] = await db
+      .select()
+      .from(users)
+      .where(eq(users.id, plant.ownerId));
+    const [coach] = await db
+      .insert(users)
+      .values({
+        email: scratchEmail(),
+        name: SCRATCH_NAME,
+        passwordHash: "scratch",
+        seat: null,
+      })
+      .returning();
+    const coachingMail = captureTransport();
+    const coaching = await createUserInvitationAs(
+      plant.actor,
+      { kind: "coach", inviteeEmail: coach.email },
+      coachingMail.deps
+    );
+    await db.batch([
+      claimUserInvitationStatement(coaching.invitation.id, coach.id),
+      assignCoachOnAcceptStatement(coaching.invitation.id),
+    ]);
+    const first = captureTransport();
+    await createUserInvitationAs(
+      plant.actor,
+      { kind: "seat", inviteeEmail: coach.email, seat: "member" },
+      first.deps
+    );
+    await acceptSeatInvitationAs(coach, first.tokenFrom());
+    const [original] = await db
+      .select()
+      .from(persons)
+      .where(eq(persons.userId, coach.id));
+    assert.ok(original);
+    const session = await createSession(randomUUID(), owner.id);
+    await removeSeat(seatActorFromSession({ user: owner, session }), coach.id);
+    const [removed] = await db
+      .select()
+      .from(users)
+      .where(eq(users.id, coach.id));
+    assert.equal(removed.seat, null);
+    assert.equal(removed.churchId, null);
+    const [duplicate] = await db
+      .insert(persons)
+      .values({
+        churchId: plant.churchId,
+        firstName: "Duplicate",
+        lastName: "Contact",
+        email: coach.email,
+        createdBy: owner.id,
+      })
+      .returning();
+    const second = captureTransport();
+    await createUserInvitationAs(
+      plant.actor,
+      { kind: "seat", inviteeEmail: coach.email, seat: "member" },
+      second.deps
+    );
+    await acceptSeatInvitationAs(coach, second.tokenFrom());
+    const linked = await db
+      .select()
+      .from(persons)
+      .where(eq(persons.userId, coach.id));
+    assert.equal(linked.length, 1);
+    assert.equal(linked[0].id, original.id);
+    const [untouched] = await db
+      .select()
+      .from(persons)
+      .where(eq(persons.id, duplicate.id));
+    assert.equal(untouched.userId, null);
+    const [restored] = await db
+      .select()
+      .from(users)
+      .where(eq(users.id, coach.id));
+    assert.equal(restored.seat, "member");
+    assert.equal(restored.churchId, plant.churchId);
+    const assignments = await db
+      .select()
+      .from(coachAssignments)
+      .where(eq(coachAssignments.coachUserId, coach.id));
+    assert.equal(assignments.length, 1);
+    assert.equal(assignments[0].status, "active");
   }
 );
