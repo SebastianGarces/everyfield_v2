@@ -337,7 +337,6 @@ test("every kind of existing account is refused with the ONE constant", () => {
   for (const [what, row] of accounts) {
     assert.equal(
       inviteeRefusalFor("seat", {
-        seat: null,
         churchId: null,
         sendingChurchId: null,
         sendingNetworkId: null,
