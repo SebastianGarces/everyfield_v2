@@ -291,53 +291,108 @@ export default async function PhasePage() {
             </Card>
           )}
 
-          <PhaseLayouts
-            focus={
-              <FocusPanel
-                assessment={latest?.assessment ?? null}
-                insights={planterInsights}
-                delta={delta}
-                feedbackByInsightId={feedbackByInsightId}
-              />
-            }
-            care={
-              <PlanterCheckinCard
-                thisWeek={
-                  answeredThisWeek && {
-                    spiritually: answeredThisWeek.spiritually,
-                    marriageFamily: answeredThisWeek.marriageFamily,
-                    financially: answeredThisWeek.financially,
-                    pace: answeredThisWeek.pace,
-                    note: answeredThisWeek.note,
+          {process.env.VERCEL_ENV === "preview" ? (
+            <PhaseLayouts
+              focus={
+                <FocusPanel
+                  assessment={latest?.assessment ?? null}
+                  insights={planterInsights}
+                  delta={delta}
+                  feedbackByInsightId={feedbackByInsightId}
+                />
+              }
+              care={
+                <PlanterCheckinCard
+                  thisWeek={
+                    answeredThisWeek && {
+                      spiritually: answeredThisWeek.spiritually,
+                      marriageFamily: answeredThisWeek.marriageFamily,
+                      financially: answeredThisWeek.financially,
+                      pace: answeredThisWeek.pace,
+                      note: answeredThisWeek.note,
+                    }
                   }
-                }
-                weeks={checkinWeeks}
-                nudges={checkinNudges(checkins)}
-              />
-            }
-            health={
-              <>
+                  weeks={checkinWeeks}
+                  nudges={checkinNudges(checkins)}
+                />
+              }
+              health={
+                <>
+                  <CsfScorecard scorecard={scorecard} />
+                  <Trends trends={trends} />
+                </>
+              }
+              progress={
+                <>
+                  <PhaseControl
+                    currentPhase={church.currentPhase}
+                    readiness={readiness}
+                  />
+                  <ExitCriteria progress={exitCriteria} />
+                  <MilestoneTimeline timeline={timeline} />
+                </>
+              }
+              signals={
+                <SignalToggles
+                  initialValues={booleanSignals}
+                  attestedDaysAgo={attestationAges}
+                />
+              }
+            />
+          ) : (
+            <div className="grid gap-6 lg:grid-cols-3">
+              {/* Scorecard, then exit criteria, then the trends, then the focus list:
+            where the plant stands → what is left before it moves on → which way
+            it is moving → what to do about it. The trends sit above the focus
+            list because they are evidence for it, and below the exit criteria
+            because a direction only means something once the target is known. */}
+              <div className="space-y-6 lg:col-span-2">
                 <CsfScorecard scorecard={scorecard} />
+                <ExitCriteria progress={exitCriteria} />
                 <Trends trends={trends} />
-              </>
-            }
-            progress={
-              <>
+                <FocusPanel
+                  assessment={latest?.assessment ?? null}
+                  insights={planterInsights}
+                  delta={delta}
+                  feedbackByInsightId={feedbackByInsightId}
+                />
+              </div>
+
+              <div className="space-y-6">
                 <PhaseControl
                   currentPhase={church.currentPhase}
                   readiness={readiness}
                 />
-                <ExitCriteria progress={exitCriteria} />
+                {/* The timeline sits under the phase control, not in the main column:
+              it is the dated record of the moves that control makes plus the day
+              the plant is heading for, so the two read as one column about
+              where the plant is in time. Keeping it out of the main column also
+              leaves the focus list — the only part of the page a planter acts
+              on — directly under the evidence for it. */}
+                {/* #484 — the private one. It sits in the same column as the
+              assessment, deliberately: launch-green may not be shown without
+              the planter's own state beside it. */}
+                <PlanterCheckinCard
+                  thisWeek={
+                    answeredThisWeek && {
+                      spiritually: answeredThisWeek.spiritually,
+                      marriageFamily: answeredThisWeek.marriageFamily,
+                      financially: answeredThisWeek.financially,
+                      pace: answeredThisWeek.pace,
+                      note: answeredThisWeek.note,
+                    }
+                  }
+                  weeks={checkinWeeks}
+                  nudges={checkinNudges(checkins)}
+                />
                 <MilestoneTimeline timeline={timeline} />
-              </>
-            }
-            signals={
-              <SignalToggles
-                initialValues={booleanSignals}
-                attestedDaysAgo={attestationAges}
-              />
-            }
-          />
+                <SignalToggles
+                  initialValues={booleanSignals}
+                  attestedDaysAgo={attestationAges}
+                />
+              </div>
+            </div>
+          )}
         </div>
       </PageCanvas>
     </>
