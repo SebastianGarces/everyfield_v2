@@ -18,12 +18,9 @@
 // that tenancy's FK and the invited seat, in the same write that creates the
 // account (AS-012). So:
 //
-//   * IT IS REGISTER-ONLY. An address that already holds an account is refused
-//     with `ACCOUNT_NOT_INVITABLE_MESSAGE` — the ONE neutral message, imported
-//     rather than restated. There is no in-product surface for an existing
-//     account to answer a seat invitation from, and by the invariant "no
-//     invitation that cannot be answered" one that could not be answered is not
-//     created. Moving an account between tenancies is support's job, by ruling.
+//   * IT GRANTS A FIRST SEAT. A coach-only account with no seat or tenancy
+//     can accept while signed in. Any seat or tenancy holder is refused with
+//     ACCOUNT_NOT_INVITABLE_MESSAGE; tenancy moves remain unsupported (#568).
 //   * THE TOKEN IS A SECRET, NOT AN ID. The org path's credential is the row's
 //     own uuid, so anybody who reads the row (or its id in a DOM) holds it. Here
 //     the database stores sha256 of a 32-byte random token and nothing else, so
@@ -167,28 +164,7 @@ export function hashUserInvitationToken(token: string): string {
 // The refusal predicate
 // ----------------------------------------------------------------------------
 
-/**
- * WHAT THE TWO KINDS DISAGREE ABOUT, AS ONE TABLE (AS-008 / AS-010, #496).
- *
- * `user_invitations` has always had two kinds and exactly one axis of
- * difference: whether an address that ALREADY HOLDS AN ACCOUNT may be invited.
- * The asymmetry is deliberate and it is a ruling (2026-08-20, 185 (5)), not an
- * oversight:
- *
- *   * A SEAT invitation would MOVE an account between tenancies. One account
- *     holds one home tenancy, so accepting would have to vacate the old one —
- *     which is a support request, not a click. Register-only, therefore.
- *   * A COACH invitation only ADDS a `coach_assignments` row. Nothing moves, no
- *     tenancy is touched, and access is the UNION of what the account already
- *     reached and what the assignment reaches. Any account can hold one, so any
- *     account may be invited.
- *
- * Keeping it as a lookup rather than an `if` is what makes the property
- * `ACCOUNT_NOT_INVITABLE_MESSAGE` states checkable: ONE predicate answers for
- * both kinds, so "a coach invitation is never refused with that message" and "a
- * seat invitation always is" are two reads of the same row rather than two code
- * paths that can drift.
- */
+/** A seat invitation may grant a first tenancy; a coach invitation adds an assignment. */
 const INVITATION_KIND_RULES = {
   seat: {
     admitsExistingAccount: false,
@@ -207,26 +183,25 @@ const INVITATION_KIND_RULES = {
   { admitsExistingAccount: boolean; capability: Capability }
 >;
 
-/**
- * REGISTER-ONLY, OR NOT, DECIDED BY THE KIND — one pure function for both
- * (AS-008 / AS-010).
- *
- * For `seat`, any existing account is refused, whatever it is: a plant Owner, an
- * Admin, a Member, an oversight seat, or a coach holding no seat at all. For
- * `coach`, none of them is — the invitation adds an assignment and moves
- * nothing, so there is no account it cannot be answered by.
- *
- * Pure, and total over "is there a row" × "which kind", so the property AS-010
- * states is executable across every kind of account without a database.
- */
+/** AS-010: refuse tenancy moves and accounts that hold any seat, including pre-plant Owners. */
 export function inviteeRefusalFor(
   kind: UserInvitationKind,
-  existingAccount: { id: string } | null | undefined
+  existingAccount:
+    | Pick<
+        typeof users.$inferSelect,
+        "id" | "seat" | "churchId" | "sendingChurchId" | "sendingNetworkId"
+      >
+    | null
+    | undefined
 ): string | null {
-  if (!existingAccount) return null;
-  return INVITATION_KIND_RULES[kind].admitsExistingAccount
-    ? null
-    : ACCOUNT_NOT_INVITABLE_MESSAGE;
+  if (!existingAccount || INVITATION_KIND_RULES[kind].admitsExistingAccount)
+    return null;
+  return existingAccount.seat !== null ||
+    existingAccount.churchId !== null ||
+    existingAccount.sendingChurchId !== null ||
+    existingAccount.sendingNetworkId !== null
+    ? ACCOUNT_NOT_INVITABLE_MESSAGE
+    : null;
 }
 
 /**
@@ -485,11 +460,15 @@ export async function createUserInvitationAs(
   // is exactly one sentence available and it is the imported constant — and for
   // `coach` there is not even that one, because the kind admits every account.
   //
-  // The projection is a single column: answering "does this address hold an
-  // account" must not pull `password_hash` into application memory (the same
-  // reasoning as `accessColumns` in `@/lib/notifications/enqueue`).
+  // Read only the seat and tenancy fields needed for eligibility, never credentials.
   const [existingAccount] = await db
-    .select({ id: users.id })
+    .select({
+      id: users.id,
+      seat: users.seat,
+      churchId: users.churchId,
+      sendingChurchId: users.sendingChurchId,
+      sendingNetworkId: users.sendingNetworkId,
+    })
     .from(users)
     .where(eq(users.email, inviteeEmail))
     .limit(1);

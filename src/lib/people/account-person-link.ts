@@ -38,7 +38,7 @@
 // planner.
 // ============================================================================
 
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull, sql, type SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 
 import { db } from "@/db";
@@ -110,22 +110,17 @@ export function accountPersonLinkStatements(account: {
   email: string;
   /** From `findLinkablePersonId`. `null` mints a new record. */
   matchedPersonId: string | null;
+  /** Gate every effect on the caller's successful atomic grant. */
+  eligible?: SQL;
 }): BatchItem<"pg">[] {
-  const mint = db
-    .insert(persons)
-    .values(
-      accountPersonValues({
-        userId: account.userId,
-        churchId: account.churchId,
-        name: account.name,
-        email: account.email,
-      })
-    )
-    .onConflictDoNothing({
-      target: [persons.churchId, persons.userId],
-      where: sql`${persons.userId} is not null`,
-    })
-    .returning({ id: persons.id });
+  const values = accountPersonValues(account);
+  const mint = db.execute(sql`insert into ${persons}
+    ("church_id", "user_id", "created_by", "email", "status", "first_name", "last_name")
+    select ${values.churchId}::uuid, ${values.userId}::uuid, ${values.createdBy}::uuid,
+      ${values.email}, ${values.status}, ${values.firstName}, ${values.lastName}
+    where ${account.eligible ?? sql`true`}
+    on conflict ("church_id","user_id") where ${persons.userId} is not null do nothing
+    returning id`);
 
   if (!account.matchedPersonId) return [mint];
 
@@ -136,8 +131,11 @@ export function accountPersonLinkStatements(account: {
       .where(
         and(
           eq(persons.id, account.matchedPersonId),
+          eq(persons.churchId, account.churchId),
+          sql`lower(${persons.email}) = ${account.email.trim().toLowerCase()}`,
           isNull(persons.userId),
-          isNull(persons.deletedAt)
+          isNull(persons.deletedAt),
+          account.eligible
         )
       )
       .returning({ id: persons.id }),

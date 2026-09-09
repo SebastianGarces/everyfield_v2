@@ -1,3 +1,4 @@
+import { PgRaw } from "drizzle-orm/pg-core/query-builders/raw";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -148,7 +149,9 @@ const COACH = account();
  * statement is exactly what this suite is asserting about.
  */
 const asQuery = (statement: BatchItem<"pg">) =>
-  statement as unknown as { toSQL(): { sql: string; params: unknown[] } };
+  statement instanceof PgRaw
+    ? { toSQL: () => statement.getQuery() }
+    : (statement as unknown as { toSQL(): { sql: string; params: unknown[] } });
 
 const actorFor = (user: SeatFields) =>
   invitationActorFromSession({ user: { id: USER, ...user } });
@@ -324,16 +327,22 @@ test("every kind of existing account is refused with the ONE constant", () => {
       "an org Member",
       { id: USER, seat: "member", sendingChurchId: SENDING_CHURCH },
     ],
-    ["a coach, holding no seat at all", { id: USER, seat: null }],
     [
-      "a projection of one column, which is what the create reads",
-      { id: USER },
+      "a seatless account naming a plant",
+      { id: USER, seat: null, churchId: PLANT },
     ],
+    ["a pre-plant Owner", { id: USER, seat: "owner" }],
   ] as const;
 
   for (const [what, row] of accounts) {
     assert.equal(
-      inviteeRefusalFor("seat", row),
+      inviteeRefusalFor("seat", {
+        seat: null,
+        churchId: null,
+        sendingChurchId: null,
+        sendingNetworkId: null,
+        ...row,
+      }),
       ACCOUNT_NOT_INVITABLE_MESSAGE,
       `${what} was not refused with the one neutral message`
     );
@@ -343,6 +352,36 @@ test("every kind of existing account is refused with the ONE constant", () => {
   // pass on a function that returned the constant unconditionally.
   assert.equal(inviteeRefusalFor("seat", undefined), null);
   assert.equal(inviteeRefusalFor("seat", null), null);
+});
+
+test("a coach-only account can receive its first seat without moving tenancy (#568)", () => {
+  assert.equal(
+    inviteeRefusalFor("seat", {
+      id: USER,
+      seat: null,
+      churchId: null,
+      sendingChurchId: null,
+      sendingNetworkId: null,
+    }),
+    null
+  );
+  for (const field of [
+    "churchId",
+    "sendingChurchId",
+    "sendingNetworkId",
+  ] as const) {
+    assert.equal(
+      inviteeRefusalFor("seat", {
+        id: USER,
+        seat: null,
+        churchId: null,
+        sendingChurchId: null,
+        sendingNetworkId: null,
+        [field]: PLANT,
+      }),
+      ACCOUNT_NOT_INVITABLE_MESSAGE
+    );
+  }
 });
 
 test("a COACH invitation is never refused with that constant (AS-009)", () => {
@@ -366,7 +405,18 @@ test("a COACH invitation is never refused with that constant (AS-009)", () => {
 
   for (const [what, row] of accounts) {
     assert.equal(
-      inviteeRefusalFor("coach", row),
+      inviteeRefusalFor(
+        "coach",
+        row
+          ? {
+              seat: null,
+              churchId: null,
+              sendingChurchId: null,
+              sendingNetworkId: null,
+              ...row,
+            }
+          : row
+      ),
       null,
       `${what} was refused a coach invitation — AS-009 admits every account`
     );
@@ -376,7 +426,13 @@ test("a COACH invitation is never refused with that constant (AS-009)", () => {
 test("the refusal is the imported constant, not a sentence that resembles it", () => {
   // Identity, not similarity: two strings that agree today are two strings.
   assert.equal(
-    inviteeRefusalFor("seat", { id: USER }),
+    inviteeRefusalFor("seat", {
+      id: USER,
+      seat: "member",
+      churchId: PLANT,
+      sendingChurchId: null,
+      sendingNetworkId: null,
+    }),
     ACCOUNT_NOT_INVITABLE_MESSAGE
   );
   // THE PATTERN IS ONE STRING LITERAL, and it has to be spelled that way.

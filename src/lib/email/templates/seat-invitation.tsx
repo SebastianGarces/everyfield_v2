@@ -28,13 +28,9 @@ import { BaseLayout } from "../components/base-layout";
 //   * IT INVITES A PERSON, NOT AN ORGANIZATION. Nothing is associated and no
 //     church is created — the reader joins a plant somebody else already runs,
 //     with the seat the invitation names.
-//   * A SEAT INVITATION IS REGISTER-ONLY, and it says so. An address that
-//     already holds an EveryField account is refused at create time (AS-010),
-//     so every reader of a seat message is signing up for the first time. A
-//     COACH invitation is the deliberate exception (AS-009): it adds an
-//     assignment and moves nothing, so any account can answer one and the link
-//     lands on a page that asks rather than on the sign-up form. The words for
-//     both come from `INVITED_AS_COPY`; this template picks none of them.
+//   * The link offers sign-in or registration without looking up the invitee.
+//     A seat grants a first tenancy; a coach invitation adds an assignment.
+//     INVITED_AS_COPY supplies the words for both kinds.
 //   * IT IS THE CREDENTIAL CHANNEL. The link carries a random token that only
 //     works for the address in the `To:` line, so forwarding it hands somebody a
 //     link they cannot use — one plain sentence rather than a support
