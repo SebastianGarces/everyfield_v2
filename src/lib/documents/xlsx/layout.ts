@@ -32,12 +32,6 @@ export function formatBudget(ws: ExcelJS.Worksheet, lastColumn: number) {
       footer: 0.2,
     },
   };
-  if (lastColumn > 3) {
-    // A merged A:N title cannot repeat across horizontal print pages. Keep
-    // the worksheet title for editing and print a complete header on each page.
-    const title = String(ws.getCell("A1").value).replaceAll("&", "&&");
-    ws.headerFooter.oddHeader = `&L&"Calibri,Bold"&12${title}\n&"Calibri,Regular"&9Enter amounts in blue cells. Totals calculate automatically. Amounts in USD.`;
-  }
   ws.headerFooter.oddFooter = "&LBudget planner&RPage &P of &N";
   ws.mergeCells(1, 1, 1, lastColumn);
   ws.mergeCells(2, 1, 2, lastColumn);

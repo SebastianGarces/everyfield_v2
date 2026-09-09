@@ -43,3 +43,35 @@ for (const [name, build, width] of [
     }
   });
 }
+
+for (const churchName of [
+  "A".repeat(255),
+  "A".repeat(119),
+  "&".repeat(255),
+  "W".repeat(255),
+  "Faith & Hope",
+]) {
+  test(`annual export bounds print header and preserves worksheet name: ${churchName.slice(0, 12)}`, async () => {
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(
+      Uint8Array.from(await buildFirstYearBudget({ church_name: churchName }))
+        .buffer
+    );
+    const ws = wb.worksheets[0];
+    const header = ws.headerFooter.oddHeader!;
+    assert.ok(
+      header.length <= 255,
+      `serialized header has ${header.length} characters`
+    );
+    assert.equal(ws.getCell("A1").value, `${churchName} — First-Year Budget`);
+    assert.ok(header.includes("First-Year Budget"));
+    assert.ok(header.endsWith("Amounts in USD."));
+    const printedName = header
+      .split("\n")[1]
+      .replace('&"Calibri,Regular"&10', "");
+    // Every ampersand in the name remains paired, including at the truncation edge.
+    assert.ok(!printedName.replaceAll("&&", "").includes("&"));
+    if (churchName.length > 60) assert.ok(printedName.endsWith("…"));
+    else assert.equal(printedName, churchName.replaceAll("&", "&&"));
+  });
+}
