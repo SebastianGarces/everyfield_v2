@@ -1,4 +1,5 @@
 import type { ActivityItem } from "@/lib/dashboard/service";
+import type { ReactNode } from "react";
 import {
   AlertCircle,
   CalendarCheck,
@@ -71,9 +72,10 @@ function formatTimeAgo(date: Date): string {
 
 interface ActivityFeedProps {
   activities: ActivityItem[];
+  emptyGuidance?: ReactNode;
 }
 
-export function ActivityFeed({ activities }: ActivityFeedProps) {
+export function ActivityFeed({ activities, emptyGuidance }: ActivityFeedProps) {
   if (activities.length === 0) {
     return (
       <div className="bg-card rounded-xl border p-6 shadow-sm">
@@ -81,9 +83,10 @@ export function ActivityFeed({ activities }: ActivityFeedProps) {
         <div className="mt-6 flex flex-col items-center justify-center py-8 text-center">
           <AlertCircle className="text-muted-foreground/40 h-10 w-10" />
           <p className="text-muted-foreground mt-3 text-sm">
-            No activity yet. Start by adding people, scheduling meetings, or
-            creating tasks.
+            No activity yet. People updates, completed meetings, and completed
+            tasks will appear here.
           </p>
+          {emptyGuidance}
         </div>
       </div>
     );

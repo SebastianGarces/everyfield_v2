@@ -26,6 +26,9 @@ import { db } from "@/db";
 import { churches } from "@/db/schema/church";
 import { eq } from "drizzle-orm";
 
+import { getOwnRsvp } from "@/lib/meetings/own-rsvp";
+import { OwnRsvp } from "@/components/meetings/own-rsvp";
+
 export const dynamic = "force-dynamic";
 
 interface MeetingPageProps {
@@ -40,7 +43,7 @@ export default async function MeetingPage({ params }: MeetingPageProps) {
   }
 
   const { id } = await params;
-  const [meeting, locations, comms, churchRows, followUp, guests] =
+  const [meeting, locations, comms, churchRows, followUp, guests, ownRsvp] =
     await Promise.all([
       getMeeting(user.churchId, id),
       listLocations(user.churchId),
@@ -52,6 +55,7 @@ export default async function MeetingPage({ params }: MeetingPageProps) {
       // guests as recipients, the same way the Invitations tab's own button
       // does (#612).
       getGuestList(user.churchId, id),
+      getOwnRsvp(user, id),
     ]);
 
   if (!meeting) {
@@ -76,6 +80,11 @@ export default async function MeetingPage({ params }: MeetingPageProps) {
   return (
     <div className="space-y-6">
       <MeetingDetails meeting={meeting} locations={locations} />
+      {ownRsvp && (
+        <div className="mx-auto max-w-3xl">
+          <OwnRsvp meetingId={meeting.id} response={ownRsvp.response} />
+        </div>
+      )}
 
       {/* VM-020. Ruled 2026-08-12 on #312 (decision 2, option A) — rationale in copy.ts.
           `null` until attendance is finalized, so the card is absent rather than 0%. */}

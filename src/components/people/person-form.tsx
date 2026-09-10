@@ -120,7 +120,7 @@ export function PersonForm({
           </Alert>
         )}
 
-        <div className="grid gap-6 md:grid-cols-2">
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
           {/* Name */}
           <div className="space-y-2">
             <Label htmlFor="firstName">First Name *</Label>
@@ -266,7 +266,7 @@ export function PersonForm({
         {/* Address */}
         <div className="space-y-4">
           <h3 className="text-muted-foreground text-sm font-medium">Address</h3>
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <div className="space-y-2 md:col-span-2">
               <Label htmlFor="addressLine1">Street Address</Label>
               <Input
@@ -353,7 +353,7 @@ export function PersonForm({
         </div>
 
         {/* Actions */}
-        <div className="flex gap-4">
+        <div className="flex flex-wrap gap-4">
           <Button type="submit" disabled={isPending}>
             {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             {isEdit ? "Save Changes" : "Create Person"}

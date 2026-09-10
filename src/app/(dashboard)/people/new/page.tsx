@@ -40,7 +40,7 @@ export default async function NewPersonPage() {
         contextItems={BREADCRUMBS}
         scrollLayout="flow"
       >
-        <WorkspacePanel className="mx-auto max-w-2xl">
+        <WorkspacePanel className="mx-auto w-full max-w-2xl">
           <CardHeader>
             <CardTitle className="text-2xl">Add Person</CardTitle>
             <CardDescription>Add a new person to your contacts</CardDescription>

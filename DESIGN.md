@@ -4,10 +4,10 @@ name: EveryField — Sharp
 description: >-
   Design system for the EveryField marketing surface (the (marketing) landing
   page). Direction ruled 2026-07-30: "sharp" — rectangles and drawn edges, type
-  that is light and giant, a serif that does the storytelling, and green spent
+  that is light and giant, Instrument Sans for working text, and green spent
   only where it signals. Source of truth: docs/design-catalog.html. Scope is
-  marketing only; the in-app UI shares the palette but not the serif or the
-  display scale.
+  marketing geometry; the type system also covers auth and the app. The
+  in-app UI shares working text and the palette, but not the display scale.
 colors:
   # Required role tokens
   primary: "#181D19" # ink — CTAs and all reading text
@@ -40,56 +40,56 @@ colors:
   input-border: "rgba(24, 29, 25, 0.45)"
 typography:
   display:
-    fontFamily: Outfit
+    fontFamily: Bricolage Grotesque
     fontSize: 80px # fluid: clamp(46px, 5.8vw, 80px)
     fontWeight: 400
     lineHeight: 1
     letterSpacing: -0.03em
   heading:
-    fontFamily: Outfit
+    fontFamily: Bricolage Grotesque
     fontSize: 46px # fluid: clamp(30px, 3.8vw, 46px)
     fontWeight: 400
     lineHeight: 1.05
     letterSpacing: -0.03em
   stat-numeral:
-    fontFamily: Outfit
+    fontFamily: Bricolage Grotesque
     fontSize: 56px # lining figures — font-variant-numeric: lining-nums
     fontWeight: 400
     lineHeight: 1
     letterSpacing: -0.03em
   title:
-    fontFamily: Outfit
+    fontFamily: Bricolage Grotesque
     fontSize: 21px
     fontWeight: 500
     lineHeight: 1.25
     letterSpacing: -0.015em
-  serif-lead:
-    fontFamily: Newsreader
+  lead:
+    fontFamily: Instrument Sans
     fontSize: 20px
     fontWeight: 400
     lineHeight: 1.5
   engine-pull:
-    fontFamily: Newsreader
+    fontFamily: Instrument Sans
     fontSize: 22px # italic, on ink
     fontWeight: 400
     lineHeight: 1.6
   marketing-body:
-    fontFamily: Newsreader
+    fontFamily: Instrument Sans
     fontSize: 17.5px
     fontWeight: 400
     lineHeight: 1.6
   body:
-    fontFamily: DM Sans
+    fontFamily: Instrument Sans
     fontSize: 16px
     fontWeight: 400
     lineHeight: 1.6
   caption:
-    fontFamily: DM Sans
+    fontFamily: Instrument Sans
     fontSize: 14px
     fontWeight: 400
     lineHeight: 1.5
   label:
-    fontFamily: DM Sans
+    fontFamily: Instrument Sans
     fontSize: 15px
     fontWeight: 500
     lineHeight: 1.2
@@ -208,11 +208,11 @@ promise clarity, never growth.
 The visual direction is **sharp**, ruled 2026-07-30 after a side-by-side
 against a softer rounded direction ("too soft with rounded corners looks
 uncared for"). The grammar was extracted live from intercom.com and translated
-to our assets: green takes cobalt's job, ink takes black's, Newsreader takes
-the serif role. In one line:
+to our assets: green takes cobalt's job, ink takes black's. The approved type system pairs
+Bricolage Grotesque display text with Instrument Sans working text. In one line:
 
 > Radius 0 everywhere with drawn 1px edges; display type light and giant
-> (Outfit 400 at −3%, line-height 1); Newsreader as the marketing body voice;
+> (Bricolage Grotesque 400 at −3%, line-height 1); Instrument Sans as the marketing body voice;
 > ink rectangle CTAs; green spent only where it signals — registration
 > squares, active rules, the current phase, and exactly one solid green
 > closing panel per page.
@@ -227,8 +227,8 @@ The in-app UI takes exactly two brand colors — green (the signal) and ink
 (text and primary) — while keeping its neutral surfaces. Marketing remains
 Sharp. The authenticated app uses shadcn's `0.625rem` base radius and native
 component geometry; pills and avatars retain their intentional shapes, and
-page-level workspace panels use `rounded-xl`. Newsreader and the giant display
-scale never appear in UI.
+page-level workspace panels use `rounded-xl`. The giant display scale stays in marketing; Instrument Sans is the default
+for auth and authenticated product text.
 
 The authenticated app bar is ink with its light foreground. Its 24px brand
 mark is the sole green-on-ink exception. That exception does not license green
@@ -273,29 +273,29 @@ state/brand, field-green is interactive text, danger is only ever bad news.
 
 ## Typography
 
-Four families, each with one job. Never more, never crossed:
+Two proportional families with distinct roles, plus the existing monospace roles:
 
 | Family | Job |
 | --- | --- |
-| **Outfit** | Display and headings only. Weight 400 at display sizes — scale talks, weight doesn't. Section/pillar titles step up to 500. |
-| **Newsreader** | The marketing body voice: section subtitles, lead paragraphs, feature/phase descriptions, pull quotes, italic emphasis words. **Never in UI.** |
-| **DM Sans** | Working text: buttons, captions, nav links, form labels, stat labels, in-app mock text. |
-| **DM Mono** | Annotation: markers, nav in the catalog, timestamps, figure captions. Uppercase with positive tracking. |
+| **Bricolage Grotesque** | Display text: marketing headlines, headings, titles and stat numerals. Weight 400 at display sizes, 500 for section titles. |
+| **Instrument Sans** | Working text: leads, body copy, navigation, controls, labels, captions, auth and authenticated product UI. Normal and italic styles. |
+| **Outfit** | Outlined logo only. The existing SVG paths, lowercase casing, spacing and proportions stay unchanged. No runtime font is loaded. |
+| **DM Mono** | Existing marketing and catalog annotations. Geist Mono may remain in product monospace roles. |
 
 The scale (fluid sizes via `clamp()`; front-matter tokens hold the max):
 
 | Token | Spec | Use |
 | --- | --- | --- |
-| `display` | Outfit 400 · clamp(46px, 5.8vw, 80px) · lh 1 · −3% | The hero line. One per page. |
-| `heading` | Outfit 400 · clamp(30px, 3.8vw, 46px) · lh 1.05 · −3% | Section headlines. |
-| `stat-numeral` | Outfit 400 · 56px · lh 1 · −3% | Stat cell numerals, lining figures. |
-| `title` | Outfit 500 · 21px · lh 1.25 · −1.5% | Feature/phase panel headers. |
-| `engine-pull` | Newsreader 400 italic · 22px · lh 1.6 | The engine panel's pull quote. |
-| `serif-lead` | Newsreader 400 · 19–20px · lh 1.5 | Pitch leads, hero sub. |
-| `marketing-body` | Newsreader 400 · 17.5px · lh 1.6 | Section body prose. |
-| `body` | DM Sans 400 · 16px · lh 1.6 | Default working text. |
-| `caption` | DM Sans 400 · 14px · lh 1.5 · muted | Footnotes, CTA notes. |
-| `label` | DM Sans 500 · 15px | Buttons. |
+| `display` | Bricolage Grotesque 400 · clamp(46px, 5.8vw, 80px) · lh 1 · −3% | The hero line. One per page. |
+| `heading` | Bricolage Grotesque 400 · clamp(30px, 3.8vw, 46px) · lh 1.05 · −3% | Section headlines. |
+| `stat-numeral` | Bricolage Grotesque 400 · 56px · lh 1 · −3% | Stat cell numerals, lining figures. |
+| `title` | Bricolage Grotesque 500 · 21px · lh 1.25 · −1.5% | Feature/phase panel headers. |
+| `engine-pull` | Instrument Sans 400 italic · 22px · lh 1.6 | The engine panel's pull quote. |
+| `lead` | Instrument Sans 400 · 19–20px · lh 1.5 | Pitch leads, hero sub. |
+| `marketing-body` | Instrument Sans 400 · 17.5px · lh 1.6 | Section body prose. |
+| `body` | Instrument Sans 400 · 16px · lh 1.6 | Default working text. |
+| `caption` | Instrument Sans 400 · 14px · lh 1.5 · muted | Footnotes, CTA notes. |
+| `label` | Instrument Sans 500 · 15px | Buttons. |
 | `marker` | DM Mono 500 · 12.5px · +10% · uppercase | The registration marker label. |
 
 Craft rules that ship with the type:
@@ -379,7 +379,7 @@ ruled in the #252 rounds).
 
 ### Buttons
 
-Rectangles, DM Sans 500 at 15px, verb-first sentence-case labels
+Rectangles, Instrument Sans 500 at 15px, verb-first sentence-case labels
 ("Request an invite").
 
 - **Primary:** ink fill, cream text, 13px/24px padding; hover deepens to
@@ -399,7 +399,7 @@ On ink: label goes `dark-text-secondary`, square goes cream.
 ### Cards (`pillar-item`)
 
 Card surface `#FFFEF6`, 1px `edge` ring, radius 0, 26–28px padding. Header
-pattern: field-green mono kicker → Outfit 500 19px title → 14.5px
+pattern: field-green mono kicker → Bricolage Grotesque 500 19px title → 14.5px
 text-secondary body. No washes, no decorative shadows.
 
 ### Inputs
@@ -423,14 +423,14 @@ Two columns (1.5fr shot / 1fr list; stacks under 900px). The shot is the
 hero: a full CSS product frame with real words, standing on the per-feature
 painting (people/meetings/teams/giving swap the backdrop; c1 is the
 fallback). Selection is a whisper — 3px green top rule + `rgba(24,29,25,.045)`
-tint; the active item reveals its Newsreader description. `role="tablist"`
+tint; the active item reveals its Instrument Sans description. `role="tablist"`
 with `aria-selected` maintained. Real screenshots replace the mocks when the
 app ships.
 
 ### Phase tabs (`ptabs`)
 
 Mono uppercase tabs on a hairline; the active tab carries a 3px green rule
-the full width of its cell. Each panel: Outfit 500 title, Newsreader
+the full width of its cell. Each panel: Bricolage Grotesque 500 title, Instrument Sans
 description, green-dash list, and a focused app window (`appwin`) on the c2
 painting. Same tablist semantics as the switcher.
 
@@ -438,11 +438,11 @@ painting. Same tablist semantics as the switcher.
 
 Lead stat cell is ink-on-green (the one allowed green fill outside the CTA
 panel); supporting cells are card surface with an `edge` ring. Numerals in
-Outfit 400 at 56px with lining figures.
+Bricolage Grotesque 400 at 56px with lining figures.
 
 ### Quote
 
-Newsreader italic 28px, centered, on a card surface with ring; mono uppercase
+Instrument Sans italic 28px, centered, on a card surface with ring; mono uppercase
 cite. Only real voices — the placeholder ships only until a real
 sending-network quote exists, or it's removed.
 
@@ -471,8 +471,8 @@ disables smooth scroll.
   rings, corner marks on art panels. Edges are drawn, not implied.
 - CTAs are ink — fills or 1px outlines, hovers invert. Green fills exactly
   one closing panel per page, its button ink.
-- Display type is light and giant: Outfit 400 at −3%, line-height 1.
-  Newsreader is the marketing body voice; never in UI.
+- Display type is light and giant: Bricolage Grotesque 400 at −3%, line-height 1.
+  Instrument Sans is the working text face across marketing, auth and product.
 - Long content earns an interactive toggle before it earns more scroll.
 - Speak as the grounded shepherd: short declaratives, concrete nouns
   (people, meetings, launch Sunday), "you" always, honest about difficulty.
@@ -533,6 +533,6 @@ Ruled 2026-07-27: **grounded shepherd**. The pitch:
   `teams-tasks.png`, `giving.png`, and the parked `a1-sprout.png`. All PNGs
   are 0.8–2.4 MB and must be optimized (WebP/AVIF at display size) before the
   real page ships.
-- **Fonts:** Outfit (400/500), Newsreader (400/500 + italics, optical
-  sizing), DM Sans (400–700), DM Mono (400/500) — via `next/font` on the
+- **Fonts:** Bricolage Grotesque (400/500), Instrument Sans (400–700 + italics),
+  DM Mono (400/500) — via `next/font` on the
   real page.

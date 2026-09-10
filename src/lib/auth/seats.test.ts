@@ -175,6 +175,7 @@ test("a Member's own-duty writes still succeed (AS-006)", () => {
     "tasks.own",
     "teams.own",
     "meetings.attendance",
+    "meetings.rsvp",
     "launch.milestone",
   ] as const) {
     only(capability, [plantOwner, plantAdmin, plantMember]);
