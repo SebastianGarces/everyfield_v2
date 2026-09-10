@@ -188,7 +188,9 @@ test("all toolbar controls compose pending destinations and acknowledge intermed
   await commit(afterReset);
 
   await type("queued");
-  await act(() => events.dispatchEvent(new Event("popstate")));
+  await act(() => {
+    events.dispatchEvent(new Event("popstate"));
+  });
   await commit("search=Previous");
   await tick();
   assert.equal(input().props.value, "Previous");
