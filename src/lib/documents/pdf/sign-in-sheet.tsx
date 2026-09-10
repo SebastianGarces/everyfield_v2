@@ -44,7 +44,7 @@ export function SignInSheetDocument({
         </View>
 
         {Array.from({ length: ROW_COUNT }).map((_, i) => (
-          <View key={i} style={styles.tableRow}>
+          <View key={i} wrap={false} style={styles.tableRow}>
             {COLUMNS.map((col) => (
               <View key={col.label} style={[styles.td, { flex: col.flex }]} />
             ))}

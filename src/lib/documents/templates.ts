@@ -227,7 +227,7 @@ export const DOCUMENT_TEMPLATES: DocumentTemplate[] = [
       "A 12-month budget spreadsheet with income/expense categories and live total formulas.",
     category: "administrative",
     formats: ["xlsx"],
-    pageCount: 1,
+    pageCount: 2,
     mergeFields: [
       {
         key: "church_name",

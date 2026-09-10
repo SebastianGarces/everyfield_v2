@@ -104,19 +104,41 @@ export function LaunchSundayChecklistsDocument({
           <Text style={styles.subtitle}>
             {documentSubtitle(
               "Launch Sunday Checklist",
-              values.launch_date || null,
-              team
+              values.launch_date || null
             )}
           </Text>
 
           <Text style={styles.h2}>{team}</Text>
           {items.map((item) => (
-            <View key={item} style={styles.checkRow}>
+            <View
+              key={item}
+              wrap={false}
+              style={[
+                styles.checkRow,
+                {
+                  minHeight: 42,
+                  paddingVertical: 10,
+                  borderBottomWidth: 0.5,
+                  borderBottomColor: "#d1d5db",
+                },
+              ]}
+            >
               <View style={styles.checkbox} />
-              <Text>{item}</Text>
+              <Text style={{ flex: 1 }}>{item}</Text>
             </View>
           ))}
 
+          <Text style={styles.h2}>Notes and follow-up</Text>
+          {[0, 1, 2].map((line) => (
+            <View
+              key={line}
+              style={{
+                height: 30,
+                borderBottomWidth: 0.5,
+                borderBottomColor: "#d1d5db",
+              }}
+            />
+          ))}
           <View style={styles.divider} />
           <Text style={{ fontSize: 9, color: "#6b7280" }}>
             Team lead: ____________________ Time complete: __________

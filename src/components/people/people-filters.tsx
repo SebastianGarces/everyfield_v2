@@ -1,8 +1,6 @@
 "use client";
 
 import { Filter, X } from "lucide-react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,57 +13,45 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
+import {
+  parsePeopleListQuery,
+  peopleListQueryWith,
+  peopleListFilterQuery,
+} from "@/lib/people/list-params";
 import { personSources, personStatuses, Tag } from "@/lib/people/types";
 
 interface PeopleFiltersProps {
   availableTags?: Tag[];
+  query: string;
+  navigate: (destination: string) => void;
 }
 
-export function PeopleFilters({ availableTags = [] }: PeopleFiltersProps) {
-  const router = useRouter();
-  const searchParams = useSearchParams();
+export function PeopleFilters({
+  availableTags = [],
+  query,
+  navigate,
+}: PeopleFiltersProps) {
+  const filters = parsePeopleListQuery(query);
+  const selectedStatuses = filters.status ?? [];
+  const selectedSources = filters.source ?? [];
+  const selectedTags = filters.tagIds ?? [];
 
-  // Get current filters
-  const selectedStatuses = searchParams.getAll("status");
-  const selectedSources = searchParams.getAll("source");
-  const selectedTags = searchParams.getAll("tag");
-
-  // Create a new URLSearchParams object to manipulate
-  const createQueryString = useCallback(
-    (name: string, value: string, type: "add" | "remove" | "clear") => {
-      const params = new URLSearchParams(searchParams.toString());
-
-      if (type === "clear") {
-        params.delete(name);
-      } else if (type === "add") {
-        params.append(name, value);
-      } else if (type === "remove") {
-        const values = params.getAll(name);
-        params.delete(name);
-        values
-          .filter((v) => v !== value)
-          .forEach((v) => params.append(name, v));
-      }
-
-      // Reset cursor when filters change
-      params.delete("cursor");
-
-      return params.toString();
-    },
-    [searchParams]
-  );
-
-  const toggleFilter = (name: string, value: string) => {
-    const currentValues = searchParams.getAll(name);
-    const isActive = currentValues.includes(value);
-
-    router.push(
-      `?${createQueryString(name, value, isActive ? "remove" : "add")}`
-    );
+  const toggleFilter = (
+    name: "status" | "source" | "tag",
+    value: string | null
+  ) => {
+    const destination = peopleListFilterQuery(query, name, value).toString();
+    navigate(destination);
   };
 
   const clearFilters = () => {
-    router.push("?");
+    const destination = peopleListQueryWith(query, {
+      status: undefined,
+      source: undefined,
+      tagIds: undefined,
+      search: undefined,
+    }).toString();
+    navigate(destination);
   };
 
   const hasFilters =
@@ -140,9 +126,7 @@ export function PeopleFilters({ availableTags = [] }: PeopleFiltersProps) {
             <>
               <DropdownMenuSeparator />
               <DropdownMenuCheckboxItem
-                onCheckedChange={() =>
-                  router.push(`?${createQueryString("status", "", "clear")}`)
-                }
+                onCheckedChange={() => toggleFilter("status", null)}
                 className="justify-center text-center"
               >
                 Clear filters
@@ -206,9 +190,7 @@ export function PeopleFilters({ availableTags = [] }: PeopleFiltersProps) {
             <>
               <DropdownMenuSeparator />
               <DropdownMenuCheckboxItem
-                onCheckedChange={() =>
-                  router.push(`?${createQueryString("source", "", "clear")}`)
-                }
+                onCheckedChange={() => toggleFilter("source", null)}
                 className="justify-center text-center"
               >
                 Clear filters
@@ -273,9 +255,7 @@ export function PeopleFilters({ availableTags = [] }: PeopleFiltersProps) {
               <>
                 <DropdownMenuSeparator />
                 <DropdownMenuCheckboxItem
-                  onCheckedChange={() =>
-                    router.push(`?${createQueryString("tag", "", "clear")}`)
-                  }
+                  onCheckedChange={() => toggleFilter("tag", null)}
                   className="justify-center text-center"
                 >
                   Clear filters

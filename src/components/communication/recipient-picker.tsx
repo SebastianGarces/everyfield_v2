@@ -229,13 +229,13 @@ export function RecipientPicker({
                 <Badge
                   key={person.id}
                   variant="secondary"
-                  className="gap-1 py-1"
+                  className="gap-1 overflow-visible py-1"
                 >
                   {person.firstName} {person.lastName}
                   <button
                     type="button"
                     aria-label={`Remove ${person.firstName} ${person.lastName}`}
-                    className="hover:bg-muted-foreground/25 cursor-pointer rounded-full p-0.5"
+                    className="hover:bg-muted-foreground/25 hit-area-6 relative cursor-pointer rounded-full p-0.5"
                     onClick={() => removeRecipient(person.id)}
                   >
                     <X className="h-3 w-3" />

@@ -340,8 +340,11 @@ export function CheckinStrip({
 
       <ul className="space-y-1.5">
         {CHECKIN_DIMENSIONS.map((dimension) => (
-          <li key={dimension.key} className="flex items-center gap-3">
-            <span className="text-muted-foreground w-32 shrink-0 text-xs">
+          <li
+            key={dimension.key}
+            className="grid grid-cols-[minmax(0,1fr)_max-content] items-center gap-3"
+          >
+            <span className="text-muted-foreground text-xs">
               {dimension.label}
             </span>
             <span className="flex gap-1">

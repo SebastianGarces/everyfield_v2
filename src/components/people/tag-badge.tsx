@@ -44,19 +44,20 @@ export function TagBadge({ tag, size = "sm", onRemove }: TagBadgeProps) {
         "gap-1 font-normal transition-colors",
         size === "sm" ? "px-2 py-0.5 text-xs" : "px-2.5 py-0.5 text-sm",
         colorClass,
-        onRemove && "pr-1"
+        onRemove && "overflow-visible pr-1"
       )}
       style={customStyle}
     >
       {tag.name}
       {onRemove && (
         <button
+          type="button"
           onClick={(e) => {
             e.preventDefault();
             e.stopPropagation();
             onRemove();
           }}
-          className="ml-0.5 rounded-full p-0.5 hover:bg-black/10 focus:outline-none"
+          className="hit-area-6 relative ml-0.5 rounded-full p-0.5 hover:bg-black/10"
         >
           <X className="h-3 w-3" />
           <span className="sr-only">Remove {tag.name} tag</span>

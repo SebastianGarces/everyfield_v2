@@ -22,7 +22,7 @@ import {
   personSourceSchema,
   personStatusSchema,
 } from "@/lib/validations/people";
-import type { z } from "zod";
+import { z } from "zod";
 
 /** What Next hands a page: one value, several, or none. */
 export type SearchParamValue = string | string[] | undefined;
@@ -60,17 +60,66 @@ function parseEnumParam<T extends string>(
 export function parsePeopleListSearchParams(
   params: PeopleListSearchParams
 ): PeopleListParams {
-  const tagParam = params.tag;
-  const tagIds = tagParam ? [tagParam].flat() : undefined;
-
   return {
     view: params.view === "pipeline" ? "pipeline" : "list",
     cursor: typeof params.cursor === "string" ? params.cursor : undefined,
     search: typeof params.search === "string" ? params.search : undefined,
     status: parseEnumParam(params.status, personStatusSchema),
     source: parseEnumParam(params.source, personSourceSchema),
-    tagIds: tagIds && tagIds.length > 0 ? tagIds : undefined,
+    tagIds: parseEnumParam(
+      params.tag,
+      z
+        .string()
+        .uuid()
+        .transform((value) => value.toLowerCase())
+    ),
   };
+}
+
+/** Read browser parameters with the same repeated-value semantics as Next pages. */
+export function parsePeopleListQuery(query: string): PeopleListParams {
+  const params = new URLSearchParams(query);
+  return parsePeopleListSearchParams(
+    Object.fromEntries(
+      [...new Set(params.keys())].map((key) => {
+        const values = params.getAll(key);
+        return [key, values.length === 1 ? values[0] : values];
+      })
+    )
+  );
+}
+
+/** Navigation rebuilds validated state and always starts a fresh page. */
+export function peopleListQueryWith(
+  query: string,
+  changes: Partial<Omit<PeopleListParams, "cursor">>
+): URLSearchParams {
+  const state = { ...parsePeopleListQuery(query), ...changes };
+  const params = new URLSearchParams();
+  if (state.view === "pipeline") params.set("view", state.view);
+  if (state.search) params.set("search", state.search);
+  for (const status of state.status ?? []) params.append("status", status);
+  for (const source of state.source ?? []) params.append("source", source);
+  for (const tag of state.tagIds ?? []) params.append("tag", tag);
+  return params;
+}
+
+/** Toggle one checkbox, or clear its group with null. */
+export function peopleListFilterQuery(
+  query: string,
+  key: "status" | "source" | "tag",
+  value: string | null
+): URLSearchParams {
+  const params = peopleListQueryWith(query, {});
+  const values = params.getAll(key);
+  params.delete(key);
+  if (value !== null) {
+    const next = values.includes(value)
+      ? values.filter((item) => item !== value)
+      : [...values, value];
+    next.forEach((item) => params.append(key, item));
+  }
+  return peopleListQueryWith(params.toString(), {});
 }
 
 /** How many people one page of `/people` shows. */
