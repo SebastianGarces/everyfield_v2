@@ -23,7 +23,7 @@ export function ViewToggle({ currentView, query, navigate }: ViewToggleProps) {
   return (
     <div
       aria-label="People view"
-      className="bg-muted text-foreground/60 flex items-center rounded-lg border p-1"
+      className="bg-muted text-muted-foreground flex items-center rounded-lg border p-1"
       role="group"
     >
       <Button

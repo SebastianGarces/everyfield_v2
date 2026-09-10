@@ -156,12 +156,17 @@ export default async function PeoplePage({ searchParams }: PeoplePageProps) {
                 timeZone={church?.timeZone ?? DEFAULT_CHURCH_TIME_ZONE}
               />
             ) : (
-              <PeopleList
-                people={listResult.people}
-                total={listResult.total}
-                nextCursor={listResult.nextCursor}
-                searchParams={params}
-              />
+              <section aria-labelledby="people-directory-heading">
+                <h2 id="people-directory-heading" className="sr-only">
+                  Directory results
+                </h2>
+                <PeopleList
+                  people={listResult.people}
+                  total={listResult.total}
+                  nextCursor={listResult.nextCursor}
+                  searchParams={params}
+                />
+              </section>
             )}
           </div>
         </WorkspacePanel>
