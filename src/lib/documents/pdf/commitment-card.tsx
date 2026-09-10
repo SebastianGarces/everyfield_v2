@@ -28,21 +28,21 @@ export function CommitmentCardDocument({
 
         <View style={styles.checkRow}>
           <View style={styles.checkbox} />
-          <Text>
+          <Text style={{ flex: 1 }}>
             <Text style={{ fontFamily: PDF_FONT.bold }}>GROW</Text> — Actively
             invite others to Vision Meetings.
           </Text>
         </View>
         <View style={styles.checkRow}>
           <View style={styles.checkbox} />
-          <Text>
+          <Text style={{ flex: 1 }}>
             <Text style={{ fontFamily: PDF_FONT.bold }}>PRAY</Text> — Faithfully
             pray for the church plant.
           </Text>
         </View>
         <View style={styles.checkRow}>
           <View style={styles.checkbox} />
-          <Text>
+          <Text style={{ flex: 1 }}>
             <Text style={{ fontFamily: PDF_FONT.bold }}>GIVE</Text> — Generously
             and sacrificially give.
           </Text>
@@ -66,7 +66,7 @@ export function CommitmentCardDocument({
         </View>
 
         {values.pastor_name ? (
-          <Text style={{ marginTop: 12, color: "#6b7280" }}>
+          <Text style={{ marginTop: 8, fontSize: 8, color: "#6b7280" }}>
             {values.pastor_name}
           </Text>
         ) : null}
