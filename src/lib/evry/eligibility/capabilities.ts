@@ -353,7 +353,15 @@ export function isEvryEffectCapabilityIdentity(identity: string): boolean {
 export async function authorizeEvryReadCapability(
   identity: string
 ): Promise<EvryReadCapabilityAuthorization | null> {
-  const actor = await requireEvryPlantViewer();
+  let actor: EvryPlantActor;
+  try {
+    actor = await requireEvryPlantViewer();
+  } catch (error) {
+    if (error instanceof EvryPlantViewerRefusalError || isUnauthorized(error)) {
+      return null;
+    }
+    throw error;
+  }
   const registration = REGISTRY.registrationFor(identity);
 
   if (

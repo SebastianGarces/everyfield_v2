@@ -111,6 +111,9 @@ export function accountPersonLinkStatements(account: {
   /** From `findLinkablePersonId`. `null` mints a new record. */
   matchedPersonId: string | null;
 }): BatchItem<"pg">[] {
+  const duplicateMutationLock = db.execute(
+    sql`select id from churches where id = ${account.churchId}::uuid for update`
+  );
   const mint = db
     .insert(persons)
     .values(
@@ -127,9 +130,10 @@ export function accountPersonLinkStatements(account: {
     })
     .returning({ id: persons.id });
 
-  if (!account.matchedPersonId) return [mint];
+  if (!account.matchedPersonId) return [duplicateMutationLock, mint];
 
   return [
+    duplicateMutationLock,
     db
       .update(persons)
       .set({ userId: account.userId, updatedAt: new Date() })

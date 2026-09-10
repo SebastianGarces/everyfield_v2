@@ -142,7 +142,7 @@ export async function previewImportAction(
  */
 export async function executeBulkImportAction(
   rows: ImportRow[],
-  duplicateResolutions: Record<number, "skip" | "create">
+  duplicateResolutions: Record<number, "skip" | "create" | "merge">
 ): Promise<ActionResult<ImportSummary>> {
   return withChurchSession(
     "people.write",

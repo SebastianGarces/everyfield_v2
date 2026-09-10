@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { EVRY_EXACT_CONTENT_MAX_PAGE_CHARACTERS } from "./exact-content-pages";
+
 import {
   EVRY_CONVERSATION_DURABLE_RESULT_CODES,
   evryConversationPlanIdentitySchema,
@@ -61,14 +63,17 @@ const contentPreviewSchema = z
     format: z.enum(["plain_text", "rich_text"]).optional(),
   })
   .superRefine((preview, context) => {
-    if (preview.format !== "rich_text" && preview.content.length > 4_000) {
+    if (
+      preview.format !== "rich_text" &&
+      preview.content.length > EVRY_EXACT_CONTENT_MAX_PAGE_CHARACTERS
+    ) {
       context.addIssue({
         code: "too_big",
-        maximum: 4_000,
+        maximum: EVRY_EXACT_CONTENT_MAX_PAGE_CHARACTERS,
         origin: "string",
         inclusive: true,
         path: ["content"],
-        message: "Plain-text previews must be at most 4,000 characters",
+        message: `Plain-text previews must be at most ${EVRY_EXACT_CONTENT_MAX_PAGE_CHARACTERS.toLocaleString()} characters`,
       });
     }
   })
