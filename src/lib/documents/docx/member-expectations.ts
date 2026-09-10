@@ -2,13 +2,10 @@
 // Expectations of a Core Group Member — docx template (F6)
 // ============================================================================
 
-import {
-  AlignmentType,
-  Document,
-  HeadingLevel,
-  Paragraph,
-  TextRun,
-} from "docx";
+import { AlignmentType, HeadingLevel, Paragraph, TextRun } from "docx";
+
+import { handout, signature } from "./layout";
+import type { Document } from "docx";
 
 import { churchNameOf } from "../render-text";
 import type { DocumentMergeValues } from "../types";
@@ -24,52 +21,46 @@ const EXPECTATIONS: string[] = [
 export function buildMemberExpectations(values: DocumentMergeValues): Document {
   const churchName = churchNameOf(values);
 
-  return new Document({
-    sections: [
-      {
-        children: [
+  return handout(
+    [
+      new Paragraph({
+        heading: HeadingLevel.TITLE,
+        alignment: AlignmentType.CENTER,
+        text: "Expectations of a Core Group Member",
+      }),
+      new Paragraph({
+        alignment: AlignmentType.CENTER,
+        spacing: { after: 240 },
+        children: [new TextRun({ text: churchName, bold: true })],
+      }),
+      new Paragraph({
+        spacing: { after: 160 },
+        text: `Joining the core group of ${churchName} is a meaningful commitment. As a founding member, you help lay the foundation this church will be built on. Here is what we ask of every core-group member:`,
+      }),
+      ...EXPECTATIONS.map(
+        (text) =>
           new Paragraph({
-            heading: HeadingLevel.HEADING_1,
-            alignment: AlignmentType.CENTER,
-            text: "Expectations of a Core Group Member",
-          }),
-          new Paragraph({
-            alignment: AlignmentType.CENTER,
-            spacing: { after: 240 },
-            children: [new TextRun({ text: churchName, bold: true })],
-          }),
-          new Paragraph({
-            spacing: { after: 160 },
-            text: `Joining the core group of ${churchName} is a meaningful commitment. As a founding member, you help lay the foundation this church will be built on. Here is what we ask of every core-group member:`,
-          }),
-          ...EXPECTATIONS.map(
-            (text) =>
-              new Paragraph({
-                text,
-                bullet: { level: 0 },
-                spacing: { after: 80 },
-              })
-          ),
-          new Paragraph({
-            spacing: { before: 240, after: 80 },
-            text: "I have read and understand these expectations, and I commit to them for this season of planting.",
-          }),
-          new Paragraph({
-            spacing: { before: 200 },
-            text: "Signed: ______________________________    Date: ______________",
-          }),
-          ...(values.pastor_name
-            ? [
-                new Paragraph({
-                  spacing: { before: 200 },
-                  children: [
-                    new TextRun({ text: values.pastor_name, italics: true }),
-                  ],
-                }),
-              ]
-            : []),
-        ],
-      },
+            text,
+            bullet: { level: 0 },
+            spacing: { after: 80 },
+          })
+      ),
+      new Paragraph({
+        spacing: { before: 240, after: 80 },
+        text: "I have read and understand these expectations, and I commit to them for this season of planting.",
+      }),
+      ...signature(),
+      ...(values.pastor_name
+        ? [
+            new Paragraph({
+              spacing: { before: 200 },
+              children: [
+                new TextRun({ text: values.pastor_name, italics: true }),
+              ],
+            }),
+          ]
+        : []),
     ],
-  });
+    "Core group expectations"
+  );
 }

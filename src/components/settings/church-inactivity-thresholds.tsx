@@ -62,7 +62,7 @@ export function ChurchInactivityThresholds({
     alertDays: Number(alert.current?.value),
   });
 
-  const { state, commit } = useFieldSave({
+  const { state, commit, dirty, revert, editProps } = useFieldSave({
     // NUMBERS, so "07" and "7" are the same answer and neither costs a write —
     // and the PAIR is one string, because the pair is one decision here for the
     // same reason it is one row write.
@@ -71,13 +71,28 @@ export function ChurchInactivityThresholds({
       return `${next.warningDays}/${next.alertDays}`;
     },
     stored: `${warningDays}/${alertDays}`,
-    save: () => setChurchInactivityThresholdsAction(counts()),
+    save: (value) => {
+      const [warningDays, alertDays] = value.split("/").map(Number);
+      return setChurchInactivityThresholdsAction({ warningDays, alertDays });
+    },
+    reset: (value) => {
+      const [warningDays, alertDays] = value.split("/");
+      if (warning.current) warning.current.value = warningDays;
+      if (alert.current) alert.current.value = alertDays;
+      warning.current?.focus();
+    },
   });
 
   const invalid = state.status === "failed" ? state.invalid : [];
 
   return (
-    <div className="space-y-3">
+    <div
+      {...editProps}
+      className="space-y-3"
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) commit();
+      }}
+    >
       <div className="space-y-1">
         {/* A GROUP HEADING, not a label — the same rule the digest pair learned
             the hard way: pointing one label at both inputs concatenates into
@@ -99,10 +114,6 @@ export function ChurchInactivityThresholds({
         role="group"
         aria-labelledby="inactivity-heading"
         className="flex flex-wrap gap-3"
-        onBlur={(event) => {
-          if (event.currentTarget.contains(event.relatedTarget)) return;
-          commit();
-        }}
       >
         <DayCountInput
           id="inactivity-warning-days"
@@ -128,7 +139,12 @@ export function ChurchInactivityThresholds({
 
       {/* One region for the pair — they are one decision — named by BOTH
           inputs' `aria-describedby`. */}
-      <FieldSaveStatus id="inactivity-status" state={state} />
+      <FieldSaveStatus
+        id="inactivity-status"
+        state={state}
+        dirty={dirty}
+        revert={revert}
+      />
     </div>
   );
 }
