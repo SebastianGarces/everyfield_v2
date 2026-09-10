@@ -7,10 +7,12 @@ import test from "node:test";
 import {
   assertCommunicationCapabilityInventoryCurrent,
   communicationExternalSurfaces,
+  classifyCommunicationRscRead,
   discoverCommunicationRouteHandlers,
   discoverCommunicationRscReads,
   generateCommunicationCapabilityInventory,
 } from "../../../../../ops/evry/communication-inventory";
+import { evryCapabilityRegistrationFor } from "@/lib/evry/eligibility/capabilities";
 import { EVRY_CAPABILITY_EVAL_LAYERS } from "@/lib/evry/evals/contracts";
 import { EVRY_CAPABILITY_EVAL_FIXTURES } from "@/lib/evry/evals/registry";
 
@@ -59,6 +61,54 @@ test("generated Communication inventory is current and fully classified", async 
     assert.equal(
       capability.confirmation,
       capability.operationKind === "effect" ? "required" : "not_required"
+    );
+  }
+});
+
+test("plant merge facts remain a visible Evry gap without granting compose access", () => {
+  const inventory = generateCommunicationCapabilityInventory(repoRoot);
+  const read = {
+    caller: "src/app/(dashboard)/communication/compose/page.tsx",
+    modulePath: "@/lib/communication/church-merge",
+    exportName: "getChurchMergeData",
+  };
+  const gap = classifyCommunicationRscRead(read);
+  assert.deepEqual(
+    inventory.entries.find(({ identity }) => identity === gap.identity),
+    gap
+  );
+  assert.equal(gap.kind, "rsc_read");
+  assert.equal(evryCapabilityRegistrationFor(gap.capabilityIdentity), null);
+  assert.deepEqual(gap.classification, {
+    state: "excluded",
+    reason: "evry_capability_gap",
+  });
+  assert.equal(gap.applicationCapability, null);
+  assert.equal(gap.operationKind, "excluded");
+  assert.equal(
+    inventory.capabilities.some(
+      ({ identity, surfaceIdentities }) =>
+        identity === gap.capabilityIdentity ||
+        surfaceIdentities.includes(gap.identity)
+    ),
+    false
+  );
+  const compose = inventory.capabilities.find(
+    ({ identity }) => identity === "communication.compose.get-context"
+  );
+  assert.ok(compose);
+  assert.equal(compose.operationKind, "read");
+  assert.equal(compose.applicationCapability, "read");
+  assert.equal(compose.confirmation, "not_required");
+  assert.equal(compose.mutationShape, null);
+  for (const unknown of [
+    { ...read, exportName: "getUnknownMergeData" },
+    { ...read, modulePath: "@/lib/communication/another-module" },
+    { ...read, caller: "src/app/(dashboard)/another/page.tsx" },
+  ]) {
+    assert.throws(
+      () => classifyCommunicationRscRead(unknown),
+      /no closed RSC read contract/
     );
   }
 });
