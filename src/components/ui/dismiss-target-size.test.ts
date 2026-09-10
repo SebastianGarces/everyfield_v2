@@ -1,249 +1,328 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
+import ts from "typescript";
 
-import { sourceReader, stripComments } from "@/lib/testing/source-span";
+import { buttonVariants } from "@/components/ui/button";
 import { resolveTargetBox } from "@/lib/testing/tailwind-box";
+import { cn } from "@/lib/utils";
 
-// ----------------------------------------------------------------------------
-// EVERY SHARED DISMISS CONTROL CLEARS WCAG 2.5.8's 24x24 FLOOR (#639).
-//
-// The defect this file was written for: `DialogContent`'s Close carried
-// `absolute top-4 right-4` and nothing else that touched its box, so the button
-// was exactly as big as the glyph inside it — 16x16 — in EVERY dialog in the
-// product, because the primitive is shared by all of them. `SheetContent` had
-// the same class string and the same 16x16, and sonner's toast close button sat
-// at 20x20 from its own stylesheet.
-//
-// WHY THE ASSERTION IS A COMPILED NUMBER AND NOT A CLASS NAME. The obvious test
-// here is `assert.match(classes, /size-6/)`, and it is worth nothing: it proves
-// somebody typed a class, not that anything is 24 CSS px. It survives a retuned
-// `--spacing`, a later class in the same string overriding the earlier one, and
-// a utility renamed by a major version — all three of which change the pixels
-// while leaving the six characters in place. So the class string is read out of
-// the shipped source and handed to the PROJECT'S OWN Tailwind, and what gets
-// compared against 24 is the width and height that compiler emits.
-//
-// WHAT THE NUMBER IS TAKEN FROM matters as much (`tailwind-box.ts` has the
-// detail): only declarations at the TOP LEVEL of the compiled rule count as the
-// element's own box. A Tailwind variant compiles to a nested rule, so the
-// `[&_svg:not([class*='size-'])]:size-4` that made the old button LOOK 16px
-// wide cannot be mistaken for the button's own width — it never was one. That
-// distinction is precisely the bug: the glyph had a size and the target did not.
-//
-// THE GLYPH DOES NOT GROW. Each fix pairs the bigger box with a smaller offset
-// (`top-4 right-4` -> `top-3 right-3` around a 24px box centres the same 16px X
-// at the same 16px inset), or leaves the painted control alone entirely and
-// extends the hit area with a centred `::after`. The target changed; the design
-// did not.
-// ----------------------------------------------------------------------------
-
-/** WCAG 2.5.8 Level AA. The floor, not the goal. */
 const MINIMUM_TARGET_PX = 24;
+const ROOT = process.cwd();
+const SWEPT_DIRS = ["src/components", "src/app"];
 
-const UI_DIR = path.join(process.cwd(), "src/components/ui");
-const SETTINGS_DIR = path.join(process.cwd(), "src/components/settings");
-
-/**
- * Every directory that may hold a dismiss control, and therefore every
- * directory the sweep at the foot of this file reads.
- *
- * `src/components/ui/` alone was the original scope, and it was the scope of
- * the DEFECT: a shared primitive is wrong everywhere at once. It stopped being
- * the whole scope when the settings modal refused `DialogContent`'s Close and
- * drew its own — two hand-placed buttons, in a directory nothing here read,
- * growing their own 24px box on trust (#657 review). A local control is not a
- * smaller version of the problem; it is the same 16x16 target with no shared
- * primitive to fix it in.
- */
-const SWEPT_DIRS: readonly string[] = [UI_DIR, SETTINGS_DIR];
-
-/**
- * How a control reaches the floor — and therefore where the box is measured.
- *
- * `box`: the control's own border-box is >= 24. Available whenever nothing is
- * painted at the smaller size, which is the case for a bare X that only shows
- * an opacity change on hover: growing its box changes no pixel a reader sees.
- *
- * `overlay`: the PAINTED control must stay its current size — sonner's close
- * button is a bordered 20px circle, and resizing it would redesign every toast
- * in the product — so the hit area is extended by a centred `::after` instead,
- * the technique the better-accessibility skill's hit-areas reference prescribes
- * for exactly this case.
- */
-type Mechanism = "box" | "overlay";
-
+type Opening = ts.JsxOpeningElement | ts.JsxSelfClosingElement;
 interface DismissControl {
-  /**
-   * The file, relative to `src/components/ui/` — so a control that lives in
-   * another swept directory is spelled the way `path.relative` spells it
-   * (`"../settings/settings-modal.tsx"`), and one string serves both the read
-   * below and the sweep at the foot of the file.
-   */
-  readonly file: string;
-  /** Successive narrowing spans, outermost first, ending on the class string. */
-  readonly anchors: readonly (readonly [from: string, to: string])[];
-  /** The text immediately before the class string literal. */
-  readonly attribute: string;
-  /** Which box carries the target. */
-  readonly mechanism: Mechanism;
-  /** What a reader is aiming at, for the failure message. */
-  readonly control: string;
+  readonly location: string;
+  readonly classes: string;
+  readonly sourceHash?: string;
+  readonly externallyPositioned?: boolean;
 }
 
-const DISMISS_CONTROLS: readonly DismissControl[] = [
-  {
-    file: "dialog.tsx",
-    anchors: [
-      ["function DialogContent(", "function DialogHeader("],
-      ["<DialogPrimitive.Close", "<XIcon"],
-    ],
-    attribute: "className=",
-    mechanism: "box",
-    control:
-      "the X on every dialog in the app — settings, the command palette, and 25 call sites besides",
-  },
-  {
-    file: "sheet.tsx",
-    anchors: [
-      ["function SheetContent(", "function SheetHeader("],
-      ["<SheetPrimitive.Close", "<XIcon"],
-    ],
-    attribute: "className=",
-    mechanism: "box",
-    control: "the X on every sheet",
-  },
-  {
-    file: "sonner.tsx",
-    anchors: [["const Toaster = ", "export { Toaster }"]],
-    attribute: "closeButton:",
-    mechanism: "overlay",
-    control:
-      "the toast close button — painted by sonner's own stylesheet at 20x20",
-  },
-  {
-    file: "../settings/settings-modal.tsx",
-    anchors: [["function SettingsClose(", "<XIcon"]],
-    attribute: "className=",
-    mechanism: "box",
-    control:
-      "the settings modal's Close — drawn twice (the stacked corner X, and the section pane's bar at md) from this one class string",
-  },
-];
-
-/** The class string this control ships, or a throw naming the anchor that moved. */
-function shippedClasses(control: DismissControl): string {
-  const label = `${control.file} › ${control.control}`;
-
-  const span = control.anchors.reduce(
-    (code, [from, to]) => sourceReader(code, label).span(from, to),
-    stripComments(readFileSync(path.join(UI_DIR, control.file), "utf8"))
+function attribute(node: Opening, name: string): ts.JsxAttribute | undefined {
+  return node.attributes.properties.find(
+    (item): item is ts.JsxAttribute =>
+      ts.isJsxAttribute(item) && item.name.getText() === name
   );
-
-  const at = sourceReader(span, label).after(control.attribute);
-  const literal = /"([^"]*)"/.exec(at);
-
-  if (!literal) {
-    throw new Error(`${label}: no class string follows ${control.attribute}`);
-  }
-
-  return literal[1];
 }
 
-test("every shared dismiss control compiles to a target of at least 24x24", async () => {
-  for (const control of DISMISS_CONTROLS) {
-    const classes = shippedClasses(control);
-    const resolved = await resolveTargetBox(classes);
-    const box = control.mechanism === "box" ? resolved.self : resolved.after;
+/** Only unconditional literals contribute. Conditional sizing cannot prove a floor. */
+function staticClasses(node: ts.Node | undefined): string {
+  if (!node) return "";
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+    return node.text;
+  }
+  if (ts.isJsxExpression(node)) return staticClasses(node.expression);
+  if (ts.isCallExpression(node) && node.expression.getText() === "cn") {
+    return node.arguments.map(staticClasses).join(" ");
+  }
+  return "";
+}
 
-    const where =
-      control.mechanism === "box"
-        ? "its own border-box"
-        : "the ::after that extends its hit area";
+/** Text-labelled buttons are outside this icon-target guard. Hidden labels count as icons. */
+function hasPaintedText(node: ts.Node): boolean {
+  if (ts.isJsxText(node)) return node.text.trim().length > 0;
+  if (ts.isJsxExpression(node))
+    return node.expression ? hasPaintedText(node.expression) : false;
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node))
+    return node.text.trim().length > 0;
+  if (ts.isTemplateExpression(node)) return true;
+  if (ts.isConditionalExpression(node))
+    return hasPaintedText(node.whenTrue) && hasPaintedText(node.whenFalse);
+  if (ts.isJsxElement(node)) {
+    const classes = staticClasses(
+      attribute(node.openingElement, "className")?.initializer
+    );
+    if (classes.split(/\s+/).includes("sr-only")) return false;
+    return node.children.some(hasPaintedText);
+  }
+  return false;
+}
 
-    // Size alone is not the property for an overlay. A 24x24 `::after` that is
-    // not positioned is an ordinary child: it enlarges nothing, and because a
-    // close button is `display: flex` it becomes a flex item and shoves the
-    // glyph off centre — a visible regression the size check would call green.
-    if (control.mechanism === "overlay") {
-      assert.ok(
-        resolved.after.centred,
-        `${control.file} › ${control.control}: the ::after is not absolutely positioned and centred on the control, so it is sitting INSIDE the control rather than over it. It enlarges no target, and on a flex control it pushes the glyph off centre. Use the \`hit-area-*\` utility from globals.css rather than assembling the positioning by hand.`
-      );
+/**
+ * Parse controls, not files: a second removal button in an already measured
+ * file is independently checked. Comments, forwarding props and status icons
+ * outside buttons cannot manufacture a target. Labels, handlers and X glyphs
+ * catch removal controls even when one of those signals is missing.
+ *
+ * This checks the control's own unconditional classes. A consumer can still
+ * shrink a shared Close through a descendant selector on its content wrapper;
+ * that needs browser hit-testing. Conditional classes and inline styles also
+ * require browser verification. Text-labelled buttons use their layout width
+ * and are outside this icon-only guard.
+ */
+function discoverControls(code: string, file: string): DismissControl[] {
+  const source = ts.createSourceFile(
+    file,
+    code,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX
+  );
+  const controls: DismissControl[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isJsxElement(node)) {
+      const opening = node.openingElement;
+      const tag = opening.tagName.getText(source);
+      if (
+        /^(?:button|Button|DialogClose|(?:Dialog|Sheet)Primitive\.Close)$/.test(
+          tag
+        )
+      ) {
+        const signals = ["aria-label", "title", "onClick"]
+          .map(
+            (name) =>
+              attribute(opening, name)?.initializer?.getText(source) ?? ""
+          )
+          .join(" ");
+        const children = node.children
+          .map((child) => child.getText(source))
+          .join(" ");
+        const dismiss =
+          /remove|clear|dismiss|close/i.test(signals + children) ||
+          /<(?:X|XIcon)\b/.test(children) ||
+          /Close$/.test(tag);
+        if (dismiss && !node.children.some(hasPaintedText)) {
+          let classes = staticClasses(
+            attribute(opening, "className")?.initializer
+          );
+          if (tag === "Button") {
+            const sizeAttribute = attribute(opening, "size");
+            const sizeName = sizeAttribute
+              ? staticClasses(sizeAttribute.initializer)
+              : "default";
+            const size = (
+              [
+                "default",
+                "xs",
+                "sm",
+                "lg",
+                "icon",
+                "icon-xs",
+                "icon-sm",
+                "icon-lg",
+              ] as const
+            ).find((value) => value === sizeName);
+            assert.ok(size, `${file}: teach the guard Button size ${sizeName}`);
+            let base = buttonVariants({ size });
+            // Explicit width AND height replace the inherited size shorthand.
+            // Keep conflicting declarations within the caller's own string:
+            // resolveTargetBox must still refuse those rather than guess.
+            if (
+              /(?:^|\s)w-\S+/.test(classes) &&
+              /(?:^|\s)h-\S+/.test(classes)
+            ) {
+              base = base
+                .split(/\s+/)
+                .filter((candidate) => !candidate.startsWith("size-"))
+                .join(" ");
+            }
+            classes = cn(base, classes);
+          }
+          const line =
+            source.getLineAndCharacterOfPosition(opening.getStart(source))
+              .line + 1;
+          controls.push({
+            location: `${file}:${line}`,
+            classes,
+            sourceHash: createHash("sha256")
+              .update(node.getText(source))
+              .digest("hex"),
+          });
+        }
+      }
     }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return controls;
+}
 
-    for (const axis of ["width", "height"] as const) {
-      const measured = box[axis];
+function tsxFilesUnder(dir: string): string[] {
+  return readdirSync(path.join(ROOT, dir), { withFileTypes: true }).flatMap(
+    (entry) => {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) return tsxFilesUnder(full);
+      return entry.name.endsWith(".tsx") ? [full] : [];
+    }
+  );
+}
 
-      assert.ok(
-        measured !== null && measured >= MINIMUM_TARGET_PX,
-        `${control.file} › ${control.control}: ${where} compiles to ${
-          measured === null
-            ? `NO ${axis} AT ALL, so the target is only ever as big as the glyph that happens to sit inside it — which is how this shipped at 16x16`
-            : `${axis} ${measured}px`
-        }, under the WCAG 2.5.8 floor of ${MINIMUM_TARGET_PX}px.
+/** Sonner owns its button markup and positioning; our shipped classNames owns its overlay. */
+function toastControl(): DismissControl {
+  const file = "src/components/ui/sonner.tsx";
+  const code = readFileSync(path.join(ROOT, file), "utf8");
+  const source = ts.createSourceFile(
+    file,
+    code,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX
+  );
+  const classes: string[] = [];
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isPropertyAssignment(node) &&
+      node.name.getText(source) === "closeButton"
+    ) {
+      classes.push(staticClasses(node.initializer));
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  assert.equal(
+    classes.length,
+    1,
+    "sonner must expose exactly one measured closeButton class string"
+  );
+  return { location: file, classes: classes[0], externallyPositioned: true };
+}
 
-This is ${control.control}, so the miss is systemic — it is wrong everywhere at once.
+async function assertTarget(control: DismissControl): Promise<void> {
+  const resolved = await resolveTargetBox(control.classes);
+  const overlay =
+    resolved.after.width !== null || resolved.after.height !== null;
+  const box = overlay ? resolved.after : resolved.self;
+  if (overlay) {
+    assert.ok(
+      resolved.after.centred,
+      `${control.location}: the hit overlay must be absolutely positioned and centred`
+    );
+    assert.ok(
+      control.externallyPositioned ||
+        /(?:^|\s)(?:relative|absolute|fixed|sticky)(?:\s|$)/.test(
+          control.classes
+        ),
+      `${control.location}: the control must establish the overlay's containing block; add relative`
+    );
+    assert.ok(
+      !/(?:^|\s)static(?:\s|$)/.test(control.classes),
+      `${control.location}: static positioning detaches the overlay`
+    );
+  }
+  for (const axis of ["width", "height"] as const) {
+    const measured = box[axis];
+    assert.ok(
+      measured !== null && measured >= MINIMUM_TARGET_PX,
+      `${control.location}: ${overlay ? "hit overlay" : "button"} ${axis} is ${measured ?? "undeclared"}, below ${MINIMUM_TARGET_PX}px. Use an explicit box or positioned hit-area-6; keep the painted glyph and layout unchanged. Compiled classes: ${control.classes}`
+    );
+  }
+}
 
-Fix it in this shared primitive, never at a call site, and keep the glyph where it is: pair the bigger box with a smaller offset (a 24px box at top-3/right-3 centres a 16px icon at the same 16px inset as top-4/right-4 did), or extend the hit area with a centred ::after when the painted control has to keep its size.
-Measured by compiling "${classes}" through the project's own Tailwind.`
+test("every icon dismissal/removal in components and app compiles to at least 24x24", async () => {
+  const controls = SWEPT_DIRS.flatMap(tsxFilesUnder).flatMap((file) =>
+    discoverControls(readFileSync(path.join(ROOT, file), "utf8"), file)
+  );
+  assert.ok(
+    controls.length > 10,
+    "the sweep must reach feature controls, not just shared UI"
+  );
+  // Pre-existing, UNMEASURED control: this Button's width comes from padding.
+  // commitment-form is actively owned by Evri #813, so #652 cannot change it.
+  // No target-size pass is claimed for it. Pin its entire JSX, not its file:
+  // a second control or any markup change must be reviewed independently.
+  const legacy = controls.filter(
+    (control) =>
+      control.location.startsWith(
+        "src/components/people/commitment-form.tsx:"
+      ) &&
+      control.sourceHash ===
+        "f34e72c47441c5a2ba5a5f89953b634fa535e676e3896c9813a852ea482cef63"
+  );
+  assert.equal(
+    legacy.length,
+    1,
+    "the unmeasured commitment attachment control changed; retire or review its exact fingerprint"
+  );
+  const failures: string[] = [];
+  for (const control of [
+    ...controls.filter((control) => control !== legacy[0]),
+    toastControl(),
+  ]) {
+    try {
+      await assertTarget(control);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      failures.push(
+        message.startsWith(control.location)
+          ? message
+          : `${control.location}: ${message}`
       );
     }
   }
+  assert.deepEqual(failures, [], failures.join("\n"));
 });
 
-/**
- * The tells that a file HAS a dismiss control, so a new one cannot arrive
- * unmeasured.
- *
- * The test above only checks what it has been told about, and `pnpm dlx
- * shadcn@latest add <anything>` is one command away from dropping a fresh 16x16
- * Close into `src/components/ui/` — invisible to an inventory that never
- * re-reads it. `src/components/settings/` is swept for the same reason with a
- * different cause: nothing generates a file there, but the modal already has a
- * precedent for refusing the shared Close and hand-placing its own, and the
- * next surface that does it will copy the modal.
- * `showCloseButton` is deliberately NOT a tell: `command.tsx` forwards that prop
- * to `DialogContent` and owns no control of its own, which is the difference
- * between passing the flag and painting the button.
- *
- * WHAT THIS DOES NOT REACH: a call site that targets the control as a
- * DESCENDANT. Neither Close takes a `className` prop, a `cn()` merge or a
- * `{...props}` spread, so no consumer can shrink one directly — but a content
- * class can still select it, and one does: `sidebar.tsx` passes
- * `[&>button]:hidden` to `SheetContent` to remove its Close entirely.
- * `[&>button]:size-4` would be the same move and nothing here would see it.
- */
-const DISMISS_TELL = /sr-only">(?:Close|Dismiss)|(?<![A-Za-z])closeButton\b/;
-
-/** Every `.tsx` under `dir`, at any depth, named as `DismissControl.file` is. */
-function tsxFilesUnder(dir: string): string[] {
-  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) return tsxFilesUnder(full);
-    return entry.name.endsWith(".tsx") ? [path.relative(UI_DIR, full)] : [];
-  });
-}
-
-test("no swept directory holds a dismiss control this file has not measured", () => {
-  const measured = new Set(DISMISS_CONTROLS.map((control) => control.file));
-
-  const found = SWEPT_DIRS.flatMap(tsxFilesUnder)
-    .filter((file) =>
-      DISMISS_TELL.test(
-        stripComments(readFileSync(path.join(UI_DIR, file), "utf8"))
-      )
-    )
-    .sort();
-
-  assert.deepEqual(
-    found,
-    [...measured].sort(),
-    `the dismiss controls in ${SWEPT_DIRS.map((dir) => path.relative(process.cwd(), dir)).join(" and ")} are no longer the ones this file measures.
-
-A file that paints its own Close is a 24x24 target the test above cannot see until it is listed. Add it to DISMISS_CONTROLS with the anchors that reach its class string — or, if it merely forwards a flag to another primitive's control, it owns no target and the tell is what needs narrowing.
-
-Two Close buttons in one file must be ONE component with one class string before they can be listed: the entry names a file and an anchor, so a second hand-placed control in the same file is a second unmeasured target wearing a measured one's name.`
+test("discovery catches two controls in one file, dynamic labels, handlers, and unlabeled X buttons", () => {
+  const controls = discoverControls(
+    `
+    <div>
+      <button className="relative hit-area-6" aria-label={\`Remove \${name}\`}><X /></button>
+      <button className="size-4" onClick={clearSelection}><Trash2 /></button>
+      <Button size="icon"><X /></Button>
+      <button className="size-6"><span className="sr-only">Dismiss</span><X /></button>
+      <button className="size-4" aria-label="Clear">{pending ? "Clearing" : <X />}</button>
+      <button>Clear all</button>
+      <Button onClick={remove}>{pending ? "Removing" : "Remove person"}</Button>
+      <Button><X />{"Clear selection"}</Button>
+      <X />
+      <DialogContent showCloseButton />
+    </div>`,
+    "fixture.tsx"
   );
+  assert.equal(controls.length, 5);
+  assert.equal(new Set(controls.map((control) => control.location)).size, 5);
+});
+
+test("guard refuses a second undersized control and an overlay without a containing block", async () => {
+  const controls = discoverControls(
+    `<div>
+    <button className="size-6" aria-label="Close"><X /></button>
+    <button className="size-4" aria-label="Remove"><X /></button>
+    <button className="hit-area-6" aria-label="Clear"><X /></button>
+    <button className="relative hit-area-6" aria-label="Dismiss"><X /></button>
+  </div>`,
+    "fixture.tsx"
+  );
+  await assertTarget(controls[0]);
+  await assert.rejects(assertTarget(controls[1]), /below 24px/);
+  await assert.rejects(assertTarget(controls[2]), /containing block/);
+  await assertTarget(controls[3]);
+});
+
+test("Button size defaults and explicit axis overrides use the shipped variants", async () => {
+  const controls = discoverControls(
+    `<div>
+    <Button size="icon" className="h-8 w-8" aria-label="Remove"><X /></Button>
+    <Button size="icon-xs" aria-label="Close"><X /></Button>
+    <Button size="icon" className="h-4 w-4" aria-label="Clear"><X /></Button>
+  </div>`,
+    "fixture.tsx"
+  );
+  assert.equal(controls.length, 3);
+  await assertTarget(controls[0]);
+  await assertTarget(controls[1]);
+  await assert.rejects(assertTarget(controls[2]), /below 24px/);
 });
