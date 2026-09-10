@@ -1,5 +1,6 @@
 import type { Church } from "@/db/schema";
 import { ActivityFeed } from "@/components/dashboard/activity-feed";
+import { ActivityGuidance } from "@/components/dashboard/activity-guidance";
 import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
 import { MetricCard } from "@/components/dashboard/metric-card";
 import { QuickActions } from "@/components/dashboard/quick-actions";
@@ -273,7 +274,15 @@ export async function PlantDashboard({
         {/* Activity Feed + Quick Actions */}
         <div className="grid gap-6 lg:grid-cols-3">
           <div className="lg:col-span-2">
-            <ActivityFeed activities={activities} />
+            <ActivityFeed
+              activities={activities}
+              emptyGuidance={
+                <ActivityGuidance
+                  viewer={viewer}
+                  phase={(church?.currentPhase ?? 0) as PhaseNumber}
+                />
+              }
+            />
           </div>
           <div className="space-y-6">
             {/* LS-005: the compact countdown/status card. The countdown is
