@@ -88,6 +88,7 @@ html:has(.marketing) {
   line-height: 1;
   letter-spacing: -0.03em;
   text-wrap: balance;
+  overflow-wrap: anywhere;
 }
 .marketing .lp-h2 {
   font-family: var(--display);
