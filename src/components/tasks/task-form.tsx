@@ -184,7 +184,7 @@ export function TaskPrerequisitesField({
               <span className="min-w-0 truncate">{row.title}</span>
               <button
                 type="button"
-                className="text-muted-foreground hover:text-foreground cursor-pointer rounded-sm p-0.5"
+                className="text-muted-foreground hover:text-foreground hit-area-6 relative shrink-0 cursor-pointer rounded-sm p-0.5"
                 aria-label={`Remove prerequisite ${row.title}`}
                 onClick={() => remove(row.id)}
                 disabled={disabled}

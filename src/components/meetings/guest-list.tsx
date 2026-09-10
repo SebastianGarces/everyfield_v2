@@ -556,7 +556,7 @@ export function GuestList({
                       <div className="col-span-1 flex justify-end">
                         <button
                           type="button"
-                          className="text-muted-foreground cursor-pointer rounded-md p-1 hover:bg-red-50 hover:text-red-600"
+                          className="text-muted-foreground size-6 cursor-pointer rounded-md p-1 hover:bg-red-50 hover:text-red-600"
                           onClick={() => handleRemovePerson(guest.personId)}
                           disabled={isPending}
                           aria-label={`Remove ${guest.firstName} ${guest.lastName} from the guest list`}
