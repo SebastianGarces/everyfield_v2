@@ -120,7 +120,15 @@ test("commitment, proficiency, and people-view choices expose their selected sta
     1
   );
 
-  const view = render(createElement(ViewToggle, { currentView: "pipeline" }));
+  const view = render(
+    createElement(ViewToggle, {
+      currentView: "pipeline",
+      query: "view=pipeline",
+      navigate: () => {
+        throw new Error("a static render must not navigate");
+      },
+    })
+  );
   group(view, "People view");
   assert.equal(
     pressedButtons(view).find(
