@@ -2,7 +2,10 @@
 // Board / Elder Meeting Agenda — docx template (F6)
 // ============================================================================
 
-import { Document, HeadingLevel, Paragraph, TextRun } from "docx";
+import { HeadingLevel, Paragraph, TextRun } from "docx";
+
+import { handout, agendaTable } from "./layout";
+import type { Document } from "docx";
 
 import { churchNameOf, documentSubtitle } from "../render-text";
 import type { DocumentMergeValues } from "../types";
@@ -32,33 +35,27 @@ const AGENDA: { title: string; detail: string }[] = [
 
 export function buildBoardMeetingAgenda(values: DocumentMergeValues): Document {
   const churchName = churchNameOf(values);
-  const header = documentSubtitle(
-    "Board / Elder Meeting Agenda",
-    values.meeting_date || null
-  );
+  const header = documentSubtitle(churchName, values.meeting_date || null);
 
-  return new Document({
-    sections: [
-      {
-        children: [
-          new Paragraph({ heading: HeadingLevel.HEADING_1, text: churchName }),
-          new Paragraph({
-            spacing: { after: 240 },
-            children: [new TextRun({ text: header, color: "6B7280" })],
-          }),
-          ...AGENDA.flatMap((item, i) => [
-            new Paragraph({
-              spacing: { before: 120, after: 20 },
-              children: [
-                new TextRun({ text: `${i + 1}. ${item.title}`, bold: true }),
-              ],
-            }),
-            new Paragraph({
-              children: [new TextRun({ text: item.detail, color: "6B7280" })],
-            }),
-          ]),
-        ],
-      },
+  return handout(
+    [
+      new Paragraph({
+        heading: HeadingLevel.TITLE,
+        text: "Board and Elder Meeting Agenda",
+      }),
+      new Paragraph({
+        spacing: { after: 240 },
+        children: [new TextRun({ text: header, color: "6B7280" })],
+      }),
+      agendaTable(AGENDA),
+      new Paragraph({
+        text: "Action / owner / due date",
+        heading: HeadingLevel.HEADING_1,
+      }),
+      new Paragraph({
+        text: "________________________________________________________________",
+      }),
     ],
-  });
+    "Board and elder meeting"
+  );
 }
