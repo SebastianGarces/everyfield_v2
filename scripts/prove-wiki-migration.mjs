@@ -36,8 +36,8 @@ const journal = JSON.parse(
   readFileSync(join(migrations, "meta/_journal.json"), "utf8")
 );
 const wiki = journal.entries.at(-1);
-assert.equal(wiki.tag, "0074_wiki_progress_sharing");
-assert.equal(wiki.idx, 74);
+assert.equal(wiki.tag, "0075_wiki_progress_sharing");
+assert.equal(wiki.idx, 75);
 const baseline = join(temporary, "baseline");
 mkdirSync(join(baseline, "meta"), { recursive: true });
 const prior = journal.entries.slice(0, -1);
@@ -87,7 +87,7 @@ try {
     "select max(created_at)::text as stamp from drizzle.__drizzle_migrations"
   );
   assert.equal(oldMax.rows[0].stamp, String(prior.at(-1).when));
-  const fixture = "62000000-0000-4000-8000-000000000074";
+  const fixture = "62000000-0000-4000-8000-000000000075";
   await client.query(
     "insert into churches(id,name,onboarding_completed_at) values ($1,'issue62 migration default proof',now())",
     [fixture]
