@@ -46,10 +46,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body
-        className={`${instrumentSans.variable} ${geistMono.variable} antialiased`}
-      >
+    <html
+      lang="en"
+      className={`${instrumentSans.variable} ${geistMono.variable} ${instrumentSans.className}`}
+    >
+      <body className="antialiased">
         {children}
         <Toaster richColors position="bottom-right" closeButton />
       </body>

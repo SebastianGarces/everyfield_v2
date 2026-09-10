@@ -45,11 +45,12 @@ test("design and catalog assign display and working text to the approved familie
 test("the root and utility defaults share Instrument Sans, including italic working text", () => {
   assert.match(root, /Instrument_Sans\(\{/);
   assert.match(root, /style: \["normal", "italic"\]/);
-  assert.match(root, /instrumentSans\.variable/);
-  assert.match(
-    globals,
-    /body\s*\{\s*font-family: var\(--font-instrument-sans\)/
-  );
+  // Tailwind resolves its default on html. Defining only the variable on body
+  // leaves root defaults unresolved, even though marketing can read it below.
+  const html = root.match(/<html\b[\s\S]*?>/)?.[0];
+  assert.ok(html);
+  assert.match(html, /instrumentSans\.variable/);
+  assert.match(html, /instrumentSans\.className/);
   assert.match(globals, /--font-sans: var\(--font-instrument-sans\)/);
   assert.match(marketing, /--display: var\(--font-bricolage-grotesque\)/);
   assert.match(marketing, /--sans: var\(--font-instrument-sans\)/);
