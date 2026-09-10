@@ -121,6 +121,7 @@ const SERVICE = path.join(SRC, "lib/meetings/service.ts");
  */
 const DB_MODULES = [
   SERVICE,
+  path.join(SRC, "lib/meetings/own-rsvp.ts"),
   path.join(SRC, "lib/meetings/response-queries.ts"),
 ];
 
