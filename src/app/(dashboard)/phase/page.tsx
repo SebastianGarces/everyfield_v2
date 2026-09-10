@@ -22,7 +22,6 @@ import { redirect } from "next/navigation";
 
 import {
   HeaderBreadcrumbs,
-  PageContext,
   type HeaderBreadcrumbItem,
 } from "@/components/header";
 import { PhaseWorkspace } from "@/components/phase-engine/phase-workspace";
@@ -256,7 +255,6 @@ export default async function PhasePage() {
           intro={
             <>
               <header>
-                <PageContext className="mb-2" items={PHASE_BREADCRUMBS} />
                 <h1
                   id={DASHBOARD_PAGE_CONTENT_ID}
                   tabIndex={-1}

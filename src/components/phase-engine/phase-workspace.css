@@ -9,7 +9,8 @@
 .phase-workspace > .phase-care {
   min-width: 0;
   align-self: start;
-  top: 1rem;
+  /* PageCanvas supplies the inset; another offset depends on panel height. */
+  top: 0;
 }
 
 @media (min-width: 72rem) {
