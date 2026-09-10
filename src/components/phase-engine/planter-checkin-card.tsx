@@ -2,6 +2,7 @@
 
 import {
   useEffect,
+  useId,
   useOptimistic,
   useRef,
   useState,
@@ -99,6 +100,7 @@ export function PlanterCheckinCard({
   weeks,
   nudges,
 }: PlanterCheckinCardProps) {
+  const checkinId = useId();
   const [isPending, startTransition] = useTransition();
 
   // `useOptimistic` OVER THE SERVER PROP, never `useState` seeded from it
@@ -211,14 +213,22 @@ export function PlanterCheckinCard({
             className="space-y-4"
           >
             {CHECKIN_DIMENSIONS.map((dimension) => (
-              <div key={dimension.key} className="space-y-1.5">
-                <Label className="text-sm font-medium">
+              <fieldset
+                key={dimension.key}
+                data-slot="checkin-dimension"
+                aria-describedby={`${checkinId}-${dimension.key}-prompt`}
+                className="min-w-0"
+              >
+                <legend className="w-full text-sm leading-5 font-medium">
                   {dimension.label}
-                  <span className="text-muted-foreground ml-2 font-normal">
-                    {dimension.prompt}
-                  </span>
-                </Label>
-                <div className="flex flex-wrap gap-2">
+                </legend>
+                <p
+                  id={`${checkinId}-${dimension.key}-prompt`}
+                  className="text-muted-foreground mt-0.5 text-sm leading-5"
+                >
+                  {dimension.prompt}
+                </p>
+                <div className="mt-1.5 grid grid-cols-[repeat(auto-fit,minmax(min(100%,6.5em),1fr))] gap-1.5 text-xs font-medium">
                   {CHECKIN_LEVELS.map((level) => (
                     <button
                       key={level.value}
@@ -240,7 +250,7 @@ export function PlanterCheckinCard({
                         })
                       }
                       className={cn(
-                        "cursor-pointer rounded-md border px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50",
+                        "min-h-9 cursor-pointer rounded-md border px-2 py-2 leading-4 transition-colors disabled:opacity-50 data-[selected=true]:underline data-[selected=true]:decoration-2 data-[selected=true]:underline-offset-4",
                         "hover:bg-muted",
                         LEVEL_BUTTON[level.value]
                       )}
@@ -249,7 +259,7 @@ export function PlanterCheckinCard({
                     </button>
                   ))}
                 </div>
-              </div>
+              </fieldset>
             ))}
 
             <div className="space-y-1.5">

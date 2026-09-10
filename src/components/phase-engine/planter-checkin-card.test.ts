@@ -20,7 +20,10 @@ import { test } from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import type { CheckinAnswer } from "@/lib/phase-engine/planter-checkin";
+import {
+  CHECKIN_DIMENSIONS,
+  type CheckinAnswer,
+} from "@/lib/phase-engine/planter-checkin";
 
 import { PlanterCheckinCard, type CheckinWeek } from "./planter-checkin-card";
 
@@ -93,5 +96,32 @@ test("both panels are really rendering, so neither test asserts on an empty card
   for (const markup of [render(ANSWER), render(null)]) {
     assert.match(markup, /data-testid="planter-checkin"/);
     assert.match(markup, /data-testid="checkin-strip"/);
+  }
+});
+
+// The same response labels repeat across dimensions. The native groups must
+// announce which question each set answers, rather than twelve unnamed peers.
+test("each response group has its dimension name and question description", () => {
+  const markup = render(null);
+  const groups = [
+    ...markup.matchAll(/<fieldset([^>]*)>([\s\S]*?)<\/fieldset>/g),
+  ];
+  assert.equal(groups.length, CHECKIN_DIMENSIONS.length);
+
+  for (const [index, [, attributes, content]] of groups.entries()) {
+    const dimension = CHECKIN_DIMENSIONS[index];
+    const descriptionId = attributes.match(/aria-describedby="([^"]+)"/)?.[1];
+    assert.ok(
+      descriptionId,
+      `${dimension.label} needs its question description`
+    );
+    assert.ok(
+      content.includes(`>${dimension.label.replaceAll("&", "&amp;")}</legend>`),
+      `${dimension.label} needs a native legend`
+    );
+    assert.ok(content.includes(`id="${descriptionId}"`));
+    assert.ok(content.includes(dimension.prompt));
+    assert.equal((content.match(/aria-pressed="false"/g) ?? []).length, 3);
+    assert.equal((content.match(/<button /g) ?? []).length, 3);
   }
 });
