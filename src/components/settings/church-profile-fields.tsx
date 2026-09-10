@@ -98,11 +98,15 @@ function ProfileFieldRow({
   const stored = value ?? "";
   const typed = () => input.current?.value.trim() ?? stored;
 
-  const { state, commit } = useFieldSave({
+  const { state, commit, dirty, revert, editProps } = useFieldSave({
     typed,
     stored,
-    save: () =>
-      setChurchProfileFieldAction({ field: field.id, value: typed() }),
+    save: (value) => setChurchProfileFieldAction({ field: field.id, value }),
+    reset: (value) => {
+      if (!input.current) return;
+      input.current.value = value;
+      input.current.focus();
+    },
   });
 
   const inputId = `church-profile-${field.id}`;
@@ -112,7 +116,13 @@ function ProfileFieldRow({
   // one-column grid asks for a second column and CSS grid obliges by creating
   // an implicit one, which is a stray half-width track.
   return (
-    <div className={field.span === "full" ? "@md:col-span-2" : undefined}>
+    <div
+      {...editProps}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) commit();
+      }}
+      className={field.span === "full" ? "@md:col-span-2" : undefined}
+    >
       <div className="space-y-1.5">
         <Label htmlFor={inputId} className="cursor-pointer">
           {field.label}
@@ -144,11 +154,15 @@ function ProfileFieldRow({
           aria-invalid={state.status === "failed" ? true : undefined}
           aria-describedby={statusId}
           className="w-full max-w-md"
-          onBlur={commit}
           onKeyDown={commitOnEnter(commit)}
         />
 
-        <FieldSaveStatus id={statusId} state={state} />
+        <FieldSaveStatus
+          id={statusId}
+          state={state}
+          dirty={dirty}
+          revert={revert}
+        />
       </div>
     </div>
   );
