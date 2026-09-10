@@ -56,12 +56,14 @@ async function main() {
         userId: member.id,
         firstName: "Member",
         lastName: prefix,
+        createdBy: member.id,
       },
       {
         churchId: church.id,
         userId: stranger.id,
         firstName: "Other",
         lastName: prefix,
+        createdBy: member.id,
       },
     ])
     .returning();
@@ -95,7 +97,7 @@ async function main() {
       personId: p.id,
       status: "absent" as const,
       notes: "Do not change",
-      responseStatus: "invited" as const,
+      responseStatus: null,
     }))
   );
   await db.insert(invitations).values({
@@ -133,7 +135,7 @@ async function main() {
   }
   const pending = await pendingToken();
   assert.deepEqual(await getOwnRsvp(member, meeting.id), {
-    response: "invited",
+    response: null,
   });
   for (const response of ["confirmed", "declined"] as const) {
     assert.equal(await saveOwnRsvp(member, meeting.id, response), true);
@@ -321,8 +323,7 @@ async function main() {
     assert.equal(guest.status, "absent");
     assert.equal(guest.notes, "Do not change");
     assert.equal(guest.attendanceType, null);
-    if (guest.personId === other.id)
-      assert.equal(guest.responseStatus, "invited");
+    if (guest.personId === other.id) assert.equal(guest.responseStatus, null);
   }
   const [invitation] = await db
     .select()
