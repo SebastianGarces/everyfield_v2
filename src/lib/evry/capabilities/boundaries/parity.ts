@@ -21,6 +21,13 @@ export const PARITY_CAPABILITIES = defineEvryParityCapabilities(
       { kind: "route", match: "prefix", path: "/login" },
       { kind: "route", match: "prefix", path: "/register" },
       { kind: "route", match: "prefix", path: "/verify-email" },
+      // Token-bound human acceptance can grant a first seat; Evry cannot accept it.
+      { kind: "route", match: "exact", path: "/seat-invitation" },
+      {
+        kind: "action-identity",
+        identity:
+          "action:src/app/(auth)/seat-invitation/actions.ts → acceptSeatInvitationAction",
+      },
       {
         kind: "action-source",
         match: "prefix",
