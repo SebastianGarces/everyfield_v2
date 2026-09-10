@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useSyncExternalStore } from "react";
+
 import {
   settingsSectionFromHash,
   settingsSectionHref,
@@ -166,6 +168,25 @@ export function subscribeToSettingsHash(onStoreChange: () => void): () => void {
 }
 
 export const settingsHashSnapshot = () => window.location.hash;
+
+/** The active section and its registration with the client router. */
+export function useSettingsSection() {
+  const hash = useSyncExternalStore(
+    subscribeToSettingsHash,
+    settingsHashSnapshot,
+    settingsHashServerSnapshot
+  );
+  const activeId = settingsSectionFromHash(hash);
+  useEffect(() => {
+    if (activeId === null) return;
+    // A cold URL may already be canonical while Next's router still lacks its
+    // fragment. Register it through the same history API as SettingsLink, even
+    // when the visible URL needs no correction, so a save's refresh preserves it.
+    // Replace keeps cold arrivals in place and retains a pushed entry's Close rule.
+    showSection(activeId);
+  }, [activeId, hash]);
+  return activeId;
+}
 
 /** A fragment never reaches a server, so a server render always draws no modal. */
 export const settingsHashServerSnapshot = () => "";

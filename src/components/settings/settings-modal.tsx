@@ -1,15 +1,7 @@
 "use client";
 
 import { Search, XIcon } from "lucide-react";
-import {
-  Suspense,
-  use,
-  useEffect,
-  useId,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import { Suspense, use, useEffect, useId, useRef, useState } from "react";
 
 import { AccountSection } from "@/components/settings/sections/account-section";
 import { AssociationSection } from "@/components/settings/sections/association-section";
@@ -33,10 +25,8 @@ import {
   cachedSectionView,
   closeSettings,
   sectionRequest,
-  settingsHashServerSnapshot,
-  settingsHashSnapshot,
   showSection,
-  subscribeToSettingsHash,
+  useSettingsSection,
 } from "@/lib/settings/settings-hash";
 import type {
   SettingsSectionLoad,
@@ -46,7 +36,6 @@ import {
   DEFAULT_SETTINGS_SECTION,
   SETTINGS_SECTIONS,
   sectionMatchesQuery,
-  settingsSectionFromHash,
   settingsSectionHref,
   type SettingsSectionId,
 } from "@/lib/settings/sections";
@@ -144,25 +133,7 @@ export function SettingsModal({
   serverRenderId,
   scope,
 }: SettingsModalProps) {
-  const hash = useSyncExternalStore(
-    subscribeToSettingsHash,
-    settingsHashSnapshot,
-    settingsHashServerSnapshot
-  );
-  const activeId = settingsSectionFromHash(hash);
-
-  // THE ADDRESS BAR IS CORRECTED TO WHAT IS ON SCREEN. `#settings`,
-  // `#settings/sharing` and a typo all resolve to a real section, and without
-  // this the URL would go on naming something the modal is not showing — which
-  // is the one thing a mechanism whose whole state is the URL cannot afford. It
-  // converges in one pass: the rewrite makes the fragment canonical, so the
-  // change it triggers finds nothing left to do.
-  useEffect(() => {
-    if (activeId === null) return;
-    if (window.location.hash !== settingsSectionHref(activeId)) {
-      showSection(activeId);
-    }
-  }, [activeId, hash]);
+  const activeId = useSettingsSection();
 
   if (activeId === null) return null;
   return (

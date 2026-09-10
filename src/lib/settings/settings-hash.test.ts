@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
 import { beforeEach, test } from "node:test";
+import { createElement } from "react";
+import { act, create, type ReactTestRenderer } from "react-test-renderer";
+
+Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
 // ============================================================================
 // THE HISTORY POLICY, DRIVEN (#657).
@@ -32,10 +36,12 @@ type Entry = { url: string };
 class FakeWindow {
   entries: Entry[];
   index = 0;
+  routerUrl: string;
   listeners: Record<string, ((event?: unknown) => void)[]> = {};
 
   constructor(url: string) {
     this.entries = [{ url }];
+    this.routerUrl = url.split("#")[0];
     // Arrow functions, so the object closes over the instance rather than over
     // its own `this` — the patch in `watchHistory` reassigns these properties,
     // and a `this`-dependent method would then be called on the wrong receiver.
@@ -44,9 +50,11 @@ class FakeWindow {
         this.entries = this.entries.slice(0, this.index + 1);
         this.entries.push({ url: new URL(to, this.href()).href });
         this.index = this.entries.length - 1;
+        this.routerUrl = this.href();
       },
       replaceState: (_state: unknown, _title: string, to: string) => {
         this.entries[this.index] = { url: new URL(to, this.href()).href };
+        this.routerUrl = this.href();
       },
       back: () => {
         if (this.index > 0) {
@@ -151,6 +159,43 @@ async function arriveOn(url: string) {
 
 beforeEach(() => {
   delete (globalThis as { window?: unknown }).window;
+});
+
+test("cold canonical settings survive router refresh without adding a history entry", async () => {
+  const { fake, mod, unsubscribe } = await arriveOn(
+    "/phase?view=board#settings/church"
+  );
+  function ModalLocation() {
+    return createElement("div", null, mod.useSettingsSection());
+  }
+  let renderer: ReactTestRenderer | undefined;
+  try {
+    await act(async () => {
+      renderer = create(createElement(ModalLocation));
+    });
+    // Next refresh uses its own canonical URL, initially missing the cold hash.
+    await act(async () => {
+      fake.history.replaceState(null, "", fake.routerUrl);
+    });
+    assert.equal(fake.url, `${ORIGIN}/phase?view=board#settings/church`);
+    assert.deepEqual(renderer?.toJSON(), {
+      type: "div",
+      props: {},
+      children: ["church"],
+    });
+    assert.equal(fake.depth, 1);
+    await act(async () => {
+      mod.closeSettings();
+    });
+    assert.equal(fake.url, `${ORIGIN}/phase?view=board`);
+    assert.equal(fake.index, 0);
+    assert.equal(fake.depth, 1);
+  } finally {
+    await act(async () => {
+      renderer?.unmount();
+    });
+    unsubscribe();
+  }
 });
 
 test("a cold load into settings closes IN PLACE, and never navigates", async () => {
