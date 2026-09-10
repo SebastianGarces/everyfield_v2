@@ -36,7 +36,7 @@ export function ResponseCardDocument({
             style={{
               flexDirection: "row",
               alignItems: "flex-end",
-              marginBottom: 7,
+              marginBottom: 10,
             }}
           >
             <Text style={{ width: 42 }}>{label}:</Text>
@@ -50,7 +50,7 @@ export function ResponseCardDocument({
         {INTERESTS.map((interest) => (
           <View key={interest} style={styles.checkRow}>
             <View style={styles.checkbox} />
-            <Text>{interest}</Text>
+            <Text style={{ flex: 1 }}>{interest}</Text>
           </View>
         ))}
       </Page>
