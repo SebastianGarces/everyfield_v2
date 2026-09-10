@@ -228,7 +228,7 @@ export function PlanterCheckinCard({
                 >
                   {dimension.prompt}
                 </p>
-                <div className="mt-1.5 grid grid-cols-[repeat(auto-fit,minmax(min(100%,5rem),1fr))] gap-1.5">
+                <div className="mt-1.5 grid grid-cols-[repeat(auto-fit,minmax(min(100%,6.5em),1fr))] gap-1.5 text-xs font-medium">
                   {CHECKIN_LEVELS.map((level) => (
                     <button
                       key={level.value}
@@ -250,7 +250,7 @@ export function PlanterCheckinCard({
                         })
                       }
                       className={cn(
-                        "min-h-9 cursor-pointer rounded-md border px-2 py-2 text-xs leading-4 font-medium break-words transition-colors disabled:opacity-50 data-[selected=true]:underline data-[selected=true]:decoration-2 data-[selected=true]:underline-offset-4",
+                        "min-h-9 cursor-pointer rounded-md border px-2 py-2 leading-4 transition-colors disabled:opacity-50 data-[selected=true]:underline data-[selected=true]:decoration-2 data-[selected=true]:underline-offset-4",
                         "hover:bg-muted",
                         LEVEL_BUTTON[level.value]
                       )}
