@@ -66,15 +66,26 @@ test("completed dashboard uses an unboxed identity and sibling cards", () => {
 
 test("Plant Intelligence keeps approved standalone context and sibling surfaces", () => {
   const source = routeSource("phase/page.tsx");
+  const workspace = readFileSync(
+    join(process.cwd(), "src/components/phase-engine/phase-workspace.tsx"),
+    "utf8"
+  );
 
   assert.match(source, /<PageCanvas[\s\S]*?context="none"/);
   assert.match(
     source,
     /<PageContext className="mb-2" items=\{PHASE_BREADCRUMBS\}/
   );
-  assert.match(source, /data-slot="plant-intelligence-content"/);
-  assert.doesNotMatch(source, /WorkspacePanel/);
-  assert.doesNotMatch(source, /contextAttachment|attachment="attached"/);
+  assert.match(
+    source,
+    /import \{ PhaseWorkspace \} from "@\/components\/phase-engine\/phase-workspace"/
+  );
+  assert.match(source, /<PhaseWorkspace\s/);
+  assert.match(workspace, /data-slot="plant-intelligence-content"/);
+  for (const composition of [source, workspace]) {
+    assert.doesNotMatch(composition, /WorkspacePanel/);
+    assert.doesNotMatch(composition, /contextAttachment|attachment="attached"/);
+  }
 });
 
 test("detail routes attach server-known trails to their first surface", () => {

@@ -25,6 +25,8 @@ import {
   PageContext,
   type HeaderBreadcrumbItem,
 } from "@/components/header";
+import { PhaseWorkspace } from "@/components/phase-engine/phase-workspace";
+
 import { CsfScorecard } from "@/components/phase-engine/csf-scorecard";
 import { PageCanvas } from "@/components/layout/page-frame";
 import { ExitCriteria } from "@/components/phase-engine/exit-criteria";
@@ -250,98 +252,91 @@ export default async function PhasePage() {
         context="none"
         scrollLayout="flow"
       >
-        <div
-          data-slot="plant-intelligence-content"
-          className="min-h-full space-y-6"
-        >
-          <header>
-            <PageContext className="mb-2" items={PHASE_BREADCRUMBS} />
-            <h1
-              id={DASHBOARD_PAGE_CONTENT_ID}
-              tabIndex={-1}
-              className="text-2xl font-semibold tracking-tight outline-none"
-            >
-              Plant Intelligence
-            </h1>
-            <p className="text-foreground mt-1 text-sm">
-              Your prioritized focus, phase control, and self-attestations —
-              read from the latest assessment.
-            </p>
-            {/* #485 (C20) — the scope, said out loud on the surface rather than
+        <PhaseWorkspace
+          intro={
+            <>
+              <header>
+                <PageContext className="mb-2" items={PHASE_BREADCRUMBS} />
+                <h1
+                  id={DASHBOARD_PAGE_CONTENT_ID}
+                  tabIndex={-1}
+                  className="text-2xl font-semibold tracking-tight outline-none"
+                >
+                  Plant Intelligence
+                </h1>
+                <p className="text-foreground mt-1 text-sm">
+                  Your prioritized focus, phase control, and self-attestations —
+                  read from the latest assessment.
+                </p>
+                {/* #485 (C20) — the scope, said out loud on the surface rather than
             only in the rubric. Bryan: "the product should be really clear
             about which of those two things it is claiming to assess." */}
-            <p className="text-foreground mt-1 max-w-[70ch] text-sm text-pretty">
-              Plant Intelligence assesses your progress toward a healthy launch
-              — not the full health of a church.
-            </p>
-          </header>
+                <p className="text-foreground mt-1 max-w-[70ch] text-sm text-pretty">
+                  Plant Intelligence assesses your progress toward a healthy
+                  launch — not the full health of a church.
+                </p>
+              </header>
 
-          {coldStart && (
-            <Card data-testid="assessment-cold-start">
-              <CardHeader>
-                <CardTitle>
-                  <h2>{coldStart.title}</h2>
-                </CardTitle>
-                <CardDescription className="max-w-[65ch] text-pretty">
-                  {coldStart.body}
-                </CardDescription>
-              </CardHeader>
-            </Card>
-          )}
-
-          <div className="grid gap-6 lg:grid-cols-3">
-            {/* Scorecard, then exit criteria, then the trends, then the focus list:
-            where the plant stands → what is left before it moves on → which way
-            it is moving → what to do about it. The trends sit above the focus
-            list because they are evidence for it, and below the exit criteria
-            because a direction only means something once the target is known. */}
-            <div className="space-y-6 lg:col-span-2">
+              {coldStart && (
+                <Card data-testid="assessment-cold-start">
+                  <CardHeader>
+                    <CardTitle>
+                      <h2>{coldStart.title}</h2>
+                    </CardTitle>
+                    <CardDescription className="max-w-[65ch] text-pretty">
+                      {coldStart.body}
+                    </CardDescription>
+                  </CardHeader>
+                </Card>
+              )}
+            </>
+          }
+          focus={
+            <FocusPanel
+              assessment={latest?.assessment ?? null}
+              insights={planterInsights}
+              delta={delta}
+              feedbackByInsightId={feedbackByInsightId}
+            />
+          }
+          care={
+            <PlanterCheckinCard
+              thisWeek={
+                answeredThisWeek && {
+                  spiritually: answeredThisWeek.spiritually,
+                  marriageFamily: answeredThisWeek.marriageFamily,
+                  financially: answeredThisWeek.financially,
+                  pace: answeredThisWeek.pace,
+                  note: answeredThisWeek.note,
+                }
+              }
+              weeks={checkinWeeks}
+              nudges={checkinNudges(checkins)}
+            />
+          }
+          health={
+            <>
               <CsfScorecard scorecard={scorecard} />
-              <ExitCriteria progress={exitCriteria} />
               <Trends trends={trends} />
-              <FocusPanel
-                assessment={latest?.assessment ?? null}
-                insights={planterInsights}
-                delta={delta}
-                feedbackByInsightId={feedbackByInsightId}
-              />
-            </div>
-
-            <div className="space-y-6">
+            </>
+          }
+          progress={
+            <>
               <PhaseControl
                 currentPhase={church.currentPhase}
                 readiness={readiness}
               />
-              {/* The timeline sits under the phase control, not in the main column:
-              it is the dated record of the moves that control makes plus the day
-              the plant is heading for, so the two read as one column about
-              where the plant is in time. Keeping it out of the main column also
-              leaves the focus list — the only part of the page a planter acts
-              on — directly under the evidence for it. */}
-              {/* #484 — the private one. It sits in the same column as the
-              assessment, deliberately: launch-green may not be shown without
-              the planter's own state beside it. */}
-              <PlanterCheckinCard
-                thisWeek={
-                  answeredThisWeek && {
-                    spiritually: answeredThisWeek.spiritually,
-                    marriageFamily: answeredThisWeek.marriageFamily,
-                    financially: answeredThisWeek.financially,
-                    pace: answeredThisWeek.pace,
-                    note: answeredThisWeek.note,
-                  }
-                }
-                weeks={checkinWeeks}
-                nudges={checkinNudges(checkins)}
-              />
+              <ExitCriteria progress={exitCriteria} />
               <MilestoneTimeline timeline={timeline} />
-              <SignalToggles
-                initialValues={booleanSignals}
-                attestedDaysAgo={attestationAges}
-              />
-            </div>
-          </div>
-        </div>
+            </>
+          }
+          signals={
+            <SignalToggles
+              initialValues={booleanSignals}
+              attestedDaysAgo={attestationAges}
+            />
+          }
+        />
       </PageCanvas>
     </>
   );

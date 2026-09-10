@@ -172,6 +172,8 @@ Applies to `phase_transitions` and every reader of it.
 
 ## Phase Engine — Cited Facts & Attestation Citations
 
+- Plant Intelligence uses the sectioned A layout, ruled by Sebastian for #533 on 2026-09-10. The personal check-in sits beside the entire header/navigation/content column on desktop and stays visible while scrolling when it fits; shorter viewports must retain access to every control, and mobile stacks naturally. Section changes preserve drafts.
+
 Applies to `src/lib/phase-engine/**` and the `/phase` surfaces rendering `plant_insights.cited_facts`.
 
 - A CITED PATH IS UNTRUSTED INPUT — the judge writes it, so a segment may be `constructor`, `toString` or `__proto__` — binding every read of a judge-written key AND the write that assembles `manual.byKey`. Exactly three shapes are sanctioned: a `Map` read with `.get`, a `Record` read through `Object.hasOwn`, or a prototype-free `Object.create(null)` accumulator; never a bare `in` or `[key]`.
