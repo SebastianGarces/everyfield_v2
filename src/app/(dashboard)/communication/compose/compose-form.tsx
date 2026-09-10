@@ -88,7 +88,7 @@ export function ComposeForm({
 
   const [subject, setSubject] = useState(initialTemplate?.subject ?? "");
   const [body, setBody] = useState(() =>
-    toRichTextHtml(initialTemplate?.body ?? "")
+    toRichTextHtml(initialTemplate?.bodyHtml ?? initialTemplate?.body ?? "")
   );
   const [selectedTemplateId, setSelectedTemplateId] = useState(
     initialTemplate?.id ?? ""
