@@ -37,7 +37,9 @@ test("a caller cannot select another Person, church, or attendance field", () =>
 
 test("the HTTP write authenticates before parsing and returns JSON refusals", () => {
   const route = readFileSync("src/app/api/meetings/[id]/rsvp/route.ts", "utf8");
-  const guard = route.indexOf('await requireSeat("meetings.rsvp")');
+  const guard = route.indexOf('holdsSeatFor(user, "meetings.rsvp")');
+  const session = route.indexOf("await getCurrentSession()");
+  assert.ok(session > 0 && session < guard);
   assert.ok(guard > 0 && guard < route.indexOf("safeParse"));
   assert.ok(guard < route.indexOf("req.json"));
   for (const status of [400, 401, 403, 404, 500])

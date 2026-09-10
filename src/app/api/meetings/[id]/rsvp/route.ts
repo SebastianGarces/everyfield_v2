@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { requireSeat } from "@/lib/auth/seats";
-import { SeatRefusalError } from "@/lib/auth/seat-rules";
-import { isUnauthorized } from "@/lib/auth/unauthorized";
+import { getCurrentSession } from "@/lib/auth/session";
+import { holdsSeatFor, SeatRefusalError } from "@/lib/auth/seat-rules";
 import { ownRsvpInput } from "@/lib/meetings/own-rsvp-input";
 import { saveOwnRsvp } from "@/lib/meetings/own-rsvp";
 
@@ -11,7 +10,21 @@ export async function POST(
   context: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { user } = await requireSeat("meetings.rsvp");
+    // HTTP routes return explicit status codes; server actions throw their
+    // session refusal. The capability and subject policies are shared.
+    const { user } = await getCurrentSession();
+    if (!user) {
+      return NextResponse.json(
+        { error: "Sign in again to save your RSVP." },
+        { status: 401 }
+      );
+    }
+    if (!holdsSeatFor(user, "meetings.rsvp")) {
+      return NextResponse.json(
+        { error: "Your account cannot update this RSVP." },
+        { status: 403 }
+      );
+    }
     const id = z
       .string()
       .uuid()
@@ -31,12 +44,6 @@ export async function POST(
     }
     return NextResponse.json({ success: true });
   } catch (error) {
-    if (isUnauthorized(error)) {
-      return NextResponse.json(
-        { error: "Sign in again to save your RSVP." },
-        { status: 401 }
-      );
-    }
     if (error instanceof SeatRefusalError) {
       return NextResponse.json(
         { error: "Your account cannot update this RSVP." },
