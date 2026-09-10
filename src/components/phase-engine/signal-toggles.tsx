@@ -12,7 +12,6 @@
 // server failure.
 // ============================================================================
 
-import { usePhaseSavePreview } from "./prototypes/save-preview";
 import { RotateCcw } from "lucide-react";
 import { useOptimistic, useTransition } from "react";
 import { toast } from "sonner";
@@ -106,7 +105,6 @@ function SignalToggle({
   daysAgo: number | null;
   reaffirmWindowDays: number;
 }) {
-  const previewSave = usePhaseSavePreview();
   const [isPending, startTransition] = useTransition();
   const [checked, setOptimisticChecked] = useOptimistic(attested);
 
@@ -125,7 +123,6 @@ function SignalToggle({
     daysAgo >= reaffirmWindowDays;
 
   function handleChange(next: boolean) {
-    if (previewSave()) return;
     startTransition(async () => {
       setOptimisticChecked(next);
 
@@ -152,7 +149,6 @@ function SignalToggle({
    * the same true twice.
    */
   function handleReaffirm() {
-    if (previewSave()) return;
     startTransition(async () => {
       const result = await setManualSignalAction({
         signalKey: signal.key,

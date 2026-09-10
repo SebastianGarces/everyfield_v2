@@ -12,7 +12,6 @@
 // (src/app/(dashboard)/phase/actions.ts → transitionPhaseAction).
 // ============================================================================
 
-import { usePhaseSavePreview } from "./prototypes/save-preview";
 import { Loader2 } from "lucide-react";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -70,7 +69,6 @@ interface PhaseControlProps {
  * plant at all.
  */
 export function PhaseControl({ currentPhase, readiness }: PhaseControlProps) {
-  const previewSave = usePhaseSavePreview();
   const [targetPhase, setTargetPhase] = useState<number>(currentPhase);
   const [reason, setReason] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -89,8 +87,6 @@ export function PhaseControl({ currentPhase, readiness }: PhaseControlProps) {
       toast.error("A reason is required to change the phase");
       return;
     }
-
-    if (previewSave()) return;
 
     startTransition(async () => {
       const result = await transitionPhaseAction({
