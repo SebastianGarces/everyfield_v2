@@ -23,7 +23,7 @@ type PrimaryComposition =
   | "context-free-workspace"
   | "context-free-siblings"
   | "dashboard-hybrid"
-  | "manual-standalone";
+  | "heading-owned-siblings";
 
 /**
  * The canonical route-to-composition inventory for authenticated primary
@@ -33,7 +33,7 @@ type PrimaryComposition =
 const PRIMARY_PRESENTATION_ROOTS = [
   ["dashboard/no-plant-empty-state.tsx", "context-free-workspace"],
   ["dashboard/plant-dashboard.tsx", "dashboard-hybrid"],
-  ["phase/page.tsx", "manual-standalone"],
+  ["phase/page.tsx", "heading-owned-siblings"],
   ["launch/page.tsx", "context-free-siblings"],
   ["tasks/page.tsx", "attached-workspace"],
   ["tasks/new/page.tsx", "attached-workspace"],
@@ -114,10 +114,15 @@ function assertComposition(
       assert.doesNotMatch(source, /PageContext/);
       break;
     }
-    case "manual-standalone": {
+    case "heading-owned-siblings": {
       assert.equal(canvases.length, 1, `${relativePath} needs one canvas`);
       assertPageCanvasContext(canvases[0], "context-free", relativePath);
-      assert.match(source, /<PageContext(?:\s|>)/);
+      assert.doesNotMatch(source, /PageContext/);
+      assert.match(
+        source,
+        /<h1\s[^>]*id=\{DASHBOARD_PAGE_CONTENT_ID\}[^>]*tabIndex=\{-1\}/,
+        "the page heading owns the content focus target"
+      );
       assert.doesNotMatch(source, /WorkspacePanel/);
       assert.doesNotMatch(source, /contextAttachment|attachment="attached"/);
       break;
@@ -272,12 +277,8 @@ test("every primary route declares page context and phase names Plant Intelligen
   assertInOrder(
     phase,
     "phase/page.tsx",
-    [
-      "<HeaderBreadcrumbs items={PHASE_BREADCRUMBS} />",
-      "<PageCanvas",
-      "<PageContext",
-    ],
-    "phase context must be declared before its canvas"
+    ["<HeaderBreadcrumbs items={PHASE_BREADCRUMBS} />", "<PageCanvas", "<h1"],
+    "shell breadcrumbs precede the canvas and its page heading"
   );
   assertInOrder(
     phase,
@@ -287,12 +288,12 @@ test("every primary route declares page context and phase names Plant Intelligen
       "id={DASHBOARD_PAGE_CONTENT_ID}",
       "tabIndex={-1}",
     ],
-    "the settings focus target must follow Phase's manually placed context"
+    "the page heading keeps the settings focus target after shell breadcrumbs"
   );
   assert.match(
     phase,
-    /<header>\s*<PageContext className="mb-2" items=\{PHASE_BREADCRUMBS\} \/>/,
-    "Plant Intelligence keeps the ruled compact, unboxed context above its title"
+    /<header>\s*<h1(?:\s|>)/,
+    "Plant Intelligence starts its unboxed header with the sole page title"
   );
   assert.doesNotMatch(phase, /contextAttachment|attachment="attached"/);
 });

@@ -72,10 +72,12 @@ test("Plant Intelligence keeps approved standalone context and sibling surfaces"
   );
 
   assert.match(source, /<PageCanvas[\s\S]*?context="none"/);
-  assert.match(
+  assert.doesNotMatch(
     source,
-    /<PageContext className="mb-2" items=\{PHASE_BREADCRUMBS\}/
+    /PageContext/,
+    "the page heading is the sole content identity, per the owner ruling"
   );
+  assert.match(source, /<HeaderBreadcrumbs items=\{PHASE_BREADCRUMBS\}/);
   assert.match(
     source,
     /import \{ PhaseWorkspace \} from "@\/components\/phase-engine\/phase-workspace"/

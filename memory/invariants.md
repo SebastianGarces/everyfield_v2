@@ -172,7 +172,7 @@ Applies to `phase_transitions` and every reader of it.
 
 ## Phase Engine — Cited Facts & Attestation Citations
 
-- Plant Intelligence uses the sectioned A layout, ruled by Sebastian for #533 on 2026-09-10. The personal check-in sits beside the entire header/navigation/content column on desktop and stays visible while scrolling when it fits; shorter viewports must retain access to every control, and mobile stacks naturally. Section changes preserve drafts.
+- Plant Intelligence uses the sectioned A layout, ruled by Sebastian for #533 on 2026-09-10. The personal check-in sits beside the entire header/navigation/content column on desktop and stays visible while scrolling when it fits; shorter viewports must retain access to every control, and mobile stacks naturally. Section changes preserve drafts and the fitting check-in card's top position. The page h1 is the sole in-content identity; do not repeat it in a smaller PageContext label, per Sebastian's follow-up ruling.
 
 Applies to `src/lib/phase-engine/**` and the `/phase` surfaces rendering `plant_insights.cited_facts`.
 

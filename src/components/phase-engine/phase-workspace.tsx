@@ -30,10 +30,12 @@ export function PhaseWorkspace({
     // form. A card taller than that viewport stays in normal page flow so its
     // last control remains reachable on short screens and at text zoom.
     const measure = () => {
-      const inset = Number.parseFloat(getComputedStyle(card).top);
-      setCareFits(
-        card.getBoundingClientRect().height + 2 * inset <= canvas.clientHeight
-      );
+      const canvasStyle = getComputedStyle(canvas);
+      const availableHeight =
+        canvas.clientHeight -
+        Number.parseFloat(canvasStyle.paddingTop) -
+        Number.parseFloat(canvasStyle.paddingBottom);
+      setCareFits(card.getBoundingClientRect().height <= availableHeight);
     };
     const observer = new ResizeObserver(measure);
     observer.observe(card);
