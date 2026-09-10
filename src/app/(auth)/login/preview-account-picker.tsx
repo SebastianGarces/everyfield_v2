@@ -113,7 +113,7 @@ export function PreviewAccountPicker({
             className="w-full cursor-pointer justify-between font-normal"
           >
             {picked ? (
-              <span className="truncate">
+              <span className="min-w-0 flex-1 truncate text-left">
                 {picked.name}
                 <span className="text-muted-foreground">
                   {" · "}
@@ -121,7 +121,7 @@ export function PreviewAccountPicker({
                 </span>
               </span>
             ) : (
-              <span className="text-muted-foreground">
+              <span className="text-muted-foreground min-w-0 flex-1 truncate text-left">
                 Search accounts by name, email, or note…
               </span>
             )}
