@@ -288,47 +288,32 @@ export async function resolveConfirmation(
     };
   }
 
-  // All three writes are known up front, so they go in ONE `db.batch([...])`
-  // — a Neon batched transaction, all-or-nothing (memory/invariants.md ->
-  // Transactions). Three independent statements once left a consumed token
-  // whose RSVP was recorded nowhere when a later statement failed, and the
-  // `status !== "pending"` guard above then reported success forever. Now the
-  // token, the invitation and the guest-list row move together, and on failure
-  // the token stays `pending` so the link still works.
-  const invitationStatus = response === "confirmed" ? "confirmed" : "declined";
-  await db.batch([
-    db
-      .update(meetingConfirmationTokens)
-      .set({
-        status: response,
-        respondedAt: new Date(),
-      })
-      .where(eq(meetingConfirmationTokens.id, tokenRecord.id)),
-    db
-      .update(invitations)
-      .set({
-        status: invitationStatus,
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(invitations.meetingId, tokenRecord.meetingId),
-          eq(invitations.inviteeId, tokenRecord.personId)
-        )
-      ),
-    db
-      .update(meetingAttendance)
-      .set({
-        responseStatus: response,
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(meetingAttendance.meetingId, tokenRecord.meetingId),
-          eq(meetingAttendance.personId, tokenRecord.personId)
-        )
-      ),
-  ]);
+  // Claim the pending token inside the write. A signed-in RSVP can answer it
+  // after the read above; a lost claim must not overwrite that newer answer.
+  // The signed-in path locks token rows before the guest row in the same order.
+  await db.execute(sql`
+    with claimed as (
+      update ${meetingConfirmationTokens} as token
+      set status = ${response}, responded_at = now()
+      where token.id = ${tokenRecord.id}
+        and token.status = 'pending'
+        and token.expires_at >= now()
+      returning token.meeting_id, token.person_id, token.church_id
+    ), guest_answer as (
+      update ${meetingAttendance} as guest
+      set response_status = ${response}, updated_at = now()
+      from claimed
+      where guest.meeting_id = claimed.meeting_id
+        and guest.person_id = claimed.person_id
+        and guest.church_id = claimed.church_id
+    )
+    update ${invitations} as invitation
+    set status = ${response}, updated_at = now()
+    from claimed
+    where invitation.meeting_id = claimed.meeting_id
+      and invitation.invitee_id = claimed.person_id
+      and invitation.church_id = claimed.church_id
+  `);
 
   // Update email tracking — the person clicked the link, so they opened + clicked
   // Find communication_recipients for this person + meeting
