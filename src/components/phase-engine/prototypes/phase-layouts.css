@@ -4,6 +4,11 @@
   gap: 1.5rem;
   align-items: start;
 }
+/* Keep the rating and comment controls inside narrow populated focus cards. */
+.phase-prototypes [data-slot="insight-feedback-controls"] {
+  flex-wrap: wrap;
+}
+
 .phase-section-nav,
 .phase-disclosure,
 .phase-description-b,
