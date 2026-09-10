@@ -174,14 +174,11 @@ test("a Member's own-duty writes still succeed (AS-006)", () => {
   // `assertMayActOnTask`, which this cannot see; `own-duty.test.ts` drives the
   // action for that.
   //
-  // The other two own-duty writes AS-006 names — a Member's meeting RSVP and
-  // their own ministry team — are NOT here, and their absence is the point.
-  // `ministry_teams.leader_id` and the meeting guest list reference
-  // `persons.id`, and nothing links a person row to an account until AS-013, so
-  // a `SEATED` capability for them would be a floor with nothing above it:
-  // every Member reaching every team and every RSVP. They sit at
-  // `teams.write` / `meetings.write` until the link exists.
-  for (const capability of ["tasks.own", "launch.milestone"] as const) {
+  for (const capability of [
+    "tasks.own",
+    "meetings.rsvp",
+    "launch.milestone",
+  ] as const) {
     only(capability, [plantOwner, plantAdmin, plantMember]);
   }
 });
