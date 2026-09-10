@@ -65,9 +65,7 @@ export default function LandingPage() {
       <section className="lp-hero">
         <div className="lp-hero-panel">
           <div className="lp-inner">
-            <h1 className="lp-hero-h">
-              Your&nbsp;church&nbsp;plant, understood.
-            </h1>
+            <h1 className="lp-hero-h">Your church plant, under&shy;stood.</h1>
             <p className="lp-hero-sub">
               EveryField puts a proven planting methodology to work on your real
               progress — the people, meetings, and momentum that get you to{" "}

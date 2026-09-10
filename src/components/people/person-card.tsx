@@ -50,7 +50,7 @@ export function PersonCard({ person, linkStatic }: PersonCardProps) {
         </Avatar>
         <div className="min-w-0 flex-1 space-y-1">
           <div className="flex items-center justify-between gap-2">
-            <h3 className="truncate text-sm leading-none font-semibold tracking-tight">
+            <h3 className="truncate text-sm leading-snug font-semibold tracking-tight">
               {person.firstName} {person.lastName}
             </h3>
             <Badge

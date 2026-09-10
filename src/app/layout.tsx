@@ -1,10 +1,11 @@
 import { Toaster } from "@/components/ui/sonner";
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Instrument_Sans, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const instrumentSans = Instrument_Sans({
+  style: ["normal", "italic"],
+  variable: "--font-instrument-sans",
   subsets: ["latin"],
 });
 
@@ -45,10 +46,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-      >
+    <html
+      lang="en"
+      className={`${instrumentSans.variable} ${geistMono.variable} ${instrumentSans.className}`}
+    >
+      <body className="antialiased">
         {children}
         <Toaster richColors position="bottom-right" closeButton />
       </body>

@@ -69,6 +69,7 @@ export function NavMain({
                 <SidebarMenuItem>
                   <CollapsibleTrigger asChild>
                     <SidebarMenuButton
+                      className="h-auto min-h-8 py-1.5"
                       tooltip={item.title}
                       isActive={isActive}
                       disabled={isEffectivelyDisabled}
@@ -126,7 +127,7 @@ export function NavMain({
                     <SidebarMenuButton
                       isActive={false}
                       aria-disabled="true"
-                      className="pointer-events-auto cursor-not-allowed opacity-50"
+                      className="pointer-events-auto h-auto min-h-8 cursor-not-allowed py-1.5 opacity-50"
                     >
                       {item.icon && <item.icon />}
                       <span>{item.title}</span>
@@ -173,6 +174,7 @@ export function NavMain({
           return (
             <SidebarMenuItem key={item.title}>
               <SidebarMenuButton
+                className="h-auto min-h-8 py-1.5"
                 asChild
                 tooltip={item.title}
                 isActive={isActive}
