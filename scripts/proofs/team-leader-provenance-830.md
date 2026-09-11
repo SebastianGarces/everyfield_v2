@@ -92,7 +92,7 @@ The proof passed removal, unmarking and deletion for both explicit and derived p
 
 The 34 targeted local tests and the requirement-ID guard also passed: team-action authorization, seat capabilities, seat-removal source guards, membership-conflict handling and predefined-team guards. Four regressions were added to the existing Neon live suite for eventual coordinated migration verification; that suite has not been run against a migrated Neon-compatible database in this pass. Independent review ran the PGlite proof successfully and found fixture provenance gaps, subsequently corrected; final focused re-review reported no findings. Targeted formatting passed. ESLint reported no errors for the native source/test files; repository configuration ignores the proof and eval seed scripts, so those were not linted. Full typecheck/build and current-head CI were not run in this focused local pass.
 
-This establishes sequential native persistence through the test adapter. It does not establish migration apply/rollback, Neon transport, concurrent-writer correctness, browser behavior or release readiness. Two pre-existing races remain explicitly recorded in memory: a delete using a stale holder snapshot can miss a replacement holder's cleanup, and delayed vacancy can clear a same-person/same-role reassignment. Provenance alone does not serialize those writers.
+This PGlite result establishes sequential native persistence through the test adapter. The subsequent PostgreSQL proof below closes the two documented native writer races. Migration apply/rollback, hosted Neon transport, browser behavior and release readiness remain unverified.
 
 ### Evry integration contract, owned by the orchestrator
 
@@ -102,3 +102,27 @@ At the inspected #825 head `a7acc48a6da8ae8f626bedbe82ddb8ccebff4e37`, the requi
 - Vacancy plans at 799, 847 and 1312 must require source `role` plus matching role/person and clear all three fields. Explicit and legacy appointments remain intact.
 - `atomic-effect.ts:179-180`: JSON-populated inserts must include the valid provenance state whenever a leader is non-null; the explicit UPDATE column list must write `leader_source=p.leader_source, leader_role_id=p.leader_role_id` alongside `leader_id`. Both before/after snapshots and proof fixtures must include provenance so a same-person source change is visible to stale-plan checks.
 - Keep existing authority, effect claim, confirmation and retry rules. Run the owner's effect proofs against the coordinated schema and preserve #840's administrative explicit-appointment boundary. No Evry code was changed by this native branch.
+
+
+## Native concurrency follow-up
+
+The native role/membership mutation now locks the tenant-scoped team as statement one of a `db.batch`. This is a separate SQL statement so later READ COMMITTED statements see commits made while waiting. The membership mutation and derived fill use a data-modifying CTE: only a successful membership RETURNING row can fill the leader. The role status write shares the transaction and returns the current leadership flag for the event emitted after commit.
+
+Removal reconciles status and provenance before committing. Deletion clears by stored source role, without a stale holder gate. Direct vacancy synchronization locks the team and preserves a matching active leadership membership, including a renewed derivation for the same person and role. Role enabling fills only on a false-to-true transition read after the lock; renames and repeated saves do not create appointments. Explicit and legacy leaders remain protected.
+
+`scripts/proofs/team-leader-provenance-races-830.mjs` runs the actual native services through `drizzle-orm/neon-http` and `@neondatabase/serverless`. It replaces only fetch transport with a disposable PostgreSQL transaction adapter, exercising the driver's batch encoding and result parsing. It creates a unique schema from production columns/checks, with the relevant role cascade and active-role uniqueness index. Unrelated FKs are omitted. This is not a hosted Neon test or a migration test.
+
+On PostgreSQL 16, the same proof reproduced both original races using the native files from integration commit `0f036309` and `EXPECT_OLD_RACES=1`. Current code passed deletion after holder replacement, delayed vacancy after renewal, real database lock waits with post-wait snapshots, assignment racing deletion, unmark racing enable, rename/repeated-enable no-ops, refused insert and reactivation, both event flag-toggle directions, and rollback of membership plus leadership after an injected later-statement SQL failure. Lock-wait assertions inspect `pg_stat_activity`; they do not infer contention from sleeps. The isolated transcripts are `/private/tmp/leadership830-race-baseline.txt` and `/private/tmp/leadership830-race-proof.txt`.
+
+Reproduce with a temporary driver installation and the bounded scratch-container runner:
+
+```sh
+npm install --prefix /private/tmp/ef830-pg --no-audit --no-fund pg@8.16.3
+PG_MODULE=/private/tmp/ef830-pg/node_modules/pg/lib/index.js bash scripts/proofs/team-leader-provenance-races-830.sh
+```
+
+The runner uses cached `pgvector/pgvector:pg16`, 256 MB RAM, one CPU, temporary data and a random loopback port. It removes its container on exit. Independent re-review reported no findings after correcting the event's stale role-flag read.
+
+Evry must adopt a compatible team-first locking protocol as well as the field adaptations above. A lock acquired inside the same SQL statement as predicate reads does not provide the fresh post-wait snapshot used here. Its current single-statement atomic effect must account for that distinction while preserving confirmation, staleness and retry behavior. Native-only success does not establish combined release readiness. Concurrency with account-seat removal remains outside this protocol and proof; no guarantee is made about a simultaneous seat removal and new appointment. An assignment that loses to role deletion rolls back on the existing FK; its user-facing error mapping is unchanged.
+
+The 34 focused tests and targeted native ESLint checks pass. Full typecheck was attempted on the integration tree and reports missing inherited Evry packages `pdfjs-dist`, `fflate`, and `fast-xml-parser`, plus consequent implicit-any diagnostics in those Evry files. No native provenance type errors were reported. No full build or browser run was attempted.
