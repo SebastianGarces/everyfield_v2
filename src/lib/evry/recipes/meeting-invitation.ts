@@ -94,6 +94,7 @@ export type MeetingInvitationReferenceRequest = Readonly<{
   locationQuery?: string;
   subject: string;
   body: string;
+  guestPersonIds?: readonly string[];
 }>;
 
 export type MeetingInvitationLocation = Readonly<{
@@ -169,13 +170,21 @@ export type MeetingInvitationPlanSnapshot = Readonly<
   z.infer<typeof MEETING_INVITATION_PLAN_SNAPSHOT_SCHEMA>
 >;
 
-const meetingInvitationRequestSchema = z.strictObject({
+export const meetingInvitationRequestSchema = z.strictObject({
   sourceText: z.string().trim().min(1).max(4_000),
   durationMinutes: z.number().int().min(1).max(1_440).optional(),
   locationId: z.string().uuid().optional(),
   locationQuery: z.string().trim().min(1).max(500).optional(),
   subject: z.string().trim().min(1).max(998),
   body: z.string().trim().min(1).max(200_000),
+  guestPersonIds: z
+    .array(z.string().uuid())
+    .min(1)
+    .max(50)
+    .optional()
+    .describe(
+      "Explicit freshly resolved guests. If omitted, the canonical audience is core-team people plus prospects who have not attended a Vision Meeting."
+    ),
 });
 
 export const MEETING_INVITATION_PLAN_RESOLVER_INPUT_SCHEMA = z.strictObject({
@@ -771,7 +780,8 @@ export async function meetingInvitationPlanTargetsAreCurrent(input: {
 export type MeetingInvitationReferenceResolverDependencies = Readonly<{
   resolveDateTime(request: unknown): Promise<EvryDateTimeResolution>;
   loadFacts(
-    actor: EvryPlantActor
+    actor: EvryPlantActor,
+    request?: MeetingInvitationReferenceRequest
   ): Promise<MeetingInvitationReferenceFacts | null>;
 }>;
 
@@ -886,11 +896,16 @@ function locationChoice(location: MeetingInvitationLocation, index: number) {
   });
 }
 
-function resolveAudience(facts: MeetingInvitationReferenceFacts) {
+function resolveAudience(
+  facts: MeetingInvitationReferenceFacts,
+  guestPersonIds?: readonly string[]
+) {
+  const explicitGuests = guestPersonIds ? new Set(guestPersonIds) : null;
   const eligible = facts.people
-    .filter(
-      (person) =>
-        CORE_TEAM_STATUSES.has(person.status) || person.status === "prospect"
+    .filter((person) =>
+      explicitGuests
+        ? explicitGuests.has(person.id)
+        : CORE_TEAM_STATUSES.has(person.status) || person.status === "prospect"
     )
     .toSorted((left, right) => left.id.localeCompare(right.id));
   const guests: MeetingInvitationGuest[] = [];
@@ -899,7 +914,11 @@ function resolveAudience(facts: MeetingInvitationReferenceFacts) {
 
   for (const person of eligible) {
     const label = personLabel(person);
-    if (person.status === "prospect" && person.attendedVisionMeeting) {
+    if (
+      !explicitGuests &&
+      person.status === "prospect" &&
+      person.attendedVisionMeeting
+    ) {
       exclusions.push({
         personId: person.id,
         label,
@@ -977,7 +996,7 @@ export function createMeetingInvitationReferenceResolver(
     }
     if (dateTime.status !== "resolved") return { kind: "unavailable" };
 
-    const facts = await dependencies.loadFacts(input.actor);
+    const facts = await dependencies.loadFacts(input.actor, input.request);
     if (!facts || facts.church.id !== input.actor.plantId) {
       return { kind: "unavailable" };
     }
@@ -987,7 +1006,13 @@ export function createMeetingInvitationReferenceResolver(
       input.request.locationQuery
     );
     if ("kind" in location) return location;
-    const audience = resolveAudience(facts);
+    if (
+      input.request.guestPersonIds?.some(
+        (id) => !facts.people.some((person) => person.id === id)
+      )
+    )
+      return { kind: "unavailable" };
+    const audience = resolveAudience(facts, input.request.guestPersonIds);
     if (audience.guests.length === 0) return { kind: "unavailable" };
 
     return Object.freeze({
@@ -1004,7 +1029,8 @@ export function createMeetingInvitationReferenceResolver(
 }
 
 async function loadProductionFacts(
-  actor: EvryPlantActor
+  actor: EvryPlantActor,
+  request?: MeetingInvitationReferenceRequest
 ): Promise<MeetingInvitationReferenceFacts | null> {
   const [[church], locationRows, peopleRows, priorRows] = await Promise.all([
     db
@@ -1042,15 +1068,18 @@ async function loadProductionFacts(
       .where(
         and(
           eq(persons.churchId, actor.plantId),
-          inArray(persons.status, [
-            "prospect",
-            "core_group",
-            "launch_team",
-            "leader",
-          ]),
+          request?.guestPersonIds
+            ? inArray(persons.id, [...request.guestPersonIds])
+            : inArray(persons.status, [
+                "prospect",
+                "core_group",
+                "launch_team",
+                "leader",
+              ]),
           isNull(persons.deletedAt)
         )
-      ),
+      )
+      .limit(501),
     db
       .select({ personId: meetingAttendance.personId })
       .from(meetingAttendance)
@@ -1070,6 +1099,7 @@ async function loadProductionFacts(
       ),
   ]);
   if (!church) return null;
+  if (peopleRows.length > 500) return null;
   const prior = new Set(priorRows.map(({ personId }) => personId));
   const addresses = peopleRows.flatMap(({ email }) => (email ? [email] : []));
   return Object.freeze({

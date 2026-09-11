@@ -21,6 +21,7 @@ const labelSchema = z.string().trim().min(1).max(160);
 export const publicReadArtifactSchema = z
   .strictObject({
     kind: z.literal("read"),
+    resultMode: z.enum(["list", "count", "group"]).optional(),
     textOffset: z.number().int().min(0).max(8000).optional(),
     title: titleSchema,
     filters: z
@@ -71,7 +72,10 @@ export const publicReadArtifactSchema = z
     if (
       artifact.counts.returned !== artifact.items.length ||
       artifact.counts.excluded !== excluded ||
-      artifact.counts.matched !== artifact.items.length + excluded
+      (artifact.resultMode === undefined
+        ? artifact.counts.matched !== artifact.items.length + excluded
+        : artifact.resultMode !== "count" &&
+          artifact.counts.matched < artifact.items.length)
     ) {
       context.addIssue({
         code: "custom",
@@ -221,6 +225,9 @@ export function publicEvryArtifact(
         ...artifact,
         items: artifact.items.map((item) => ({
           ...item,
+          facts: item.facts
+            .filter((fact) => !fact.modelOnly)
+            .map(({ label, value }) => ({ label, value })),
           sourceLink: publicLink(item.sourceLink),
         })),
         sourceLinks: artifact.sourceLinks.map(publicLink),

@@ -135,9 +135,12 @@ const removePhotoSchema = z.strictObject({
 export type PeopleCoreSelection =
   | Readonly<{
       kind: "create" | "quick_add";
-      values: Readonly<Record<string, string>>;
+      values: Readonly<Record<string, string | null | undefined>>;
     }>
-  | Readonly<{ kind: "update"; values: Readonly<Record<string, string>> }>
+  | Readonly<{
+      kind: "update";
+      values: Readonly<Record<string, string | null | undefined>>;
+    }>
   | Readonly<{ kind: "delete" | "remove_photo" }>
   | Readonly<{ kind: "status"; status: string; reason: string | null }>
   | Readonly<{ kind: "reorder"; personIds: readonly string[] }>;
@@ -161,15 +164,18 @@ const ALLOWED_FIELDS = new Set([
   "role",
 ]);
 
-function keyValues(value: string): Readonly<Record<string, string>> | null {
-  const result: Record<string, string> = {};
+function keyValues(
+  value: string
+): Readonly<Record<string, string | null>> | null {
+  const result: Record<string, string | null> = {};
   for (const part of value.split(";")) {
     const index = part.indexOf("=");
     if (index <= 0) return null;
     const key = part.slice(0, index).trim();
     const fieldValue = part.slice(index + 1).trim();
     if (!ALLOWED_FIELDS.has(key) || key in result) return null;
-    result[key] = fieldValue;
+    // Only legacy text commands use a dash as a clearing instruction.
+    result[key] = fieldValue === "-" ? null : fieldValue;
   }
   return Object.keys(result).length ? result : null;
 }
@@ -245,9 +251,9 @@ function payloadOf(
   });
 }
 
-function applyValues(
+export function applyPeopleCoreFields(
   base: EvryPersonPayload,
-  values: Readonly<Record<string, string>>,
+  values: Readonly<Record<string, string | null | undefined>>,
   creation: boolean
 ): EvryPersonPayload | null {
   const map: Record<string, keyof EvryPersonPayload> = {
@@ -272,7 +278,7 @@ function applyValues(
   for (const [key, value] of Object.entries(values)) {
     const field = map[key];
     if (!field) return null;
-    next[field] = value === "-" ? null : value;
+    if (value !== undefined) next[field] = value;
   }
   if (creation && (!values.first || !values.last)) return null;
   const parsed = personPayloadSchema.safeParse(next);
@@ -485,25 +491,30 @@ function changes(
               before:
                 key === "notes"
                   ? noteDisclosureSummary(before?.notes ?? null)
-                  : (before?.[key] ?? "Not set"),
+                  : displayField(before?.[key] ?? null),
               after:
                 key === "notes"
                   ? noteDisclosureSummary(after?.notes ?? null)
-                  : (after?.[key] ?? "Not set"),
+                  : displayField(after?.[key] ?? null),
               count: 1,
             },
           ]
   );
 }
 
+function displayField(value: string | null): string {
+  return value === null ? "Not set" : value === "" ? "Empty text" : value;
+}
+
 function noteDisclosureSummary(value: string | null): string {
   if (value === null) return "Not set";
+  if (value === "") return "Empty text";
   const pages = exactEvryContentPages(value).length;
   return `Exact content shown in ${pages} ${pages === 1 ? "page" : "pages"} below`;
 }
 
 function noteDisclosurePages(phase: "before" | "after", value: string | null) {
-  if (value === null) return [];
+  if (value === null || value === "") return [];
   const pages = exactEvryContentPages(value);
   return pages.map((content, index) => ({
     label: `Notes ${phase} · page ${index + 1} of ${pages.length}`,
@@ -846,7 +857,7 @@ export async function proposePeopleCoreEffect(input: {
       householdId: null,
       householdRole: null,
     });
-    const person = applyValues(empty, input.selection.values, true);
+    const person = applyPeopleCoreFields(empty, input.selection.values, true);
     if (!person) return null;
     let expectedHouseholdName: string | null = null;
     if (person.householdId) {
@@ -890,7 +901,11 @@ export async function proposePeopleCoreEffect(input: {
     const label = `${person.firstName} ${person.lastName}`.trim();
     if (input.selection.kind === "update") {
       const before = payloadOf(person);
-      const after = applyValues(before, input.selection.values, false);
+      const after = applyPeopleCoreFields(
+        before,
+        input.selection.values,
+        false
+      );
       if (!after || after.status !== before.status) return null;
       if (after.householdId) {
         const household = await getHousehold(

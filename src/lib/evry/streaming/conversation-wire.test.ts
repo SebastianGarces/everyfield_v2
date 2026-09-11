@@ -3,6 +3,20 @@ import { test } from "node:test";
 
 import { evryConversationStream } from "@/app/api/evry/conversations/stream";
 import type { PublicEvryConversation } from "@/lib/evry/conversations/public-contract";
+import {
+  buildEvryReadArtifact,
+  trustedEvryApplicationSourceLink,
+} from "@/lib/evry/artifacts/core";
+import {
+  publicEvryArtifact,
+  publicReadArtifactSchema,
+} from "@/lib/evry/artifacts/public";
+import {
+  composeEvryResponse,
+  storedEvryResponse,
+} from "@/lib/evry/capabilities/response-parts";
+import { hydrateStoredEvryConversationArtifact } from "@/lib/evry/conversations/artifacts";
+import { EVRY_READ_BUDGET } from "@/lib/evry/capabilities/read-budget";
 
 import {
   EvryConversationStreamFailure,
@@ -41,6 +55,112 @@ async function readEvent(reader: ReadableStreamDefaultReader<Uint8Array>) {
     JSON.parse(new TextDecoder().decode(read.value).trim())
   );
 }
+
+for (const count of [5, EVRY_READ_BUDGET.calls]) {
+  test(`${count} result cards cross real response frames and durable conversation wire`, async () => {
+    const results = Array.from({ length: count }, (_, i) =>
+      buildEvryReadArtifact({
+        title: `Evidence ${i + 1}`,
+        filters: [],
+        exclusions: [],
+        items: [],
+        sourceLinks: [
+          trustedEvryApplicationSourceLink({
+            label: "Open Tasks",
+            href: "/tasks",
+          }),
+        ],
+      })
+    );
+    const composed = composeEvryResponse(
+      {
+        parts: [
+          { kind: "text", text: "Review.", resultIndex: null },
+          ...results.map((_, resultIndex) => ({
+            kind: "result",
+            text: "",
+            resultIndex,
+          })),
+        ],
+      },
+      results
+    );
+    const stored = storedEvryResponse(composed);
+    const artifacts = stored.artifacts.map((document) =>
+      publicReadArtifactSchema.parse(
+        publicEvryArtifact(
+          hydrateStoredEvryConversationArtifact(
+            JSON.parse(JSON.stringify(document))
+          )
+        )
+      )
+    );
+    const durable: PublicEvryConversation = {
+      ...conversation,
+      messages: [
+        {
+          ...conversation.messages[0]!,
+          author: "assistant",
+          body: composed.body,
+          artifacts: artifacts.map((artifact, index) => ({
+            id: `40000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+            ordinal: index,
+            artifact,
+          })),
+        },
+      ],
+    };
+    const response = evryConversationStream({
+      requestId: REQUEST_ID,
+      failureCode: () => "unavailable",
+      run: async (report) => {
+        report({
+          type: "response",
+          response: { body: composed.body, artifacts },
+        });
+        return { conversation: durable };
+      },
+    });
+    let previewCount = 0;
+    const result = await readEvryConversationStream(response, {
+      requestId: REQUEST_ID,
+      expectedConversationId: CONVERSATION_ID,
+      onEvent: (event) => {
+        if (event.type === "response")
+          previewCount = event.response.artifacts.length;
+      },
+    });
+    assert.equal(previewCount, count);
+    assert.ok("conversation" in result);
+    assert.equal(result.conversation.messages[0]!.artifacts.length, count);
+  });
+}
+
+test("response wire rejects more cards than the read budget", () => {
+  const artifact = publicReadArtifactSchema.parse(
+    publicEvryArtifact(
+      buildEvryReadArtifact({
+        title: "Tasks",
+        filters: [],
+        exclusions: [],
+        items: [],
+        sourceLinks: [],
+      })
+    )
+  );
+  assert.equal(
+    evryConversationStreamEventSchema.safeParse({
+      type: "response",
+      requestId: REQUEST_ID,
+      sequence: 1,
+      response: {
+        body: "Review",
+        artifacts: Array(EVRY_READ_BUDGET.calls + 1).fill(artifact),
+      },
+    }).success,
+    false
+  );
+});
 
 test("live response frames cross the real wire while durable completion is still pending", async () => {
   const durable = Promise.withResolvers<void>();

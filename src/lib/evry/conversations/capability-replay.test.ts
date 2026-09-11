@@ -16,8 +16,16 @@ import {
   continueEvryConversation,
   type EvryConversationStore,
 } from "./service";
-import { composeEvryCapabilityConversationContinuations } from "../capabilities/conversation";
+import {
+  composeEvryCapabilityConversationContinuations,
+  type EvryCapabilityConversationRunner,
+} from "../capabilities/conversation";
 import type { EvryPlantActor } from "../eligibility/viewer";
+import {
+  buildEvryReadArtifact,
+  trustedEvryApplicationSourceLink,
+} from "../artifacts/core";
+import type { EvryConversationStreamReport } from "../streaming/conversation-wire";
 
 const ACTOR = {
   userId: "10000000-0000-4000-8000-000000000001",
@@ -28,6 +36,100 @@ const CONVERSATION_ID = "30000000-0000-4000-8000-000000000001" as never;
 const CREATE_REQUEST = "40000000-0000-4000-8000-000000000001" as never;
 const CONTINUE_REQUEST = "50000000-0000-4000-8000-000000000001" as never;
 const NOW = new Date("2026-08-29T12:00:00.000Z");
+
+for (const path of ["create", "continue"] as const) {
+  test(`${path} service projects model-only facts out of fresh and recovered response previews`, async () => {
+    const store = memoryStore({ throwAfterFirstResultCommit: false });
+    const sourceLink = trustedEvryApplicationSourceLink({
+      label: "Open Tasks",
+      href: "/tasks",
+    });
+    const artifact = buildEvryReadArtifact({
+      title: "Tasks",
+      filters: [],
+      exclusions: [],
+      items: [
+        {
+          id: "task",
+          label: "Call Alex",
+          sourceLink,
+          facts: [
+            { label: "Status", value: "Open" },
+            {
+              label: "Assignee account ID",
+              value: ACTOR.userId,
+              modelOnly: true,
+            },
+          ],
+        },
+      ],
+      sourceLinks: [sourceLink],
+    });
+    const stages: EvryConversationStreamReport[] = [];
+    let attempts = 0;
+    const input = {
+      actor: ACTOR,
+      requestKey: path === "create" ? CREATE_REQUEST : CONTINUE_REQUEST,
+      message: "Show tasks",
+      pageContext: null,
+      requestPageContext: null,
+      now: NOW,
+      store,
+      reportStage(stage: EvryConversationStreamReport) {
+        stages.push(stage);
+      },
+      async continueCapabilityConversation(
+        selection: Parameters<EvryCapabilityConversationRunner>[0]
+      ) {
+        attempts++;
+        await selection.reportResponse?.({
+          body: "Here are your tasks.",
+          artifacts: [artifact],
+        });
+        if (attempts === 1)
+          throw new Error(
+            "Simulated interruption after preview before durable result"
+          );
+        return selection.conversation;
+      },
+    };
+    if (path === "continue")
+      await store.create({
+        actorUserId: ACTOR.userId,
+        plantId: ACTOR.plantId,
+        requestKey: CREATE_REQUEST,
+        body: "Start",
+        pageContext: null,
+        requestPageContext: null,
+        createdAt: NOW,
+      });
+    const run = () =>
+      path === "create"
+        ? createEvryConversation(input)
+        : continueEvryConversation({
+            ...input,
+            conversationId: CONVERSATION_ID,
+            resolveReference: () => ({ status: "not_applicable" }),
+          });
+    await assert.rejects(run(), /Simulated interruption after preview/);
+    assert.ok(await run());
+    const previews = stages.filter(
+      (stage) => typeof stage !== "string" && stage.type === "response"
+    );
+    assert.equal(previews.length, 2);
+    for (const preview of previews) {
+      assert.notEqual(typeof preview, "string");
+      if (typeof preview === "string")
+        throw new Error("Expected response preview");
+      assert.deepEqual(preview.response.artifacts[0]!.items[0]!.facts, [
+        { label: "Status", value: "Open" },
+      ]);
+      assert.ok(!JSON.stringify(preview).includes(ACTOR.userId));
+    }
+    assert.equal(artifact.items[0]!.facts[1]!.modelOnly, true);
+    assert.equal(attempts, 2);
+  });
+}
 
 function message(input: {
   id: string;

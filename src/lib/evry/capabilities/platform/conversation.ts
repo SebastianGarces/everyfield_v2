@@ -248,7 +248,11 @@ export function createPlatformEvryConversationContinuation(
     findPlan: findEvryActionPlanByRequestKey,
     propose: proposeEffect,
     read: continuePlatformEvryRead,
-  }
+  },
+  preparedSelection?: Extract<
+    PlatformEvrySelection,
+    { kind: "mark_one" | "mark_all" | "feedback" }
+  >
 ): EvryCapabilityConversationContinuation {
   return {
     identity: "platform",
@@ -256,7 +260,8 @@ export function createPlatformEvryConversationContinuation(
       return selectPlatformEvryRequest(input.literalUserText) !== null;
     },
     async continue(input) {
-      const selection = selectPlatformEvryRequest(input.literalUserText);
+      const selection =
+        preparedSelection ?? selectPlatformEvryRequest(input.literalUserText);
       if (!selection) return null;
       if (selection.kind === "clarification") {
         const clarification = {

@@ -110,14 +110,66 @@ test("conflicting or malformed model output fails without an operation", () => {
     { prepareOriginalRequest: true },
     { readId: "tasks.list", readInputJson: "{}", prepareOriginalRequest: true },
     {
-      classification: "application_action",
-      readId: "tasks.list",
-      readInputJson: "{}",
+      readId: "actions.prepare",
+      readInputJson: '{"operation":"tasks.create","arguments":{}}',
     },
     { readInputJson: "{}" },
     { response: "" },
   ])
     assert.throws(() => parseEvryModelTurn(modelDecision(overrides)));
+});
+
+test("an action may resolve targets then prepare typed intent, never a read-authorized write", () => {
+  assert.deepEqual(
+    parseEvryModelTurn(
+      modelDecision({
+        classification: "application_action",
+        readId: "people.query",
+        readInputJson: "{}",
+        continueReading: true,
+      })
+    ),
+    {
+      kind: "read",
+      id: "people.query",
+      input: {},
+      continueReading: true,
+      actionIntent: true,
+    }
+  );
+  assert.deepEqual(
+    parseEvryModelTurn(
+      modelDecision({
+        classification: "application_action",
+        readId: "actions.prepare",
+        readInputJson: JSON.stringify({
+          operation: "tasks.create",
+          arguments: { title: "Call Alex; do not alter this text" },
+        }),
+      })
+    ),
+    {
+      kind: "prepare_action",
+      operation: "tasks.create",
+      input: { title: "Call Alex; do not alter this text" },
+    }
+  );
+  for (const classification of [
+    "mixed",
+    "unrelated",
+    "theology_or_spiritual_guidance",
+    "ambiguous",
+  ])
+    assert.equal(
+      parseEvryModelTurn(
+        modelDecision({
+          classification,
+          readId: "actions.prepare",
+          readInputJson: "{}",
+        })
+      ).kind,
+      "reply"
+    );
 });
 
 test("provider failure remains retryable rather than becoming a durable misunderstanding", async () => {

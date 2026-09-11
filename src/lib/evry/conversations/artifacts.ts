@@ -34,6 +34,7 @@ import {
   evryConversationResultCodeFor,
   evryConversationPlanIdentitySchema,
   storedEvryArtifactFactSchema,
+  storedEvryReadFactSchema,
   storedEvrySourceLinkSchema,
 } from "./contract";
 
@@ -55,7 +56,7 @@ const readItemSchema = z
   .object({
     id: z.string().min(1).max(160),
     label: labelSchema,
-    facts: z.array(storedEvryArtifactFactSchema).max(EVRY_READ_ITEM_MAX_FACTS),
+    facts: z.array(storedEvryReadFactSchema).max(EVRY_READ_ITEM_MAX_FACTS),
     sourceLink: storedEvrySourceLinkSchema,
   })
   .strict()
@@ -64,6 +65,7 @@ const readItemSchema = z
 const readArtifactDocumentSchema = z
   .object({
     kind: z.literal("read"),
+    resultMode: z.enum(["list", "count", "group"]).optional(),
     textOffset: z.number().int().min(0).max(8000).optional(),
     title: titleSchema,
     filters: z.array(readFilterSchema).max(16),
@@ -88,7 +90,10 @@ const readArtifactDocumentSchema = z
     if (
       artifact.counts.returned !== artifact.items.length ||
       artifact.counts.excluded !== excluded ||
-      artifact.counts.matched !== artifact.items.length + excluded
+      (artifact.resultMode === undefined
+        ? artifact.counts.matched !== artifact.items.length + excluded
+        : artifact.resultMode !== "count" &&
+          artifact.counts.matched < artifact.items.length)
     ) {
       context.addIssue({
         code: "custom",
@@ -392,6 +397,10 @@ export function hydrateStoredEvryConversationArtifact(
           })),
           sourceLinks: document.sourceLinks.map(trustedLink),
         }),
+        counts: document.counts,
+        ...(document.resultMode === undefined
+          ? {}
+          : { resultMode: document.resultMode }),
         ...(document.textOffset === undefined
           ? {}
           : { textOffset: document.textOffset }),

@@ -23,6 +23,7 @@ import {
   plantIntelligenceEffectIdentityFor,
   proposePlantIntelligenceEvryEffect,
   selectPlantIntelligenceEvryEffect,
+  type PlantIntelligenceEffectSelection,
 } from "./effects";
 import {
   executePlantIntelligenceEvryRead,
@@ -104,7 +105,8 @@ function refusalArtifact() {
 }
 
 export function createPlantIntelligenceEvryConversationContinuation(
-  dependencies: Dependencies = productionDependencies
+  dependencies: Dependencies = productionDependencies,
+  preparedSelection?: PlantIntelligenceEffectSelection
 ): EvryCapabilityConversationContinuation {
   return {
     identity: "plant-intelligence",
@@ -117,10 +119,12 @@ export function createPlantIntelligenceEvryConversationContinuation(
       );
     },
     async continue(input) {
-      const read = selectPlantIntelligenceEvryRead(
-        input.literalUserText,
-        input.pageContext
-      );
+      const read = preparedSelection
+        ? null
+        : selectPlantIntelligenceEvryRead(
+            input.literalUserText,
+            input.pageContext
+          );
       if (read) {
         const artifact = await executePlantIntelligenceEvryRead(read);
         return artifact?.kind === "read"
@@ -130,9 +134,9 @@ export function createPlantIntelligenceEvryConversationContinuation(
             }
           : null;
       }
-      const selection = selectPlantIntelligenceEvryEffect(
-        input.literalUserText
-      );
+      const selection =
+        preparedSelection ??
+        selectPlantIntelligenceEvryEffect(input.literalUserText);
       if (!selection) return null;
       const expectedIdentity = plantIntelligenceEffectIdentityFor(selection);
       const requestKey = deriveEvryPlanRequestKey(

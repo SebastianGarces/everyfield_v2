@@ -8,6 +8,7 @@ import {
 import { hydrateStoredEvryConversationArtifact } from "@/lib/evry/conversations/artifacts";
 import { publicEvryArtifact } from "@/lib/evry/artifacts/public";
 import { evryResponseContent } from "@/components/evry/response-content";
+import { EVRY_READ_BUDGET } from "./read-budget";
 
 const result = buildEvryReadArtifact({
   title: "Tasks",
@@ -80,4 +81,52 @@ test("the model cannot inject card data, unknown or repeated references, or an e
   ]) {
     assert.throws(() => composeEvryResponse({ parts }, [result]));
   }
+});
+
+for (const count of [5, EVRY_READ_BUDGET.calls]) {
+  test(`${count} composed results preserve prose, persistence, public projection and layout`, () => {
+    const results = Array.from({ length: count }, (_, i) => ({
+      ...result,
+      title: `Evidence ${i + 1}`,
+    }));
+    const parts = results.flatMap((_, i) => [
+      text(`Explanation ${i + 1}.\n\n`),
+      card(i),
+    ]);
+    parts.push(text("That is the complete review."));
+    const composed = composeEvryResponse({ parts }, results);
+    const stored = storedEvryResponse(composed);
+    const artifacts = stored.artifacts.map((document) => ({
+      artifact: publicEvryArtifact(
+        hydrateStoredEvryConversationArtifact(
+          JSON.parse(JSON.stringify(document))
+        )
+      ),
+    }));
+    assert.equal(stored.artifacts.length, count);
+    const layout = evryResponseContent(stored.body, artifacts);
+    assert.equal(layout.length, count * 2 + 1);
+    assert.deepEqual(
+      layout
+        .filter((part) => part.kind === "artifact")
+        .map((part) =>
+          part.entry.artifact.kind === "read" ? part.entry.artifact.title : null
+        ),
+      results.map((result) => result.title)
+    );
+    const last = layout.at(-1);
+    assert.equal(
+      last?.kind === "text" ? last.text : null,
+      "That is the complete review."
+    );
+  });
+}
+
+test("a ninth result reference remains outside the read budget", () => {
+  assert.throws(() =>
+    composeEvryResponse(
+      { parts: [text("Review"), card(EVRY_READ_BUDGET.calls)] },
+      Array(EVRY_READ_BUDGET.calls + 1).fill(result)
+    )
+  );
 });

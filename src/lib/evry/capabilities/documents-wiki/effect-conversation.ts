@@ -74,7 +74,8 @@ function recoveredResult(input: {
 
 /** Recover request-key durable plans before consulting mutable templates/articles. */
 export function createDocumentsWikiEffectConversationContinuation(
-  dependencies: DocumentsWikiConversationDependencies = productionDependencies
+  dependencies: DocumentsWikiConversationDependencies = productionDependencies,
+  preparedSelection?: DocumentsWikiEffectSelection
 ): EvryCapabilityConversationContinuation {
   return {
     identity: "documents-wiki-effects",
@@ -82,7 +83,8 @@ export function createDocumentsWikiEffectConversationContinuation(
       return selectDocumentsWikiEffect(input.literalUserText) !== null;
     },
     async continue(input) {
-      const selection = selectDocumentsWikiEffect(input.literalUserText);
+      const selection =
+        preparedSelection ?? selectDocumentsWikiEffect(input.literalUserText);
       if (!selection) return null;
       const requestKey = deriveEvryPlanRequestKey(
         `documents-wiki-${selection.kind}`,

@@ -123,7 +123,7 @@ export type HouseholdSelection =
   | Readonly<{
       kind: "update";
       householdId: string;
-      values: Readonly<Record<string, string>>;
+      values: Readonly<Record<string, string | null | undefined>>;
     }>
   | Readonly<{ kind: "delete" | "propagate"; householdId: string }>
   | Readonly<{ kind: "add"; householdId: string; role: string }>
@@ -139,15 +139,16 @@ const HOUSEHOLD_FIELDS = new Set([
   "country",
 ]);
 
-function values(value: string): Readonly<Record<string, string>> | null {
-  const result: Record<string, string> = {};
+function values(value: string): Readonly<Record<string, string | null>> | null {
+  const result: Record<string, string | null> = {};
   for (const part of value.split(";")) {
     const index = part.indexOf("=");
     if (index <= 0) return null;
     const key = part.slice(0, index).trim();
     const fieldValue = part.slice(index + 1).trim();
     if (!HOUSEHOLD_FIELDS.has(key) || key in result) return null;
-    result[key] = fieldValue;
+    // Empty text clears a field in the legacy command syntax only.
+    result[key] = fieldValue || null;
   }
   return Object.keys(result).length ? result : null;
 }
@@ -723,9 +724,9 @@ export const HOUSEHOLD_REVIEWS = definitions.map((identity) =>
 export const HOUSEHOLD_REVIEW_REGISTRY =
   createEvryArtifactReviewRegistry(HOUSEHOLD_REVIEWS);
 
-function applyHouseholdValues(
+export function applyHouseholdValues(
   before: EvryHouseholdSnapshot,
-  valuesValue: Readonly<Record<string, string>>
+  valuesValue: Readonly<Record<string, string | null | undefined>>
 ): EvryHouseholdSnapshot | null {
   const next: Record<string, string | null> = { ...before };
   const mapping = {
@@ -740,7 +741,7 @@ function applyHouseholdValues(
   for (const [key, value] of Object.entries(valuesValue)) {
     const field = mapping[key as keyof typeof mapping];
     if (!field) return null;
-    next[field] = value || null;
+    if (value !== undefined) next[field] = value;
   }
   return householdSnapshotSchema.safeParse(next).success
     ? householdSnapshotSchema.parse(next)

@@ -24,6 +24,7 @@ import {
   LAUNCH_EFFECT_IDENTITIES,
   proposeLaunchEvryEffect,
   selectLaunchEvryEffect,
+  type LaunchEvryEffectSelection,
 } from "./effects";
 import { continueLaunchEvryRead, selectLaunchEvryRead } from "./reads";
 import {
@@ -112,7 +113,8 @@ function refusal() {
 }
 
 export function createLaunchEvryConversationContinuation(
-  dependencies: Dependencies = productionDependencies
+  dependencies: Dependencies = productionDependencies,
+  selectedEffect?: LaunchEvryEffectSelection
 ): EvryCapabilityConversationContinuation {
   return {
     identity: "launch",
@@ -123,7 +125,9 @@ export function createLaunchEvryConversationContinuation(
       );
     },
     async continue(input) {
-      const read = selectLaunchEvryRead(input.literalUserText);
+      const read = selectedEffect
+        ? null
+        : selectLaunchEvryRead(input.literalUserText);
       if (read) {
         const artifact = await continueLaunchEvryRead({
           eligibleCapabilities: eligibleEvryCapabilitiesFor(input.actor),
@@ -137,7 +141,8 @@ export function createLaunchEvryConversationContinuation(
             }
           : null;
       }
-      const selection = selectLaunchEvryEffect(input.literalUserText);
+      const selection =
+        selectedEffect ?? selectLaunchEvryEffect(input.literalUserText);
       if (!selection) return null;
       const expectedIdentity = identityForSelection(selection);
       const requestKey = deriveEvryPlanRequestKey(

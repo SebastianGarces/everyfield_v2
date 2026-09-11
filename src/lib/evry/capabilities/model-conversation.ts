@@ -20,6 +20,11 @@ import {
 import { generateEvryModelTurn } from "./model-turn";
 import { generateEvryModelResponse } from "./model-response";
 import { storedEvryResponse } from "./response-parts";
+import type { EvryModelPreparation } from "./model-preparation";
+import { createEvryReadBudget, EVRY_READ_BUDGET } from "./read-budget";
+import type { EvryReadWorkflow } from "@/lib/evry/recipes/read-workflows";
+
+class EvryReadUnavailable extends Error {}
 
 export type EvryModelRead = Readonly<{
   id: string;
@@ -76,12 +81,18 @@ export function evryVisibleReadContext(
 export function createModelEvryConversation({
   continuations,
   reads,
+  preparations = [],
+  recipes = [],
+  clock = Date.now,
   generate = generateEvryModelTurn,
   compose = generateEvryModelResponse,
   authorizeRead = authorizeEvryReadCapability,
 }: {
   continuations: readonly EvryCapabilityConversationContinuation[];
   reads: readonly EvryModelRead[];
+  preparations?: readonly EvryModelPreparation[];
+  recipes?: readonly EvryReadWorkflow[];
+  clock?: () => number;
   generate?: typeof generateEvryModelTurn;
   compose?: typeof generateEvryModelResponse;
   authorizeRead?: typeof authorizeEvryReadCapability;
@@ -96,6 +107,24 @@ export function createModelEvryConversation({
       return input.conversation;
     let current = input.conversation;
     const pending = current.state.pendingModelPreparation;
+    const budget = createEvryReadBudget(clock);
+    const eligible = new Set(
+      eligibleEvryCapabilitiesFor(input.actor).map(({ identity }) => identity)
+    );
+    const preparationCatalog = preparations.filter((entry) =>
+      entry.capabilityIdentities.every((identity) => eligible.has(identity))
+    );
+    function structuredPreparation(operation: string, value: unknown) {
+      const entry = preparationCatalog.find(({ id }) => id === operation);
+      if (!entry || !entry.inputSchema.safeParse(value).success)
+        return undefined;
+      return {
+        identity: `actions.prepare:${operation}`,
+        matches: () => false,
+        continue: (selection: EvryCapabilityConversationSelectionInput) =>
+          entry.run(selection, value),
+      } satisfies EvryCapabilityConversationContinuation;
+    }
     const finish = (
       result: EvryCapabilityConversationResult,
       selection = input
@@ -122,7 +151,8 @@ export function createModelEvryConversation({
     async function prepare(
       selection: typeof input,
       selected: EvryCapabilityConversationContinuation | undefined,
-      recovering = false
+      recovering = false,
+      preparedInputJson?: string
     ) {
       if (!recovering && selected) {
         const identity = evryCapabilityConversationResultIdentity({
@@ -143,6 +173,7 @@ export function createModelEvryConversation({
                 selection.userRequestKey
               ),
               capabilityIdentity: selected.identity,
+              ...(preparedInputJson === undefined ? {} : { preparedInputJson }),
             },
           },
           author: "assistant",
@@ -199,9 +230,14 @@ export function createModelEvryConversation({
       };
       current = await prepare(
         selection,
-        continuations.find(
-          ({ identity }) => identity === pending.capabilityIdentity
-        ),
+        pending.preparedInputJson === undefined
+          ? continuations.find(
+              ({ identity }) => identity === pending.capabilityIdentity
+            )
+          : structuredPreparation(
+              pending.capabilityIdentity.replace(/^actions\.prepare:/, ""),
+              JSON.parse(pending.preparedInputJson)
+            ),
         true
       );
       if (pending.userRequestKey === input.userRequestKey) return current;
@@ -209,11 +245,11 @@ export function createModelEvryConversation({
     const selection = { ...input, conversation: current };
     const selected = selectPreparation(continuations, selection);
 
-    const eligible = new Set(
-      eligibleEvryCapabilitiesFor(input.actor).map(({ identity }) => identity)
-    );
     const catalog = reads.filter((read) =>
       eligible.has(read.capabilityIdentity)
+    );
+    const recipeCatalog = recipes.filter((recipe) =>
+      recipe.readIds.every((id) => catalog.some((read) => read.id === id))
     );
     const historicalConfirmation = current.messages
       .flatMap(({ artifacts }) => artifacts)
@@ -249,18 +285,89 @@ export function createModelEvryConversation({
         visibleReadResults: evryVisibleReadContext(selection),
         pageContext: input.pageContext,
         originalRequestCanBePrepared: selected !== null,
+        workBudget: budget.remaining(),
       },
       reads: catalog.map((read) => ({
         id: read.id,
-        schema: z.toJSONSchema(read.inputSchema, { unrepresentable: "any" }),
+        description: read.inputSchema.description?.slice(0, 500),
+      })),
+      preparations: preparationCatalog.map((entry) => ({
+        id: entry.id,
+        description: entry.inputSchema.description?.slice(0, 500),
+      })),
+      recipes: recipeCatalog.map((entry) => ({
+        id: entry.id,
+        description: entry.description,
+        schema: z.toJSONSchema(entry.inputSchema, { unrepresentable: "any" }),
       })),
     };
     let decision = await generate(modelInput);
+    const actionIntent =
+      decision.kind === "prepare_action" ||
+      decision.kind === "prepare" ||
+      ((decision.kind === "read" ||
+        decision.kind === "recipe" ||
+        decision.kind === "describe") &&
+        decision.actionIntent === true);
+    const requestedContracts = new Map<
+      string,
+      { kind: "read" | "action"; id: string; schema: unknown }
+    >();
+    const discoveryLimit = 2;
+    let discoveries = 0;
     const freshReadResults: {
       readId: string;
       input: unknown;
       artifact: EvryReadContinuationArtifact;
     }[] = [];
+    const planningContext = () => ({
+      ...modelInput.context,
+      originalRequestCanBePrepared:
+        freshReadResults.length === 0 &&
+        modelInput.context.originalRequestCanBePrepared,
+      actionPreparationAllowed: actionIntent,
+      requestedContracts: [...requestedContracts.values()],
+      remainingDiscoveryCalls: discoveryLimit - discoveries,
+      freshReadResults: freshReadResults.map(({ readId, input, artifact }) => ({
+        readId,
+        input,
+        ...(artifact.kind === "read"
+          ? {
+              title: artifact.title,
+              counts: artifact.counts,
+              filters: artifact.filters,
+              items: artifact.items.slice(0, 25),
+              truncated: artifact.items.length > 25,
+            }
+          : { clarification: artifact.prompt }),
+      })),
+      remainingReads: budget.remaining().calls,
+      workBudget: budget.remaining(),
+    });
+    async function query(readId: string, argumentsValue: unknown) {
+      const read = catalog.find(({ id }) => id === readId);
+      if (!read) throw new EvryReadUnavailable("Unknown read");
+      const parsed = read.inputSchema.safeParse(argumentsValue);
+      if (!parsed.success || !budget.claim(read.id, parsed.data))
+        throw new EvryReadUnavailable(
+          "Read is unavailable, repeated or exceeds the work budget"
+        );
+      const authorization = await authorizeRead(read.capabilityIdentity);
+      if (
+        !authorization ||
+        authorization.actor.userId !== input.actor.userId ||
+        authorization.actor.plantId !== input.actor.plantId
+      )
+        throw new EvryReadUnavailable("Read authorization unavailable");
+      const artifact = await read.run(authorization, selection, argumentsValue);
+      if (!artifact) throw new EvryReadUnavailable("Read returned no evidence");
+      freshReadResults.push({ readId, input: argumentsValue, artifact });
+      budget.record(
+        artifact.kind === "read" ? artifact.items.length : 0,
+        artifact
+      );
+      return artifact;
+    }
     const answer = async (draft: string) =>
       finish(
         storedEvryResponse(
@@ -304,8 +411,42 @@ export function createModelEvryConversation({
           })
         )
       );
-    readLoop: for (let readCount = 0; readCount < 4; readCount++) {
+    readLoop: for (
+      let decisionCount = 0;
+      decisionCount <= EVRY_READ_BUDGET.calls + discoveryLimit;
+      decisionCount++
+    ) {
       switch (decision.kind) {
+        case "describe": {
+          if (++discoveries > discoveryLimit || budget.exhausted())
+            break readLoop;
+          const before = requestedContracts.size;
+          for (const key of decision.ids) {
+            const kind = key.startsWith("read:") ? "read" : "action";
+            const id = key.slice(key.indexOf(":") + 1);
+            const entry =
+              kind === "read"
+                ? catalog.find((read) => read.id === id)
+                : actionIntent
+                  ? preparationCatalog.find((action) => action.id === id)
+                  : undefined;
+            if (entry)
+              requestedContracts.set(key, {
+                kind,
+                id,
+                schema: z.toJSONSchema(entry.inputSchema, {
+                  unrepresentable: "any",
+                }),
+              });
+          }
+          if (before === requestedContracts.size) break readLoop;
+          decision = await generate({
+            ...modelInput,
+            preparations: actionIntent ? modelInput.preparations : [],
+            context: planningContext(),
+          });
+          continue readLoop;
+        }
         case "reply":
           return answer(decision.body);
         case "settings":
@@ -315,63 +456,65 @@ export function createModelEvryConversation({
               { kind: "settings_handoff", sectionId: decision.sectionId },
             ],
           });
-        case "read": {
-          const readId = decision.id;
-          const read = catalog.find(({ id }) => id === readId);
-          if (!read || !read.inputSchema.safeParse(decision.input).success)
+        case "recipe": {
+          const recipeId = decision.id;
+          const recipe = recipeCatalog.find(({ id }) => id === recipeId);
+          if (!recipe || !recipe.inputSchema.safeParse(decision.input).success)
             break readLoop;
-          const authorization = await authorizeRead(read.capabilityIdentity);
-          if (
-            !authorization ||
-            authorization.actor.userId !== input.actor.userId ||
-            authorization.actor.plantId !== input.actor.plantId
-          )
-            break readLoop;
-          const artifact = await read.run(
-            authorization,
-            selection,
-            decision.input
+          try {
+            await recipe.run(async (id, args) => {
+              if (!recipe.readIds.includes(id))
+                throw new EvryReadUnavailable(
+                  "Recipe requested an undeclared read"
+                );
+              return query(id, args);
+            }, decision.input);
+          } catch (error) {
+            if (!(error instanceof EvryReadUnavailable)) throw error;
+            return answer(
+              "The workflow could only retrieve part of its evidence. Explain the available results and the missing evidence; do not claim full coverage."
+            );
+          }
+          if (decision.continueReading && !budget.exhausted()) {
+            decision = await generate({
+              ...modelInput,
+              preparations: actionIntent ? modelInput.preparations : [],
+              context: planningContext(),
+            });
+            continue readLoop;
+          }
+          return answer(
+            `${recipe.description} Answer from the fresh evidence, distinguish each cohort and explain criteria and limitations.`
           );
-          if (!artifact) break readLoop;
-          freshReadResults.push({
-            readId: read.id,
-            input: decision.input,
-            artifact,
-          });
+        }
+        case "read": {
+          let artifact: EvryReadContinuationArtifact;
+          try {
+            artifact = await query(decision.id, decision.input);
+          } catch (error) {
+            if (!(error instanceof EvryReadUnavailable)) throw error;
+            if (freshReadResults.length)
+              return answer(
+                "The evidence budget was reached or a requested read was unavailable or repeated. Answer from facts already retrieved and name what remains unknown."
+              );
+            break readLoop;
+          }
           if (
             decision.continueReading &&
             artifact.kind === "read" &&
-            readCount < 3
+            !budget.exhausted()
           ) {
             decision = await generate({
               ...modelInput,
-              context: {
-                ...modelInput.context,
-                originalRequestCanBePrepared: false,
-                freshReadResults: freshReadResults.map(
-                  ({ readId, input, artifact }) => ({
-                    readId,
-                    input,
-                    ...(artifact.kind === "read"
-                      ? {
-                          title: artifact.title,
-                          counts: artifact.counts,
-                          filters: artifact.filters,
-                          items: artifact.items.slice(0, 25),
-                          truncated: artifact.items.length > 25,
-                        }
-                      : { clarification: artifact.prompt }),
-                  })
-                ),
-                remainingReads: 3 - readCount,
-              },
+              context: planningContext(),
+              preparations: actionIntent ? modelInput.preparations : [],
             });
             continue readLoop;
           }
           if (artifact.kind === "read")
             return answer(
               decision.continueReading
-                ? "The request reached its four-read budget. Explain what the available evidence establishes and any remaining limitations."
+                ? "The request reached its evidence budget. Explain what the available evidence establishes and any remaining limitations."
                 : "Answer the request using the fresh results and their actual selection criteria."
             );
           return finish({
@@ -380,10 +523,26 @@ export function createModelEvryConversation({
           });
         }
         case "prepare":
-          if (readCount === 0 && selected) return prepare(selection, selected);
+          if (freshReadResults.length === 0 && actionIntent && selected)
+            return prepare(selection, selected);
           break readLoop;
+        case "prepare_action": {
+          if (!actionIntent) break readLoop;
+          const prepared = structuredPreparation(
+            decision.operation,
+            decision.input
+          );
+          const json = JSON.stringify(decision.input);
+          if (!prepared || json === undefined || json.length > 16000)
+            break readLoop;
+          return prepare(selection, prepared, false, json);
+        }
       }
     }
+    if (freshReadResults.length)
+      return answer(
+        "A requested next step was unavailable. Explain what the retrieved evidence establishes and what could not be completed. No change was made."
+      );
     const clarification = await generate({
       ...modelInput,
       feedback:

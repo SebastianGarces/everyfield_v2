@@ -17,6 +17,7 @@ import {
   createMeetingInvitationRecipeRegistry,
   createMeetingInvitationReferenceResolver,
   meetingInvitationPlanResolverRegistration,
+  meetingInvitationRequestSchema,
   MEETING_INVITATION_PLAN_SNAPSHOT_SCHEMA,
   MEETING_INVITATION_RECIPE_IDENTITY,
   MEETING_INVITATION_REVIEW_REGISTRY,
@@ -344,6 +345,130 @@ test("the canonical audience combines core team with unvisited prospects and dis
     address: "144 Oak Street, Albany, NY, USA",
   });
   assert.equal(result.dateTime.timeZone, "America/New_York");
+});
+
+test("explicit meeting guests include an attendee and a prospect with prior attendance", async () => {
+  const result = await resolver({}).resolve({
+    actor: ACTOR,
+    request: {
+      ...BASE_REQUEST,
+      guestPersonIds: [PEOPLE[7]!.id, PEOPLE[4]!.id],
+    },
+  });
+  assert.equal(result.kind, "resolved");
+  if (result.kind !== "resolved") return;
+  assert.deepEqual(
+    result.guests.map((guest) => guest.label),
+    ["Eli Person", "Hope Person"]
+  );
+  assert.deepEqual(result.exclusions, []);
+});
+
+test("explicit meeting guests remain the exact selected subset without canonical expansion", async () => {
+  const result = await resolver({}).resolve({
+    actor: ACTOR,
+    request: { ...BASE_REQUEST, guestPersonIds: [PEOPLE[3]!.id] },
+  });
+  assert.equal(result.kind, "resolved");
+  if (result.kind !== "resolved") return;
+  assert.deepEqual(
+    result.guests.map((guest) => guest.personId),
+    [PEOPLE[3]!.id]
+  );
+  assert.deepEqual(result.exclusions, []);
+});
+
+test("explicit missing and foreign guest IDs return the same neutral unavailable result", async () => {
+  // An authorized fact read omits both foreign and missing people. Neither may
+  // silently disappear from an explicit subset while the remaining guest sends.
+  for (const unavailableId of [
+    "90000000-0000-4000-8000-000000000001",
+    "90000000-0000-4000-8000-000000000002",
+  ]) {
+    const result = await resolver({}).resolve({
+      actor: ACTOR,
+      request: {
+        ...BASE_REQUEST,
+        guestPersonIds: [PEOPLE[0]!.id, unavailableId],
+      },
+    });
+    assert.deepEqual(result, { kind: "unavailable" });
+  }
+  const foreignPlant = facts({
+    church: { ...facts().church, id: "90000000-0000-4000-8000-000000000003" },
+  });
+  assert.deepEqual(
+    await resolver({ facts: foreignPlant }).resolve({
+      actor: ACTOR,
+      request: { ...BASE_REQUEST, guestPersonIds: [PEOPLE[0]!.id] },
+    }),
+    { kind: "unavailable" }
+  );
+});
+
+test("explicit guests still respect missing email, suppression, and duplicate-address exclusions", async () => {
+  const result = await resolver({}).resolve({
+    actor: ACTOR,
+    request: {
+      ...BASE_REQUEST,
+      guestPersonIds: PEOPLE.map((person) => person.id),
+    },
+  });
+  assert.equal(result.kind, "resolved");
+  if (result.kind !== "resolved") return;
+  assert.deepEqual(
+    result.guests.map((guest) => guest.label),
+    ["Alex Person", "Beth Person", "Drew Person", "Eli Person", "Hope Person"]
+  );
+  assert.deepEqual(
+    result.exclusions.map((exclusion) => exclusion.reason),
+    [
+      "Missing email address",
+      "Duplicate email address",
+      "Suppressed email address",
+    ]
+  );
+});
+
+test("explicit guest input is bounded, and omitted guests preserve the canonical audience", async () => {
+  assert.equal(
+    meetingInvitationRequestSchema.safeParse({
+      ...BASE_REQUEST,
+      guestPersonIds: [],
+    }).success,
+    false
+  );
+  assert.equal(
+    meetingInvitationRequestSchema.safeParse({
+      ...BASE_REQUEST,
+      guestPersonIds: Array(51).fill(PEOPLE[0]!.id),
+    }).success,
+    false
+  );
+  assert.equal(
+    meetingInvitationRequestSchema.safeParse({
+      ...BASE_REQUEST,
+      guestPersonIds: ["not-an-id"],
+    }).success,
+    false
+  );
+  const result = await resolver({}).resolve({
+    actor: ACTOR,
+    request: BASE_REQUEST,
+  });
+  assert.equal(result.kind, "resolved");
+  if (result.kind !== "resolved") return;
+  assert.deepEqual(
+    result.guests.map((guest) => guest.label),
+    ["Alex Person", "Beth Person", "Drew Person"]
+  );
+  assert.ok(
+    result.exclusions.some(
+      (exclusion) =>
+        exclusion.label === "Eli Person" &&
+        exclusion.reason === "Prior Vision Meeting attendance"
+    )
+  );
 });
 
 test("missing year and duration return focused clarifications before any fact read", async () => {

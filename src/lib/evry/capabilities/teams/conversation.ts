@@ -13,7 +13,10 @@ import {
   proposeTeamsEvryEffect,
   recoverTeamsEvryEffectProposal,
 } from "./runtime";
-import { selectTeamsEvryRequest } from "./selection";
+import {
+  selectTeamsEvryRequest,
+  type TeamsEvryEffectSelection,
+} from "./selection";
 
 const READ_IDENTITY = {
   read_list: "teams.read.list",
@@ -36,14 +39,17 @@ const unavailable = {
 };
 
 /** Closed production continuation for immediate Teams reads and confirmed effects. */
-export const continueTeamsEvryConversation: EvryCapabilityConversationContinuation =
-  {
+export function createTeamsEvryConversationContinuation(
+  selectedEffect?: TeamsEvryEffectSelection
+): EvryCapabilityConversationContinuation {
+  return {
     identity: "teams",
     matches(input) {
       return selectTeamsEvryRequest(input.literalUserText) !== null;
     },
     async continue(input) {
-      const selection = selectTeamsEvryRequest(input.literalUserText);
+      const selection =
+        selectedEffect ?? selectTeamsEvryRequest(input.literalUserText);
       if (!selection) return null;
       const effectSelection =
         selection.kind === "read_responsibilities"
@@ -133,3 +139,7 @@ export const continueTeamsEvryConversation: EvryCapabilityConversationContinuati
       return null;
     },
   };
+}
+
+export const continueTeamsEvryConversation =
+  createTeamsEvryConversationContinuation();

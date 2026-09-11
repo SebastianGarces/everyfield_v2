@@ -6,6 +6,10 @@ import {
 import { authorizeEvryReadCapability } from "@/lib/evry/eligibility/capabilities";
 import { deriveEvryPlanRequestKey } from "@/lib/evry/plans";
 import { selectMeetingInvitationReferenceRequest } from "@/lib/evry/recipes/meeting-invitation-selection";
+import { resolveAuthorizedEvryPageContext } from "@/lib/evry/resolvers/page-context";
+import { readEvryPlantTimeZone } from "@/lib/evry/reads/plant-time-zone";
+import { instantsAtZonedTime } from "@/lib/datetime";
+import { resolveOperationDatetime } from "../preparations/operations-dates";
 
 import type { EvryCapabilityConversationContinuation } from "../conversation";
 
@@ -17,7 +21,10 @@ import {
   recoverMeetingsEvryEffectProposal,
   type MeetingsEvryEffectProposal,
 } from "./runtime";
-import { selectMeetingsEvryRequest } from "./selection";
+import {
+  selectMeetingsEvryRequest,
+  type MeetingsEvryEffectSelection,
+} from "./selection";
 
 const READ_IDENTITY = {
   read_list: "meetings.read.list",
@@ -44,6 +51,8 @@ type MeetingsEffectConversationDependencies = Readonly<{
   recoverProposal: typeof recoverMeetingsEvryEffectProposal;
   resolveEffect: typeof resolveMeetingsEvryEffect;
   proposeEffect: typeof proposeMeetingsEvryEffect;
+  readTimeZone?: typeof readEvryPlantTimeZone;
+  resolvePageContext?: typeof resolveAuthorizedEvryPageContext;
 }>;
 
 type MeetingsReadConversationDependencies = Readonly<{
@@ -71,7 +80,9 @@ export function createMeetingsEvryConversationContinuation(
     resolveEffect: resolveMeetingsEvryEffect,
     proposeEffect: proposeMeetingsEvryEffect,
   },
-  readDependencies: MeetingsReadConversationDependencies = productionReadDependencies
+  readDependencies: MeetingsReadConversationDependencies = productionReadDependencies,
+  selectedEffect?: MeetingsEvryEffectSelection,
+  targetMeetingId?: string
 ): EvryCapabilityConversationContinuation {
   return {
     identity: "meetings",
@@ -82,7 +93,8 @@ export function createMeetingsEvryConversationContinuation(
       );
     },
     async continue(input) {
-      const selection = selectMeetingsEvryRequest(input.literalUserText);
+      const selection =
+        selectedEffect ?? selectMeetingsEvryRequest(input.literalUserText);
       if (!selection) return null;
 
       if (selection.kind !== "effect") {
@@ -136,10 +148,61 @@ export function createMeetingsEvryConversationContinuation(
       });
       if (recovered) return proposalResult(recovered);
 
+      const pageContext = targetMeetingId
+        ? await (
+            dependencies.resolvePageContext ?? resolveAuthorizedEvryPageContext
+          )({
+            actor: input.actor,
+            pageContext: { kind: "meeting", recordId: targetMeetingId },
+          })
+        : input.pageContext;
+      let effectSelection = selection;
+      if (selectedEffect) {
+        const timezone = await (
+          dependencies.readTimeZone ?? readEvryPlantTimeZone
+        )(input.actor.plantId);
+        const datetime =
+          selection.values.datetime === undefined
+            ? undefined
+            : resolveOperationDatetime(
+                selection.values.datetime,
+                input.now,
+                timezone
+              );
+        if (typeof datetime === "string") {
+          const date = datetime.slice(0, 10);
+          const hour = Number(datetime.slice(11, 13));
+          const minute = Number(datetime.slice(14, 16));
+          if (instantsAtZonedTime(date, hour, minute, timezone).length !== 1) {
+            const clarification = {
+              kind: "clarification" as const,
+              mode: "missing" as const,
+              entityType: "meeting_time",
+              prompt:
+                "That local meeting time is skipped or repeated by daylight saving. Choose another time so the meeting has one clear start time.",
+            };
+            return {
+              body: clarification.prompt,
+              artifacts: [
+                storedEvryClarificationArtifactDocument(clarification),
+              ],
+            };
+          }
+        }
+        effectSelection = {
+          ...selection,
+          values: {
+            ...selection.values,
+            ...(datetime ? { datetime } : {}),
+            timezone,
+          },
+        };
+      }
+
       const resolved = await dependencies.resolveEffect({
         actor: input.actor,
-        selection,
-        pageContext: input.pageContext,
+        selection: effectSelection,
+        pageContext,
         requestKey,
         now: input.now,
       });

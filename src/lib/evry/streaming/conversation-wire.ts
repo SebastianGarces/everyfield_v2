@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { publicReadArtifactSchema } from "@/lib/evry/artifacts/public";
 import { validEvryResponseLayout } from "@/lib/evry/conversations/response-layout";
+import { EVRY_READ_BUDGET } from "@/lib/evry/capabilities/read-budget";
 
 import {
   publicEvryConversationSchema,
@@ -47,7 +48,9 @@ export const evryConversationStreamEventSchema = z.union([
     response: z
       .strictObject({
         body: z.string().max(8000),
-        artifacts: z.array(publicReadArtifactSchema).max(4),
+        artifacts: z
+          .array(publicReadArtifactSchema)
+          .max(EVRY_READ_BUDGET.calls),
       })
       .refine(
         (response) =>

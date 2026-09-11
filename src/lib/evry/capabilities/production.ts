@@ -1,4 +1,12 @@
 import { continuePlatformEvryConversation } from "./platform/conversation";
+import { PEOPLE_QUERY_READS } from "./queries/people";
+import { OPERATIONS_QUERY_READS } from "./queries/operations";
+import { CONTENT_QUERY_READS } from "./queries/content";
+import { EVRY_READ_WORKFLOWS } from "@/lib/evry/recipes/read-workflows";
+import { MEETING_INVITATION_MODEL_PREPARATION } from "@/lib/evry/recipes/meeting-invitation-preparation";
+import { PEOPLE_MODEL_PREPARATIONS } from "./preparations/people";
+import { OPERATIONS_MODEL_PREPARATIONS } from "./preparations/operations";
+import { CONTENT_MODEL_PREPARATIONS } from "./preparations/content";
 import {
   PLATFORM_READ_CONTRACTS,
   continuePlatformEvryRead,
@@ -271,24 +279,33 @@ export const PRODUCTION_EVRY_MODEL_READS: readonly EvryModelRead[] =
       ...COMMUNICATION_EVRY_READ_REGISTRATIONS,
       ...LAUNCH_READ_REGISTRATIONS,
       ...TASK_EVRY_READ_REGISTRATIONS,
-    ].map(
-      (read): EvryModelRead => ({
-        id: read.id,
-        capabilityIdentity: read.capabilityIdentity,
-        inputSchema: read.inputSchema,
-        run: (authorization, input, argumentsValue) =>
-          executeAuthorizedEvryRead(
-            read,
-            authorization,
-            {
-              literalUserText: input.literalUserText,
-              pageContext: input.requestPageContext,
-              now: input.now,
-            },
-            argumentsValue
-          ),
-      })
-    ),
+      ...PEOPLE_QUERY_READS,
+      ...OPERATIONS_QUERY_READS,
+      ...CONTENT_QUERY_READS,
+    ]
+      .filter(
+        (read) =>
+          read.id !== "wiki.search" ||
+          CONTENT_QUERY_READS.some((entry) => entry === read)
+      )
+      .map(
+        (read): EvryModelRead => ({
+          id: read.id,
+          capabilityIdentity: read.capabilityIdentity,
+          inputSchema: read.inputSchema,
+          run: (authorization, input, argumentsValue) =>
+            executeAuthorizedEvryRead(
+              read,
+              authorization,
+              {
+                literalUserText: input.literalUserText,
+                pageContext: input.requestPageContext,
+                now: input.now,
+              },
+              argumentsValue
+            ),
+        })
+      ),
     ...MEETINGS_READ_CONTRACTS.map(
       (read): EvryModelRead => ({
         id: read.identity,
@@ -325,10 +342,19 @@ export const PRODUCTION_EVRY_MODEL_READS: readonly EvryModelRead[] =
     ),
   ]);
 
+export const PRODUCTION_EVRY_MODEL_PREPARATIONS = [
+  ...PEOPLE_MODEL_PREPARATIONS,
+  ...OPERATIONS_MODEL_PREPARATIONS,
+  ...CONTENT_MODEL_PREPARATIONS,
+  MEETING_INVITATION_MODEL_PREPARATION,
+] as const;
+
 export const continueProductionEvryCapabilityConversation =
   createModelEvryConversation({
     continuations: PRODUCTION_EVRY_CAPABILITY_CONTINUATIONS,
     reads: PRODUCTION_EVRY_MODEL_READS,
+    recipes: EVRY_READ_WORKFLOWS,
+    preparations: PRODUCTION_EVRY_MODEL_PREPARATIONS,
   });
 
 type ProductionDispatcherDependencies = Readonly<{

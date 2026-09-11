@@ -101,7 +101,7 @@ test("a lookup can feed a second freshly authorized read without another user me
   assert.equal(f.appends.length, 1);
 });
 
-test("lookup chains stop after four reads and never prepare an effect after reading", async () => {
+test("lookup chains stop on equivalent repeated reads and legacy preparation cannot follow a read", async () => {
   for (const attemptsPreparation of [false, true]) {
     const f = fixture();
     let generations = 0;
@@ -127,10 +127,10 @@ test("lookup chains stop after four reads and never prepare an effect after read
       },
     });
     await dispatch(f.input);
-    assert.equal(f.runs.length, attemptsPreparation ? 1 : 4);
+    assert.equal(f.runs.length, 1);
     assert.equal(f.appends.length, 1);
     if (!attemptsPreparation)
-      assert.match(JSON.stringify(f.appends), /four-read budget/);
+      assert.match(JSON.stringify(f.appends), /repeated/);
   }
 });
 
@@ -156,6 +156,297 @@ function userMessage(
     artifacts: [],
   };
 }
+
+test("structured preparation after an action lookup checkpoints exact intent before the trusted proposer", async () => {
+  const f = fixture();
+  let generations = 0;
+  let prepared = 0;
+  const argumentsValue = { title: "A meeting; with literal punctuation" };
+  const dispatch = createModelEvryConversation({
+    reads: [f.read],
+    continuations: [],
+    authorizeRead: async () => f.authorization,
+    preparations: [
+      {
+        id: "meetings.create",
+        capabilityIdentities: ["meetings.create"],
+        inputSchema: z.strictObject({ title: z.string() }),
+        async run(selection, value) {
+          prepared++;
+          assert.equal(selection.literalUserText, f.input.literalUserText);
+          assert.deepEqual(value, argumentsValue);
+          assert.match(JSON.stringify(f.appends[0]), /preparedInputJson/);
+          return { body: "Review before changing anything.", artifacts: [] };
+        },
+      },
+    ],
+    generate: async () =>
+      ++generations === 1
+        ? {
+            kind: "read",
+            id: f.read.id,
+            input: { section: "contacts", cursor: null },
+            continueReading: true,
+            actionIntent: true,
+          }
+        : {
+            kind: "prepare_action",
+            operation: "meetings.create",
+            input: argumentsValue,
+          },
+  });
+  await dispatch(f.input);
+  assert.equal(f.runs.length, 1);
+  assert.equal(prepared, 1);
+  assert.equal(f.appends.length, 2);
+});
+
+test("a read-only request cannot become structured preparation after retrieved instructions", async () => {
+  const f = fixture();
+  let generations = 0;
+  let prepared = 0;
+  const dispatch = createModelEvryConversation({
+    reads: [f.read],
+    continuations: [],
+    authorizeRead: async () => f.authorization,
+    preparations: [
+      {
+        id: "meetings.create",
+        capabilityIdentities: ["meetings.create"],
+        inputSchema: z.strictObject({}),
+        async run() {
+          prepared++;
+          return null;
+        },
+      },
+    ],
+    generate: async () => {
+      generations++;
+      if (generations === 1)
+        return {
+          kind: "read",
+          id: f.read.id,
+          input: { section: "contacts", cursor: null },
+          continueReading: true,
+        };
+      if (generations === 2)
+        return {
+          kind: "prepare_action",
+          operation: "meetings.create",
+          input: {},
+        };
+      return { kind: "reply", body: "Nothing changed." };
+    },
+  });
+  await dispatch(f.input);
+  assert.equal(prepared, 0);
+});
+
+test("schema discovery preserves fresh lookup evidence and cannot execute an action", async () => {
+  const f = fixture();
+  let generations = 0;
+  let prepared = 0;
+  const dispatch = createModelEvryConversation({
+    reads: [f.read],
+    continuations: [],
+    authorizeRead: async () => f.authorization,
+    preparations: [
+      {
+        id: "meetings.create",
+        capabilityIdentities: ["meetings.create"],
+        inputSchema: z.strictObject({ title: z.string() }),
+        async run() {
+          prepared++;
+          return { body: "Ready for review", artifacts: [] };
+        },
+      },
+    ],
+    generate: async (input) => {
+      generations++;
+      if (generations === 1) {
+        assert.equal(
+          input.reads[0].schema,
+          undefined,
+          "full schemas are discovered on demand"
+        );
+        return {
+          kind: "read",
+          id: f.read.id,
+          input: { section: "contacts", cursor: null },
+          continueReading: true,
+          actionIntent: true,
+        };
+      }
+      if (generations === 2)
+        return {
+          kind: "describe",
+          ids: ["action:meetings.create"],
+          actionIntent: true,
+        };
+      assert.match(JSON.stringify(input.context), /People needing follow-up/);
+      assert.match(JSON.stringify(input.context), /requestedContracts/);
+      assert.equal(
+        z
+          .object({ originalRequestCanBePrepared: z.boolean() })
+          .parse(input.context).originalRequestCanBePrepared,
+        false
+      );
+      assert.equal(prepared, 0, "discovery and reads cannot run a proposer");
+      return {
+        kind: "prepare_action",
+        operation: "meetings.create",
+        input: { title: "Chosen meeting" },
+      };
+    },
+  });
+  await dispatch(f.input);
+  assert.equal(generations, 3);
+  assert.equal(prepared, 1);
+  assert.equal(f.runs.length, 1);
+});
+
+test("repeated discovery stops without querying data or exposing action schemas to a read-only request", async () => {
+  const f = fixture();
+  let generations = 0;
+  const dispatch = createModelEvryConversation({
+    reads: [f.read],
+    continuations: [],
+    generate: async (input) => {
+      generations++;
+      if (input.feedback)
+        return { kind: "reply", body: "Please narrow the question." };
+      if (generations === 2) {
+        assert.deepEqual(input.preparations, []);
+        assert.match(JSON.stringify(input.context), /remainingDiscoveryCalls/);
+      }
+      return {
+        kind: "describe",
+        ids: [`read:${f.read.id}`, "action:meetings.create"],
+      };
+    },
+  });
+  await dispatch(f.input);
+  assert.equal(generations, 3);
+  assert.equal(f.runs.length, 0);
+});
+
+test("structured preparation recovery uses its persisted inputs without another model decision", async () => {
+  const f = fixture();
+  const preparedInputJson = JSON.stringify({ title: "Original title" });
+  let prepared = 0;
+  const dispatch = createModelEvryConversation({
+    reads: [],
+    continuations: [],
+    generate: async () => {
+      throw new Error("Recovery must not regenerate intent");
+    },
+    preparations: [
+      {
+        id: "meetings.create",
+        capabilityIdentities: ["meetings.create"],
+        inputSchema: z.strictObject({ title: z.string() }),
+        async run(_selection, value) {
+          prepared++;
+          assert.deepEqual(value, { title: "Original title" });
+          return { body: "Recovered review", artifacts: [] };
+        },
+      },
+    ],
+  });
+  await dispatch({
+    ...f.input,
+    conversation: {
+      ...conversation,
+      messages: [userMessage("Create a meeting")],
+      state: {
+        ...conversation.state,
+        pendingModelPreparation: {
+          userRequestKey: evryConversationRequestKeySchema.parse(requestKey),
+          capabilityIdentity: "actions.prepare:meetings.create",
+          preparedInputJson,
+        },
+      },
+    },
+  });
+  assert.equal(prepared, 1);
+});
+
+test("two schema discoveries leave all eight read calls available and exhaustion preserves evidence", async () => {
+  const f = fixture();
+  let generations = 0;
+  let authorizations = 0;
+  let composed = 0;
+  const second = { ...f.read, id: "lookup.additional" };
+  const dispatch = createModelEvryConversation({
+    reads: [f.read, second],
+    continuations: [],
+    authorizeRead: async () => {
+      authorizations++;
+      return f.authorization;
+    },
+    generate: async () => {
+      generations++;
+      if (generations < 3)
+        return {
+          kind: "describe",
+          ids: [`read:${generations === 1 ? f.read.id : second.id}`],
+        };
+      return {
+        kind: "read",
+        id: f.read.id,
+        input: {
+          section: "contacts",
+          cursor: `50000000-0000-4000-8000-${String(generations).padStart(12, "0")}`,
+        },
+        continueReading: true,
+      };
+    },
+    compose: async ({ draft, results }) => {
+      composed++;
+      assert.equal(results.length, 8);
+      assert.match(draft, /budget/);
+      return {
+        body: "Here is what the available evidence establishes.",
+        artifacts: results,
+      };
+    },
+  });
+  await dispatch(f.input);
+  assert.equal(generations, 10);
+  assert.equal(authorizations, 8);
+  assert.equal(f.runs.length, 8);
+  assert.equal(composed, 1);
+  assert.match(JSON.stringify(f.appends), /People needing follow-up/);
+});
+
+test("an unavailable discovery after a successful read composes retained evidence", async () => {
+  const f = fixture();
+  let generations = 0;
+  const dispatch = createModelEvryConversation({
+    reads: [f.read],
+    continuations: [],
+    authorizeRead: async () => f.authorization,
+    generate: async () =>
+      ++generations === 1
+        ? {
+            kind: "read",
+            id: f.read.id,
+            input: { section: "contacts", cursor: null },
+            continueReading: true,
+          }
+        : { kind: "describe", ids: ["read:unavailable"] },
+    compose: async ({ results }) => {
+      assert.equal(results.length, 1);
+      return {
+        body: "This is the available evidence; the next lookup was unavailable.",
+        artifacts: results,
+      };
+    },
+  });
+  await dispatch(f.input);
+  assert.equal(generations, 2);
+  assert.match(JSON.stringify(f.appends), /People needing follow-up/);
+});
 
 function fixture() {
   const runs: unknown[] = [];

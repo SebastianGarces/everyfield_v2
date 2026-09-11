@@ -1,6 +1,10 @@
 import { z } from "zod";
 import type { EvryReadArtifact } from "@/lib/evry/artifacts/types";
 import { storedEvryReadArtifactDocument } from "@/lib/evry/conversations/artifacts";
+import { EVRY_READ_BUDGET } from "./read-budget";
+
+// One prose passage per result, plus an optional closing passage.
+export const EVRY_RESPONSE_PART_LIMIT = EVRY_READ_BUDGET.calls * 2 + 1;
 
 // The provider chooses references, never component payloads or application URLs.
 export const evryResponseSchema = z.strictObject({
@@ -9,11 +13,16 @@ export const evryResponseSchema = z.strictObject({
       z.strictObject({
         kind: z.enum(["text", "result"]),
         text: z.string().max(8000),
-        resultIndex: z.number().int().min(0).max(3).nullable(),
+        resultIndex: z
+          .number()
+          .int()
+          .min(0)
+          .max(EVRY_READ_BUDGET.calls - 1)
+          .nullable(),
       })
     )
     .min(1)
-    .max(12),
+    .max(EVRY_RESPONSE_PART_LIMIT),
 });
 export type EvryResponse = z.infer<typeof evryResponseSchema>;
 export type EvryResponsePreview = Readonly<{

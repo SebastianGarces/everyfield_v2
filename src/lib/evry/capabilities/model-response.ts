@@ -13,6 +13,7 @@ import type { EvryReadArtifact } from "@/lib/evry/artifacts/types";
 import {
   composeEvryResponse,
   evryResponseSchema,
+  EVRY_RESPONSE_PART_LIMIT,
   type EvryResponsePreview,
 } from "./response-parts";
 
@@ -71,7 +72,10 @@ export async function generateEvryModelResponse(
       // Incomplete JSON never reaches the client. Project only text and fully
       // resolved references from the provider's current partial object.
       const parts = [];
-      for (const part of (partial.parts ?? []).slice(0, 12)) {
+      for (const part of (partial.parts ?? []).slice(
+        0,
+        EVRY_RESPONSE_PART_LIMIT
+      )) {
         if (!part) break;
         if (part.kind === "text") {
           parts.push({

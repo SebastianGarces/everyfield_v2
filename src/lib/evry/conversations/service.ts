@@ -1,5 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
-import { publicReadArtifactSchema } from "@/lib/evry/artifacts/public";
+import {
+  publicEvryArtifact,
+  publicReadArtifactSchema,
+} from "@/lib/evry/artifacts/public";
 
 import type {
   EvryConversationAuthor,
@@ -207,7 +210,7 @@ export async function createEvryConversation(input: {
         response: {
           body: response.body,
           artifacts: response.artifacts.map((artifact) =>
-            publicReadArtifactSchema.parse(artifact)
+            publicReadArtifactSchema.parse(publicEvryArtifact(artifact))
           ),
         },
       }),
@@ -574,7 +577,7 @@ export async function continueEvryConversation(
           response: {
             body: response.body,
             artifacts: response.artifacts.map((artifact) =>
-              publicReadArtifactSchema.parse(artifact)
+              publicReadArtifactSchema.parse(publicEvryArtifact(artifact))
             ),
           },
         }),

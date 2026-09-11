@@ -183,7 +183,8 @@ function proposalFromStored(stored: StoredEvryActionPlan) {
 
 /** Ordinary production continuation for the canonical FRD 3.5 recipe. */
 export function createMeetingInvitationConversationContinuation(
-  dependencies: Dependencies = productionDependencies
+  dependencies: Dependencies = productionDependencies,
+  requestFor = meetingInvitationRequestForConversation
 ): EvryCapabilityConversationContinuation {
   return {
     identity: MEETING_INVITATION_RECIPE_IDENTITY,
@@ -197,7 +198,7 @@ export function createMeetingInvitationConversationContinuation(
       return meetingInvitationRequestForConversation(input) !== null;
     },
     async continue(input) {
-      const request = meetingInvitationRequestForConversation(input);
+      const request = requestFor(input);
       if (!request) return null;
       const requestKey = deriveEvryPlanRequestKey("meeting-invitation", [
         input.actor.userId,

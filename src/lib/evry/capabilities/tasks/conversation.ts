@@ -23,12 +23,18 @@ import { continueTaskEvryRead, selectTaskEvryRead } from "./reads";
 import { resolveTaskEvryEffect } from "./resolver";
 import { proposeTaskEvryEffect, TASK_PLAN_REGISTRY } from "./runtime";
 import { TASK_REVIEW_REGISTRY } from "./review";
-import { selectTaskEvryEffect } from "./selection";
+import {
+  selectTaskEvryEffect,
+  type TaskEvryEffectSelection,
+} from "./selection";
+import { readEvryPlantTimeZone } from "@/lib/evry/reads/plant-time-zone";
+import { resolveOperationDate } from "../preparations/operations-dates";
 
 type TaskEvryConversationDependencies = Readonly<{
   findPlanByRequestKey: typeof findEvryActionPlanByRequestKey;
   propose: typeof proposeTaskEvryEffect;
   resolve: typeof resolveTaskEvryEffect;
+  readTimeZone?: typeof readEvryPlantTimeZone;
 }>;
 
 const productionDependencies: TaskEvryConversationDependencies = {
@@ -91,7 +97,8 @@ function recoveredPlanResult(input: {
 
 /** Closed production continuation for Task reads and reviewed effects. */
 export function createTaskEvryConversationContinuation(
-  dependencies: TaskEvryConversationDependencies = productionDependencies
+  dependencies: TaskEvryConversationDependencies = productionDependencies,
+  selectedEffect?: TaskEvryEffectSelection
 ): EvryCapabilityConversationContinuation {
   return {
     identity: "tasks",
@@ -102,7 +109,9 @@ export function createTaskEvryConversationContinuation(
       );
     },
     async continue(input) {
-      const readSelection = selectTaskEvryRead(input.literalUserText);
+      const readSelection = selectedEffect
+        ? null
+        : selectTaskEvryRead(input.literalUserText);
       if (readSelection) {
         const artifact = await continueTaskEvryRead({
           eligibleCapabilities: eligibleEvryCapabilitiesFor(input.actor),
@@ -121,7 +130,8 @@ export function createTaskEvryConversationContinuation(
             };
       }
 
-      const selection = selectTaskEvryEffect(input.literalUserText);
+      const selection =
+        selectedEffect ?? selectTaskEvryEffect(input.literalUserText);
       if (!selection) return null;
       const contract = TASK_ACTION_CONTRACTS[selection.exportName];
       const requestKey = deriveEvryPlanRequestKey(
@@ -146,9 +156,30 @@ export function createTaskEvryConversationContinuation(
           expectedIdentity: contract.operationId,
         });
       }
+      let effectSelection = selection;
+      if (
+        selectedEffect &&
+        selection.values.dueDate &&
+        typeof selection.values.dueDate === "object"
+      ) {
+        const timezone = await (
+          dependencies.readTimeZone ?? readEvryPlantTimeZone
+        )(input.actor.plantId);
+        effectSelection = {
+          ...selection,
+          values: {
+            ...selection.values,
+            dueDate: resolveOperationDate(
+              selection.values.dueDate,
+              input.now,
+              timezone
+            ),
+          },
+        };
+      }
       const resolved = await dependencies.resolve({
         actor: input.actor,
-        selection,
+        selection: effectSelection,
         pageContext: input.pageContext,
         requestKey,
         now: input.now,

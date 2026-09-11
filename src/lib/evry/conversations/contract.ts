@@ -135,6 +135,11 @@ export const storedEvryArtifactFactSchema = z
   .strict()
   .readonly();
 
+export const storedEvryReadFactSchema = storedEvryArtifactFactSchema
+  .unwrap()
+  .extend({ modelOnly: z.literal(true).optional() })
+  .readonly();
+
 function normalizeAlias(value: string): string {
   return value
     .normalize("NFKC")
@@ -362,6 +367,8 @@ export const evryConversationStateDocumentSchema = z
       .strictObject({
         userRequestKey: evryConversationRequestKeySchema,
         capabilityIdentity: z.string().min(1).max(200),
+        // Structured intent survives a crash without asking the model to recreate it.
+        preparedInputJson: z.string().max(16000).optional(),
       })
       .nullable()
       .optional(),
