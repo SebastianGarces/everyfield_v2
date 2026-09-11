@@ -1,4 +1,5 @@
 import { PgRaw } from "drizzle-orm/pg-core/query-builders/raw";
+import { sql } from "drizzle-orm";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -1015,6 +1016,25 @@ test("every person link locks its church before any claim or mint", () => {
     ACCOUNT_PERSON_LINK,
     /return \[\s*duplicateMutationLock,\s*db\s*\.update\(persons\)[\s\S]*?mint,\s*\];/
   );
+});
+
+test("the duplicate lock preserves the seat acceptance gate on both person writes", () => {
+  const statements = accountPersonLinkStatements({
+    userId: USER,
+    churchId: PLANT,
+    name: "Sam Stranger",
+    email: "sam@example.test",
+    matchedPersonId: "77777777-7777-4777-8777-777777777777",
+    eligible: sql`exists (select 1 where ${"accepted-token"} = ${"current-token"})`,
+  });
+  assert.equal(statements.length, 3);
+  assert.match(asQuery(statements[0]).toSQL().sql, /for update/);
+  for (const statement of statements.slice(1)) {
+    const query = asQuery(statement).toSQL();
+    assert.match(query.sql, /exists \(select 1 where/);
+    assert.ok(query.params.includes("accepted-token"));
+    assert.ok(query.params.includes("current-token"));
+  }
 });
 
 test("a matching person is CLAIMED, and the mint behind it makes that total", () => {

@@ -595,6 +595,7 @@
       "domain": "members",
       "operationKind": "effect",
       "applicationCapability": "teams.write",
+      "sourceApplicationCapability": "teams.own",
       "confirmation": "required",
       "mutationShape": "compound_write",
       "classification": { "state": "supported" }
@@ -608,6 +609,7 @@
       "domain": "teams",
       "operationKind": "effect",
       "applicationCapability": "teams.write",
+      "sourceApplicationCapability": "teams.write",
       "confirmation": "required",
       "mutationShape": "compound_write",
       "classification": { "state": "supported" }
@@ -621,6 +623,7 @@
       "domain": "meetings",
       "operationKind": "effect",
       "applicationCapability": "teams.write",
+      "sourceApplicationCapability": "teams.own",
       "confirmation": "required",
       "mutationShape": "compound_write",
       "classification": { "state": "supported" }
@@ -634,6 +637,7 @@
       "domain": "responsibilities",
       "operationKind": "effect",
       "applicationCapability": "teams.write",
+      "sourceApplicationCapability": "teams.own",
       "confirmation": "required",
       "mutationShape": "single_create",
       "classification": { "state": "supported" }
@@ -647,6 +651,7 @@
       "domain": "roles",
       "operationKind": "effect",
       "applicationCapability": "teams.write",
+      "sourceApplicationCapability": "teams.own",
       "confirmation": "required",
       "mutationShape": "single_create",
       "classification": { "state": "supported" }
@@ -660,6 +665,7 @@
       "domain": "teams",
       "operationKind": "effect",
       "applicationCapability": "teams.write",
+      "sourceApplicationCapability": "teams.write",
       "confirmation": "required",
       "mutationShape": "single_create",
       "classification": { "state": "supported" }
@@ -673,6 +679,7 @@
       "domain": "training",
       "operationKind": "effect",
       "applicationCapability": "teams.write",
+      "sourceApplicationCapability": "teams.own",
       "confirmation": "required",
       "mutationShape": "single_create",
       "classification": { "state": "supported" }
@@ -686,6 +693,7 @@
       "domain": "responsibilities",
       "operationKind": "effect",
       "applicationCapability": "teams.write",
+      "sourceApplicationCapability": "teams.own",
       "confirmation": "required",
       "mutationShape": "single_delete",
       "classification": { "state": "supported" }
@@ -699,6 +707,7 @@
       "domain": "roles",
       "operationKind": "effect",
       "applicationCapability": "teams.write",
+      "sourceApplicationCapability": "teams.own",
       "confirmation": "required",
       "mutationShape": "compound_write",
       "classification": { "state": "supported" }
@@ -712,6 +721,7 @@
       "domain": "roles",
       "operationKind": "effect",
       "applicationCapability": "teams.write",
+      "sourceApplicationCapability": "teams.write",
       "confirmation": "required",
       "mutationShape": "bulk_import",
       "classification": { "state": "supported" }
@@ -725,6 +735,7 @@
       "domain": "teams",
       "operationKind": "effect",
       "applicationCapability": "teams.write",
+      "sourceApplicationCapability": "teams.write",
       "confirmation": "required",
       "mutationShape": "bulk_import",
       "classification": { "state": "supported" }
@@ -738,6 +749,7 @@
       "domain": "teams",
       "operationKind": "effect",
       "applicationCapability": "teams.write",
+      "sourceApplicationCapability": "teams.write",
       "confirmation": "required",
       "mutationShape": "compound_write",
       "classification": { "state": "supported" }
@@ -751,6 +763,7 @@
       "domain": "teams",
       "operationKind": "read",
       "applicationCapability": "read",
+      "sourceApplicationCapability": "read",
       "confirmation": "not_required",
       "mutationShape": null,
       "classification": { "state": "supported" }
@@ -764,6 +777,7 @@
       "domain": "training",
       "operationKind": "effect",
       "applicationCapability": "teams.write",
+      "sourceApplicationCapability": "teams.own",
       "confirmation": "required",
       "mutationShape": "association_add",
       "classification": { "state": "supported" }
@@ -777,6 +791,7 @@
       "domain": "members",
       "operationKind": "effect",
       "applicationCapability": "teams.write",
+      "sourceApplicationCapability": "teams.own",
       "confirmation": "required",
       "mutationShape": "compound_write",
       "classification": { "state": "supported" }
@@ -790,6 +805,7 @@
       "domain": "members",
       "operationKind": "read",
       "applicationCapability": "read",
+      "sourceApplicationCapability": "read",
       "confirmation": "not_required",
       "mutationShape": null,
       "classification": { "state": "supported" }
@@ -803,6 +819,7 @@
       "domain": "responsibilities",
       "operationKind": "effect",
       "applicationCapability": "teams.write",
+      "sourceApplicationCapability": "teams.own",
       "confirmation": "required",
       "mutationShape": "single_update",
       "classification": { "state": "supported" }
@@ -816,6 +833,7 @@
       "domain": "responsibilities",
       "operationKind": "effect",
       "applicationCapability": "teams.write",
+      "sourceApplicationCapability": "teams.own",
       "confirmation": "required",
       "mutationShape": "single_update",
       "classification": { "state": "supported" }
@@ -829,6 +847,7 @@
       "domain": "roles",
       "operationKind": "effect",
       "applicationCapability": "teams.write",
+      "sourceApplicationCapability": "teams.own",
       "confirmation": "required",
       "mutationShape": "compound_write",
       "classification": { "state": "supported" }
@@ -842,6 +861,7 @@
       "domain": "teams",
       "operationKind": "effect",
       "applicationCapability": "teams.write",
+      "sourceApplicationCapability": "teams.write",
       "confirmation": "required",
       "mutationShape": "single_update",
       "classification": { "state": "supported" }

@@ -944,6 +944,7 @@
       "parityCapability": "meetings",
       "operationKind": "effect",
       "applicationCapability": "meetings.write",
+      "sourceApplicationCapability": "meetings.attendance",
       "confirmation": "required",
       "classification": { "state": "supported" }
     },
@@ -954,6 +955,7 @@
       "parityCapability": "meetings",
       "operationKind": "effect",
       "applicationCapability": "meetings.write",
+      "sourceApplicationCapability": "meetings.write",
       "confirmation": "required",
       "classification": { "state": "supported" }
     },
@@ -964,6 +966,7 @@
       "parityCapability": "meetings",
       "operationKind": "effect",
       "applicationCapability": "meetings.write",
+      "sourceApplicationCapability": "meetings.write",
       "confirmation": "required",
       "classification": { "state": "supported" }
     },
@@ -974,6 +977,7 @@
       "parityCapability": "meetings",
       "operationKind": "effect",
       "applicationCapability": "meetings.write",
+      "sourceApplicationCapability": "meetings.attendance",
       "confirmation": "required",
       "classification": { "state": "supported" }
     },
@@ -984,6 +988,7 @@
       "parityCapability": "meetings",
       "operationKind": "effect",
       "applicationCapability": "meetings.write",
+      "sourceApplicationCapability": "meetings.write",
       "confirmation": "required",
       "classification": { "state": "supported" }
     },
@@ -994,6 +999,7 @@
       "parityCapability": "meetings",
       "operationKind": "effect",
       "applicationCapability": "meetings.write",
+      "sourceApplicationCapability": "meetings.write",
       "confirmation": "required",
       "classification": { "state": "supported" }
     },
@@ -1004,6 +1010,7 @@
       "parityCapability": "meetings",
       "operationKind": "effect",
       "applicationCapability": "meetings.write",
+      "sourceApplicationCapability": "meetings.write",
       "confirmation": "required",
       "classification": { "state": "supported" }
     },
@@ -1014,6 +1021,7 @@
       "parityCapability": "meetings",
       "operationKind": "effect",
       "applicationCapability": "meetings.write",
+      "sourceApplicationCapability": "meetings.write",
       "confirmation": "required",
       "classification": { "state": "supported" }
     },
@@ -1024,6 +1032,7 @@
       "parityCapability": "meetings",
       "operationKind": "effect",
       "applicationCapability": "meetings.write",
+      "sourceApplicationCapability": "meetings.write",
       "confirmation": "required",
       "classification": { "state": "supported" }
     },
@@ -1034,6 +1043,7 @@
       "parityCapability": "meetings",
       "operationKind": "effect",
       "applicationCapability": "meetings.write",
+      "sourceApplicationCapability": "meetings.attendance",
       "confirmation": "required",
       "classification": { "state": "supported" }
     },
@@ -1044,6 +1054,7 @@
       "parityCapability": "meetings",
       "operationKind": "effect",
       "applicationCapability": "meetings.write",
+      "sourceApplicationCapability": "meetings.write",
       "confirmation": "required",
       "classification": { "state": "supported" }
     },
@@ -1054,6 +1065,7 @@
       "parityCapability": "meetings",
       "operationKind": "effect",
       "applicationCapability": "meetings.write",
+      "sourceApplicationCapability": "meetings.write",
       "confirmation": "required",
       "classification": { "state": "supported" }
     },
@@ -1064,6 +1076,7 @@
       "parityCapability": "meetings",
       "operationKind": "effect",
       "applicationCapability": "meetings.write",
+      "sourceApplicationCapability": "meetings.write",
       "confirmation": "required",
       "classification": { "state": "supported" }
     },
@@ -1074,6 +1087,7 @@
       "parityCapability": "meetings",
       "operationKind": "effect",
       "applicationCapability": "meetings.write",
+      "sourceApplicationCapability": "meetings.attendance",
       "confirmation": "required",
       "classification": { "state": "supported" }
     },
@@ -1084,6 +1098,7 @@
       "parityCapability": "meetings",
       "operationKind": "effect",
       "applicationCapability": "meetings.write",
+      "sourceApplicationCapability": "meetings.write",
       "confirmation": "required",
       "classification": { "state": "supported" }
     },
@@ -1094,6 +1109,7 @@
       "parityCapability": "meetings",
       "operationKind": "effect",
       "applicationCapability": "meetings.write",
+      "sourceApplicationCapability": "meetings.attendance",
       "confirmation": "required",
       "classification": { "state": "supported" }
     },
@@ -1104,6 +1120,7 @@
       "parityCapability": "meetings",
       "operationKind": "effect",
       "applicationCapability": "meetings.write",
+      "sourceApplicationCapability": "meetings.write",
       "confirmation": "required",
       "classification": { "state": "supported" }
     },
@@ -1114,6 +1131,7 @@
       "parityCapability": "meetings",
       "operationKind": "effect",
       "applicationCapability": "meetings.write",
+      "sourceApplicationCapability": "meetings.write",
       "confirmation": "required",
       "classification": { "state": "supported" }
     },
@@ -1124,6 +1142,7 @@
       "parityCapability": "meetings",
       "operationKind": "effect",
       "applicationCapability": "meetings.write",
+      "sourceApplicationCapability": "meetings.attendance",
       "confirmation": "required",
       "classification": { "state": "supported" }
     },
@@ -1134,6 +1153,7 @@
       "parityCapability": "meetings",
       "operationKind": "effect",
       "applicationCapability": "meetings.write",
+      "sourceApplicationCapability": "meetings.write",
       "confirmation": "required",
       "classification": { "state": "supported" }
     },
@@ -1144,6 +1164,7 @@
       "parityCapability": "meetings",
       "operationKind": "effect",
       "applicationCapability": "meetings.write",
+      "sourceApplicationCapability": "meetings.write",
       "confirmation": "required",
       "classification": { "state": "supported" }
     },
@@ -1154,6 +1175,7 @@
       "parityCapability": "meetings",
       "operationKind": "effect",
       "applicationCapability": "meetings.write",
+      "sourceApplicationCapability": "meetings.write",
       "confirmation": "required",
       "classification": { "state": "supported" }
     },
@@ -1164,6 +1186,7 @@
       "parityCapability": "meetings",
       "operationKind": "effect",
       "applicationCapability": "meetings.write",
+      "sourceApplicationCapability": "meetings.write",
       "confirmation": "required",
       "classification": { "state": "supported" }
     },
@@ -1174,6 +1197,7 @@
       "parityCapability": "meetings",
       "operationKind": "effect",
       "applicationCapability": "meetings.write",
+      "sourceApplicationCapability": "meetings.write",
       "confirmation": "required",
       "classification": { "state": "supported" }
     },
@@ -1184,6 +1208,7 @@
       "parityCapability": "meetings",
       "operationKind": "effect",
       "applicationCapability": "meetings.write",
+      "sourceApplicationCapability": "meetings.write",
       "confirmation": "required",
       "classification": { "state": "supported" }
     },
@@ -1373,6 +1398,19 @@
       "applicationCapability": "read",
       "confirmation": "not_required",
       "classification": { "state": "supported" }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/attendance/page.tsx → mayRecordMeetingAttendance",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
     },
     {
       "identity": "read-operation:src/app/(dashboard)/meetings/[id]/attendance/page.tsx → notFound",
@@ -1883,6 +1921,16 @@
       }
     },
     {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/page.tsx → getOwnRsvp",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": { "state": "excluded", "reason": "evry_capability_gap" }
+    },
+    {
       "identity": "read-operation:src/app/(dashboard)/meetings/[id]/page.tsx → listLocations",
       "kind": "read_operation",
       "capabilityIdentity": "meetings.read.detail",
@@ -2317,7 +2365,7 @@
     "actions": 25,
     "routes": 10,
     "readOperations": 31,
-    "exclusions": 55,
+    "exclusions": 57,
     "readCapabilities": 4,
     "effectCapabilities": 25,
     "unclassified": 0

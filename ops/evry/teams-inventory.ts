@@ -50,6 +50,8 @@ export type TeamsEvrySurface = Readonly<{
   domain: string;
   operationKind: TeamsOperationKind | "excluded";
   applicationCapability: Capability | null;
+  /** Source UI permission; the confirmed Evry adapter retains its own gate. */
+  sourceApplicationCapability?: Capability;
   confirmation: "not_required" | "required" | "excluded";
   mutationShape: TeamsMutationShape | null;
   classification: Classification;
@@ -203,7 +205,9 @@ function actionEntries(): TeamsEvrySurface[] {
         capabilityIdentity: contract.operationId,
         domain: contract.domain,
         operationKind: contract.operationKind,
-        applicationCapability: surface.applicationCapability,
+        applicationCapability: fieldsFor(contract.operationId)
+          .applicationCapability,
+        sourceApplicationCapability: surface.applicationCapability,
         confirmation:
           contract.operationKind === "effect" ? "required" : "not_required",
         mutationShape: contract.mutationShape,

@@ -421,7 +421,8 @@ function buildMeetingsCapabilitySurfaces(): readonly MeetingsCapabilitySurface[]
       if (
         entry.classification.state !== "supported" ||
         entry.parityCapability !== "meetings" ||
-        entry.applicationCapability !== "meetings.write"
+        (entry.applicationCapability !== "meetings.write" &&
+          entry.applicationCapability !== "meetings.attendance")
       ) {
         throw new Error(
           `Meetings action left the supported plant boundary: ${exportName}`

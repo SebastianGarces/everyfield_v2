@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import type { Capability } from "../../src/lib/auth/seat-rules";
 
 import {
   format as formatWithPrettier,
@@ -44,12 +45,17 @@ type MeetingsInventoryEntry = Readonly<{
   parityCapability: "meetings";
   operationKind: "read" | "effect" | "excluded";
   applicationCapability: "read" | "meetings.write" | null;
+  /** Source UI permission; the confirmed Evry adapter retains its own gate. */
+  sourceApplicationCapability?: Capability;
   confirmation: "not_required" | "required" | "excluded";
   classification:
     | Readonly<{ state: "supported" }>
     | Readonly<{
         state: "excluded";
-        reason: "no_authenticated_surface" | "shared_boundary_or_presentation";
+        reason:
+          | "no_authenticated_surface"
+          | "shared_boundary_or_presentation"
+          | "evry_capability_gap";
       }>;
 }>;
 
@@ -199,6 +205,13 @@ export function generateMeetingsCapabilityInventory(
         parityCapability: "meetings",
         operationKind: registration.operationKind,
         applicationCapability: registration.applicationCapability,
+        ...(kind === "action"
+          ? {
+              sourceApplicationCapability: MEETINGS_CAPABILITY_SURFACES.find(
+                (surface) => surface.identity === identity
+              )?.applicationCapability,
+            }
+          : {}),
         confirmation:
           registration.operationKind === "effect" ? "required" : "not_required",
         classification: { state: "supported" },
@@ -222,7 +235,7 @@ export function generateMeetingsCapabilityInventory(
       })
     ),
     ...discoveredReadExclusions.map(
-      ({ identity }): MeetingsInventoryEntry => ({
+      ({ identity, classificationReason }): MeetingsInventoryEntry => ({
         identity,
         kind: "excluded_operation",
         capabilityIdentity: null,
@@ -232,7 +245,7 @@ export function generateMeetingsCapabilityInventory(
         confirmation: "excluded",
         classification: {
           state: "excluded",
-          reason: "shared_boundary_or_presentation",
+          reason: classificationReason,
         },
       })
     )

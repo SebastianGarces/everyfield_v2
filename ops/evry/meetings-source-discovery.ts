@@ -30,6 +30,14 @@ const BOUNDARY_EXCLUSION_REASON = new Map([
   ["redirect", "Next navigation boundary, not Meetings domain data."],
   ["notFound", "Next navigation boundary, not Meetings domain data."],
   ["holdsSeatFor", "Shared authorization boundary, not Meetings domain data."],
+  [
+    "mayRecordMeetingAttendance",
+    "Subject-scoped attendance authorization boundary.",
+  ],
+  [
+    "getOwnRsvp",
+    "Human RSVP context has no Evry adapter; keep this capability gap visible.",
+  ],
   ["parseMeetingType", "Meetings presentation parser, not a data read."],
   ["meetingDisplayTitle", "Meetings presentation helper, not a data read."],
   ["meetingComposeUrl", "Communication link builder, not a data read."],
@@ -418,12 +426,29 @@ export function discoverMeetingsPageReadOperations(
 
 export function meetingsDiscoveredReadExclusions(
   repoRoot = process.cwd()
-): readonly Readonly<{ identity: string; reason: string }>[] {
+): readonly Readonly<{
+  identity: string;
+  reason: string;
+  classificationReason:
+    | "shared_boundary_or_presentation"
+    | "evry_capability_gap";
+}>[] {
   return Object.freeze(
     discoverMeetingsPageReadOperations(repoRoot).flatMap((operation) => {
       const imported = operation.slice(operation.lastIndexOf(" → ") + 3);
       const reason = BOUNDARY_EXCLUSION_REASON.get(imported);
-      return reason ? [Object.freeze({ identity: operation, reason })] : [];
+      return reason
+        ? [
+            Object.freeze({
+              identity: operation,
+              reason,
+              classificationReason:
+                imported === "getOwnRsvp"
+                  ? ("evry_capability_gap" as const)
+                  : ("shared_boundary_or_presentation" as const),
+            }),
+          ]
+        : [];
     })
   );
 }
