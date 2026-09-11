@@ -17,10 +17,13 @@ export function launchEffectLiveProofArguments(input: {
 }): string[] {
   return [
     "--no-warnings",
+    "--experimental-test-module-mocks",
     "--import",
     "tsx",
     "--import",
     "./scripts/live-db-endpoint.ts",
+    "--import",
+    "./src/lib/evry/capabilities/launch/effect-live-route-runner.ts",
     path.join(
       input.cwd,
       "src/lib/evry/capabilities/launch/effect-live-proof.ts"

@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import process from "node:process";
+import console from "node:console";
 import { readFile, writeFile, mkdir, access } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { resolve, dirname } from "node:path";
