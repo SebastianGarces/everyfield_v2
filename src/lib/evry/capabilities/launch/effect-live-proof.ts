@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { spawn, type ChildProcess } from "node:child_process";
 
 import { and, eq, inArray, sql } from "drizzle-orm";
 
@@ -58,14 +57,12 @@ import {
   readLaunchReadinessForPlant,
   readLaunchStatusForPlant,
 } from "./reads";
+import { launchLiveModel, launchLiveRoute } from "./effect-live-route-runner";
 
 const SCRATCH = "__evry launch effect proof__";
 const identities = Object.values(LAUNCH_EFFECT_IDENTITIES);
 const outcomes = new Set<string>();
-const HTTP_PORT = 32_000 + (process.pid % 1_000);
-const HTTP_ORIGIN = `http://127.0.0.1:${HTTP_PORT}`;
-let server: ChildProcess | null = null;
-let serverOutput = "";
+const HTTP_ORIGIN = "http://launch-live.invalid";
 
 /** Fixture-only owner writes used to create post-review drift. */
 async function setLaunchLiveProofSendingChurch(
@@ -84,57 +81,6 @@ async function renameLaunchLiveProofChurch(
   await db.execute(
     sql`update "churches" set "name" = ${name} where "id" = ${churchId}::uuid`
   );
-}
-
-async function startApplication(): Promise<void> {
-  server = spawn(
-    process.execPath,
-    [
-      "./node_modules/next/dist/bin/next",
-      "dev",
-      "--webpack",
-      "-p",
-      String(HTTP_PORT),
-    ],
-    {
-      cwd: process.cwd(),
-      env: {
-        ...process.env,
-        NEXT_TELEMETRY_DISABLED: "1",
-        NODE_OPTIONS: "--import=./scripts/live-next-db-endpoint.mjs",
-      },
-      stdio: ["ignore", "pipe", "pipe"],
-    }
-  );
-  const append = (chunk: Buffer) => {
-    serverOutput = `${serverOutput}${chunk.toString("utf8")}`.slice(-20_000);
-  };
-  server.stdout?.on("data", append);
-  server.stderr?.on("data", append);
-  for (let attempt = 0; attempt < 120; attempt += 1) {
-    if (server.exitCode !== null) {
-      throw new Error(`Next server exited early\n${serverOutput}`);
-    }
-    try {
-      await fetch(`${HTTP_ORIGIN}/api/evry/conversations`, {
-        signal: AbortSignal.timeout(1_000),
-      });
-      return;
-    } catch {
-      await new Promise((resolve) => setTimeout(resolve, 250));
-    }
-  }
-  throw new Error(`Next server did not become ready\n${serverOutput}`);
-}
-
-async function stopApplication(): Promise<void> {
-  if (!server || server.exitCode !== null) return;
-  server.kill("SIGTERM");
-  await Promise.race([
-    new Promise<void>((resolve) => server?.once("exit", () => resolve())),
-    new Promise<void>((resolve) => setTimeout(resolve, 5_000)),
-  ]);
-  if (server.exitCode === null) server.kill("SIGKILL");
 }
 
 async function fixture(suffix: string) {
@@ -205,7 +151,7 @@ async function applicationJson(input: {
   path: string;
   body: unknown;
 }): Promise<{ response: Response; value: unknown }> {
-  const response = await fetch(`${HTTP_ORIGIN}${input.path}`, {
+  const request = new Request(`${HTTP_ORIGIN}${input.path}`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -215,13 +161,14 @@ async function applicationJson(input: {
     body: JSON.stringify(input.body),
     redirect: "manual",
   });
+  const response = await launchLiveRoute(request);
   const body = await response.text();
   let value: unknown;
   try {
     value = JSON.parse(body);
   } catch {
     throw new Error(
-      `Production route ${input.path} returned ${response.status} ${response.headers.get("location") ?? ""}: ${JSON.stringify(body)}\n${serverOutput}`
+      `Production route ${input.path} returned ${response.status}: ${JSON.stringify(body)}`
     );
   }
   return { response, value };
@@ -236,11 +183,7 @@ async function conversationThroughProduction(
     path: "/api/evry/conversations",
     body: { requestKey: crypto.randomUUID(), message, pageContext: null },
   });
-  assert.equal(
-    proposal.response.status,
-    201,
-    `${JSON.stringify(proposal.value)}\n${serverOutput}`
-  );
+  assert.equal(proposal.response.status, 201, JSON.stringify(proposal.value));
   return proposal.value;
 }
 
@@ -458,8 +401,7 @@ async function assertClosedFailure(
 async function main() {
   const phase = process.argv[2];
   if (phase === "production") {
-    await startApplication();
-    try {
+    {
       const production = await fixture("production-runtime");
       const [sendingChurch] = await db
         .insert(sendingChurches)
@@ -490,7 +432,7 @@ async function main() {
       assert.equal(
         scheduled.result.status,
         "completed",
-        `${JSON.stringify(scheduled.result)}\n${serverOutput}`
+        JSON.stringify(scheduled.result)
       );
       assert.equal((await scheduled.replay()).status, "completed");
       const [productionLaunch] = await db
@@ -511,7 +453,7 @@ async function main() {
       assert.equal(
         taskCompletion.result.status,
         "completed",
-        `${JSON.stringify(taskCompletion.result)}\n${serverOutput}`
+        JSON.stringify(taskCompletion.result)
       );
       assert.equal((await taskCompletion.replay()).status, "completed");
 
@@ -1156,9 +1098,11 @@ async function main() {
         "exact outcome replay consulted the later mutable Launch row"
       );
 
+      assert.ok(
+        launchLiveModel.calls.length > 0,
+        "production used the model provider"
+      );
       process.stdout.write("EVRY_LAUNCH_EFFECT_PHASE=production:passed\n");
-    } finally {
-      await stopApplication();
     }
     return;
   }

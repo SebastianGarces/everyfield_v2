@@ -66,6 +66,115 @@ test("help and arbitrary paraphrases reach a real model boundary with storage di
   }
 });
 
+test("provider output only permits catalog tool names, not discovery keys or invented tools", async () => {
+  const scripted = scriptedConversationModel(modelDecision());
+  await generateEvryModelTurn(
+    { context: {}, reads: [{ id: "people.query" }] },
+    () => scripted.model
+  );
+  const call = z
+    .object({
+      responseFormat: z.object({
+        schema: z.object({
+          properties: z.object({ readId: z.unknown() }),
+        }),
+      }),
+    })
+    .parse(scripted.calls[0]);
+  const property = JSON.stringify(call.responseFormat.schema.properties.readId);
+  assert.ok(property.includes('"people.query"'));
+  assert.ok(property.includes('"tools.describe"'));
+  assert.ok(!property.includes('"read:people.query"'));
+  for (const readId of ["read:people.query", "invented.read"]) {
+    const invalid = scriptedConversationModel(
+      modelDecision({ readId, readInputJson: "{}" })
+    );
+    await assert.rejects(
+      generateEvryModelTurn(
+        { context: {}, reads: [{ id: "people.query" }] },
+        () => invalid.model
+      )
+    );
+  }
+});
+
+test("a direct tool choice without its schema becomes discovery before arguments can run", async () => {
+  const scripted = scriptedConversationModel(
+    modelDecision({
+      readId: "tasks.query",
+      readInputJson: "{}",
+      continueReading: true,
+    })
+  );
+  const input = {
+    context: { latestRequest: "My pending tasks due today" },
+    reads: [{ id: "tasks.query" }],
+  };
+  assert.deepEqual(await generateEvryModelTurn(input, () => scripted.model), {
+    kind: "describe",
+    ids: ["read:tasks.query"],
+  });
+  for (const kind of ["read", "action"] as const) {
+    const result = await generateEvryModelTurn(
+      {
+        ...input,
+        context: {
+          ...input.context,
+          requestedContracts: [
+            { kind, id: "tasks.query", schema: { type: "object" } },
+          ],
+        },
+      },
+      () => scripted.model
+    );
+    assert.equal(result.kind, kind === "read" ? "read" : "describe");
+  }
+});
+
+test("preparation discovery preserves action intent and never discovers unlisted tools", async () => {
+  const scripted = scriptedConversationModel(
+    modelDecision({
+      classification: "application_action",
+      readId: "actions.prepare",
+      readInputJson: JSON.stringify({
+        operation: "tasks.create",
+        arguments: {},
+      }),
+    })
+  );
+  assert.deepEqual(
+    await generateEvryModelTurn(
+      { context: {}, reads: [], preparations: [{ id: "tasks.create" }] },
+      () => scripted.model
+    ),
+    {
+      kind: "describe",
+      ids: ["action:tasks.create"],
+      actionIntent: true,
+    }
+  );
+  const unknown = await generateEvryModelTurn(
+    { context: {}, reads: [] },
+    () => scripted.model
+  );
+  assert.equal(
+    unknown.kind,
+    "prepare_action",
+    "Unlisted operations stay on the runtime's refusal path."
+  );
+});
+
+test("an inline schema does not add a redundant discovery round trip", async () => {
+  const scripted = scriptedConversationModel(
+    modelDecision({ readId: "tasks.query", readInputJson: "{}" })
+  );
+  const result = await generateEvryModelTurn(
+    { context: {}, reads: [{ id: "tasks.query", schema: { type: "object" } }] },
+    () => scripted.model
+  );
+  assert.equal(result.kind, "read");
+});
+
 test("policy refusals cannot carry a read or preparation across the boundary", () => {
   for (const classification of [
     "mixed",
