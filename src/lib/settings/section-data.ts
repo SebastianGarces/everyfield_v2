@@ -219,6 +219,7 @@ async function readChurch({
             financials: isOn("financials"),
             ministry_teams: isOn("ministry_teams"),
             facilities: isOn("facilities"),
+            wiki: isOn("wiki"),
             oversight_activity: isOn("oversight_activity"),
           } satisfies Record<PrivacyFeatureKey, boolean>,
         }
