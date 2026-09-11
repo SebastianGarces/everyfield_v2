@@ -114,6 +114,73 @@ describe(
       };
     }
 
+    test("registration atomically creates only a seatless account and discovery profile", async () => {
+      const { createAccountEntities } =
+        await import("../../app/(auth)/register/account-entities");
+      const { registerSchema } = await import("../validations/auth");
+      const input = registerSchema.parse({
+        accountType: "discovery",
+        name: "Explorer",
+        email: `${randomUUID()}@example.test`,
+        password: "scratch-password",
+      });
+      for (const rollback of [false, true]) {
+        const id = randomUUID();
+        const planned = createAccountEntities(
+          input.accountType,
+          null,
+          id,
+          input
+        );
+        assert.deepEqual(
+          [
+            planned.seat,
+            planned.userChurchId,
+            planned.sendingChurchId,
+            planned.sendingNetworkId,
+          ],
+          [null, null, null, null]
+        );
+        assert.equal(planned.statements.length, 0);
+        assert.equal(planned.linkStatements.length, 1);
+        const statements = [
+          db.insert(users).values({
+            id,
+            name: input.name,
+            email: `${id}@example.test`,
+            passwordHash: "scratch",
+            seat: planned.seat,
+            churchId: planned.userChurchId,
+            sendingChurchId: planned.sendingChurchId,
+            sendingNetworkId: planned.sendingNetworkId,
+          }),
+          ...planned.linkStatements,
+          ...(rollback ? [db.execute(sql`select 1 / 0`)] : []),
+        ] as const;
+        if (rollback) await assert.rejects(db.batch(statements));
+        else await db.batch(statements);
+        assert.equal((await profile({ id })).length, rollback ? 0 : 1);
+        assert.equal(
+          (
+            await db
+              .select()
+              .from(users)
+              .where(sql`${users.id} = ${id}`)
+          ).length,
+          rollback ? 0 : 1
+        );
+        assert.equal(
+          (
+            await db
+              .select()
+              .from(persons)
+              .where(sql`${persons.userId} = ${id}`)
+          ).length,
+          0
+        );
+      }
+    });
+
     test("creation persists, is actor-scoped and replay has no winner", async () => {
       const actor = await account();
       const foreign = await account();

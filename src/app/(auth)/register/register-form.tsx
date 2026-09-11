@@ -37,6 +37,12 @@ const ACCOUNT_TYPE_CONFIG: Record<
     orgPlaceholder: string;
   }
 > = {
+  discovery: {
+    label: "Exploring church planting",
+    description: "Read the wiki and learn at your own pace",
+    orgLabel: "",
+    orgPlaceholder: "",
+  },
   planter: {
     label: "Church Planter",
     description: "I'm planting a new church",
@@ -271,34 +277,37 @@ export function RegisterForm({
           {/* Organization Name — always for sending church / network, and for
               an INVITED planter, whose plant is created at signup so the
               invitation has something to associate. */}
-          {!seatInvitation && (accountType !== "planter" || needsPlantName) && (
-            <div className="space-y-2">
-              <Label htmlFor="organizationName">{config.orgLabel}</Label>
-              <Input
-                id="organizationName"
-                name="organizationName"
-                type="text"
-                placeholder={config.orgPlaceholder}
-                required
-                value={organizationName}
-                onChange={(e) => setOrganizationName(e.target.value)}
-                aria-invalid={!!state.fieldErrors?.organizationName}
-                aria-describedby={
-                  state.fieldErrors?.organizationName
-                    ? "register-organization-name-error"
-                    : undefined
-                }
-              />
-              {state.fieldErrors?.organizationName && (
-                <p
-                  id="register-organization-name-error"
-                  className="text-destructive text-sm"
-                >
-                  {state.fieldErrors.organizationName}
-                </p>
-              )}
-            </div>
-          )}
+          {!seatInvitation &&
+            (accountType === "sending_church" ||
+              accountType === "network" ||
+              needsPlantName) && (
+              <div className="space-y-2">
+                <Label htmlFor="organizationName">{config.orgLabel}</Label>
+                <Input
+                  id="organizationName"
+                  name="organizationName"
+                  type="text"
+                  placeholder={config.orgPlaceholder}
+                  required
+                  value={organizationName}
+                  onChange={(e) => setOrganizationName(e.target.value)}
+                  aria-invalid={!!state.fieldErrors?.organizationName}
+                  aria-describedby={
+                    state.fieldErrors?.organizationName
+                      ? "register-organization-name-error"
+                      : undefined
+                  }
+                />
+                {state.fieldErrors?.organizationName && (
+                  <p
+                    id="register-organization-name-error"
+                    className="text-destructive text-sm"
+                  >
+                    {state.fieldErrors.organizationName}
+                  </p>
+                )}
+              </div>
+            )}
 
           {/* Personal Details */}
           <div className="space-y-2">

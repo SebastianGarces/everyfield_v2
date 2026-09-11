@@ -137,6 +137,8 @@ Some sections link `invariants/<domain>.md` for the why, the pattern and the wor
 
 ## Seats & Tenancy
 
+- Discovery is an explicit `discovery_profiles` row belonging to an account with no seat and no tenancy FK (#294), never an inference from missing tenancy. Registration writes the account and profile in one batch; redeemed seat/coach tokens retain authority over the submitted account choice. A discovery association grants no org seat or tenant reach, and joining a seat must refuse either association before claiming the token; only a valid claim may retire the empty profile and grant the seat.
+
 → [seats-and-tenancy](invariants/seats-and-tenancy.md) — anything reading who an account is.
 
 - `users.role` DOES NOT EXIST (dropped by migration 0051). An account is a SEAT — `users.seat` ∈ {owner, admin, member}, NULL for a coach — held in a TENANCY named by `church_id`, `sending_church_id` or `sending_network_id`. Neither half answers alone: `seat = 'owner'` says nothing about whose owner.
