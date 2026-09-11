@@ -4,7 +4,7 @@ import { useOptimistic, useRef, useState, useTransition } from "react";
 import { ListChecks, Plus } from "lucide-react";
 import { toast } from "sonner";
 
-import { useCan } from "@/components/shared/viewer-capabilities";
+import { useCanManageTeam } from "./team-write-context";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -42,10 +42,8 @@ export function ResponsibilitiesTab({
   const [adding, setAdding] = useState(false);
   const [, startTransition] = useTransition();
 
-  // Add, tick, edit and delete are one verb — `teams.write` (AS-020, #499).
-  // The PROGRESS is the read and it stays; the row's own two controls ask the
-  // same question again in `responsibility-item.tsx`, where they render.
-  const canWrite = useCan("teams.write");
+  // AS-006: authority is resolved for this team, using the server's subject check.
+  const canWrite = useCanManageTeam(teamId);
 
   const [items, applyToggle] = useOptimistic(
     responsibilities,

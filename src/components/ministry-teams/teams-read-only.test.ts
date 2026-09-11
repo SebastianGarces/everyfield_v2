@@ -17,6 +17,7 @@ import { ViewerCapabilitiesProvider } from "@/components/shared/viewer-capabilit
 import type { Capability } from "@/lib/auth/seat-rules";
 import { namedButtons, parseElements } from "@/lib/testing/rendered-markup";
 
+import { TeamWriteProvider } from "./team-write-context";
 import { MeetingsTab } from "./meetings-tab";
 import { MembersRolesTab } from "./members-roles-tab";
 import { ResponsibilitiesTab } from "./responsibilities-tab";
@@ -45,13 +46,7 @@ import { TrainingTab } from "./training-tab";
 // `teams.write`, showing the control comes back. A gate that hid the control
 // from everyone would pass the first half and fail the second.
 //
-// THE FRD'S THIRD EXCEPTION IS NOT TESTED HERE BECAUSE IT DOES NOT SHIP. "A
-// team leader's writes on their own team stay" cannot be asked of any rendered
-// surface: `ministry_teams.leader_id` references `persons.id`, a session names
-// a `users.id`, and no column joins them until AS-013's registration link
-// lands. `seat-rules.ts` records the server half of the same residual — every
-// teams write sits at `teams.write` — so hiding all of them is what matches the
-// server today.
+// The own-team leader exception is tested below with the scoped provider.
 //
 // NONE OF THIS IS AUTHORIZATION. `requireSeat("teams.write")` refuses the POST
 // that never rendered a button, and `seat-guard.test.ts` is what asserts that.
@@ -375,7 +370,7 @@ test("the roles empty state EXPLAINS to a Member instead of inviting them", () =
     false,
     "the inviting copy belongs to the viewer who can act on it"
   );
-  assert.ok(admin.includes("Import role templates"));
+  assert.ok(admin.includes("Add roles to start staffing this team."));
 });
 
 // ----------------------------------------------------------------------------
@@ -624,4 +619,76 @@ test("the team meetings empty state EXPLAINS instead of inviting", () => {
     "the inviting copy belongs to the viewer who can act on it"
   );
   assert.ok(admin.includes("Schedule team meetings to coordinate"));
+});
+
+test("a Member leader sees only their team's role, roster, responsibility and meeting controls", () => {
+  const scoped = (teamId: string, element: ReactElement) =>
+    render(
+      ["teams.own"],
+      createElement(TeamWriteProvider, {
+        writableTeamId: teamId,
+        children: element,
+      })
+    );
+  for (const [element, label] of [
+    [membersRoles(), "Add Role"],
+    [
+      responsibilities(CHECKLIST.map((row) => ({ ...row, teamId: "team-1" }))),
+      "New responsibility",
+    ],
+    [teamMeetings(TEAM_MEETING), "Schedule Meeting"],
+  ] as const) {
+    assert.ok(scoped("team-1", element).includes(label), label);
+    assert.ok(
+      !scoped("team-2", element).includes(label),
+      `other-team ${label}`
+    );
+  }
+  const roles = scoped("team-1", membersRoles());
+  assert.ok(
+    !roles.includes("Import Templates"),
+    "template imports remain administrative"
+  );
+  assert.ok(
+    controlLabels(roles).some((label) => /remove|unassign/i.test(label)),
+    "leader gets roster removal"
+  );
+  const checklist = scoped(
+    "team-1",
+    responsibilities(CHECKLIST.map((row) => ({ ...row, teamId: "team-1" })))
+  );
+  assert.ok(
+    parseElements(checklist).some((el) => el.attrs.role === "checkbox"),
+    "leader gets responsibility completion"
+  );
+});
+
+test("a leader's training controls exclude church-wide and foreign-team programs", () => {
+  const programs = [
+    { id: "own", name: "Team induction", isRequired: true, teamId: "team-1" },
+    { id: "global", name: "Church induction", isRequired: true, teamId: null },
+    {
+      id: "other",
+      name: "Other induction",
+      isRequired: true,
+      teamId: "team-2",
+    },
+  ];
+  const rows = [{ personId: "person-1", personName: "Ada", completions: {} }];
+  const html = render(
+    ["teams.own"],
+    createElement(TeamWriteProvider, {
+      writableTeamId: "team-1",
+      children: training(programs, rows),
+    })
+  );
+  const buttons = controlLabels(html).filter((label) =>
+    label.startsWith("Mark Ada")
+  );
+  assert.deepEqual(buttons, ["Mark Ada as complete for Team induction"]);
+  const admin = render(ADMIN, training(programs, rows));
+  assert.equal(
+    controlLabels(admin).filter((label) => label.startsWith("Mark Ada")).length,
+    3
+  );
 });

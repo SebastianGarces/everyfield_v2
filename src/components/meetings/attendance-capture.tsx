@@ -1,5 +1,6 @@
 "use client";
 
+import { toast } from "sonner";
 import { useState, useTransition, useCallback } from "react";
 import {
   Search,
@@ -81,6 +82,8 @@ interface PersonResult {
 
 interface AttendanceCaptureProps {
   meetingId: string;
+  /** Server-resolved attendance grant for this meeting only. */
+  writableMeetingId?: string;
   guests: GuestEntry[];
   summary: AttendanceSummary;
   /**
@@ -182,6 +185,7 @@ const rsvpBadge: Record<
 
 export function AttendanceCapture({
   meetingId,
+  writableMeetingId,
   guests,
   summary,
   showResponseCards = false,
@@ -190,11 +194,12 @@ export function AttendanceCapture({
 }: AttendanceCaptureProps) {
   const [isPending, startTransition] = useTransition();
 
-  // AS-020. Every write on this screen is `meetings.write`: the register's
-  // ticks, the walk-in card, the response cards and the finalize. A Member
-  // keeps the register as a READ — who was invited, who came, what they handed
-  // in — and is offered none of the controls that change it.
-  const canWrite = useCan("meetings.write");
+  // Attendance uses a meeting-scoped grant; quick-add people and response cards remain administrative.
+  const canAdministerMeeting = useCan("meetings.write");
+  const canRecordAttendance = useCan("meetings.attendance");
+  const canWrite =
+    canAdministerMeeting ||
+    (canRecordAttendance && writableMeetingId === meetingId);
 
   // Walk-in search state
   const [searchQuery, setSearchQuery] = useState("");
@@ -221,7 +226,12 @@ export function AttendanceCapture({
   const handleToggle = (personId: string, currentStatus: string) => {
     const attended = currentStatus !== "attended";
     startTransition(async () => {
-      await toggleAttendanceStatusAction(meetingId, personId, attended);
+      const result = await toggleAttendanceStatusAction(
+        meetingId,
+        personId,
+        attended
+      );
+      if (!result.success) toast.error(result.error);
     });
   };
 
@@ -249,7 +259,11 @@ export function AttendanceCapture({
 
   const handleAddWalkIn = (person: PersonResult) => {
     startTransition(async () => {
-      await addWalkInAttendeeAction(meetingId, person.id);
+      const result = await addWalkInAttendeeAction(meetingId, person.id);
+      if (!result.success) {
+        toast.error(result.error);
+        return;
+      }
       setSearchQuery("");
       setSearchResults([]);
     });
@@ -335,91 +349,93 @@ export function AttendanceCapture({
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <CardTitle className="text-base">Add Walk-in</CardTitle>
               <div className="flex flex-wrap items-center gap-2">
-                <Dialog open={quickAddOpen} onOpenChange={setQuickAddOpen}>
-                  <DialogTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="cursor-pointer"
-                    >
-                      <UserPlus className="mr-2 h-4 w-4" />
-                      Quick Add Person
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent className="sm:max-w-[425px]">
-                    <DialogHeader>
-                      <DialogTitle>Quick Add Walk-in</DialogTitle>
-                      <DialogDescription>
-                        Create a new person and mark them as attended.
-                      </DialogDescription>
-                    </DialogHeader>
-                    <form onSubmit={handleQuickAdd} className="space-y-4">
-                      <div className="grid grid-cols-2 gap-4">
+                {canAdministerMeeting && (
+                  <Dialog open={quickAddOpen} onOpenChange={setQuickAddOpen}>
+                    <DialogTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="cursor-pointer"
+                      >
+                        <UserPlus className="mr-2 h-4 w-4" />
+                        Quick Add Person
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="sm:max-w-[425px]">
+                      <DialogHeader>
+                        <DialogTitle>Quick Add Walk-in</DialogTitle>
+                        <DialogDescription>
+                          Create a new person and mark them as attended.
+                        </DialogDescription>
+                      </DialogHeader>
+                      <form onSubmit={handleQuickAdd} className="space-y-4">
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <Label htmlFor="firstName">First Name *</Label>
+                            <Input
+                              id="firstName"
+                              name="firstName"
+                              required
+                              placeholder="John"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="lastName">Last Name *</Label>
+                            <Input
+                              id="lastName"
+                              name="lastName"
+                              required
+                              placeholder="Doe"
+                            />
+                          </div>
+                        </div>
                         <div className="space-y-2">
-                          <Label htmlFor="firstName">First Name *</Label>
+                          <Label htmlFor="email">Email</Label>
                           <Input
-                            id="firstName"
-                            name="firstName"
-                            required
-                            placeholder="John"
+                            id="email"
+                            name="email"
+                            type="email"
+                            placeholder="john@example.com"
                           />
                         </div>
                         <div className="space-y-2">
-                          <Label htmlFor="lastName">Last Name *</Label>
+                          <Label htmlFor="phone">Phone</Label>
                           <Input
-                            id="lastName"
-                            name="lastName"
-                            required
-                            placeholder="Doe"
+                            id="phone"
+                            name="phone"
+                            type="tel"
+                            placeholder="(555) 123-4567"
                           />
                         </div>
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="email">Email</Label>
-                        <Input
-                          id="email"
-                          name="email"
-                          type="email"
-                          placeholder="john@example.com"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="phone">Phone</Label>
-                        <Input
-                          id="phone"
-                          name="phone"
-                          type="tel"
-                          placeholder="(555) 123-4567"
-                        />
-                      </div>
-                      {quickAddError && (
-                        <p className="text-destructive text-sm">
-                          {quickAddError}
-                        </p>
-                      )}
-                      <DialogFooter>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={() => setQuickAddOpen(false)}
-                          className="cursor-pointer"
-                        >
-                          Cancel
-                        </Button>
-                        <Button
-                          type="submit"
-                          disabled={isPending}
-                          className="cursor-pointer"
-                        >
-                          {isPending && (
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          )}
-                          Add & Mark Attended
-                        </Button>
-                      </DialogFooter>
-                    </form>
-                  </DialogContent>
-                </Dialog>
+                        {quickAddError && (
+                          <p className="text-destructive text-sm">
+                            {quickAddError}
+                          </p>
+                        )}
+                        <DialogFooter>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => setQuickAddOpen(false)}
+                            className="cursor-pointer"
+                          >
+                            Cancel
+                          </Button>
+                          <Button
+                            type="submit"
+                            disabled={isPending}
+                            className="cursor-pointer"
+                          >
+                            {isPending && (
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            )}
+                            Add & Mark Attended
+                          </Button>
+                        </DialogFooter>
+                      </form>
+                    </DialogContent>
+                  </Dialog>
+                )}
 
                 <Button
                   variant="outline"
@@ -477,8 +493,9 @@ export function AttendanceCapture({
                   !searching &&
                   searchResults.length === 0 && (
                     <p className="text-muted-foreground mt-1 text-xs">
-                      No results found. Use &quot;Quick Add Person&quot; to
-                      create a new one.
+                      {canAdministerMeeting
+                        ? 'No results found. Use "Quick Add Person" to create a new one.'
+                        : "No results found. Ask an admin to add this person."}
                     </p>
                   )}
               </div>
@@ -493,6 +510,12 @@ export function AttendanceCapture({
           <CardTitle className="text-base">
             Attendance ({guests.length} guests)
           </CardTitle>
+          {canWrite && (
+            <p className="text-muted-foreground text-sm">
+              Uncheck Here to clear attendance. The guest and their RSVP stay on
+              the list.
+            </p>
+          )}
         </CardHeader>
         <CardContent>
           {guests.length === 0 ? (
@@ -639,7 +662,7 @@ export function AttendanceCapture({
                               business rule and stays; AS-020's hide is the
                               branch around it — a Member reads what was handed
                               in and is offered no picker to change it. */}
-                          {canWrite ? (
+                          {canAdministerMeeting ? (
                             <ResponsePicker
                               meetingId={meetingId}
                               personId={guest.personId}
@@ -703,7 +726,7 @@ export function AttendanceCapture({
             </p>
             <Button
               onClick={handleFinalize}
-              disabled={isPending || attendedCount === 0}
+              disabled={isPending || (!finalized && attendedCount === 0)}
               size="lg"
               className="cursor-pointer"
             >

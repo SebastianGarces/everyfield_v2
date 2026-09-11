@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Check, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
-import { useCan } from "@/components/shared/viewer-capabilities";
+import { useCanManageTeam } from "./team-write-context";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -60,10 +60,8 @@ export function ResponsibilityItem({
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  // Ticking, editing and deleting are all `teams.write` (AS-020, #499). Asked
-  // here rather than threaded from the tab: this file is where the three
-  // controls render, so a reviewer reads the verb and the control together.
-  const canWrite = useCan("teams.write");
+  // AS-006: authority is resolved for this team, using the server's subject check.
+  const canWrite = useCanManageTeam(responsibility.teamId);
 
   const complete = responsibility.completedAt !== null;
   const checkboxId = `responsibility-${responsibility.id}`;

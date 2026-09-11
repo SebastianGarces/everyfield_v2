@@ -205,7 +205,7 @@ before the sweep is complete; the right-hand column names what must not render.
 | People directory (list) | New person, import, bulk actions, per-row edit and delete menus, stage drag-and-drop |
 | Person detail and its activity, assessments, communication and teams tabs | Edit, delete, change-stage, add-note, new-assessment, assign-to-team and send-message controls |
 | Meetings (list) | New meeting, per-row edit and delete menus |
-| Meeting detail and its attendance, evaluation, invitations, logistics, outcomes and analytics tabs | Edit meeting, record and finalize attendance, submit evaluation, send invitations, edit logistics, record outcomes — a Member's own RSVP is the one control that stays |
+| Meeting detail and its attendance, evaluation, invitations, logistics, outcomes and analytics tabs | Edit meeting, submit evaluation, send invitations, edit logistics, record outcomes; attendance controls are available only for team meetings the Member leads, and own RSVP remains available |
 | Tasks (list, detail, templates) | New task, import template, per-row complete, assign, edit and delete — a Member's own assigned task keeps its own complete control |
 | Ministry Teams (list, detail, meetings, responsibilities, training tabs, health, org chart) | New team, add and remove member, assign role, set leader, edit responsibilities, record training — a team leader's writes on their own team stay, derived from `MinistryTeam.leader_id` |
 | Communication (list, compose, history, templates, template editing, message detail) | Compose, send, schedule, new template, edit template, delete |
