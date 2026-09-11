@@ -193,6 +193,48 @@ export type EvryModelTurnInput = Readonly<{
   feedback?: string;
 }>;
 
+const discoveredContractsSchema = z.object({
+  requestedContracts: z
+    .array(
+      z.object({
+        kind: z.enum(["read", "action"]),
+        id: z.string(),
+        schema: z.object({}).passthrough(),
+      })
+    )
+    .default([]),
+});
+
+/** Selecting an unknown schema loads its contract, never runs guessed arguments. */
+function requireDiscoveredContract(
+  input: EvryModelTurnInput,
+  decision: EvryModelTurn
+): EvryModelTurn {
+  if (decision.kind !== "read" && decision.kind !== "prepare_action")
+    return decision;
+  const kind = decision.kind === "read" ? "read" : "action";
+  const id = decision.kind === "read" ? decision.id : decision.operation;
+  const catalog = kind === "read" ? input.reads : (input.preparations ?? []);
+  const entry = catalog.find((candidate) => candidate.id === id);
+  // Unknown tools remain unavailable; discovery must not invent authority.
+  if (!entry || entry.schema !== undefined) return decision;
+  const context = discoveredContractsSchema.safeParse(input.context);
+  if (
+    context.success &&
+    context.data.requestedContracts.some(
+      (contract) => contract.kind === kind && contract.id === id
+    )
+  )
+    return decision;
+  return {
+    kind: "describe",
+    ids: [`${kind}:${id}`],
+    ...(decision.kind === "prepare_action" || decision.actionIntent
+      ? { actionIntent: true as const }
+      : {}),
+  };
+}
+
 function startModelObservation() {
   try {
     if (configuredLangfuseEnvironment() === null) return null;
@@ -221,13 +263,28 @@ export async function generateEvryModelTurn(
         context: input.context,
         applicationFeedback: input.feedback ?? null,
       }),
-      output: Output.object({ schema: evryModelTurnSchema }),
+      output: Output.object({
+        schema: evryModelTurnSchema.extend({
+          // Keep executable names distinct from read:/action: discovery keys.
+          readId: z
+            .enum([
+              "tools.describe",
+              "actions.prepare",
+              "recipes.run",
+              ...input.reads.map(({ id }) => id),
+            ])
+            .nullable(),
+        }),
+      }),
       maxOutputTokens: 1500,
       maxRetries: 0,
       timeout: 30000,
       providerOptions: evryPolicyProviderOptions(candidate),
     });
-    const decision = parseEvryModelTurn(result.output);
+    const decision = requireDiscoveredContract(
+      input,
+      parseEvryModelTurn(result.output)
+    );
     try {
       observation?.update({
         output: { kind: decision.kind },

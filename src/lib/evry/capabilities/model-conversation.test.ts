@@ -506,7 +506,11 @@ test("the screenshot request reaches the model then a typed authorized read with
     authorizeRead: async () => f.authorization,
   });
   await dispatch(f.input);
-  assert.equal(scripted.calls.length, 1);
+  assert.equal(
+    scripted.calls.length,
+    2,
+    "The schema is loaded before forming executable arguments."
+  );
   assert.deepEqual(f.runs, [
     {
       literalUserText: f.input.literalUserText,
