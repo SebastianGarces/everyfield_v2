@@ -32,7 +32,14 @@ before(() => {
       {
         cwd,
         encoding: "utf8",
-        env: process.env,
+        env: {
+          ...process.env,
+          OPENAI_API_KEY: "",
+          RESEND_API_KEY: "re_live_test_placeholder",
+          LANGFUSE_PUBLIC_KEY: "",
+          LANGFUSE_SECRET_KEY: "",
+          LANGFUSE_BASE_URL: "",
+        },
         timeout: LAUNCH_EFFECT_LIVE_PROOF_PHASE_TIMEOUT_MS,
       }
     );
