@@ -1,8 +1,15 @@
 import Link from "next/link";
 import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
 import { Button } from "@/components/ui/button";
+import { verifySession } from "@/lib/auth";
+import { invitationActorFromSession } from "@/lib/invitations/core";
+import { getDiscoveryAssociations } from "@/lib/discovery/associations";
+import { DiscoveryPlantForm } from "./discovery-plant-form";
 
-export function DiscoveryHome() {
+export async function DiscoveryHome() {
+  const associations = await getDiscoveryAssociations(
+    invitationActorFromSession(await verifySession())
+  );
   return (
     <PageCanvas context="none" contentFocusTarget scrollLayout="flow">
       <WorkspacePanel className="p-6 sm:p-10">
@@ -22,6 +29,33 @@ export function DiscoveryHome() {
               <Link href="#settings/account">Account settings</Link>
             </Button>
           </div>
+          <Button asChild variant="outline">
+            <Link href="#settings/association">Manage associations</Link>
+          </Button>
+          {associations && (
+            <DiscoveryPlantForm
+              associations={[
+                ...(associations.sendingChurch
+                  ? [
+                      {
+                        orgType: "sending_church" as const,
+                        orgId: associations.sendingChurch.id,
+                        orgName: associations.sendingChurch.name,
+                      },
+                    ]
+                  : []),
+                ...(associations.network
+                  ? [
+                      {
+                        orgType: "network" as const,
+                        orgId: associations.network.id,
+                        orgName: associations.network.name,
+                      },
+                    ]
+                  : []),
+              ]}
+            />
+          )}
         </div>
       </WorkspacePanel>
     </PageCanvas>

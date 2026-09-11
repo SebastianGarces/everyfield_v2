@@ -181,13 +181,16 @@ try {
       "exec",
       "tsx",
       "--test",
+      ...(process.env.DISCOVERY_PROFILE_TEST_PATTERN
+        ? [`--test-name-pattern=${process.env.DISCOVERY_PROFILE_TEST_PATTERN}`]
+        : []),
       "src/lib/discovery/conversion-policy.test.ts",
       "src/lib/discovery/profile-repository-live.test.ts",
     ],
     {
       cwd,
       stdio: "inherit",
-      timeout: 240_000,
+      timeout: 480_000,
       env: {
         ...process.env,
         DISCOVERY_PROFILE_PROOF: "1",

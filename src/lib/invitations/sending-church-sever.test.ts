@@ -200,7 +200,7 @@ test("the sever and its audit row are one statement, for both subjects", () => {
 
   // The tenancy assertion, and the subject is now parameterised so ONE
   // statement serves the plant's sever and the sending church's.
-  assert.match(sever, /where "id" = \$\{target\.id\}::uuid/);
+  assert.match(sever, /where \$\{target\.idColumn\} = \$\{target\.id\}::uuid/);
   assert.match(sever, /and \$\{target\.fk\} = \$\{facts\.orgId\}::uuid/);
   assert.match(sever, /\$\{target\.subjectColumn\}/);
   assert.match(sever, /\$\{target\.subjectTypeLiteral\}::varchar/);
@@ -228,11 +228,13 @@ test("a sending-church sever writes a sending-church subject and no church id", 
     subjectType: "sending_church",
     churchId: null,
     subjectSendingChurchId: SENDING_CHURCH,
+    discoveryUserId: null,
   });
   assert.deepEqual(toSubjectColumns(churchSubject(PLANT)), {
     subjectType: "church",
     churchId: PLANT,
     subjectSendingChurchId: null,
+    discoveryUserId: null,
   });
 });
 

@@ -25,6 +25,7 @@ import Link from "next/link";
 import { useActionState, useState } from "react";
 import { register, type RegisterState } from "./actions";
 import type { RegistrationInvitation } from "./beta-gate";
+import { registrationAccountTypeChoices } from "./account-type-choices";
 
 const initialState: RegisterState = {};
 
@@ -38,8 +39,9 @@ const ACCOUNT_TYPE_CONFIG: Record<
   }
 > = {
   discovery: {
-    label: "Exploring church planting",
-    description: "Read the wiki and learn at your own pace",
+    label: "Discovery",
+    description:
+      "I'm exploring church planting and want to learn at my own pace",
     orgLabel: "",
     orgPlaceholder: "",
   },
@@ -139,9 +141,8 @@ export function RegisterForm({
   // so a non-null `invitation` is an OPEN one by construction and there is
   // nothing left to branch on.
   //
-  // An invitation DECIDES the account type — it was issued to a church plant or
-  // to a sending church, and picking the other one would create an organization
-  // the invitation cannot associate. So the choice is not offered.
+  // Start with the invited organization type. The person may choose discovery
+  // before creating it; seat and coach tokens keep their authoritative planner.
   const [accountType, setAccountType] = useState<AccountType>(
     invitation?.accountType ?? "planter"
   );
@@ -153,6 +154,10 @@ export function RegisterForm({
   // This is the presence of a token, which is a fact this form was rendered
   // with rather than anything the server discovered about an address.
   const invited = Boolean(invitation) || Boolean(seatInvitation);
+  const accountChoices = registrationAccountTypeChoices(
+    invitation,
+    Boolean(seatInvitation)
+  );
   const invitationToken = seatInvitation?.token ?? invitation?.id ?? null;
 
   // Controlled so a rejected submit (e.g. invalid invite code) keeps everything
@@ -223,9 +228,11 @@ export function RegisterForm({
                 {invitation.invitingOrgName} invited you to EveryField
               </p>
               <p className="text-muted-foreground mt-1">
-                {invitation.accountType === "planter"
-                  ? "Name your church plant below — it will be associated with them as soon as you finish."
-                  : "Your sending church will be associated with them as soon as you finish."}
+                {accountType === "discovery"
+                  ? "Start exploring without creating a plant. Your name and email will appear in their discovery associates list."
+                  : invitation.accountType === "planter"
+                    ? "Name your church plant below, or choose Discovery to explore before creating a plant."
+                    : "Name your sending church below, or choose Discovery to explore before creating an organization."}
               </p>
             </div>
           )}
@@ -238,9 +245,8 @@ export function RegisterForm({
             </div>
           )}
 
-          {/* Account Type Selection — not offered while an invitation is being
-              answered, since it already decided the answer (see above). */}
-          {!invited && (
+          {/* Organization invitees can choose Discovery; seat and coach tokens decide the account. */}
+          {accountChoices.length > 0 && (
             <div className="space-y-3">
               <Label>I am a...</Label>
               <RadioGroup
@@ -253,23 +259,25 @@ export function RegisterForm({
                     AccountType,
                     (typeof ACCOUNT_TYPE_CONFIG)[AccountType],
                   ][]
-                ).map(([type, cfg]) => (
-                  <label
-                    key={type}
-                    className="border-input has-data-[state=checked]:border-primary has-data-[state=checked]:bg-primary/5 flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors"
-                  >
-                    <RadioGroupItem
-                      value={type}
-                      className="mt-0.5 cursor-pointer"
-                    />
-                    <div className="space-y-0.5">
-                      <div className="text-sm font-medium">{cfg.label}</div>
-                      <div className="text-muted-foreground text-xs">
-                        {cfg.description}
+                )
+                  .filter(([type]) => accountChoices.includes(type))
+                  .map(([type, cfg]) => (
+                    <label
+                      key={type}
+                      className="border-input has-data-[state=checked]:border-primary has-data-[state=checked]:bg-primary/5 flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors"
+                    >
+                      <RadioGroupItem
+                        value={type}
+                        className="mt-0.5 cursor-pointer"
+                      />
+                      <div className="space-y-0.5">
+                        <div className="text-sm font-medium">{cfg.label}</div>
+                        <div className="text-muted-foreground text-xs">
+                          {cfg.description}
+                        </div>
                       </div>
-                    </div>
-                  </label>
-                ))}
+                    </label>
+                  ))}
               </RadioGroup>
             </div>
           )}

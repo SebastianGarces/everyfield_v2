@@ -342,6 +342,22 @@
     },
     {
       "kind": "action",
+      "identity": "action:src/app/(dashboard)/dashboard/discovery-actions.ts → createDiscoveryPlant",
+      "source": "src/app/(dashboard)/dashboard/discovery-actions.ts",
+      "exportName": "createDiscoveryPlant",
+      "applicationCapability": null,
+      "exemption": {
+        "kind": "non-seat-guard",
+        "reason": "authenticated discovery profile; account lock and fresh SQL predicates authorize its own plant conversion"
+      },
+      "parityCapability": "boundary.pre-tenancy-onboarding",
+      "classification": {
+        "state": "excluded",
+        "reason": "pre_tenancy_onboarding"
+      }
+    },
+    {
+      "kind": "action",
       "identity": "action:src/app/(dashboard)/documents/actions.ts → getGeneratedDocumentDownloadUrlAction",
       "source": "src/app/(dashboard)/documents/actions.ts",
       "exportName": "getGeneratedDocumentDownloadUrlAction",
@@ -699,6 +715,16 @@
       "exemption": null,
       "parityCapability": "notifications",
       "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/oversight/discovery-actions.ts → removeDiscoveryAssociate",
+      "source": "src/app/(dashboard)/oversight/discovery-actions.ts",
+      "exportName": "removeDiscoveryAssociate",
+      "applicationCapability": "org.invitation.manage",
+      "exemption": null,
+      "parityCapability": "boundary.oversight",
+      "classification": { "state": "excluded", "reason": "oversight" }
     },
     {
       "kind": "action",
@@ -1325,8 +1351,11 @@
       "identity": "action:src/app/(dashboard)/settings/association/actions.ts → acceptAssociationInvitation",
       "source": "src/app/(dashboard)/settings/association/actions.ts",
       "exportName": "acceptAssociationInvitation",
-      "applicationCapability": "association.answer",
-      "exemption": null,
+      "applicationCapability": null,
+      "exemption": {
+        "kind": "non-seat-guard",
+        "reason": "authenticated invitation target; core checks plant ownership or own discovery profile"
+      },
       "parityCapability": "boundary.settings",
       "classification": { "state": "excluded", "reason": "settings" }
     },
@@ -1335,8 +1364,24 @@
       "identity": "action:src/app/(dashboard)/settings/association/actions.ts → declineAssociationInvitation",
       "source": "src/app/(dashboard)/settings/association/actions.ts",
       "exportName": "declineAssociationInvitation",
-      "applicationCapability": "association.answer",
-      "exemption": null,
+      "applicationCapability": null,
+      "exemption": {
+        "kind": "non-seat-guard",
+        "reason": "authenticated invitation target; core checks plant ownership or own discovery profile"
+      },
+      "parityCapability": "boundary.settings",
+      "classification": { "state": "excluded", "reason": "settings" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/settings/association/actions.ts → leaveDiscoveryOrg",
+      "source": "src/app/(dashboard)/settings/association/actions.ts",
+      "exportName": "leaveDiscoveryOrg",
+      "applicationCapability": null,
+      "exemption": {
+        "kind": "non-seat-guard",
+        "reason": "authenticated own discovery profile; scoped association and confirmation checked in core"
+      },
       "parityCapability": "boundary.settings",
       "classification": { "state": "excluded", "reason": "settings" }
     },
@@ -2546,9 +2591,9 @@
   ],
   "summary": {
     "routes": 67,
-    "actions": 181,
+    "actions": 184,
     "supported": 179,
-    "excluded": 67,
+    "excluded": 70,
     "unreachable": 2,
     "unclassified": 0
   }

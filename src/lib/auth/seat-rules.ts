@@ -357,6 +357,28 @@ export const ALL_CAPABILITIES: readonly Capability[] = Object.keys(
 export const UNSEATED_EXPORTS: Readonly<
   Record<string, { kind: "sessionless" | "non-seat-guard"; reason: string }>
 > = {
+  "src/app/(dashboard)/dashboard/discovery-actions.ts → createDiscoveryPlant": {
+    kind: "non-seat-guard",
+    reason:
+      "authenticated discovery profile; account lock and fresh SQL predicates authorize its own plant conversion",
+  },
+  "src/app/(dashboard)/settings/association/actions.ts → acceptAssociationInvitation":
+    {
+      kind: "non-seat-guard",
+      reason:
+        "authenticated invitation target; core checks plant ownership or own discovery profile",
+    },
+  "src/app/(dashboard)/settings/association/actions.ts → declineAssociationInvitation":
+    {
+      kind: "non-seat-guard",
+      reason:
+        "authenticated invitation target; core checks plant ownership or own discovery profile",
+    },
+  "src/app/(dashboard)/settings/association/actions.ts → leaveDiscoveryOrg": {
+    kind: "non-seat-guard",
+    reason:
+      "authenticated own discovery profile; scoped association and confirmation checked in core",
+  },
   "src/app/(auth)/login/actions.ts → login": {
     kind: "sessionless",
     reason: "signing in — there is no session to check yet",

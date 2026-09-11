@@ -361,8 +361,14 @@ export function resolveSettingsSection(id: string): SettingsSectionId {
  * The ORDER is the array's, so the nav, the search results and the tab order
  * are one sequence that no consumer sorts for itself.
  */
-export function settingsSectionsFor(viewer: SeatFields): SettingsSection[] {
-  return SETTINGS_SECTIONS.filter((section) => section.isVisibleTo(viewer));
+export function settingsSectionsFor(
+  viewer: SeatFields,
+  discovery = false
+): SettingsSection[] {
+  return SETTINGS_SECTIONS.filter(
+    (section) =>
+      section.isVisibleTo(viewer) || (discovery && section.id === "association")
+  );
 }
 
 /**

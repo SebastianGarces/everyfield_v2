@@ -239,12 +239,12 @@ test("the action takes a KIND, never a church or an org id", () => {
   // And every action in the module mints its actor from the session rather than
   // accepting one.
   const mints = ACTIONS_CODE.match(
-    /const actor = invitationActorFromSession\(\s*await requireSeat\("[\w.]+"\)\s*\);/g
+    /const actor = invitationActorFromSession\(\s*await (?:requireSeat\("[\w.]+"\)|verifySession\(\))\s*\);/g
   );
   assert.equal(
     mints?.length,
-    4,
-    "each of the four writes mints its own actor — accept, decline, and the two leaves"
+    5,
+    "each answer and leave action mints its own actor from the session"
   );
   assert.doesNotMatch(ACTIONS_CODE, /actor: InvitationActor/);
 });
@@ -267,7 +267,7 @@ test("the sever nulls the FK only while it still points at the org being left", 
   // The subject is `target.id` since migration 0036 (#304 WS3): the statement
   // serves a PLANT leaving an oversight org and a SENDING CHURCH leaving a
   // network, and `subjectSql` is the single place the two differ.
-  assert.match(sever, /where "id" = \$\{target\.id\}::uuid/);
+  assert.match(sever, /where \$\{target\.idColumn\} = \$\{target\.id\}::uuid/);
   assert.match(sever, /and \$\{target\.fk\} = \$\{facts\.orgId\}::uuid/);
 
   // The OTHER FK is never mentioned, so a plant that belongs to a sending church
@@ -305,7 +305,7 @@ test("the audit row is written FROM the sever, not beside it", () => {
   // have committed an audit row for a sever that matched nothing, and an empty
   // `returning()` rolls nothing back.
   assert.match(sever, /with severed as \(/);
-  assert.match(sever, /returning "id"\s*\)/);
+  assert.match(sever, /returning \$\{target\.idColumn\} as "id"\s*\)/);
   assert.match(sever, /from severed/);
   assert.match(sever, /'disassociated'::varchar/);
 

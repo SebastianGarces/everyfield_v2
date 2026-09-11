@@ -1,5 +1,7 @@
 "use server";
 
+import { verifySession } from "@/lib/auth";
+import { leaveDiscoveryOrgAs } from "@/lib/discovery/associations";
 import { requireSeat } from "@/lib/auth/seats";
 import { refresh } from "next/cache";
 import { z } from "zod";
@@ -155,9 +157,7 @@ async function run(
 export async function acceptAssociationInvitation(
   invitationId: string
 ): Promise<AssociationActionResult> {
-  const actor = invitationActorFromSession(
-    await requireSeat("association.answer")
-  );
+  const actor = invitationActorFromSession(await verifySession());
 
   const parsed = invitationIdSchema.safeParse(invitationId);
   if (!parsed.success) {
@@ -185,9 +185,7 @@ export async function acceptAssociationInvitation(
 export async function declineAssociationInvitation(
   invitationId: string
 ): Promise<AssociationActionResult> {
-  const actor = invitationActorFromSession(
-    await requireSeat("association.answer")
-  );
+  const actor = invitationActorFromSession(await verifySession());
 
   const parsed = invitationIdSchema.safeParse(invitationId);
   if (!parsed.success) {
@@ -249,4 +247,20 @@ export async function leaveNetwork(): Promise<AssociationActionResult> {
     await requireSeat("org.association.leave")
   );
   return run("leaveNetwork", () => leaveNetworkAsSendingChurchAdmin(actor));
+}
+
+export async function leaveDiscoveryOrg(
+  orgType: string,
+  confirmation: string
+): Promise<AssociationActionResult> {
+  const actor = invitationActorFromSession(await verifySession());
+  const parsed = orgTypeSchema.safeParse(orgType);
+  if (!parsed.success || typeof confirmation !== "string")
+    return {
+      success: false,
+      error: "That is not an organization you can leave",
+    };
+  return run("leaveDiscoveryOrg", () =>
+    leaveDiscoveryOrgAs(actor, parsed.data, confirmation)
+  );
 }

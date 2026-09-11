@@ -16,6 +16,10 @@ import { sendingNetworks } from "../../db/schema/sending-network";
 import { users } from "../../db/schema/user";
 import { userInvitations } from "../../db/schema/user-invitation";
 import { persons, households } from "../../db/schema/people";
+import { organizationInvitations } from "../../db/schema/organization-invitation";
+import { associationEvents } from "../../db/schema/association-event";
+import { churchPrivacySettings } from "../../db/schema/church-privacy-settings";
+import { registerDiscoveryPlantLiveTests } from "./plant-transfer-live-cases";
 import {
   createDiscoveryProfileStatement,
   lockDiscoveryAccountStatement,
@@ -30,7 +34,7 @@ const enabled = process.env.DISCOVERY_PROFILE_PROOF === "1";
 describe(
   "persisted discovery profiles on disposable Postgres",
   { skip: !enabled },
-  () => {
+  async () => {
     if (!enabled) return;
     const connection = process.env.DISCOVERY_PROFILE_DATABASE_URL;
     const endpoint = process.env.DISCOVERY_PROFILE_ENDPOINT;
@@ -50,6 +54,10 @@ describe(
     process.env.DATABASE_URL = connection;
     process.env.RESEND_API_KEY = "re_discovery_scratch_unused";
     const db = drizzle(neon(connection));
+    registerDiscoveryPlantLiveTests(db);
+    const { registerDiscoveryAssociationLiveTests } =
+      await import("./association-live-cases");
+    registerDiscoveryAssociationLiveTests(db);
 
     before(async () => {
       const baseline = {
@@ -60,6 +68,9 @@ describe(
         userInvitations,
         persons,
         households,
+        organizationInvitations,
+        associationEvents,
+        churchPrivacySettings,
       };
       // Serialize the actual table declarations, without allocating a migration
       // or creating any journal/snapshot files. This is scratch setup only.

@@ -78,6 +78,7 @@ import type { AssociationPair, InvitationActor } from "./core";
  * none carrying neither.
  */
 export type AssociationSubject =
+  | { subjectType: "discovery"; userId: string }
   | { subjectType: "church"; churchId: string }
   | { subjectType: "sending_church"; sendingChurchId: string };
 
@@ -95,9 +96,11 @@ export function sendingChurchSubject(
 
 /** The subject's own id, whichever kind it is. Logging and keys only. */
 export function subjectId(subject: AssociationSubject): string {
-  return subject.subjectType === "church"
-    ? subject.churchId
-    : subject.sendingChurchId;
+  return subject.subjectType === "discovery"
+    ? subject.userId
+    : subject.subjectType === "church"
+      ? subject.churchId
+      : subject.sendingChurchId;
 }
 
 /**
@@ -105,23 +108,24 @@ export function subjectId(subject: AssociationSubject): string {
  * mapping happens, so the CHECK is satisfied by construction and no writer has
  * to remember to null the other column.
  */
+export function discoverySubject(userId: string): AssociationSubject {
+  return { subjectType: "discovery", userId };
+}
+
 export function toSubjectColumns(
   subject: AssociationSubject
 ): Pick<
   NewAssociationEvent,
-  "subjectType" | "churchId" | "subjectSendingChurchId"
+  "subjectType" | "churchId" | "subjectSendingChurchId" | "discoveryUserId"
 > {
-  return subject.subjectType === "church"
-    ? {
-        subjectType: "church",
-        churchId: subject.churchId,
-        subjectSendingChurchId: null,
-      }
-    : {
-        subjectType: "sending_church",
-        churchId: null,
-        subjectSendingChurchId: subject.sendingChurchId,
-      };
+  return {
+    subjectType: subject.subjectType,
+    churchId: subject.subjectType === "church" ? subject.churchId : null,
+    subjectSendingChurchId:
+      subject.subjectType === "sending_church" ? subject.sendingChurchId : null,
+    discoveryUserId:
+      subject.subjectType === "discovery" ? subject.userId : null,
+  };
 }
 
 /**
@@ -223,8 +227,21 @@ const OVERSIGHT_FK_COLUMN: Record<AssociationOrgType, string> = {
  * auditing the wrong association.
  */
 function subjectSql(subject: AssociationSubject, orgType: AssociationOrgType) {
+  if (subject.subjectType === "discovery") {
+    return {
+      table: sql.raw('"discovery_profiles"'),
+      subjectColumn: sql.raw('"discovery_user_id"'),
+      subjectTypeLiteral: "discovery" as const,
+      fk: sql.raw(OVERSIGHT_FK_COLUMN[orgType]),
+      id: subject.userId,
+      idColumn: sql.raw('"user_id"'),
+      updatedAt: sql``,
+    };
+  }
   if (subject.subjectType === "church") {
     return {
+      idColumn: sql.raw('"id"'),
+      updatedAt: sql`, "updated_at" = now()`,
       table: sql.raw('"churches"'),
       subjectColumn: sql.raw('"church_id"'),
       subjectTypeLiteral: "church" as const,
@@ -240,6 +257,8 @@ function subjectSql(subject: AssociationSubject, orgType: AssociationOrgType) {
   }
 
   return {
+    idColumn: sql.raw('"id"'),
+    updatedAt: sql`, "updated_at" = now()`,
     table: sql.raw('"sending_churches"'),
     subjectColumn: sql.raw('"subject_sending_church_id"'),
     subjectTypeLiteral: "sending_church" as const,
@@ -300,14 +319,14 @@ export function acceptedAssociationEventStatement(
     insert into "association_events"
       ("subject_type", ${target.subjectColumn}, "org_type", "org_id", "event", "actor_user_id", "source_invitation_id")
     select ${target.subjectTypeLiteral}::varchar,
-           ${target.table}."id",
+           ${target.table}.${target.idColumn},
            ${facts.orgType}::varchar,
            ${facts.orgId}::uuid,
            'associated'::varchar,
            ${actor.id}::uuid,
            ${facts.invitationId}::uuid
       from ${target.table}
-     where ${target.table}."id" = ${target.id}::uuid
+     where ${target.table}.${target.idColumn} = ${target.id}::uuid
        and ${target.table}.${target.fk} = ${facts.orgId}::uuid
        and exists (
          select 1 from "organization_invitations" oi
@@ -392,11 +411,10 @@ export async function severAssociationWithAuditStatement(
   const result = await db.execute<{ id: string }>(sql`
     with severed as (
       update ${target.table}
-         set ${target.fk} = null,
-             "updated_at" = now()
-       where "id" = ${target.id}::uuid
+         set ${target.fk} = null ${target.updatedAt}
+       where ${target.idColumn} = ${target.id}::uuid
          and ${target.fk} = ${facts.orgId}::uuid
-      returning "id"
+      returning ${target.idColumn} as "id"
     )
     insert into "association_events"
       ("subject_type", ${target.subjectColumn}, "org_type", "org_id", "event", "actor_user_id")
@@ -504,6 +522,18 @@ export function auditableAssociationOrg(pair: AssociationPair): {
   orgId: string;
 } {
   switch (pair.type) {
+    case "discovery_to_sending_church":
+      return {
+        subject: discoverySubject(pair.targetUserId),
+        orgType: "sending_church",
+        orgId: pair.sendingChurchId,
+      };
+    case "discovery_to_network":
+      return {
+        subject: discoverySubject(pair.targetUserId),
+        orgType: "network",
+        orgId: pair.sendingNetworkId,
+      };
     case "church_to_sending_church": {
       return {
         subject: churchSubject(pair.targetChurchId),

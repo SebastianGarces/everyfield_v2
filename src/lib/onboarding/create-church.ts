@@ -41,6 +41,7 @@
  */
 
 import { db } from "@/db";
+import { discoveryProfiles } from "@/db/schema/discovery-profile";
 import { churches, churchPrivacySettings, persons, users } from "@/db/schema";
 import { linkUserToChurchFilter } from "@/lib/churches/link-user";
 import { accountPersonValues } from "@/lib/people/account-person";
@@ -234,7 +235,54 @@ export async function runCreateChurch(
  * specification", which is why `person-link-live.test.ts` exercises this
  * statement against a real index rather than trusting the rendered SQL.
  */
-export function churchCreationStatements(write: ChurchCreationWrite) {
+export type DiscoveryPlantConsent = {
+  sendingChurchId: string | null;
+  sendingNetworkId: string | null;
+  shareActivityWithOversight: boolean;
+};
+
+export function churchCreationStatements(
+  write: ChurchCreationWrite,
+  discovery?: DiscoveryPlantConsent
+) {
+  if (discovery) {
+    // The caller locks this account as a separate first statement. Matching
+    // the reviewed slots refuses a stale consent form instead of transferring
+    // an association the person did not see.
+    const eligible = sql`${users.id} = ${write.plantedBy}::uuid
+      and ${users.seat} is null and ${users.churchId} is null
+      and ${users.sendingChurchId} is null and ${users.sendingNetworkId} is null
+      and ${discoveryProfiles.sendingChurchId} is not distinct from ${discovery.sendingChurchId}::uuid
+      and ${discoveryProfiles.sendingNetworkId} is not distinct from ${discovery.sendingNetworkId}::uuid`;
+    const won = sql`${users.id} = ${write.plantedBy}::uuid and ${users.churchId} = ${write.churchId}::uuid and ${users.seat} = 'owner'`;
+    const person = accountPersonValues({
+      userId: write.plantedBy,
+      churchId: write.churchId,
+      name: write.plantedByName,
+      email: write.plantedByEmail,
+    });
+    return [
+      db.execute(sql`insert into churches (id,name,city,state_region,country,sending_church_id,sending_network_id)
+        select ${write.churchId}::uuid,${write.name},${write.city},${write.stateRegion},${write.country},${discoveryProfiles.sendingChurchId},${discoveryProfiles.sendingNetworkId}
+        from ${discoveryProfiles} join ${users} on ${users.id}=${discoveryProfiles.userId} where ${eligible}`),
+      db
+        .update(users)
+        .set({ churchId: write.churchId, seat: "owner", updatedAt: new Date() })
+        .where(
+          sql`${users.id} = ${write.plantedBy}::uuid and ${users.seat} is null
+          and ${users.churchId} is null and ${users.sendingChurchId} is null and ${users.sendingNetworkId} is null
+          and exists (select 1 from ${churches} where ${churches.id} = ${write.churchId}::uuid)`
+        )
+        .returning({ id: users.id }),
+      db.execute(sql`insert into church_privacy_settings
+        (church_id,updated_by,share_people,share_meetings,share_tasks,share_financials,share_ministry_teams,share_facilities,share_activity_with_oversight)
+        select ${write.churchId}::uuid,${users.id},${discovery.shareActivityWithOversight},${discovery.shareActivityWithOversight},${discovery.shareActivityWithOversight},${discovery.shareActivityWithOversight},${discovery.shareActivityWithOversight},${discovery.shareActivityWithOversight},${discovery.shareActivityWithOversight}
+        from ${users} where ${won} on conflict (church_id) do nothing`),
+      db.execute(sql`insert into persons (church_id,user_id,created_by,email,first_name,last_name,status)
+        select ${write.churchId}::uuid,${users.id},${users.id},${person.email},${person.firstName},${person.lastName},${person.status}
+        from ${users} where ${won} on conflict (church_id,user_id) where user_id is not null do nothing`),
+    ] as const;
+  }
   return [
     db.insert(churches).values({
       id: write.churchId,

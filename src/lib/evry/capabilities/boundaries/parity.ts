@@ -107,6 +107,11 @@ export const PARITY_CAPABILITIES = defineEvryParityCapabilities(
         match: "exact",
         source: "src/app/(dashboard)/dashboard/actions.ts",
       },
+      {
+        kind: "action-source",
+        match: "exact",
+        source: "src/app/(dashboard)/dashboard/discovery-actions.ts",
+      },
     ],
   },
   {

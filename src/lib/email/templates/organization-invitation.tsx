@@ -42,7 +42,10 @@ import { BaseLayout } from "../components/base-layout";
 export type InvitingOrgKind = "sending church" | "network";
 
 /** What the invitee sets up by accepting. */
-export type InviteeOrgKind = "church plant" | "sending church";
+export type InviteeOrgKind =
+  | "church plant"
+  | "sending church"
+  | "discovery account";
 
 export interface OrganizationInvitationEmailProps {
   /** The inviting organization's own name — never an id. */
@@ -70,6 +73,9 @@ export function organizationInvitationSubject(invitingOrgName: string): string {
 export function organizationInvitationPreview(
   inviteeOrgKind: InviteeOrgKind
 ): string {
+  if (inviteeOrgKind === "discovery account") {
+    return "Review your discovery association invitation in EveryField.";
+  }
   return `Set up your ${inviteeOrgKind} — this invite link only works for this address.`;
 }
 
@@ -92,7 +98,9 @@ function OrganizationInvitationEmail({
 
       <Text style={text}>
         <strong>{invitingOrgName}</strong>, a {invitingOrgKind} on EveryField,
-        invited you to set up your {inviteeOrgKind}.
+        {inviteeOrgKind === "discovery account"
+          ? "invited you to a discovery association."
+          : `invited you to set up your ${inviteeOrgKind}.`}
       </Text>
 
       {/*
@@ -103,14 +111,18 @@ function OrganizationInvitationEmail({
         wonder whether the message was meant for them.
       */}
       <Text style={text}>
-        {inviteeOrgKind === "church plant"
-          ? "EveryField is where a church plant plans its launch, tracks the people it is reaching, and keeps its team on the same page."
-          : "EveryField is where a sending church keeps track of the plants it supports — where each one is, what it needs next, and how it is doing."}
+        {inviteeOrgKind === "discovery account"
+          ? "You can explore church planting and read the wiki while staying connected with an organization that supports you."
+          : inviteeOrgKind === "church plant"
+            ? "EveryField is where a church plant plans its launch, tracks the people it is reaching, and keeps its team on the same page."
+            : "EveryField is where a sending church keeps track of the plants it supports — where each one is, what it needs next, and how it is doing."}
       </Text>
 
       <Section style={buttonRow}>
         <Button href={inviteUrl} style={button}>
-          Accept and create your account
+          {inviteeOrgKind === "discovery account"
+            ? "Review invitation"
+            : "Accept and create your account"}
         </Button>
       </Section>
 
@@ -136,7 +148,14 @@ function OrganizationInvitationEmail({
         church and the plants under it, and each of those plants still decides
         its own sharing.
       */}
-      {inviteeOrgKind === "church plant" ? (
+      {inviteeOrgKind === "discovery account" ? (
+        <Text style={text}>
+          Your discovery account becomes associated with {invitingOrgName}. They
+          can see your name and email in their discovery list. Accepting does
+          not create a church plant or give you a seat in their organization.
+          You can decline this invitation or leave the association later.
+        </Text>
+      ) : inviteeOrgKind === "church plant" ? (
         <Text style={text}>
           You create your EveryField account and your church plant, and it
           arrives already connected to {invitingOrgName}. They will see it
@@ -155,9 +174,10 @@ function OrganizationInvitationEmail({
 
       <Text style={sectionHeading}>This link belongs to this address</Text>
       <Text style={text}>
-        The invitation is issued to <strong>{inviteeEmail}</strong>, and it only
-        works for that address. Please do not forward this email — a link that
-        reaches anybody else cannot be used to sign up. If the address is wrong,
+        The invitation is issued to <strong>{inviteeEmail}</strong>, and it{" "}
+        {inviteeOrgKind === "discovery account"
+          ? "can be answered only by that account. Sign in with this address to review it. If the address is wrong, "
+          : "only works for that address. Please do not forward this email — a link that reaches anybody else cannot be used to sign up. If the address is wrong, "}
         ask {invitingOrgName} to revoke this invitation and send a new one.
       </Text>
 

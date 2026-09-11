@@ -241,7 +241,7 @@ export default async function DashboardLayout({
               the next account to sign in on this tab was shown the previous
               one's settings while its own read was in flight (#673). */}
                 <SettingsModal
-                  visibleIds={settingsSectionsFor(user).map(
+                  visibleIds={settingsSectionsFor(user, isDiscovery).map(
                     (section) => section.id
                   )}
                   serverRenderId={crypto.randomUUID()}
