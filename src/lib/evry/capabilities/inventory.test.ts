@@ -86,6 +86,55 @@ test("the inventory keeps every ruled exclusion visible", async () => {
   ]);
 });
 
+test("human seat-invitation acceptance remains excluded from Evry", async () => {
+  const inventory = await generateParityInventory(REPO_ROOT);
+  const identities = [
+    "route:/seat-invitation",
+    "action:src/app/(auth)/seat-invitation/actions.ts → acceptSeatInvitationAction",
+  ];
+  for (const identity of identities) {
+    const entry = inventory.entries.find(
+      (entry) => entry.identity === identity
+    );
+    assert.ok(entry, identity);
+    assert.equal(entry.parityCapability, "boundary.authentication");
+    assert.deepEqual(entry.classification, {
+      state: "excluded",
+      reason: "authentication",
+    });
+    if (entry.kind === "action") {
+      assert.equal(entry.applicationCapability, "seat.invitation.answer");
+      assert.equal(entry.exemption, null);
+    }
+  }
+
+  const sources = collectAuthoritativeSources(REPO_ROOT);
+  const capabilities = await loadParityCapabilities(REPO_ROOT);
+  const action = sources.actions.find(
+    (entry) => entry.identity === identities[1]
+  );
+  assert.ok(action);
+  assert.throws(
+    () =>
+      buildParityInventory(
+        {
+          ...sources,
+          actions: [
+            ...sources.actions,
+            {
+              ...action,
+              identity: `${action.identity}Other`,
+              exportName: `${action.exportName}Other`,
+            },
+          ],
+        },
+        capabilities
+      ),
+    /unclassified action:.*acceptSeatInvitationActionOther/,
+    "the exclusion must not silently classify future actions in this module"
+  );
+});
+
 test("the generated settings registry includes source keywords in stable order", async () => {
   const inventory = await generateParityInventory(REPO_ROOT);
 

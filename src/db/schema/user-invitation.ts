@@ -65,10 +65,8 @@ export const invitableSeats = ["admin", "member"] as const;
 export type InvitableSeat = (typeof invitableSeats)[number];
 
 /**
- * No `declined`. A seat invitation is REGISTER-ONLY (AS-010): the only person
- * who can answer it has no account yet, so there is no in-product surface to
- * decline from and an unwanted invitation is simply left to expire. The
- * inviting side closes one with `revoked`.
+ * No `declined`: an unwanted invitation is left to expire. The inviting side
+ * closes one with `revoked`. Seatless accounts may accept a first seat (#568).
  */
 export const userInvitationStatuses = [
   "pending",

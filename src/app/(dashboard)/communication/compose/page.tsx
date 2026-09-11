@@ -8,7 +8,7 @@ import { listRecipientTeams } from "@/lib/communication/recipient-groups";
 import { listMeetings } from "@/lib/meetings/service";
 import { db } from "@/db";
 import { persons } from "@/db/schema/people";
-import { churches } from "@/db/schema/church";
+import { getChurchMergeData } from "@/lib/communication/church-merge";
 import { HeaderBreadcrumbs } from "@/components/header";
 import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
 import { ComposeForm } from "./compose-form";
@@ -52,7 +52,7 @@ export default async function ComposePage({ searchParams }: ComposePageProps) {
     selectedTemplate,
     meetingsResult,
     preloadedRecipients,
-    churchRows,
+    churchMergeData,
     teams,
   ] = await Promise.all([
     getTemplates(user.churchId),
@@ -79,7 +79,7 @@ export default async function ComposePage({ searchParams }: ComposePageProps) {
             )
           )
       : Promise.resolve([]),
-    db.select().from(churches).where(eq(churches.id, user.churchId)).limit(1),
+    getChurchMergeData(user.churchId),
     listRecipientTeams(user.churchId),
   ]);
 
@@ -96,8 +96,6 @@ export default async function ComposePage({ searchParams }: ComposePageProps) {
     // makes on the server.
     agenda: m.agenda,
   }));
-
-  const churchName = churchRows[0]?.name ?? "";
 
   // Arriving from a meeting with no template named? Open with the invitation
   // that meeting type calls for. RESOLVED HERE, on the server, and handed on as
@@ -134,7 +132,7 @@ export default async function ComposePage({ searchParams }: ComposePageProps) {
             meetingId={meetingId}
             meetings={meetings}
             initialRecipients={preloadedRecipients}
-            churchName={churchName}
+            churchMergeData={churchMergeData}
             teams={teams}
           />
         </WorkspacePanel>

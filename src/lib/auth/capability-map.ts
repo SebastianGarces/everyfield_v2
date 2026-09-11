@@ -231,6 +231,8 @@ export const CAPABILITY_BY_EXPORT: Readonly<Record<string, string>> = {
     "association.leave",
   "src/app/(dashboard)/settings/team/actions.ts → appointAdminAction":
     "seat.manage",
+  "src/app/(auth)/seat-invitation/actions.ts → acceptSeatInvitationAction":
+    "seat.invitation.answer",
   "src/app/(auth)/coach-invitation/actions.ts → acceptCoachInvitationAction":
     "coach.invitation.answer",
   "src/app/(dashboard)/settings/team/actions.ts → createCoachInvitationAction":

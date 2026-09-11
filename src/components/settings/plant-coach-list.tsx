@@ -71,8 +71,9 @@ export function PlantCoachList({
           id="team-coaches"
           description={
             <>
-              Coaches read this plant&rsquo;s own records and change nothing.
-              They hold no seat, so they are not on the roster above.
+              Coaching access is read-only and separate from a plant seat.
+              Coaches who also hold a seat in this plant appear on the roster
+              above.
             </>
           }
         >

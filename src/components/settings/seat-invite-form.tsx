@@ -109,7 +109,7 @@ export function SeatInviteForm({
       <SettingsBlock>
         <SettingsHeading
           id="team-invite-seat"
-          description={`They get an email with a link to create their EveryField account and join this ${noun}. The link only works for the address you type, and only for someone who does not already have an account.`}
+          description={`They get an email with a link to create an account or sign in and join this ${noun}. The link only works for the address you enter. Existing accounts must have no seat and belong to no plant or organization.`}
         >
           Invite someone to your team
         </SettingsHeading>
