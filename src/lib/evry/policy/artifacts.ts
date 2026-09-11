@@ -27,7 +27,7 @@ export type EvryPublicPolicyArtifact =
   | EvryBoundaryArtifact
   | EvrySettingsHandoffArtifact;
 
-const EXAMPLES = ["Find overdue tasks", "Create a meeting"] as const;
+const EXAMPLES = ["Show me my tasks", "Show me meetings"] as const;
 
 const APPLICATION_ONLY_BOUNDARY: EvryBoundaryArtifact = {
   kind: "boundary",
@@ -47,9 +47,9 @@ const MIXED_BOUNDARY: EvryBoundaryArtifact = {
 
 const AMBIGUOUS_BOUNDARY: EvryBoundaryArtifact = {
   kind: "boundary",
-  title: "Ask Evry about EveryField",
+  title: "I couldn’t understand that request",
   message:
-    "Name the EveryField work you want Evry to do. Nothing from this request was run.",
+    "Try asking for one thing at a time, such as listing tasks or meetings. Nothing has been changed.",
   examples: EXAMPLES,
 };
 

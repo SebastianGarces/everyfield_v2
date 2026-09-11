@@ -24,13 +24,33 @@ function displayValue(
     );
   }
   const displayed =
-    typeof argument === "string" ? argument : JSON.stringify(argument);
+    value.kind === "argument_summary"
+      ? summarizeArgument(argument)
+      : typeof argument === "string"
+        ? argument
+        : JSON.stringify(argument);
   if (displayed.length === 0) {
     throw new Error(
       `Evry recipe disclosure is empty for argument ${value.argumentKey}`
     );
   }
   return displayed;
+}
+
+function summarizeArgument(argument: EvryJsonValue): string {
+  if (typeof argument === "string") {
+    return argument.length <= 500
+      ? argument
+      : `${argument.length.toLocaleString("en-US")} characters`;
+  }
+  if (Array.isArray(argument)) {
+    return `${argument.length.toLocaleString("en-US")} ${argument.length === 1 ? "item" : "items"}`;
+  }
+  if (argument && typeof argument === "object") {
+    const fields = Object.keys(argument).length;
+    return `${fields.toLocaleString("en-US")} ${fields === 1 ? "field" : "fields"}`;
+  }
+  return JSON.stringify(argument);
 }
 
 export function disclosureForEvryRecipeStep(

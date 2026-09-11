@@ -132,18 +132,20 @@ export function createEvryConversationPlanResumeRevalidator(
       revalidated.status === "awaiting_confirmation" ||
       revalidated.status === "approved"
     ) {
-      for (const step of document.steps) {
-        if (
-          !(await boundaries.targetIsCurrent({
+      // Target checks are independent, read-only snapshots. Running them
+      // together keeps a multi-step review from paying one network round trip
+      // after another before anything is shown to the user.
+      const targetsAreCurrent = await Promise.all(
+        document.steps.map((step) =>
+          boundaries.targetIsCurrent({
             actor,
             plan: stored,
             step,
             checkedAt,
-          }))
-        ) {
-          return stale(identity);
-        }
-      }
+          })
+        )
+      );
+      if (targetsAreCurrent.some((current) => !current)) return stale(identity);
     }
     return revalidated;
   };

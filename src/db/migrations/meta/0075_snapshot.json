@@ -1,6 +1,6 @@
 {
   "id": "72bb7da6-e3d2-48a1-a165-9922496282a1",
-  "prevId": "b2e05158-e03b-4a65-b3a2-97292485e7b8",
+  "prevId": "2da19388-be03-4e98-8683-3641de9aa728",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -3321,13 +3321,6 @@
           "notNull": true,
           "default": false
         },
-        "share_wiki": {
-          "name": "share_wiki",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
         "share_activity_with_oversight": {
           "name": "share_activity_with_oversight",
           "type": "boolean",
@@ -3347,6 +3340,13 @@
           "type": "uuid",
           "primaryKey": false,
           "notNull": false
+        },
+        "share_wiki": {
+          "name": "share_wiki",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
         }
       },
       "indexes": {},
@@ -6839,6 +6839,28 @@
           ],
           "isUnique": true,
           "where": "\"tasks\".\"category\" = 'follow_up' and \"tasks\".\"related_type\" = 'person' and \"tasks\".\"deleted_at\" is null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "tasks_open_recurrence_series_unique_idx": {
+          "name": "tasks_open_recurrence_series_unique_idx",
+          "columns": [
+            {
+              "expression": "church_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "(coalesce(\"recurrence_rule\" ->> 'seriesId', \"id\"::text))",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"tasks\".\"is_recurring\" and \"tasks\".\"status\" <> 'complete' and \"tasks\".\"deleted_at\" is null",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -10353,7 +10375,7 @@
         },
         "evry_active_runs_operation_check": {
           "name": "evry_active_runs_operation_check",
-          "value": "\"evry_active_runs\".\"operation\" in ('create', 'continue', 'execute', 'retry')"
+          "value": "\"evry_active_runs\".\"operation\" in ('create', 'continue', 'reuse', 'execute', 'retry')"
         },
         "evry_active_runs_status_check": {
           "name": "evry_active_runs_status_check",
@@ -10377,7 +10399,7 @@
         },
         "evry_active_runs_shape_check": {
           "name": "evry_active_runs_shape_check",
-          "value": "(\n        \"evry_active_runs\".\"kind\" = 'conversation'\n        and \"evry_active_runs\".\"operation\" in ('create', 'continue')\n        and \"evry_active_runs\".\"plan_id\" is null\n        and \"evry_active_runs\".\"plan_fingerprint\" is null\n        and (\"evry_active_runs\".\"operation\" <> 'create' or \"evry_active_runs\".\"status\" <> 'active' or \"evry_active_runs\".\"conversation_id\" is null)\n        and (\"evry_active_runs\".\"operation\" = 'create' or \"evry_active_runs\".\"conversation_id\" is not null)\n        and \"evry_active_runs\".\"stage\" <> 'executing'\n      ) or (\n        \"evry_active_runs\".\"kind\" = 'execution'\n        and \"evry_active_runs\".\"operation\" in ('execute', 'retry')\n        and \"evry_active_runs\".\"conversation_id\" is not null\n        and \"evry_active_runs\".\"plan_id\" is not null\n        and \"evry_active_runs\".\"plan_fingerprint\" is not null\n        and \"evry_active_runs\".\"stage\" = 'executing'\n      )"
+          "value": "(\n        \"evry_active_runs\".\"kind\" = 'conversation'\n        and \"evry_active_runs\".\"operation\" in ('create', 'continue', 'reuse')\n        and \"evry_active_runs\".\"plan_id\" is null\n        and \"evry_active_runs\".\"plan_fingerprint\" is null\n        and (\"evry_active_runs\".\"operation\" not in ('create', 'reuse') or \"evry_active_runs\".\"status\" <> 'active' or \"evry_active_runs\".\"conversation_id\" is null)\n        and (\"evry_active_runs\".\"operation\" in ('create', 'reuse') or \"evry_active_runs\".\"conversation_id\" is not null)\n        and \"evry_active_runs\".\"stage\" <> 'executing'\n      ) or (\n        \"evry_active_runs\".\"kind\" = 'execution'\n        and \"evry_active_runs\".\"operation\" in ('execute', 'retry')\n        and \"evry_active_runs\".\"conversation_id\" is not null\n        and \"evry_active_runs\".\"plan_id\" is not null\n        and \"evry_active_runs\".\"plan_fingerprint\" is not null\n        and \"evry_active_runs\".\"stage\" = 'executing'\n      )"
         },
         "evry_active_runs_completed_conversation_check": {
           "name": "evry_active_runs_completed_conversation_check",
@@ -11308,6 +11330,211 @@
       },
       "isRLSEnabled": false
     },
+    "public.evry_execution_effect_claims": {
+      "name": "evry_execution_effect_claims",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "attempt_id": {
+          "name": "attempt_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "plan_id": {
+          "name": "plan_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "church_id": {
+          "name": "church_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "actor_user_id": {
+          "name": "actor_user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "plan_fingerprint": {
+          "name": "plan_fingerprint",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "correlation_id": {
+          "name": "correlation_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "effect_key": {
+          "name": "effect_key",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "step_id": {
+          "name": "step_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "capability_identity": {
+          "name": "capability_identity",
+          "type": "varchar(160)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "affected_count": {
+          "name": "affected_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "excluded_count": {
+          "name": "excluded_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "claimed_at": {
+          "name": "claimed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "evry_execution_effect_claims_effect_unique_idx": {
+          "name": "evry_execution_effect_claims_effect_unique_idx",
+          "columns": [
+            {
+              "expression": "church_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "effect_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "evry_execution_effect_claims_step_unique_idx": {
+          "name": "evry_execution_effect_claims_step_unique_idx",
+          "columns": [
+            {
+              "expression": "attempt_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "step_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "evry_execution_effect_claims_plan_time_idx": {
+          "name": "evry_execution_effect_claims_plan_time_idx",
+          "columns": [
+            {
+              "expression": "plan_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "claimed_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "evry_execution_effect_claims_exact_attempt_fk": {
+          "name": "evry_execution_effect_claims_exact_attempt_fk",
+          "tableFrom": "evry_execution_effect_claims",
+          "tableTo": "evry_execution_attempts",
+          "columnsFrom": [
+            "attempt_id",
+            "plan_id",
+            "church_id",
+            "actor_user_id",
+            "plan_fingerprint",
+            "correlation_id"
+          ],
+          "columnsTo": [
+            "id",
+            "plan_id",
+            "church_id",
+            "actor_user_id",
+            "plan_fingerprint",
+            "correlation_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "evry_execution_effect_claims_fingerprint_check": {
+          "name": "evry_execution_effect_claims_fingerprint_check",
+          "value": "\"evry_execution_effect_claims\".\"plan_fingerprint\" ~ '^[0-9a-f]{64}$'"
+        },
+        "evry_execution_effect_claims_effect_key_check": {
+          "name": "evry_execution_effect_claims_effect_key_check",
+          "value": "\"evry_execution_effect_claims\".\"effect_key\" ~ '^[0-9a-f]{64}$'"
+        },
+        "evry_execution_effect_claims_step_check": {
+          "name": "evry_execution_effect_claims_step_check",
+          "value": "\"evry_execution_effect_claims\".\"step_id\" ~ '^[a-z][a-z0-9_.-]{0,63}$' and length(\"evry_execution_effect_claims\".\"capability_identity\") > 0"
+        },
+        "evry_execution_effect_claims_counts_check": {
+          "name": "evry_execution_effect_claims_counts_check",
+          "value": "\"evry_execution_effect_claims\".\"affected_count\" >= 0 and \"evry_execution_effect_claims\".\"excluded_count\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
     "public.evry_execution_outcomes": {
       "name": "evry_execution_outcomes",
       "schema": "",
@@ -11410,6 +11637,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": 0
+        },
+        "dependency_output": {
+          "name": "dependency_output",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
         },
         "occurred_at": {
           "name": "occurred_at",

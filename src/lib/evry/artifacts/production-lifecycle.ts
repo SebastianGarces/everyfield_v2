@@ -8,16 +8,18 @@ import {
   PRODUCTION_EVRY_EXECUTION_REGISTRY,
   PRODUCTION_EVRY_PLAN_REGISTRY,
   PRODUCTION_EVRY_REVIEW_REGISTRY,
+  executeProductionEvryActionPlan,
 } from "@/lib/evry/capabilities/production";
+import { cleanupEvryPeoplePlanAttachments } from "@/lib/evry/capabilities/people/cleanup";
 import { revalidateProductionEvryConversationPlan } from "@/lib/evry/conversations/plan-resume";
 import {
   appendTrustedEvryConversationMessage,
   resumeEvryConversation,
 } from "@/lib/evry/conversations/service";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
-import { executeEvryActionPlan } from "@/lib/evry/executor";
 import { confirmEvryActionPlan } from "@/lib/evry/plans";
 import { cancelExactEvryActionPlan } from "@/lib/evry/plans/repository";
+import { PRODUCTION_EVRY_RECIPE_REUSE_REGISTRY } from "@/lib/evry/recipes/production-reuse";
 
 export type RunEvryProductionArtifactLifecycle = (input: {
   actor: EvryPlantActor;
@@ -32,12 +34,14 @@ export const runEvryProductionArtifactLifecycle = createEvryArtifactLifecycle({
   resume: resumeEvryConversation,
   append: appendTrustedEvryConversationMessage,
   confirm: confirmEvryActionPlan,
-  execute: executeEvryActionPlan,
+  execute: executeProductionEvryActionPlan,
   cancel: cancelExactEvryActionPlan,
+  cleanupPlanResources: cleanupEvryPeoplePlanAttachments,
   reviewPlan: (input) =>
     trustedEvryPlanReview({
       ...input,
       reviewRegistry: PRODUCTION_EVRY_REVIEW_REGISTRY,
     }),
+  reusableRecipeIdentities: PRODUCTION_EVRY_RECIPE_REUSE_REGISTRY.identities,
   now: () => new Date(),
 });

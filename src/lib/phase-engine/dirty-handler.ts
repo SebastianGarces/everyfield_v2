@@ -10,13 +10,14 @@
 // This handler is owned by the phase-engine feature but is MOUNTED in the
 // shared `src/lib/events/subscriptions.ts` wiring file — no feature service
 // imports another feature's service directly. It is deliberately tenant-scoped
-// (only ever touches the affected `churchId`) and best-effort: a failure to
-// stamp must never break the event that triggered it, so it swallows + logs.
+// (only ever touches the affected `churchId`). Ordinary events are best-effort;
+// a keyed Evry reconciliation is strict so its terminal outcome means this
+// derived state has actually converged.
 // ============================================================================
 
 import { db } from "@/db";
 import { churches } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 /**
  * WHAT "dirty" IS, as columns.
@@ -35,17 +36,24 @@ export function plantDirtyColumns(now: Date = new Date()) {
  * Mark a plant dirty by stamping `last_material_event_at = now` for the given
  * church. Idempotent and tenant-scoped: it only ever updates the one church_id.
  *
- * Best-effort by design — material events (attendance finalized, team member
- * assigned, person created, task completed) are the source of truth; failing to
- * mark dirty should degrade re-assessment freshness, never the originating flow.
+ * Ordinary owner flows are best-effort because the material event is the
+ * source of truth. A durable keyed reconciliation opts into `required`, where
+ * a failure remains retryable and cannot be hidden behind a terminal outcome.
  */
-export async function markPlantDirty(churchId: string): Promise<void> {
+export async function markPlantDirty(
+  churchId: string,
+  options: { occurredAt?: Date; failureMode?: "best_effort" | "required" } = {}
+): Promise<void> {
   if (!churchId) return;
 
   try {
+    const occurredAt = options.occurredAt ?? new Date();
     await db
       .update(churches)
-      .set(plantDirtyColumns())
+      .set({
+        lastMaterialEventAt: sql`greatest(coalesce(${churches.lastMaterialEventAt}, ${occurredAt}), ${occurredAt})`,
+        updatedAt: sql`greatest(${churches.updatedAt}, ${occurredAt})`,
+      })
       .where(eq(churches.id, churchId));
 
     if (process.env.NODE_ENV === "development") {
@@ -56,6 +64,7 @@ export async function markPlantDirty(churchId: string): Promise<void> {
       `[PE] Failed to mark plant dirty for church ${churchId}:`,
       error
     );
+    if (options.failureMode === "required") throw error;
   }
 }
 
@@ -66,6 +75,11 @@ export async function markPlantDirty(churchId: string): Promise<void> {
  */
 export async function handleMaterialEvent(event: {
   churchId: string;
+  timestamp?: Date;
+  occurrenceKey?: string;
 }): Promise<void> {
-  await markPlantDirty(event.churchId);
+  await markPlantDirty(event.churchId, {
+    occurredAt: event.timestamp,
+    failureMode: event.occurrenceKey ? "required" : "best_effort",
+  });
 }

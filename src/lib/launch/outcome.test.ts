@@ -255,7 +255,11 @@ test("correcting is planter-only and never moves the phase either", () => {
   );
   assert.match(
     source,
-    /export async function updateLaunchOutcome\([\s\S]*?markPlantDirty\(churchId\)/
+    /export async function updateLaunchOutcome\([\s\S]*?reconcileLaunchOutcomeAfterWrite\(churchId\)/
+  );
+  assert.match(
+    source,
+    /export async function reconcileLaunchOutcomeAfterWrite\([\s\S]*?markPlantDirty\(churchId\)/
   );
 });
 

@@ -11,6 +11,9 @@ import { resumeEvryActiveRun } from "@/lib/evry/runs/resume";
 export const dynamic = "force-dynamic";
 
 const routeParamsSchema = z.strictObject({ requestId: z.string().uuid() });
+const recoveryQuerySchema = z.strictObject({
+  operation: z.literal("reuse").optional(),
+});
 type RouteContext = Readonly<{
   params: Promise<{ requestId: string }>;
 }>;
@@ -26,7 +29,7 @@ export function createEvryRunRecoveryGet({
   now = () => new Date(),
 }: EvryRunRecoveryGetOptions = {}) {
   return async function evryRunRecoveryGet(
-    _request: Request,
+    request: Request,
     context: RouteContext
   ): Promise<Response> {
     try {
@@ -35,9 +38,17 @@ export function createEvryRunRecoveryGet({
       if (!params.success) {
         return evryConversationJson({ status: "invalid" }, 400);
       }
+      const url = new URL(request.url);
+      const query = recoveryQuerySchema.safeParse({
+        operation: url.searchParams.get("operation") ?? undefined,
+      });
+      if (!query.success) {
+        return evryConversationJson({ status: "invalid" }, 400);
+      }
       const recovered = await recover({
         actor,
         requestKey: params.data.requestId,
+        expectedOperation: query.data.operation,
         now: now(),
       });
       return evryConversationJson(recovered, 200);

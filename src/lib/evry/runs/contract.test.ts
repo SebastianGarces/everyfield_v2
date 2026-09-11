@@ -78,6 +78,31 @@ test("completed create replays still match the immutable null conversation claim
   );
 });
 
+test("completed reuse preserves its immutable source claim while binding only the destination", () => {
+  const completed = createRow({
+    operation: "reuse",
+    status: "completed",
+    conversationId: CONVERSATION_ID,
+    version: 2,
+    changedAt: new Date(START.valueOf() + 1_000),
+    completedAt: new Date(START.valueOf() + 1_000),
+  });
+  assert.equal(
+    sameEvryActiveRunIdentity(
+      completed,
+      {
+        kind: "conversation",
+        operation: "reuse",
+        conversationId: null,
+        planId: null,
+        planFingerprint: null,
+      },
+      "a".repeat(64)
+    ),
+    true
+  );
+});
+
 test("run rows reject malformed terminal and cross-domain shapes", () => {
   assert.throws(() =>
     createRow({

@@ -1,7 +1,7 @@
 import { and, eq, inArray, isNull } from "drizzle-orm";
 
 import { db } from "@/db";
-import { tasks, type TaskStatus } from "@/db/schema";
+import { tasks, users, type TaskStatus } from "@/db/schema";
 import { MS_PER_DAY, formatDayLong } from "@/lib/datetime";
 import type { NotificationCategory } from "@/lib/notifications/categories";
 import {
@@ -21,6 +21,7 @@ import {
   type NotificationSyncDeps,
   type NotificationSyncReport,
 } from "@/lib/notifications/sync";
+import { exactTaskAssigneeJoin } from "./assignees";
 
 // ============================================================================
 // T-018 — task due / overdue notifications, on the shared F11 queue.
@@ -66,11 +67,12 @@ import {
 // 255-char title clamp is `enqueue`'s: both were written per-feature once and
 // shipped as byte-identical copies beside `src/lib/meetings/notifications.ts`.
 //
-// BEST-EFFORT AT THE CALL SITE. Every entrypoint here swallows its own
-// failures and returns a report: a notification must never be able to fail, or
-// undo, the write that caused it (`memory/invariants.md` → Atomicity). The
-// write commits first and the announcement follows, so a task is never
-// announced before it exists.
+// FAILURE OWNERSHIP LIVES AT THE CALL SITE. Ordinary task writers remain
+// best-effort: a notification must never undo the write that caused it. A
+// durable Evry effect claim instead requests `required`, because replay must
+// not become terminal until the exact successor notification set converges.
+// In both modes the task write commits first, so nothing is announced before
+// it exists.
 // ============================================================================
 
 /** The F11 category every row here is filed under (N-005). */
@@ -377,6 +379,7 @@ export function syncTaskNotifications(
     mustCancel: boolean;
     deps?: TaskNotificationDeps;
     now?: Date;
+    failureMode?: "best_effort" | "required";
   }
 ): Promise<TaskNotifyReport> {
   return runNotificationSync<TaskNotificationSkip>({
@@ -384,6 +387,7 @@ export function syncTaskNotifications(
     mustCancel: options.mustCancel,
     plan: () => planTaskNotifications(facts, options.now ?? new Date()),
     deps: options.deps ?? dbTaskNotificationDeps,
+    failureMode: options.failureMode,
   });
 }
 
@@ -434,7 +438,12 @@ export async function cancelTaskNotificationsFor(
 export async function syncTaskNotificationsFor(
   churchId: string,
   taskIds: readonly string[],
-  options: { mustCancel: boolean; deps?: TaskNotificationDeps; now?: Date }
+  options: {
+    mustCancel: boolean;
+    deps?: TaskNotificationDeps;
+    now?: Date;
+    failureMode?: "best_effort" | "required";
+  }
 ): Promise<TaskNotifyReport[]> {
   const deps = options.deps ?? dbTaskNotificationDeps;
   if (taskIds.length === 0) return [];
@@ -448,11 +457,13 @@ export async function syncTaskNotificationsFor(
           deps,
           now: options.now,
           mustCancel: options.mustCancel,
+          failureMode: options.failureMode,
         })
       );
     }
     return reports;
   } catch (error) {
+    if (options.failureMode === "required") throw error;
     console.error("task notification bulk sync failed", { churchId, error });
     return [];
   }
@@ -542,10 +553,14 @@ export function taskNotificationFactsQuery(
       status: tasks.status,
       dueDate: tasks.dueDate,
       dueTime: tasks.dueTime,
-      assignedToId: tasks.assignedToId,
+      assignedToId: users.id,
       deletedAt: tasks.deletedAt,
     })
     .from(tasks)
+    .leftJoin(
+      users,
+      and(eq(users.id, tasks.assignedToId), exactTaskAssigneeJoin(churchId))
+    )
     .where(
       and(
         eq(tasks.churchId, churchId),

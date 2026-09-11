@@ -3,6 +3,14 @@ import { withSentryConfig } from "@sentry/nextjs";
 
 const nextConfig: NextConfig = {
   /* config options here */
+  // Local QA links use both host spellings. Next otherwise serves the page at
+  // 127.0.0.1 but rejects its development chunks, leaving client-only screens
+  // permanently waiting for hydration.
+  allowedDevOrigins: ["127.0.0.1", "localhost"],
+  // The neon driver owns process-wide transport configuration. Keeping one
+  // server instance lets isolated live proofs replace only its HTTP endpoint
+  // without adding a production database seam to `src/db`.
+  serverExternalPackages: ["@neondatabase/serverless"],
   experimental: {
     // A profile photo is a server-action payload — a person's (P-024a) and an
     // account's own picture (#617) alike — and the default cap on one is 1MB:

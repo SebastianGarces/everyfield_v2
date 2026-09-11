@@ -30,9 +30,11 @@ import { evrySettingsSectionIdSchema } from "@/lib/evry/policy/schema";
 
 import {
   EvryConversationStorageError,
+  EVRY_READ_ITEM_MAX_FACTS,
   evryConversationResultCodeFor,
   evryConversationPlanIdentitySchema,
   storedEvryArtifactFactSchema,
+  storedEvryReadFactSchema,
   storedEvrySourceLinkSchema,
 } from "./contract";
 
@@ -54,7 +56,7 @@ const readItemSchema = z
   .object({
     id: z.string().min(1).max(160),
     label: labelSchema,
-    facts: z.array(storedEvryArtifactFactSchema).max(12),
+    facts: z.array(storedEvryReadFactSchema).max(EVRY_READ_ITEM_MAX_FACTS),
     sourceLink: storedEvrySourceLinkSchema,
   })
   .strict()
@@ -63,6 +65,8 @@ const readItemSchema = z
 const readArtifactDocumentSchema = z
   .object({
     kind: z.literal("read"),
+    resultMode: z.enum(["list", "count", "group"]).optional(),
+    textOffset: z.number().int().min(0).max(8000).optional(),
     title: titleSchema,
     filters: z.array(readFilterSchema).max(16),
     counts: z
@@ -86,7 +90,10 @@ const readArtifactDocumentSchema = z
     if (
       artifact.counts.returned !== artifact.items.length ||
       artifact.counts.excluded !== excluded ||
-      artifact.counts.matched !== artifact.items.length + excluded
+      (artifact.resultMode === undefined
+        ? artifact.counts.matched !== artifact.items.length + excluded
+        : artifact.resultMode !== "count" &&
+          artifact.counts.matched < artifact.items.length)
     ) {
       context.addIssue({
         code: "custom",
@@ -379,15 +386,24 @@ export function hydrateStoredEvryConversationArtifact(
 ): EvryHydratedConversationArtifact {
   switch (document.kind) {
     case "read":
-      return buildEvryReadArtifact({
-        title: document.title,
-        filters: document.filters,
-        exclusions: document.exclusions,
-        items: document.items.map((item) => ({
-          ...item,
-          sourceLink: trustedLink(item.sourceLink),
-        })),
-        sourceLinks: document.sourceLinks.map(trustedLink),
+      return Object.freeze({
+        ...buildEvryReadArtifact({
+          title: document.title,
+          filters: document.filters,
+          exclusions: document.exclusions,
+          items: document.items.map((item) => ({
+            ...item,
+            sourceLink: trustedLink(item.sourceLink),
+          })),
+          sourceLinks: document.sourceLinks.map(trustedLink),
+        }),
+        counts: document.counts,
+        ...(document.resultMode === undefined
+          ? {}
+          : { resultMode: document.resultMode }),
+        ...(document.textOffset === undefined
+          ? {}
+          : { textOffset: document.textOffset }),
       });
     case "clarification":
       return document.mode === "missing"

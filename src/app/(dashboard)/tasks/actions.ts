@@ -27,6 +27,7 @@ import {
   setTaskPrerequisites,
 } from "@/lib/tasks/dependencies";
 import { FOLLOW_UP_ASSIGNEE_ERROR } from "@/lib/tasks/follow-up-ownership";
+import { TASK_ASSIGNEE_ERROR } from "@/lib/tasks/assignees";
 import type { SearchParamValue } from "@/lib/tasks/list-params";
 import { readTaskListPage, type TaskListPage } from "@/lib/tasks/list-page";
 import { parseRecurrenceForm } from "@/lib/tasks/recurrence";
@@ -90,6 +91,7 @@ const USER_FACING_SERVICE_ERRORS = new Set<string>([
   // #470 D2. "Only committed members … can own a follow-up" is ABOUT the
   // request, and a planter told "please try again" would try again.
   FOLLOW_UP_ASSIGNEE_ERROR,
+  TASK_ASSIGNEE_ERROR,
 ]);
 
 /** What a Member is told when the task they aimed at is somebody else's. */

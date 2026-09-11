@@ -1,9 +1,25 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { createHash } from "node:crypto";
+
+import { and, eq, isNull, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { persons, type Person } from "@/db/schema";
-import { deleteFile } from "@/lib/storage";
+import type { EvryAuditKey } from "@/lib/evry/audit/identity";
+import {
+  evryPeopleFileStorage,
+  type EvryPeopleFileStorage,
+} from "@/lib/evry/capabilities/people/file-storage";
+import type { EvryEffectInput, EvryEffectResult } from "@/lib/evry/executor";
+import {
+  getExtensionFromMimeType,
+  personPhotoStorageKey,
+  type StoredFileObject,
+} from "@/lib/storage";
 
+import {
+  claimEvryPeopleEffect,
+  recoverCompletedEvryPeopleEffect,
+} from "./evry-effect";
 import { toPersonForClient, type PersonForClient } from "./types";
 
 // ============================================================================
@@ -71,6 +87,258 @@ export async function getPersonPhotoKey(
   return row ?? null;
 }
 
+function digestForPersonPhoto(photoKey: string | null): string | null {
+  return photoKey ? createHash("sha256").update(photoKey).digest("hex") : null;
+}
+
+/**
+ * The closed Evry-facing view of a private person-photo key. Capability code
+ * may bind a plan to the digest and whether an image exists, but the storage
+ * locator never leaves this module.
+ */
+export async function getEvryPersonPhotoSnapshot(
+  churchId: string,
+  personId: string
+): Promise<Readonly<{ digest: string | null; present: boolean }> | null> {
+  const current = await getPersonPhotoKey(churchId, personId);
+  return current
+    ? {
+        digest: digestForPersonPhoto(current.photoKey),
+        present: current.photoKey !== null,
+      }
+    : null;
+}
+
+type EvryPhotoEffectIdentity = Pick<EvryEffectInput, "execution"> & {
+  effectKey: EvryAuditKey;
+};
+
+export type EvryPersonPhotoMutation =
+  | Readonly<{ kind: "remove" }>
+  | Readonly<{
+      kind: "upload";
+      attachmentDigest: string;
+      bytes: Buffer;
+      contentType: "image/jpeg" | "image/jpg" | "image/png" | "image/webp";
+    }>;
+
+export type EvryPersonPhotoStorageEffects = Readonly<{
+  store(key: string, bytes: Buffer, contentType: string): Promise<unknown>;
+  remove(key: string): Promise<unknown>;
+  list(prefix: string): Promise<readonly StoredFileObject[]>;
+}>;
+
+export const EVRY_FINAL_OBJECT_GRACE_MS = 60 * 60_000;
+
+const LIVE_EVRY_PHOTO_STORAGE: EvryPersonPhotoStorageEffects = {
+  store: (...argumentsValue) =>
+    evryPeopleFileStorage().store(...argumentsValue),
+  remove: (...argumentsValue) =>
+    evryPeopleFileStorage().remove(...argumentsValue),
+  list: (...argumentsValue) =>
+    evryPeopleFileStorage().listObjects(...argumentsValue),
+};
+
+/**
+ * Remove every no-longer-referenced object below one exact tenant/person
+ * prefix. The database pointer is loaded first and is never deleted. Failed
+ * deletes remain discoverable by the next terminal cleanup or operator sweep.
+ */
+export async function sweepEvryPersonPhotoObjects(input: {
+  plantId: string;
+  personId: string;
+  storage?: EvryPersonPhotoStorageEffects;
+  load?: typeof getPersonPhotoKey;
+  now?: Date;
+}): Promise<Readonly<{ removed: number; failed: number }>> {
+  const storage = input.storage ?? LIVE_EVRY_PHOTO_STORAGE;
+  const load = input.load ?? getPersonPhotoKey;
+  const prefix = `people/${input.plantId}/${input.personId}/`;
+  const objects = await storage.list(prefix);
+  const cutoff =
+    (input.now ?? new Date()).getTime() - EVRY_FINAL_OBJECT_GRACE_MS;
+  let removed = 0;
+  let failed = 0;
+  for (const object of objects) {
+    if (
+      !object.key.startsWith(prefix) ||
+      !object.lastModified ||
+      object.lastModified.getTime() > cutoff
+    )
+      continue;
+    try {
+      // Every legitimate writer stores/refreshes the object before naming it.
+      // The grace fence plus this last-moment reference read prevents a sweep
+      // selected before that write from deleting its newly current object.
+      const current = await load(input.plantId, input.personId);
+      if (current?.photoKey === object.key) continue;
+      await storage.remove(object.key);
+      removed += 1;
+    } catch {
+      failed += 1;
+    }
+  }
+  return { removed, failed };
+}
+
+/** Hourly backstop for final photo objects whose terminal replay never ran. */
+export async function sweepAllEvryPersonPhotoObjects(
+  input: {
+    now?: Date;
+    list?: EvryPeopleFileStorage["listObjects"];
+    remove?: EvryPeopleFileStorage["remove"];
+    load?: typeof getPersonPhotoKey;
+  } = {}
+): Promise<Readonly<{ removed: number; failed: number }>> {
+  const objects = await (input.list ?? evryPeopleFileStorage().listObjects)(
+    "people/"
+  );
+  const scopes = new Map<string, { plantId: string; personId: string }>();
+  for (const { key } of objects) {
+    const match =
+      /^people\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.[a-z0-9]+$/i.exec(
+        key
+      );
+    if (!match) continue;
+    const [, plantId, personId] = match;
+    scopes.set(`${plantId}:${personId}`, {
+      plantId: plantId!,
+      personId: personId!,
+    });
+  }
+  let removed = 0;
+  let failed = 0;
+  for (const scope of scopes.values()) {
+    const result = await sweepEvryPersonPhotoObjects({
+      ...scope,
+      now: input.now,
+      load: input.load,
+      storage: {
+        store: async () => undefined,
+        list: async (prefix) =>
+          objects.filter(({ key }) => key.startsWith(prefix)),
+        remove: input.remove ?? evryPeopleFileStorage().remove,
+      },
+    });
+    removed += result.removed;
+    failed += result.failed;
+  }
+  return { removed, failed };
+}
+
+/**
+ * Claim one exact Evry photo change through the same single writer as the
+ * owning interface. The object is stored first, the row changes only inside
+ * the durable effect claim, and the old object is removed only after the row
+ * no longer names it. Replays return the durable outcome before storage work.
+ */
+export async function claimEvryPersonPhotoMutation(
+  input: EvryPhotoEffectIdentity & {
+    personId: string;
+    expectedDigest: string | null;
+    mutation: EvryPersonPhotoMutation;
+    storage?: EvryPersonPhotoStorageEffects;
+    recover?: typeof recoverCompletedEvryPeopleEffect;
+    load?: typeof getPersonPhotoKey;
+    claim?: typeof claimEvryPeopleEffect;
+  }
+): Promise<EvryEffectResult> {
+  const recover = input.recover ?? recoverCompletedEvryPeopleEffect;
+  const load = input.load ?? getPersonPhotoKey;
+  const replay = await recover(input);
+  if (replay) return replay;
+
+  const current = await load(input.execution.plantId, input.personId);
+  if (
+    !current ||
+    digestForPersonPhoto(current.photoKey) !== input.expectedDigest
+  )
+    return { status: "refused", excludedCount: 1 };
+
+  const nextPhotoKey =
+    input.mutation.kind === "remove"
+      ? null
+      : personPhotoStorageKey(
+          input.execution.plantId,
+          input.personId,
+          getExtensionFromMimeType(input.mutation.contentType)
+        );
+  if (input.mutation.kind === "upload") {
+    await (input.storage ?? LIVE_EVRY_PHOTO_STORAGE).store(
+      nextPhotoKey!,
+      input.mutation.bytes,
+      input.mutation.contentType
+    );
+  }
+
+  let result: EvryEffectResult;
+  try {
+    result = await (input.claim ?? claimEvryPeopleEffect)({
+      ...input,
+      mutation: sql`
+        update persons p set photo_url = ${nextPhotoKey},
+          updated_at = transaction_timestamp()
+        from eligible e
+        where p.id = ${input.personId}::uuid and p.church_id = e.church_id
+          and p.deleted_at is null
+          and p.photo_url is not distinct from ${current.photoKey}
+        returning 1 as affected_count, 0 as excluded_count
+      `,
+      targetIsCurrent: async () => {
+        const latest = await load(input.execution.plantId, input.personId);
+        return (
+          latest !== null &&
+          digestForPersonPhoto(latest.photoKey) === input.expectedDigest
+        );
+      },
+    });
+  } catch (error) {
+    if (input.mutation.kind === "upload") {
+      try {
+        const [durable, latest] = await Promise.all([
+          recover(input),
+          load(input.execution.plantId, input.personId),
+        ]);
+        if (durable) return durable;
+        if (latest?.photoKey === nextPhotoKey) return { status: "retryable" };
+        await (input.storage ?? LIVE_EVRY_PHOTO_STORAGE).remove(nextPhotoKey!);
+      } catch {
+        // Outcome reconciliation itself is uncertain. Preserve the object so
+        // same-key replay can recover a committed pointer without data loss.
+        return { status: "retryable" };
+      }
+    }
+    throw error;
+  }
+
+  if (result.status !== "completed" && input.mutation.kind === "upload") {
+    try {
+      await (input.storage ?? LIVE_EVRY_PHOTO_STORAGE).remove(nextPhotoKey!);
+    } catch (error) {
+      console.error(
+        "[evry:people] failed to clean up an unclaimed photo object:",
+        error
+      );
+    }
+  }
+
+  if (
+    result.status === "completed" &&
+    current.photoKey &&
+    current.photoKey !== nextPhotoKey
+  ) {
+    try {
+      await (input.storage ?? LIVE_EVRY_PHOTO_STORAGE).remove(current.photoKey);
+    } catch (error) {
+      console.error(
+        "[evry:people] failed to delete replaced photo object:",
+        error
+      );
+    }
+  }
+  return result;
+}
+
 /**
  * The three effects `setPersonPhoto` sequences, injectable so the ordering
  * contract can be asserted by RUNNING the function against a forced failure
@@ -114,7 +382,8 @@ const LIVE_PHOTO_EFFECTS: PersonPhotoEffects = {
 
     return updated;
   },
-  remove: deleteFile,
+  remove: (...argumentsValue) =>
+    evryPeopleFileStorage().remove(...argumentsValue),
 };
 
 /**

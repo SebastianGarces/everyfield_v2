@@ -1,7 +1,6 @@
 "use client";
 
 import { ArrowLeft, LoaderCircle, MessagesSquare } from "lucide-react";
-import { useRouter } from "next/navigation";
 import {
   useEffect,
   useMemo,
@@ -10,6 +9,7 @@ import {
   useTransition,
   type ReactNode,
 } from "react";
+import { useRouter } from "next/navigation";
 
 import { useEvryShell } from "@/components/evry/evry-shell";
 import { syncEvryWorkspaceConversationHistory } from "@/components/evry/interaction-state";
@@ -18,14 +18,13 @@ import type { EvryConversationHistoryItem } from "@/lib/evry/conversations/histo
 import { cn } from "@/lib/utils";
 
 import { ConversationHistoryCheckpoint } from "./history-checkpoint";
-import { ConversationHistoryList, HistoryStateBadge } from "./history-list";
+import { ConversationHistoryList } from "./history-list";
 import {
   awaitingEvryCreatedConversation,
   canUseEvryHistoryComposer,
   canUseEvryNewComposer,
   conversationMatchesVisibleSearch,
   evryCreatedConversationSyncDecision,
-  evryHistoryConversationIdToLoad,
   evryHistoryHref,
   evryHistorySelectedConversationId,
   evryHistoryStateForConversation,
@@ -48,7 +47,6 @@ export function ConversationHistoryWorkspace({
   newConversation: boolean;
   searchQuery: string | null;
 }) {
-  const router = useRouter();
   const {
     activeContext,
     conversation,
@@ -57,19 +55,27 @@ export function ConversationHistoryWorkspace({
     isLoading,
     isSending,
     isWorking,
+    pendingMessage,
     loadConversation,
     resetConversation,
-    setDraft,
+    sendMessageText,
   } = useEvryShell();
+  const router = useRouter();
+  const historyNeedsRefreshRef = useRef(false);
+  const [isRefreshingHistory, startHistoryRefresh] = useTransition();
+  const [routeConversationId, setRouteConversationId] =
+    useState(conversationId);
+  const [routeNewConversation, setRouteNewConversation] =
+    useState(newConversation);
   const restoreNewComposer = shouldRestoreEvryNewComposer({
-    routeConversationId: conversationId,
+    routeConversationId,
     loadedConversationId: conversation?.id ?? null,
     hasDraft: draft.length > 0,
     hasPageContext: activeContext !== null,
   });
-  const ownsNewConversation = newConversation || restoreNewComposer;
+  const ownsNewConversation = routeNewConversation || restoreNewComposer;
   const [newConversationOriginId] = useState(() =>
-    newConversation ? (conversation?.id ?? null) : null
+    routeNewConversation ? (conversation?.id ?? null) : null
   );
   const didResetNewModeRef = useRef(false);
   const createdConversationSyncMarkerRef =
@@ -83,14 +89,16 @@ export function ConversationHistoryWorkspace({
   const historyHeadingRef = useRef<HTMLHeadingElement>(null);
   const detailHeadingRef = useRef<HTMLHeadingElement>(null);
   const detailStatusRef = useRef<HTMLDivElement>(null);
-  const [isConversationNavigationPending, startConversationNavigation] =
-    useTransition();
   const selectedConversationId = evryHistorySelectedConversationId({
     isCreatingNew: ownsNewConversation,
     previousConversationId: newConversationOriginId,
     mountedConversationId: conversation?.id ?? null,
-    routeConversationId: conversationId,
+    routeConversationId,
   });
+  const isConversationNavigationPending =
+    selectedConversationId !== null &&
+    conversation?.id !== selectedConversationId &&
+    error === null;
   const selectedConversation =
     conversation?.id === selectedConversationId ? conversation : null;
   const isNewComposer = canUseEvryNewComposer({
@@ -101,6 +109,8 @@ export function ConversationHistoryWorkspace({
     ownsNewConversation && selectedConversationId === null && !isNewComposer;
   const hasDetail = selectedConversationId !== null || ownsNewConversation;
   const blocked =
+    isRefreshingHistory ||
+    pendingMessage?.status === "failed" ||
     isLoading ||
     isSending ||
     isWorking ||
@@ -139,6 +149,9 @@ export function ConversationHistoryWorkspace({
   const checkpoint = selectedConversation
     ? latestEvryHistoryCheckpoint(selectedConversation)
     : null;
+  const rebuildMessage =
+    selectedConversation?.messages.find(({ author }) => author === "user")
+      ?.body ?? null;
   const canUseSelectedComposer = canUseEvryHistoryComposer({
     navigationPending: isConversationNavigationPending,
     selectedConversationId,
@@ -146,10 +159,28 @@ export function ConversationHistoryWorkspace({
   });
 
   useEffect(() => {
-    if (!newConversation || didResetNewModeRef.current) return;
+    if (!routeNewConversation || didResetNewModeRef.current) return;
     didResetNewModeRef.current = true;
     resetConversation();
-  }, [newConversation, resetConversation]);
+  }, [resetConversation, routeNewConversation]);
+
+  useEffect(() => {
+    function restoreLocation(): void {
+      const params = new URLSearchParams(window.location.search);
+      const nextConversationId = params.get("conversation");
+      const nextNewConversation = params.get("new") === "1";
+      setRouteConversationId(nextConversationId);
+      setRouteNewConversation(nextNewConversation);
+      didResetNewModeRef.current = !nextNewConversation;
+      createdConversationSyncMarkerRef.current = nextNewConversation
+        ? awaitingEvryCreatedConversation(conversation?.id ?? null)
+        : null;
+      if (nextNewConversation) resetConversation();
+    }
+
+    window.addEventListener("popstate", restoreLocation);
+    return () => window.removeEventListener("popstate", restoreLocation);
+  }, [conversation?.id, loadConversation, resetConversation]);
 
   useEffect(() => {
     const destinationPane = hasDetail
@@ -174,29 +205,33 @@ export function ConversationHistoryWorkspace({
   }, [canUseSelectedComposer, hasDetail, isNewComposer, selectedConversation]);
 
   useEffect(() => {
-    const conversationIdToLoad = evryHistoryConversationIdToLoad({
-      isCreatingNew: ownsNewConversation,
-      navigationPending: isConversationNavigationPending,
-      routeConversationId: conversationId,
-    });
-    if (conversationIdToLoad !== null) {
-      void loadConversation(conversationIdToLoad);
+    if (
+      ownsNewConversation ||
+      routeConversationId === null ||
+      routeConversationId === conversation?.id
+    ) {
+      return;
     }
+    void loadConversation(routeConversationId);
   }, [
-    conversationId,
-    isConversationNavigationPending,
-    ownsNewConversation,
+    conversation?.id,
     loadConversation,
+    ownsNewConversation,
+    routeConversationId,
   ]);
 
   useEffect(() => {
     const decision = evryCreatedConversationSyncDecision({
       marker: createdConversationSyncMarkerRef.current,
       mountedConversationId: conversation?.id ?? null,
-      urlConversationId: conversationId,
+      urlConversationId: routeConversationId,
     });
     createdConversationSyncMarkerRef.current = decision.nextMarker;
     if (decision.conversationIdToSync === null) return;
+
+    historyNeedsRefreshRef.current = true;
+    setRouteConversationId(decision.conversationIdToSync);
+    setRouteNewConversation(false);
 
     syncEvryWorkspaceConversationHistory(
       window.history.state,
@@ -211,25 +246,55 @@ export function ConversationHistoryWorkspace({
       decision.conversationIdToSync,
       searchQuery
     );
-  }, [conversation?.id, conversationId, searchQuery]);
+  }, [conversation?.id, routeConversationId, searchQuery]);
+
+  useEffect(() => {
+    if (!historyNeedsRefreshRef.current || isSending || isWorking) return;
+    historyNeedsRefreshRef.current = false;
+    startHistoryRefresh(() => router.refresh());
+  }, [conversation?.id, isSending, isWorking, router]);
 
   function showConversationList(): void {
     if (blocked) return;
     createdConversationSyncMarkerRef.current = null;
-    router.push(evryHistoryHref({ search: searchQuery }));
+    setRouteConversationId(null);
+    setRouteNewConversation(false);
+    window.history.pushState(
+      window.history.state,
+      "",
+      evryHistoryHref({ search: searchQuery })
+    );
   }
 
   function selectConversation(nextConversationId: string): void {
     if (blocked) return;
     createdConversationSyncMarkerRef.current = null;
-    startConversationNavigation(() => {
-      router.push(
-        evryHistoryHref({
-          conversationId: nextConversationId,
-          search: searchQuery,
-        })
-      );
-    });
+    setRouteConversationId(nextConversationId);
+    setRouteNewConversation(false);
+    window.history.pushState(
+      window.history.state,
+      "",
+      evryHistoryHref({
+        conversationId: nextConversationId,
+        search: searchQuery,
+      })
+    );
+  }
+
+  function startNewConversation(): void {
+    if (blocked) return;
+    createdConversationSyncMarkerRef.current = awaitingEvryCreatedConversation(
+      conversation?.id ?? null
+    );
+    didResetNewModeRef.current = true;
+    setRouteConversationId(null);
+    setRouteNewConversation(true);
+    resetConversation();
+    window.history.pushState(
+      window.history.state,
+      "",
+      evryHistoryHref({ newConversation: true, search: searchQuery })
+    );
   }
 
   return (
@@ -250,6 +315,7 @@ export function ConversationHistoryWorkspace({
             newConversation: true,
             search: searchQuery,
           })}
+          onNew={startNewConversation}
           onSelect={selectConversation}
           headingRef={historyHeadingRef}
           searchQuery={searchQuery}
@@ -302,14 +368,13 @@ export function ConversationHistoryWorkspace({
               state={selectedState}
               title={selectedConversation.title}
             />
-            {checkpoint ? (
+            {checkpoint?.rebuildRequired ? (
               <ConversationHistoryCheckpoint
                 checkpoint={checkpoint}
+                disabled={blocked || rebuildMessage === null}
                 onRebuild={() => {
-                  setDraft(
-                    "Rebuild this plan with current records and permissions."
-                  );
-                  document.getElementById("evry-message")?.focus();
+                  if (rebuildMessage === null) return;
+                  void sendMessageText(rebuildMessage);
                 }}
               />
             ) : null}
@@ -414,7 +479,6 @@ function ConversationDetailHeader({
   blocked,
   headingRef,
   onBack,
-  state,
   title,
 }: {
   blocked: boolean;
@@ -423,8 +487,19 @@ function ConversationDetailHeader({
   state?: EvryConversationHistoryItem["actionableState"];
   title: string;
 }) {
+  const { returnToPage } = useEvryShell();
   return (
-    <header className="flex shrink-0 items-center gap-3 border-b px-4 py-3 sm:px-5">
+    <header className="flex min-h-12 shrink-0 items-center gap-3 border-b px-4 py-2 sm:px-5">
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        onClick={returnToPage}
+        aria-label="Return to previous page"
+        className="hidden cursor-pointer lg:inline-flex"
+      >
+        <ArrowLeft aria-hidden="true" />
+      </Button>
       <Button
         type="button"
         variant="ghost"
@@ -446,11 +521,7 @@ function ConversationDetailHeader({
         >
           {title}
         </h2>
-        <p className="text-muted-foreground text-sm">
-          Your private Evry conversation
-        </p>
       </div>
-      {state ? <HistoryStateBadge state={state} /> : null}
     </header>
   );
 }

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { validEvryResponseLayout } from "./response-layout";
 
 import { evryPublicArtifactSchema } from "@/lib/evry/artifacts/public";
 import { evryResolvedPageContextSchema } from "@/lib/evry/resolvers/contract";
@@ -41,22 +42,31 @@ export const publicEvryConversationSchema = z
     stateVersion: z.number().int().nonnegative(),
     state: z.unknown(),
     messages: z.array(
-      z.object({
-        id: z.string().uuid(),
-        sequence: z.number().int().nonnegative(),
-        author: z.enum(["user", "assistant"]),
-        body: z.string(),
-        pageContext: evryResolvedPageContextSchema.nullable(),
-        deliveryStatus: z.enum(["complete", "interrupted"]),
-        createdAt: z.string().datetime(),
-        artifacts: z.array(
-          z.object({
-            id: z.string().uuid(),
-            ordinal: z.number().int().nonnegative(),
-            artifact: evryPublicArtifactSchema,
-          })
-        ),
-      })
+      z
+        .object({
+          id: z.string().uuid(),
+          sequence: z.number().int().nonnegative(),
+          author: z.enum(["user", "assistant"]),
+          body: z.string(),
+          pageContext: evryResolvedPageContextSchema.nullable(),
+          deliveryStatus: z.enum(["complete", "interrupted"]),
+          createdAt: z.string().datetime(),
+          artifacts: z.array(
+            z.object({
+              id: z.string().uuid(),
+              ordinal: z.number().int().nonnegative(),
+              artifact: evryPublicArtifactSchema,
+            })
+          ),
+        })
+        .refine(
+          (message) =>
+            validEvryResponseLayout(
+              message.body,
+              message.artifacts.map(({ artifact }) => artifact)
+            ),
+          "Invalid response component placement"
+        )
     ),
   })
   .strict();

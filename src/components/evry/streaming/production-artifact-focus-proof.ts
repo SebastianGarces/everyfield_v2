@@ -19,6 +19,7 @@ let resolveAction:
 const workStates: Array<{ phase: string; message?: string }> = [];
 const conversations: Record<string, unknown>[] = [];
 let shellIsWorking = false;
+let refreshes = 0;
 
 mock.module("@/components/evry/evry-shell", {
   namedExports: {
@@ -56,6 +57,15 @@ mock.module("@/components/evry/evry-shell", {
 mock.module("next/link", {
   defaultExport: ({ children, ...props }: { children: ReactNode }) =>
     createElement("a", props, children),
+});
+mock.module("next/navigation", {
+  namedExports: {
+    useRouter: () => ({
+      refresh() {
+        refreshes += 1;
+      },
+    }),
+  },
 });
 mock.module("@/components/evry/artifacts/production-request", {
   namedExports: {
@@ -199,5 +209,6 @@ test("execution moves focus once when confirmation controls unmount and leaves i
     await Promise.resolve();
   });
   assert.deepEqual(conversations, [reconciled]);
+  assert.equal(refreshes, 1);
   assert.equal(activeElement, statusNode);
 });

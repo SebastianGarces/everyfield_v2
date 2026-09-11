@@ -1,6 +1,6 @@
 import type { PublicEvryConversation } from "@/lib/evry/conversations/public-contract";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
-import type { EvryConversationStreamStage } from "@/lib/evry/streaming/conversation-wire";
+import type { EvryConversationStreamReport } from "@/lib/evry/streaming/conversation-wire";
 
 import {
   fingerprintEvryActiveRunRequest,
@@ -17,7 +17,7 @@ export type EvryConversationRunInput = Readonly<{
   fingerprintInput: unknown;
   startedAt: Date;
   perform(
-    report: (stage: EvryConversationStreamStage) => Promise<void>
+    report: (stage: EvryConversationStreamReport) => Promise<void>
   ): Promise<Readonly<{ conversation: PublicEvryConversation }> | null>;
 }>;
 
@@ -60,7 +60,7 @@ export async function prepareEvryConversationActiveRun(
 /** Persist each stage before presentation, and settle before durable output. */
 export async function runPreparedEvryConversationActiveRun(
   prepared: PreparedEvryConversationRun,
-  report: (stage: EvryConversationStreamStage) => void,
+  report: (stage: EvryConversationStreamReport) => void,
   boundaries: EvryConversationRunBoundaries = productionBoundaries
 ): Promise<EvryConversationRunResult> {
   const { claim, input } = prepared;
@@ -68,6 +68,8 @@ export async function runPreparedEvryConversationActiveRun(
     const recovered = await boundaries.recover({
       actor: input.actor,
       requestKey: input.requestKey,
+      expectedOperation:
+        input.identity.operation === "reuse" ? "reuse" : undefined,
       now: boundaries.now(),
     });
     if (recovered.status === "durable") {
@@ -79,6 +81,11 @@ export async function runPreparedEvryConversationActiveRun(
   let durableConversationId: string | null = null;
   try {
     const result = await input.perform(async (stage) => {
+      if (typeof stage !== "string") {
+        // Text previews are transient. Only durable lifecycle stages touch the run row.
+        report(stage);
+        return;
+      }
       const advanced = await boundaries.runs.advance({
         actor: input.actor,
         requestKey: input.requestKey,

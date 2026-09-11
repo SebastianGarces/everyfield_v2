@@ -162,6 +162,16 @@ test("seeded tasks are launch_prep tasks, created by the session's user", () => 
   );
 });
 
+test("readiness seeding rechecks the actor's exact plant tenancy in its write", () => {
+  const statement = seedSql();
+  assert.match(statement, /from users actor/);
+  assert.match(statement, /actor\.church_id = \$\d+::uuid/);
+  assert.match(statement, /actor\.sending_church_id is null/);
+  assert.match(statement, /actor\.sending_network_id is null/);
+  assert.match(statement, /actor\.seat is not null/);
+  assert.match(statement, /from milestone_template mt cross join exact_actor/);
+});
+
 test("seeded tasks carry NO due date", () => {
   // Ruled in the module header: derived due dates either go stale the moment
   // the launch moves, or the move rewrites tasks the planter has since edited.
@@ -381,7 +391,7 @@ test("the seeded tasks take the one description door, like every other writer", 
   // every launch schedule, not a dev seed. T-021 says every write goes through
   // `normalizeTaskDescription` (`src/lib/tasks/descriptions.ts`), and this one wrote
   // the template's raw string straight into the column. Read off the source
-  // because `planSeedRows` is private and the statement builder is handed rows
+  // because the statement builder is handed rows
   // the test itself made up — the gate lives in the planner, not in the SQL.
   const read = sourceReader(
     readFileSync(
@@ -396,7 +406,10 @@ test("the seeded tasks take the one description door, like every other writer", 
     /import \{ normalizeTaskDescription \} from "@\/lib\/tasks\/descriptions"/
   );
 
-  const planner = read.span("function planSeedRows", "* Seed the Playbook set");
+  const planner = read.span(
+    "function planLaunchMilestoneSeedRows",
+    "* Seed the Playbook set"
+  );
   assert.match(
     planner,
     /description: normalizeTaskDescription\(task\.description\)/,

@@ -68,7 +68,7 @@ Evry may place user-supplied words into an application field without adopting or
 
 - An application read or action proceeds under the rules above.
 - A Settings request receives a brief explanation and, when possible without reading the setting, a deep link for the person to handle it directly.
-- A theology or spiritual-guidance request receives a fixed, gentle application-only boundary message.
+- A theology or spiritual-guidance request receives a brief, contextual application-only boundary message.
 - An unrelated request receives the same kind of brief boundary message with examples of work Evry can perform.
 - A mixed request does not execute its allowed portion. Evry asks the person to restate the EveryField work separately so prohibited content cannot steer a tool call.
 - An ambiguous request fails closed: no application data is read and no action is proposed until the request clearly belongs inside the application-action boundary.
@@ -144,7 +144,7 @@ The dedicated workspace shows conversations ordered by recent activity. Each row
 | Confirmation plan | One or more lasting effects are proposed | Shows the exact steps, records, counts, content, timing, exclusions, consequences, and Confirm/Edit/Cancel controls |
 | Execution progress | A confirmed plan is running | Shows the active step, completed steps, and recoverable failures without allowing a second execution |
 | Result receipt | Execution ends | Shows a per-step outcome, created or changed records, sent-recipient counts, failures, safe retry options, and source links |
-| Boundary message | The request is prohibited, unrelated, mixed, or ambiguous | Uses brief fixed copy; loads no application tools; offers examples of allowed application work |
+| Boundary message | The request is prohibited, unrelated, mixed, or ambiguous | Explains the boundary or asks a specific clarifying question; loads no application tools |
 
 ### 3.4 Confirmation Artifact
 
@@ -210,7 +210,7 @@ Each recipe defines its required inputs, record resolvers, eligibility condition
 | EV-003 | **Permission parity.** Evry may read or propose only work the actor's held capability permits on the same plant and records. | For every capability, Evry and the corresponding interface action reach the same allow/refuse outcome. |
 | EV-004 | **No delegated authority.** Page context, recipe state, a prior result, or another participant's message never grants permission. | Removing the actor's capability before execution refuses the step even if the plan was confirmed earlier. |
 | EV-005 | **Closed request classification.** Every request resolves to application read, application action, Settings, theology or spiritual guidance, unrelated, mixed, or ambiguous before any domain capability is made available. | Every policy eval records one class and only the allowed classes can reach application data. |
-| EV-006 | **No action for prohibited or unrelated requests.** Theology, spiritual guidance, and unrelated requests receive fixed application-only copy with zero reads, plans, or effects. | “Write a prayer,” “What can I buy for dinner with $10?”, and “Make a weekly meal plan” produce no application access. |
+| EV-006 | **No action for prohibited or unrelated requests.** Theology, spiritual guidance, and unrelated requests receive a contextual application-only response with zero reads, plans, or effects. | “Write a prayer,” “What can I buy for dinner with $10?”, and “Make a weekly meal plan” produce no application access. |
 | EV-007 | **Mixed and ambiguous requests fail closed.** Evry does not execute the allowed half of a mixed request or guess which application action an ambiguous request means. | “Create the meeting and advise my sermon” creates no meeting and asks for the app work to be restated separately. |
 | EV-008 | **User-supplied field content remains allowed.** Evry can place exact user-provided text into an eligible application field without generating prohibited guidance around it. | “Create a task named ‘Pray for the launch’” may reach a task plan; “write a launch prayer” may not. |
 | EV-009 | **Read-without-confirmation policy.** Pure reads, filtering, summaries of application facts, and navigation may run immediately. | A request for overdue tasks returns a read result directly and creates no pending approval. |
@@ -251,7 +251,7 @@ Each recipe defines its required inputs, record resolvers, eligibility condition
 | ID | Requirement | Acceptance summary |
 |---|---|---|
 | EV-041 | **Conversation search.** A person can find a conversation by title and visible transcript terms within their plant-tenancy history. | Search does not expose another account's private conversation or another plant's data. |
-| EV-042 | **Suggested application prompts.** Empty and completed states offer concise examples grounded in the current module without suggesting prohibited guidance. | A Meetings page suggests meeting work; it does not imply a capability the actor lacks. |
+| EV-042 | **Natural-language help and requests.** Empty conversations show one welcoming question without sample-request lists. Every new message is interpreted by the working model, which may answer, clarify, or select an eligible application operation. People do not need to use prescribed phrases. | “What can you do for me?” receives a helpful reply without application reads or plans. “Please give me a list of people that need follow up” selects the follow-up read. Completed conversations do not append sample requests. |
 | EV-043 | **Reuse of successful recipes.** A person can begin a new plan from a prior successful recipe while all dates, records, permissions, and recipients resolve again. | Reuse copies intent and explicit choices, never a stale approval or frozen recipient set. |
 | EV-044 | **Before-and-after summaries.** Bulk, destructive, and difficult-to-reverse plans show the material state change, not only the action verb. | A stage update shows which people move from each prior stage to the proposed stage. |
 | EV-045 | **Insight-to-action handoff.** A Plant Intelligence observation can open Evry with visible source context and no pre-approved action. | The observation supplies context only; Evry still resolves, plans, and confirms every effect. |

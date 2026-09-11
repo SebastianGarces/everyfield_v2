@@ -2,7 +2,7 @@
 
 import {
   AlertCircle,
-  ArrowRight,
+  CalendarDays,
   CheckCircle2,
   CircleDashed,
   CircleX,
@@ -10,15 +10,16 @@ import {
   FileText,
   ListChecks,
   LoaderCircle,
+  Mail,
   MapPin,
   MinusCircle,
   RotateCcw,
   Settings2,
   ShieldAlert,
   ShieldX,
+  UsersRound,
 } from "lucide-react";
-import Link from "next/link";
-import { useId, type ReactNode } from "react";
+import { useId, useRef, useState, type ReactNode } from "react";
 
 import { EvryBoundaryMessage } from "@/components/evry/boundary-message";
 import { RichText } from "@/components/shared/rich-text";
@@ -32,14 +33,34 @@ import {
 } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
   EVRY_UNEXPECTED_ERROR_COPY,
   type EvryDetailedConfirmationArtifactDocument,
   type EvryDetailedProgressArtifactDocument,
   type EvryDetailedReceiptArtifactDocument,
 } from "@/lib/evry/artifacts/review";
 import type { EvryPublicArtifact } from "@/lib/evry/artifacts/public";
-import { formatDateTimeWithZone, formatTime } from "@/lib/datetime";
+import {
+  formatDate,
+  formatDateTime,
+  formatTime,
+  formatTimeZoneName,
+} from "@/lib/datetime";
 import { cn } from "@/lib/utils";
+import { AuthenticatedLink } from "@/components/authenticated-navigation";
+
+import {
+  customerContentPreviews,
+  customerReviewTargets,
+  readResultLabel,
+} from "./artifact-presentation";
 
 export const EVRY_ARTIFACT_RENDER_VARIANTS = [
   "context",
@@ -94,9 +115,16 @@ export type EvryProgressControls = Readonly<{
   onSafeRetry(): void;
 }>;
 
+export type EvryReceiptControls = Readonly<{
+  disabled: boolean;
+  label: string;
+  onReuse(): void;
+}>;
+
 export type EvryArtifactRenderOptions = Readonly<{
   confirmationControls?: EvryConfirmationControls;
   progressControls?: EvryProgressControls;
+  receiptControls?: EvryReceiptControls;
   onChoice?: (choiceId: string) => void;
 }>;
 
@@ -143,7 +171,13 @@ function ArtifactFrame({
         </CardHeader>
         <CardContent className="space-y-4 px-4 sm:px-5">{children}</CardContent>
         {footer ? (
-          <CardFooter className="flex flex-wrap justify-end gap-2 border-t px-4 pt-4 sm:px-5">
+          <CardFooter
+            className={cn(
+              "flex flex-col gap-2 border-t px-4 pt-4 sm:flex-row sm:flex-wrap sm:justify-end sm:px-5",
+              variant === "confirmation" &&
+                "bg-card/95 sticky bottom-0 z-10 supports-[backdrop-filter]:backdrop-blur"
+            )}
+          >
             {footer}
           </CardFooter>
         ) : null}
@@ -213,9 +247,12 @@ function renderClarification(
                     Choose {choice.label}
                   </Button>
                 ) : (
-                  <Link href={choice.sourceLink.href} className={linkClassName}>
+                  <AuthenticatedLink
+                    href={choice.sourceLink.href}
+                    className={linkClassName}
+                  >
                     Open {choice.sourceLink.label}
-                  </Link>
+                  </AuthenticatedLink>
                 )}
               </div>
             </li>
@@ -226,7 +263,54 @@ function renderClarification(
   );
 }
 
-function renderRead(artifact: ArtifactByVariant["read"]) {
+function ReadResults({ artifact }: { artifact: ArtifactByVariant["read"] }) {
+  const [open, setOpen] = useState(false);
+  const [page, setPage] = useState(0);
+  const resultsRef = useRef<HTMLDivElement>(null);
+  const pageSize = 10;
+  const total = artifact.items.length;
+  const rows = (items: typeof artifact.items, compact: boolean) => (
+    <ul className="divide-y">
+      {items.map((item) => (
+        <li key={item.id} className="py-3 first:pt-0 last:pb-0">
+          <AuthenticatedLink
+            href={item.sourceLink.href}
+            className={linkClassName}
+            onClick={(event) => {
+              if (
+                !event.metaKey &&
+                !event.ctrlKey &&
+                !event.shiftKey &&
+                !event.altKey
+              )
+                setOpen(false);
+            }}
+          >
+            {item.label}
+          </AuthenticatedLink>
+          <dl
+            className={cn(
+              "mt-1 grid gap-x-4 gap-y-1 text-sm",
+              !compact && "sm:grid-cols-2"
+            )}
+          >
+            {(compact ? item.facts.slice(0, 2) : item.facts).map((fact) => (
+              <div key={fact.label} className="min-w-0 break-words">
+                <dt className="text-muted-foreground inline">{fact.label}: </dt>
+                <dd className="inline">{fact.value}</dd>
+              </div>
+            ))}
+          </dl>
+        </li>
+      ))}
+    </ul>
+  );
+  const itemLinks = new Set(
+    artifact.items.map(({ sourceLink }) => sourceLink.href)
+  );
+  const additionalLinks = artifact.sourceLinks.filter(
+    ({ href }) => !itemLinks.has(href)
+  );
   return (
     <ArtifactFrame
       variant="read"
@@ -234,56 +318,105 @@ function renderRead(artifact: ArtifactByVariant["read"]) {
       title={artifact.title}
       icon={<ListChecks className="size-4" />}
     >
-      <dl className="grid grid-cols-3 gap-2 text-center">
-        {[
-          ["Matched", artifact.counts.matched],
-          ["Shown", artifact.counts.returned],
-          ["Excluded", artifact.counts.excluded],
-        ].map(([label, value]) => (
-          <div key={label} className="bg-muted/40 rounded-lg border px-2 py-3">
-            <dt className="text-muted-foreground text-xs">{label}</dt>
-            <dd className="mt-1 text-lg font-semibold tabular-nums">{value}</dd>
-          </div>
-        ))}
-      </dl>
+      <p className="text-muted-foreground text-sm tabular-nums">
+        {total > 5 ? `Showing 5 of ${total} results` : readResultLabel(total)}
+      </p>
 
-      {artifact.filters.length ? (
-        <div>
-          <h4 className="text-sm font-medium">Applied filters</h4>
-          <dl className="mt-2 grid gap-2 sm:grid-cols-2">
-            {artifact.filters.map((filter) => (
-              <div key={filter.label} className="text-sm">
-                <dt className="text-muted-foreground">{filter.label}</dt>
-                <dd>{filter.value}</dd>
+      {artifact.items.length ? (
+        rows(artifact.items.slice(0, 5), true)
+      ) : (
+        <p className="text-muted-foreground text-sm">
+          No matches for this request.
+        </p>
+      )}
+
+      {total > 5 || artifact.items.some((item) => item.facts.length > 2) ? (
+        <Dialog
+          open={open}
+          onOpenChange={(next) => {
+            setOpen(next);
+            if (next) setPage(0);
+          }}
+        >
+          <DialogTrigger asChild>
+            <Button type="button" variant="outline" size="sm">
+              {total > 5 ? `View all ${total}` : "View details"}
+            </Button>
+          </DialogTrigger>
+          <DialogContent
+            className="max-h-[85dvh] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden motion-reduce:animate-none sm:max-w-3xl"
+            onOpenAutoFocus={(event) => {
+              event.preventDefault();
+              resultsRef.current?.focus();
+            }}
+          >
+            <DialogHeader>
+              <DialogTitle>{artifact.title}</DialogTitle>
+              <DialogDescription>
+                {readResultLabel(total)} from this response. These are the saved
+                results, not a live view.
+              </DialogDescription>
+            </DialogHeader>
+            <div
+              ref={resultsRef}
+              tabIndex={-1}
+              aria-label={`${artifact.title} results`}
+              className="min-h-0 overflow-y-auto overscroll-contain p-1 focus-visible:outline-2"
+            >
+              {rows(
+                artifact.items.slice(page * pageSize, (page + 1) * pageSize),
+                false
+              )}
+            </div>
+            {total > pageSize ? (
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p
+                  role="status"
+                  className="text-muted-foreground text-sm tabular-nums"
+                >
+                  {page * pageSize + 1}–{Math.min((page + 1) * pageSize, total)}{" "}
+                  of {total}
+                </p>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={page === 0}
+                    onClick={() => {
+                      setPage(page - 1);
+                      resultsRef.current?.focus({ preventScroll: true });
+                      resultsRef.current?.scrollTo({ top: 0 });
+                    }}
+                  >
+                    Previous
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={(page + 1) * pageSize >= total}
+                    onClick={() => {
+                      setPage(page + 1);
+                      resultsRef.current?.focus({ preventScroll: true });
+                      resultsRef.current?.scrollTo({ top: 0 });
+                    }}
+                  >
+                    Next
+                  </Button>
+                </div>
               </div>
-            ))}
-          </dl>
-        </div>
+            ) : null}
+          </DialogContent>
+        </Dialog>
       ) : null}
 
-      <ul className="space-y-2">
-        {artifact.items.map((item) => (
-          <li key={item.id} className="rounded-lg border p-3">
-            <Link href={item.sourceLink.href} className={linkClassName}>
-              {item.label}
-            </Link>
-            <dl className="mt-2 grid gap-1 text-sm sm:grid-cols-2">
-              {item.facts.map((fact) => (
-                <div key={fact.label}>
-                  <dt className="text-muted-foreground inline">
-                    {fact.label}:{" "}
-                  </dt>
-                  <dd className="inline">{fact.value}</dd>
-                </div>
-              ))}
-            </dl>
-          </li>
-        ))}
-      </ul>
-
-      <div className="text-sm">
-        <h4 className="font-medium">Exclusions</h4>
-        {artifact.exclusions.length ? (
+      {artifact.exclusions.length ? (
+        <details className="text-sm">
+          <summary className="text-muted-foreground cursor-pointer">
+            {artifact.counts.excluded.toLocaleString()} additional result
+            {artifact.counts.excluded === 1 ? "" : "s"} not shown
+          </summary>
           <ul className="text-muted-foreground mt-1 list-disc pl-5">
             {artifact.exclusions.map((exclusion) => (
               <li key={exclusion.reason}>
@@ -291,10 +424,21 @@ function renderRead(artifact: ArtifactByVariant["read"]) {
               </li>
             ))}
           </ul>
-        ) : (
-          <p className="text-muted-foreground mt-1">None</p>
-        )}
-      </div>
+        </details>
+      ) : null}
+      {additionalLinks.length ? (
+        <div className="flex flex-wrap gap-x-4 gap-y-2">
+          {additionalLinks.map((source) => (
+            <AuthenticatedLink
+              key={source.href}
+              href={source.href}
+              className={linkClassName}
+            >
+              {source.label}
+            </AuthenticatedLink>
+          ))}
+        </div>
+      ) : null}
     </ArtifactFrame>
   );
 }
@@ -305,14 +449,83 @@ function dateTimeLabel(
   >
 ): string {
   const { startsAt, endsAt } = range;
-  const start = formatDateTimeWithZone(
-    new Date(startsAt.instantUtc),
-    startsAt.timeZone
-  );
-  const end = endsAt
-    ? `–${formatTime(new Date(endsAt.instantUtc), endsAt.timeZone)}`
-    : "";
-  return `${start}${end} · ${startsAt.timeZone} (UTC${startsAt.utcOffset})`;
+  const startInstant = new Date(startsAt.instantUtc);
+  const start = formatDateTime(startInstant, "long", startsAt.timeZone);
+  const zone = formatTimeZoneName(startInstant, startsAt.timeZone);
+  if (!endsAt) return `${start} ${zone}`;
+
+  const endInstant = new Date(endsAt.instantUtc);
+  const end =
+    formatDate(startInstant, "long", startsAt.timeZone) ===
+    formatDate(endInstant, "long", endsAt.timeZone)
+      ? formatTime(endInstant, endsAt.timeZone)
+      : formatDateTime(endInstant, "long", endsAt.timeZone);
+  return `${start}–${end} ${zone}`;
+}
+
+function confirmationStepTitle(
+  step: EvryDetailedConfirmationArtifactDocument["steps"][number]
+): string {
+  if (step.stepId === "create-meeting") return "Meeting";
+  if (step.stepId === "add-guests") return "Guests";
+  if (step.stepId === "send-invitations") return "Invitation email";
+  return step.title;
+}
+
+function confirmationStepLead(
+  step: EvryDetailedConfirmationArtifactDocument["steps"][number]
+): string | null {
+  if (step.stepId === "create-meeting") {
+    return "Evry will create this meeting after you confirm.";
+  }
+  if (step.stepId === "add-guests") {
+    const count = step.counts.find(({ label }) =>
+      /guests (?:added|to add)/i.test(label)
+    );
+    if (!count) return null;
+    return `Evry will add ${count.count.toLocaleString()} ${count.count === 1 ? "person" : "people"} to the guest list.`;
+  }
+  if (step.effectKind === "communication") {
+    const count = step.counts.find(({ label }) =>
+      /emails|recipients/i.test(label)
+    );
+    if (!count) return null;
+    return `Evry will use this template for ${count.count.toLocaleString()} ${count.count === 1 ? "person" : "people"}.`;
+  }
+  return null;
+}
+
+function confirmationStepIcon(
+  step: EvryDetailedConfirmationArtifactDocument["steps"][number]
+) {
+  if (step.effectKind === "meeting") return CalendarDays;
+  if (step.stepId === "add-guests") return UsersRound;
+  if (step.effectKind === "communication") return Mail;
+  return ListChecks;
+}
+
+const CUSTOMER_COUNT_ACTION_BY_SUFFIX: Readonly<Record<string, string>> = {
+  created: "create",
+  added: "add",
+  sent: "send",
+  scheduled: "schedule",
+  changed: "update",
+  updated: "update",
+  deleted: "delete",
+  removed: "remove",
+  cancelled: "cancel",
+  imported: "import",
+  parsed: "review",
+};
+
+function customerCountLabel(label: string): string {
+  const match = label.match(/^(.+?)\s+([a-z]+)$/i);
+  if (!match) return label;
+  const [, subject, suffix] = match;
+  const action = suffix
+    ? CUSTOMER_COUNT_ACTION_BY_SUFFIX[suffix.toLowerCase()]
+    : null;
+  return subject && action ? `${subject} to ${action}` : label;
 }
 
 function DetailedConfirmation({
@@ -321,162 +534,208 @@ function DetailedConfirmation({
   artifact: EvryDetailedConfirmationArtifactDocument;
 }) {
   return (
-    <div className="space-y-5">
-      <ol className="space-y-5">
-        {artifact.steps.map((step, index) => (
-          <li
-            key={step.stepId}
-            className="space-y-3 border-b pb-5 last:border-0 last:pb-0"
-          >
-            <div className="flex items-start gap-3">
-              <span className="bg-primary text-primary-foreground grid size-6 shrink-0 place-items-center rounded-full text-xs font-semibold">
-                {index + 1}
-              </span>
-              <div className="min-w-0">
-                <h4 className="font-medium">{step.title}</h4>
-                <p className="text-muted-foreground text-xs">
-                  {step.effectKind.replaceAll("_", " ")} ·{" "}
-                  {step.reversibility === "difficult_to_reverse"
-                    ? "Difficult to reverse"
-                    : step.reversibility === "irreversible"
-                      ? "Irreversible"
-                      : "Reversible"}
-                </p>
+    <div className="space-y-6">
+      <p className="text-muted-foreground max-w-prose text-sm leading-relaxed text-pretty">
+        Nothing has changed yet. Review the details, then confirm or edit the
+        plan.
+      </p>
+
+      <ol className="space-y-4">
+        {artifact.steps.map((step) => {
+          const targets = customerReviewTargets(
+            step.resolvedTargets,
+            step.effectKind
+          );
+          const previews = customerContentPreviews(step.contentPreviews);
+          const title = confirmationStepTitle(step);
+          const lead = confirmationStepLead(step);
+          const StepIcon = confirmationStepIcon(step);
+          const showChanges =
+            step.effectKind === "bulk_change" ||
+            step.effectKind === "destructive" ||
+            step.effectKind === "file_import";
+          const excludedCount = step.exclusions.reduce(
+            (sum, exclusion) => sum + exclusion.count,
+            0
+          );
+          return (
+            <li
+              key={step.stepId}
+              className="bg-muted/35 space-y-4 rounded-xl p-4"
+            >
+              <div className="flex items-start gap-3">
+                <span className="bg-background text-muted-foreground grid size-9 shrink-0 place-items-center rounded-lg border">
+                  <StepIcon aria-hidden="true" className="size-4" />
+                </span>
+                <div className="min-w-0 space-y-1">
+                  <h4 className="font-semibold text-balance">{title}</h4>
+                  {lead ? (
+                    <p className="text-muted-foreground text-sm leading-relaxed text-pretty">
+                      {lead}
+                    </p>
+                  ) : null}
+                </div>
               </div>
-            </div>
 
-            <section>
-              <h5 className="text-sm font-medium">Resolved targets</h5>
-              <ul className="mt-1 space-y-1 text-sm">
-                {step.resolvedTargets.map((target, targetIndex) => (
-                  <li key={`${target.label}-${targetIndex}`}>
-                    <span className="text-muted-foreground">
-                      {target.label}:{" "}
-                    </span>
-                    {target.sourceLink ? (
-                      <Link
-                        href={target.sourceLink.href}
-                        className={linkClassName}
-                      >
-                        {target.value}
-                      </Link>
-                    ) : (
-                      target.value
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </section>
-
-            {step.dateTime ? (
-              <section className="bg-muted/40 rounded-lg border p-3">
-                <h5 className="flex items-center gap-2 text-sm font-medium">
-                  <Clock3 aria-hidden="true" className="size-4" />
-                  Absolute date and time
-                </h5>
-                <p className="mt-1 text-sm">{dateTimeLabel(step.dateTime)}</p>
-              </section>
-            ) : null}
-
-            <section>
-              <h5 className="text-sm font-medium">Counts and exclusions</h5>
-              <dl className="mt-1 grid gap-1 text-sm sm:grid-cols-2">
-                {step.counts.map((count) => (
-                  <div
-                    key={count.label}
-                    className="flex justify-between gap-3 rounded-md border px-2.5 py-2"
-                  >
-                    <dt className="text-muted-foreground">{count.label}</dt>
-                    <dd className="font-medium tabular-nums">{count.count}</dd>
-                  </div>
-                ))}
-              </dl>
-              {step.exclusions.length ? (
-                <ul className="text-muted-foreground mt-2 list-disc pl-5 text-sm">
-                  {step.exclusions.map((exclusion) => (
-                    <li key={exclusion.reason}>
-                      {exclusion.count} excluded · {exclusion.reason}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-muted-foreground mt-2 text-sm">
-                  Exclusions: none
-                </p>
-              )}
-            </section>
-
-            {step.beforeAfter.length ? (
-              <section>
-                <h5 className="text-sm font-medium">Before and after</h5>
-                <ul className="mt-2 space-y-2">
-                  {step.beforeAfter.map((change) => (
-                    <li
-                      key={change.label}
-                      className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 rounded-lg border p-3 text-sm"
-                    >
-                      <div>
-                        <p className="text-muted-foreground text-xs">Before</p>
-                        <p>{change.before}</p>
-                      </div>
-                      <ArrowRight
-                        aria-hidden="true"
-                        className="text-muted-foreground size-4"
-                      />
-                      <div>
-                        <p className="text-muted-foreground text-xs">After</p>
-                        <p>{change.after}</p>
-                      </div>
-                      <p className="text-muted-foreground col-span-3 text-xs">
-                        {change.count} · {change.label}
-                      </p>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            ) : null}
-
-            {step.contentPreviews.length ? (
-              <section>
-                <h5 className="text-sm font-medium">Content preview</h5>
-                <dl className="mt-2 space-y-2">
-                  {step.contentPreviews.map((preview) => (
-                    <div
-                      key={preview.label}
-                      className="bg-muted/40 rounded-lg border p-3 text-sm"
-                    >
+              {targets.length ? (
+                <dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
+                  {targets.map((target, targetIndex) => (
+                    <div key={`${target.label}-${targetIndex}`}>
                       <dt className="text-muted-foreground text-xs font-medium">
-                        {preview.label}
+                        {target.label}
                       </dt>
-                      <dd className="mt-1 [overflow-wrap:anywhere]">
-                        {preview.format === "rich_text" ? (
-                          <RichText body={preview.content} />
+                      <dd className="mt-0.5 leading-relaxed [overflow-wrap:anywhere]">
+                        {target.sourceLink ? (
+                          <AuthenticatedLink
+                            href={target.sourceLink.href}
+                            className={linkClassName}
+                          >
+                            {target.value}
+                          </AuthenticatedLink>
                         ) : (
-                          <span className="whitespace-pre-wrap">
-                            {preview.content}
-                          </span>
+                          target.value
                         )}
                       </dd>
                     </div>
                   ))}
                 </dl>
-              </section>
-            ) : null}
-          </li>
-        ))}
-      </ol>
+              ) : null}
 
-      <section className="border-destructive/40 bg-destructive/5 rounded-lg border p-3">
-        <h4 className="flex items-center gap-2 text-sm font-medium">
-          <ShieldAlert aria-hidden="true" className="size-4" />
-          Consequences
-        </h4>
-        <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
-          {artifact.consequences.map((consequence) => (
-            <li key={consequence}>{consequence}</li>
-          ))}
-        </ul>
-      </section>
+              {step.dateTime ? (
+                <section className="bg-background/80 rounded-lg p-3">
+                  <h5 className="flex items-center gap-2 text-sm font-medium">
+                    <Clock3 aria-hidden="true" className="size-4" />
+                    Date and time
+                  </h5>
+                  <p className="mt-1 text-sm leading-relaxed text-pretty">
+                    {dateTimeLabel(step.dateTime)}
+                  </p>
+                </section>
+              ) : null}
+
+              {!lead ? (
+                <dl className="grid gap-2 text-sm sm:grid-cols-2">
+                  {step.counts.map((count) => (
+                    <div
+                      key={count.label}
+                      className="bg-background/80 flex justify-between gap-3 rounded-lg px-3 py-2.5"
+                    >
+                      <dt className="text-muted-foreground">
+                        {customerCountLabel(count.label)}
+                      </dt>
+                      <dd className="font-medium tabular-nums">
+                        {count.count}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+              ) : null}
+
+              {step.exclusions.length ? (
+                <details className="text-muted-foreground text-sm">
+                  <summary className="min-h-6 cursor-pointer font-medium">
+                    {excludedCount.toLocaleString()} not included
+                  </summary>
+                  <ul className="mt-2 list-disc space-y-1 ps-5">
+                    {step.exclusions.map((exclusion) => (
+                      <li key={exclusion.reason}>
+                        {exclusion.count.toLocaleString()} {exclusion.reason}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              ) : null}
+
+              {showChanges && step.beforeAfter.length ? (
+                <section>
+                  <h5 className="text-sm font-medium">
+                    Changes after confirmation
+                  </h5>
+                  <ul className="mt-2 space-y-2">
+                    {step.beforeAfter.map((change) => (
+                      <li
+                        key={change.label}
+                        className="bg-background/80 grid gap-3 rounded-lg p-3 text-sm sm:grid-cols-2"
+                      >
+                        <div>
+                          <p className="text-muted-foreground text-xs">
+                            Current
+                          </p>
+                          <p>{change.before}</p>
+                        </div>
+                        <div>
+                          <p className="text-muted-foreground text-xs">
+                            After confirmation
+                          </p>
+                          <p>{change.after}</p>
+                        </div>
+                        <p className="text-muted-foreground text-xs sm:col-span-2">
+                          {change.count.toLocaleString()} {change.label}
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ) : null}
+
+              {previews.length ? (
+                <section>
+                  {step.effectKind === "communication" ? null : (
+                    <h5 className="text-sm font-medium">Preview</h5>
+                  )}
+                  <dl
+                    className={cn(
+                      "space-y-2",
+                      step.effectKind === "communication" ? "" : "mt-2"
+                    )}
+                  >
+                    {previews.map((preview) => (
+                      <div
+                        key={`${preview.label}:${preview.content}`}
+                        className="bg-background/80 rounded-lg p-3 text-sm"
+                      >
+                        <dt className="text-muted-foreground text-xs font-medium">
+                          {preview.label}
+                        </dt>
+                        <dd className="mt-1 [overflow-wrap:anywhere]">
+                          {preview.format === "rich_text" ? (
+                            <RichText body={preview.content} />
+                          ) : (
+                            <span className="whitespace-pre-wrap">
+                              {preview.content}
+                            </span>
+                          )}
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                </section>
+              ) : null}
+
+              {step.effectKind === "communication" ? (
+                <p className="text-destructive flex gap-2 text-sm leading-relaxed">
+                  <AlertCircle
+                    aria-hidden="true"
+                    className="mt-0.5 size-4 shrink-0"
+                  />
+                  Emails send immediately after you confirm and cannot be
+                  recalled.
+                </p>
+              ) : step.reversibility !== "reversible" ? (
+                <p className="text-destructive flex gap-2 text-sm leading-relaxed">
+                  <AlertCircle
+                    aria-hidden="true"
+                    className="mt-0.5 size-4 shrink-0"
+                  />
+                  {step.reversibility === "irreversible"
+                    ? "This change cannot be undone after you confirm."
+                    : "This change may be difficult to undo after you confirm."}
+                </p>
+              ) : null}
+            </li>
+          );
+        })}
+      </ol>
     </div>
   );
 }
@@ -496,13 +755,27 @@ function renderConfirmation(
       footer={
         controls ? (
           <>
-            <Button type="button" variant="ghost" onClick={controls.onCancel}>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={controls.onCancel}
+              className="min-h-10 w-full active:scale-[0.96] sm:w-auto"
+            >
               Cancel
             </Button>
-            <Button type="button" variant="outline" onClick={controls.onEdit}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={controls.onEdit}
+              className="min-h-10 w-full active:scale-[0.96] sm:w-auto"
+            >
               Edit plan
             </Button>
-            <Button type="button" onClick={controls.onExecute}>
+            <Button
+              type="button"
+              onClick={controls.onExecute}
+              className="min-h-10 w-full active:scale-[0.96] sm:w-auto"
+            >
               {artifact.actionLabel}
             </Button>
           </>
@@ -672,13 +945,30 @@ function ReceiptError({
   );
 }
 
-function renderReceipt(artifact: ArtifactByVariant["receipt"]) {
+function renderReceipt(
+  artifact: ArtifactByVariant["receipt"],
+  options: EvryArtifactRenderOptions
+) {
   return (
     <ArtifactFrame
       variant="receipt"
       badge="Execution receipt"
       title={artifact.title}
       icon={<FileText className="size-4" />}
+      footer={
+        options.receiptControls ? (
+          <Button
+            type="button"
+            variant="outline"
+            disabled={options.receiptControls.disabled}
+            onClick={options.receiptControls.onReuse}
+            className="cursor-pointer active:scale-[0.96]"
+          >
+            <RotateCcw aria-hidden="true" />
+            {options.receiptControls.label}
+          </Button>
+        ) : null
+      }
     >
       <ol className="space-y-3">
         {artifact.steps.map((step) => (
@@ -705,9 +995,12 @@ function renderReceipt(artifact: ArtifactByVariant["receipt"]) {
               <ul className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-sm">
                 {step.sourceLinks.map((link) => (
                   <li key={link.href}>
-                    <Link href={link.href} className={linkClassName}>
+                    <AuthenticatedLink
+                      href={link.href}
+                      className={linkClassName}
+                    >
                       Open {link.label}
-                    </Link>
+                    </AuthenticatedLink>
                   </li>
                 ))}
               </ul>
@@ -765,11 +1058,11 @@ type EvryArtifactRegistry = {
 export const EVRY_ARTIFACT_REGISTRY = {
   context: (artifact, _options) => renderContext(artifact),
   clarification: (artifact, options) => renderClarification(artifact, options),
-  read: (artifact, _options) => renderRead(artifact),
+  read: (artifact, _options) => <ReadResults artifact={artifact} />,
   settings: (artifact, _options) => renderSettings(artifact),
   confirmation: (artifact, options) => renderConfirmation(artifact, options),
   progress: (artifact, options) => renderProgress(artifact, options),
-  receipt: (artifact, _options) => renderReceipt(artifact),
+  receipt: (artifact, options) => renderReceipt(artifact, options),
   boundary: (artifact, _options) => renderBoundary(artifact),
 } satisfies EvryArtifactRegistry;
 

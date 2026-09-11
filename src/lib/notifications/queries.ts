@@ -437,14 +437,25 @@ export interface FeedOptions extends VisibilityOptions {
   unreadOnly?: boolean;
 }
 
-/** `(created_at, id) < (cursor.createdAt, cursor.id)`, spelled out. */
+/**
+ * JavaScript Dates retain milliseconds while PostgreSQL timestamps retain
+ * microseconds. Canonicalize the database side to the cursor's precision so
+ * two rows inside one millisecond are ordered and paged by the id tiebreaker
+ * instead of disappearing behind a truncated timestamp cursor.
+ */
+function canonicalFeedCreatedAt(): SQL<Date> {
+  return sql<Date>`date_trunc('milliseconds', ${notifications.createdAt})`.mapWith(
+    notifications.createdAt
+  );
+}
+
+/** `(canonical created_at, id) < (cursor.createdAt, cursor.id)`, spelled out. */
 function olderThan(cursor: FeedCursor): SQL {
+  const createdAt = canonicalFeedCreatedAt();
+  const boundary = sql<Date>`${cursor.createdAt.toISOString()}::timestamptz`;
   return or(
-    lt(notifications.createdAt, cursor.createdAt),
-    and(
-      eq(notifications.createdAt, cursor.createdAt),
-      lt(notifications.id, cursor.id)
-    )
+    lt(createdAt, boundary),
+    and(eq(createdAt, boundary), lt(notifications.id, cursor.id))
   ) as SQL;
 }
 
@@ -486,7 +497,7 @@ function feedQueryWithin(where: ScopedWhere, options: FeedOptions) {
         )
       )
       // `id` is the tiebreaker, and it is in the cursor for the same reason.
-      .orderBy(desc(notifications.createdAt), desc(notifications.id))
+      .orderBy(desc(canonicalFeedCreatedAt()), desc(notifications.id))
       .limit(clampFeedLimit(options.limit))
   );
 }
