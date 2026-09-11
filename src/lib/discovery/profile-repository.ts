@@ -1,4 +1,4 @@
-import { sql } from "drizzle-orm";
+import { sql, type SQL } from "drizzle-orm";
 
 import { discoveryProfiles } from "../../db/schema/discovery-profile";
 import { users } from "../../db/schema/user";
@@ -52,17 +52,20 @@ export function readDiscoveryProfileStatement(actor: DiscoveryActor) {
  * as a data-modifying CTE and SELECT from its RETURNING row in the grant.
  * Never infer a winner from profile absence or a preloaded policy decision.
  *
- * Integration must add invitation token/email/expiry eligibility to the
- * retirement predicate itself, not only to a later grant: a zero-row grant
- * would otherwise leave a retired profile. This profile-only builder neither
- * consumes a token nor grants a seat and is not a seat-acceptance operation.
+ * Pass the invitation's winning claim as eligibility for seat conversion.
+ * Gating only a later grant would let a zero-row grant retire the profile.
+ * This builder neither consumes a token nor grants a seat on its own.
  * An empty result is a refusal/no-op; it does NOT abort a surrounding batch.
  */
-export function retireEmptyDiscoveryProfileStatement(actor: DiscoveryActor) {
+export function retireEmptyDiscoveryProfileStatement(
+  actor: DiscoveryActor,
+  eligibility: SQL = sql`true`
+) {
   return sql`delete from ${discoveryProfiles}
     where ${discoveryProfiles.userId} = ${actor.id}
       and ${discoveryProfiles.sendingChurchId} is null
       and ${discoveryProfiles.sendingNetworkId} is null
       and exists (select 1 from ${users} where ${unseatedAccount(actor)})
+      and ${eligibility}
     returning user_id as "userId"`;
 }

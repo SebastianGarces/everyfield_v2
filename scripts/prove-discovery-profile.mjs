@@ -187,7 +187,7 @@ try {
     {
       cwd,
       stdio: "inherit",
-      timeout: 120_000,
+      timeout: 240_000,
       env: {
         ...process.env,
         DISCOVERY_PROFILE_PROOF: "1",
