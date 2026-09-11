@@ -47,7 +47,10 @@ export type CommunicationEvrySurface = Readonly<{
     | Readonly<{ state: "supported" }>
     | Readonly<{
         state: "excluded";
-        reason: "public_or_sessionless" | "owning_product_gap";
+        reason:
+          | "public_or_sessionless"
+          | "owning_product_gap"
+          | "evry_capability_gap";
       }>;
 }>;
 
@@ -513,26 +516,47 @@ export function discoverCommunicationRscReads(
   );
 }
 
-function rscReadSurfaces(repoRoot: string): CommunicationEvrySurface[] {
-  return discoverCommunicationRscReads(repoRoot).map((read) => {
-    const contract =
-      RSC_READ_CONTRACTS[read.exportName as keyof typeof RSC_READ_CONTRACTS];
-    if (!contract) {
-      throw new Error(
-        `Communication inventory has no closed RSC read contract for ${read.caller} → ${read.modulePath}#${read.exportName}`
-      );
-    }
-    return supportedSurface(
-      {
-        kind: "rsc_read",
-        identity: `rsc-read:${read.caller} → ${read.modulePath}#${read.exportName}`,
-        source: read.caller,
-        exportName: read.exportName,
-      },
-      contract,
-      "read"
+export function classifyCommunicationRscRead(
+  read: DiscoveredCommunicationRscRead
+): CommunicationEvrySurface {
+  const surface = {
+    kind: "rsc_read" as const,
+    identity: `rsc-read:${read.caller} → ${read.modulePath}#${read.exportName}`,
+    source: read.caller,
+    exportName: read.exportName,
+  };
+  // The UI resolves plant merge facts, but Evry's compose adapter only reads
+  // templates and recipient teams. Keep this gap visible without granting access.
+  if (
+    read.caller === "src/app/(dashboard)/communication/compose/page.tsx" &&
+    read.modulePath === "@/lib/communication/church-merge" &&
+    read.exportName === "getChurchMergeData"
+  ) {
+    return {
+      ...surface,
+      capabilityIdentity: "communication.compose.get-church-merge-data",
+      domain: "compose",
+      operationKind: "excluded",
+      applicationCapability: null,
+      confirmation: "excluded",
+      mutationShape: null,
+      classification: { state: "excluded", reason: "evry_capability_gap" },
+    };
+  }
+  const contract =
+    RSC_READ_CONTRACTS[read.exportName as keyof typeof RSC_READ_CONTRACTS];
+  if (!contract) {
+    throw new Error(
+      `Communication inventory has no closed RSC read contract for ${read.caller} → ${read.modulePath}#${read.exportName}`
     );
-  });
+  }
+  return supportedSurface(surface, contract, "read");
+}
+
+function rscReadSurfaces(repoRoot: string): CommunicationEvrySurface[] {
+  return discoverCommunicationRscReads(repoRoot).map(
+    classifyCommunicationRscRead
+  );
 }
 
 type DiscoveredCommunicationRouteHandler = Readonly<{

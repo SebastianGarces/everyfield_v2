@@ -71,7 +71,7 @@ interface ComposeFormProps {
   meetingId?: string;
   meetings?: MeetingOption[];
   initialRecipients?: Recipient[];
-  churchName?: string;
+  churchMergeData: Record<string, string>;
   teams?: RecipientTeamOption[];
 }
 
@@ -81,14 +81,14 @@ export function ComposeForm({
   meetingId: initialMeetingId,
   meetings = [],
   initialRecipients = [],
-  churchName = "",
+  churchMergeData,
   teams = [],
 }: ComposeFormProps) {
   const router = useRouter();
 
   const [subject, setSubject] = useState(initialTemplate?.subject ?? "");
   const [body, setBody] = useState(() =>
-    toRichTextHtml(initialTemplate?.body ?? "")
+    toRichTextHtml(initialTemplate?.bodyHtml ?? initialTemplate?.body ?? "")
   );
   const [selectedTemplateId, setSelectedTemplateId] = useState(
     initialTemplate?.id ?? ""
@@ -120,12 +120,7 @@ export function ComposeForm({
 
   // Build merge data for the live preview using actual selected meeting + church data
   const previewMergeData = useMemo(() => {
-    const base = getSampleData();
-
-    // Override with real church name if available
-    if (churchName) {
-      base.church_name = churchName;
-    }
+    const base = { ...getSampleData(), ...churchMergeData };
 
     // Override with real meeting data if a meeting is selected
     if (selectedMeetingId) {
@@ -144,7 +139,7 @@ export function ComposeForm({
     }
 
     return base;
-  }, [churchName, selectedMeetingId, meetings]);
+  }, [churchMergeData, selectedMeetingId, meetings]);
 
   const subjectRef = useRef<HTMLInputElement>(null);
   const bodyRef = useRef<RichTextEditorHandle>(null);

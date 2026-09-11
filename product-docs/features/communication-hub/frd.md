@@ -666,8 +666,8 @@ General notes attached to any entity.
 | Field | Description | Source |
 |-------|-------------|--------|
 | `{{church_name}}` | Church name | Church.name |
-| `{{pastor_name}}` | Senior Pastor name | Church profile |
-| `{{launch_date}}` | Launch Sunday date | Church.launch_date |
+| `{{pastor_name}}` | Lead planter/pastor name; empty when leadership is explicitly absent or the Owner has no name | Plant Owner account and leadership answer |
+| `{{launch_date}}` | Target launch calendar date; empty when no target is set | Launch.target_date |
 
 ### Meeting Fields (available when triggered from Meetings feature)
 
