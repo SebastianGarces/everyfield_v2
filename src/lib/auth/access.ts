@@ -127,6 +127,7 @@ export type PrivacyFeatureKey =
   | "financials"
   | "ministry_teams"
   | "facilities"
+  | "wiki"
   | "oversight_activity";
 
 // The toggle column set is `@/lib/privacy/sharing-defaults`'s, imported rather than declared
@@ -144,6 +145,7 @@ const PRIVACY_COLUMN_MAP: Record<PrivacyFeatureKey, PrivacyColumn> = {
   financials: "shareFinancials",
   ministry_teams: "shareMinistryTeams",
   facilities: "shareFacilities",
+  wiki: "shareWiki",
   oversight_activity: "shareActivityWithOversight",
 };
 
