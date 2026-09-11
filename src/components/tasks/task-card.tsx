@@ -3,8 +3,7 @@
 // ============================================================================
 // TaskCard — the behaviour, and nothing else.
 //
-// The card's markup, its config tables (PRIORITY_CONFIG, CATEGORY_CONFIG,
-// STATUS_CONFIG) and its due-date formatting all moved to task-card-view.tsx,
+// The card's markup and its due-date formatting live in task-card-view.tsx,
 // which is server-safe and is now the single definition of what a task row
 // looks like. Import them from there, not from here: this module is a client
 // boundary, so anything re-exported through it becomes a client reference and

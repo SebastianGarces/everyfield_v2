@@ -24,11 +24,23 @@ const countSchema = z
   .nonnegative()
   .max(POSTGRES_INT4_MAX);
 
+const jsonValueSchema: z.ZodType<EvryJsonValue> = z.lazy(() =>
+  z.union([
+    z.null(),
+    z.boolean(),
+    z.number().finite(),
+    z.string(),
+    z.array(jsonValueSchema),
+    z.record(z.string(), jsonValueSchema),
+  ])
+);
+
 const effectResultSchema = z.discriminatedUnion("status", [
   z.strictObject({
     status: z.literal("completed"),
     affectedCount: countSchema,
     excludedCount: countSchema,
+    dependencyOutput: jsonValueSchema.optional(),
   }),
   z.strictObject({
     status: z.enum(["refused", "failed"]),
@@ -37,7 +49,22 @@ const effectResultSchema = z.discriminatedUnion("status", [
   z.strictObject({ status: z.literal("retryable") }),
 ]);
 
+const effectReconciliationSchema = z.union([
+  effectResultSchema,
+  z.strictObject({ status: z.literal("resume") }),
+]);
+
 export type EvryEffectResult = Readonly<z.infer<typeof effectResultSchema>>;
+export type EvryEffectReconciliation = Readonly<
+  z.infer<typeof effectReconciliationSchema>
+>;
+
+export type EvryDependencyOutput = Readonly<{
+  stepId: string;
+  capabilityIdentity: string;
+  effectKey: EvryAuditKey;
+  value: EvryJsonValue;
+}>;
 
 export type EvryEffectInput = Readonly<{
   authorization: EvryEffectCapabilityAuthorization;
@@ -53,17 +80,50 @@ export type EvryEffectInput = Readonly<{
     capabilityIdentity: string;
   }>;
   arguments: Readonly<Record<string, EvryJsonValue>>;
+  /** Outputs can come only from this plan step's completed direct dependencies. */
+  dependencyOutputs?: readonly EvryDependencyOutput[];
 }>;
+
+export type EvryClaimedEffectInput = Readonly<
+  Omit<EvryEffectInput, "authorization">
+>;
+
+function parseRegisteredCompletedOutput(
+  result: EvryEffectResult,
+  outputSchema: z.ZodType<EvryJsonValue> | undefined
+): EvryEffectResult {
+  if (result.status !== "completed") return result;
+  if (!outputSchema) {
+    if (result.dependencyOutput !== undefined) {
+      throw new Error("Unregistered Evry dependency output");
+    }
+    return result;
+  }
+  return Object.freeze({
+    ...result,
+    dependencyOutput: outputSchema.parse(result.dependencyOutput),
+  });
+}
 
 export type EvryExecutionCapabilityRegistration = Readonly<{
   planCapability: EvryPlanCapabilityRegistration;
+  dependencyOutputSchema: z.ZodType<EvryJsonValue> | null;
   /**
    * First return an existing exact `effectKey` claim's original closed result.
-   * Only an unclaimed key may atomically revalidate target state, claim, and
-   * apply. This ordering lets a crash-after-commit replay recover even when
-   * the applied effect changed the target. Raw errors must not cross here.
+   * `resume` means an irreversible boundary started before the final claim and
+   * must continue from its immutable inputs after fresh capability authority,
+   * even when ordinary plan freshness has elapsed. Raw errors must not cross.
    */
   executeIfCurrent(input: EvryEffectInput): Promise<EvryEffectResult>;
+  /**
+   * Reconcile a domain mutation that is already durably claimed. This runs
+   * before fresh authorization because revoking later authority cannot turn an
+   * already-committed mutation into a truthful refusal. `null` means no exact
+   * claim exists and the ordinary authorized path must run.
+   */
+  reconcileClaimed?(
+    input: EvryClaimedEffectInput
+  ): Promise<EvryEffectReconciliation | null>;
   [EVRY_EXECUTION_CAPABILITY]: true;
 }>;
 
@@ -75,7 +135,11 @@ export type EvryExecutionCapabilityRegistry = Readonly<{
 
 export function defineEvryExecutionCapability(input: {
   planCapability: EvryPlanCapabilityRegistration;
+  dependencyOutputSchema?: z.ZodType<EvryJsonValue>;
   executeIfCurrent(input: EvryEffectInput): Promise<EvryEffectResult>;
+  reconcileClaimed?(
+    input: EvryClaimedEffectInput
+  ): Promise<EvryEffectReconciliation | null>;
 }): EvryExecutionCapabilityRegistration {
   if (!isEvryEffectCapabilityIdentity(input.planCapability.identity)) {
     throw new Error(
@@ -84,11 +148,28 @@ export function defineEvryExecutionCapability(input: {
   }
   return Object.freeze({
     planCapability: input.planCapability,
+    dependencyOutputSchema: input.dependencyOutputSchema ?? null,
     async executeIfCurrent(effectInput: EvryEffectInput) {
-      return effectResultSchema.parse(
-        await input.executeIfCurrent(effectInput)
+      return parseRegisteredCompletedOutput(
+        effectResultSchema.parse(await input.executeIfCurrent(effectInput)),
+        input.dependencyOutputSchema
       );
     },
+    ...(input.reconcileClaimed
+      ? {
+          async reconcileClaimed(effectInput: EvryClaimedEffectInput) {
+            const result = await input.reconcileClaimed!(effectInput);
+            if (result === null) return null;
+            const parsed = effectReconciliationSchema.parse(result);
+            return parsed.status === "resume"
+              ? parsed
+              : parseRegisteredCompletedOutput(
+                  parsed,
+                  input.dependencyOutputSchema
+                );
+          },
+        }
+      : {}),
     [EVRY_EXECUTION_CAPABILITY]: true as const,
   });
 }

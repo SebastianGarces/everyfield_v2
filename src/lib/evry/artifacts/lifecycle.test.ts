@@ -32,6 +32,7 @@ import {
   confirmationMatchesTrustedPlan,
   progressFromRetryableEvryExecution,
   type EvryArtifactLifecycleBoundaries,
+  type EvryTrustedPlanReview,
 } from "./lifecycle";
 import { buildEvryConfirmationArtifact } from "./review";
 
@@ -128,6 +129,8 @@ function harness() {
   let executeError: unknown = null;
   let executeOverride: EvryArtifactLifecycleBoundaries["execute"] | null = null;
   let trustedConfirmation = EVRY_CONFIRMATION_FIXTURES.meeting;
+  let trustedSource: EvryTrustedPlanReview["source"] = { kind: "generic" };
+  const reusableRecipeIdentities = new Set<string>();
 
   const resume = (async () => {
     const activePlan = conversation.activePlan
@@ -177,6 +180,7 @@ function harness() {
   const boundaries: EvryArtifactLifecycleBoundaries = {
     planRegistry: createEvryPlanCapabilityRegistry([]),
     executionRegistry: createEvryExecutionCapabilityRegistry([]),
+    reusableRecipeIdentities,
     revalidatePlan,
     resume,
     append,
@@ -232,7 +236,10 @@ function harness() {
       calls.push("review");
       assert.equal(input.actor, ACTOR);
       assert.deepEqual(input.plan, EVRY_CONFIRMATION_FIXTURES.meeting.plan);
-      return { confirmation: trustedConfirmation };
+      return {
+        confirmation: trustedConfirmation,
+        source: trustedSource,
+      };
     },
     now: () => NOW,
     correlationId: () => "80000000-0000-4000-8000-000000000001",
@@ -283,6 +290,10 @@ function harness() {
       confirmation: typeof EVRY_CONFIRMATION_FIXTURES.meeting
     ) {
       trustedConfirmation = confirmation;
+    },
+    setTrustedRecipe(identity: string, reusable: boolean) {
+      trustedSource = { kind: "recipe", identity };
+      if (reusable) reusableRecipeIdentities.add(identity);
     },
   };
 }
@@ -335,6 +346,38 @@ test("execute persists progress before the effect and a terminal receipt after i
   );
 });
 
+test("only a completed registered recipe receipt advertises reuse", async () => {
+  const reusable = harness();
+  reusable.setTrustedRecipe("fixture.recipe", true);
+  await createEvryArtifactLifecycle(reusable.boundaries)(request("execute"));
+  const reusableReceipt = reusable
+    .conversation()
+    .messages.flatMap(({ artifacts }) => artifacts)
+    .findLast(({ document }) => document.kind === "result")?.document;
+  assert.deepEqual(
+    reusableReceipt?.kind === "result" && "artifactVersion" in reusableReceipt
+      ? reusableReceipt.reuse
+      : null,
+    { recipeIdentity: "fixture.recipe", label: "Reuse" }
+  );
+
+  const unregistered = harness();
+  unregistered.setTrustedRecipe("fixture.recipe", false);
+  await createEvryArtifactLifecycle(unregistered.boundaries)(
+    request("execute")
+  );
+  const ordinaryReceipt = unregistered
+    .conversation()
+    .messages.flatMap(({ artifacts }) => artifacts)
+    .findLast(({ document }) => document.kind === "result")?.document;
+  assert.equal(
+    ordinaryReceipt?.kind === "result" && "artifactVersion" in ordinaryReceipt
+      ? ordinaryReceipt.reuse
+      : null,
+    undefined
+  );
+});
+
 test("a replay returns the persisted receipt without a second confirm or execution", async () => {
   const fake = harness();
   const run = createEvryArtifactLifecycle(fake.boundaries);
@@ -345,6 +388,35 @@ test("a replay returns the persisted receipt without a second confirm or executi
 
   assert.equal(replay.status, "already_finished");
   assert.deepEqual(fake.calls, callsAfterFirstRun);
+});
+
+test("receipt survives cleanup failure and replay retries cleanup without a second effect", async () => {
+  const fake = harness();
+  let cleanupCalls = 0;
+  const run = createEvryArtifactLifecycle({
+    ...fake.boundaries,
+    cleanupPlanResources: async () => ({
+      failed: cleanupCalls++ === 0 ? 1 : 0,
+    }),
+  });
+
+  await assert.rejects(
+    run(request("execute")),
+    /terminal resource cleanup remains incomplete/
+  );
+  assert.equal(fake.calls.filter((call) => call === "execute").length, 1);
+  assert.equal(
+    fake
+      .conversation()
+      .messages.flatMap(({ artifacts }) => artifacts)
+      .some(({ document }) => document.kind === "result"),
+    true
+  );
+
+  const replay = await run(request("execute"));
+  assert.equal(replay.status, "already_finished");
+  assert.equal(fake.calls.filter((call) => call === "execute").length, 1);
+  assert.equal(cleanupCalls, 2);
 });
 
 test("cancel and edit durably cancel the exact plan and clear conversation authority", async () => {
@@ -361,6 +433,52 @@ test("cancel and edit durably cancel the exact plan and clear conversation autho
       action === "edit" ? /fresh plan/ : /cancelled/
     );
   }
+});
+
+test("terminal lifecycle states clean exact plan resources while safe retry preserves them", async () => {
+  for (const action of ["cancel", "edit", "execute"] as const) {
+    const fake = harness();
+    const cleaned: unknown[] = [];
+    const result = await createEvryArtifactLifecycle({
+      ...fake.boundaries,
+      cleanupPlanResources: async (input) => void cleaned.push(input),
+    })(request(action));
+    assert.equal(
+      result.status,
+      action === "cancel"
+        ? "cancelled"
+        : action === "edit"
+          ? "editing"
+          : "executed"
+    );
+    assert.deepEqual(cleaned, [
+      {
+        actor: ACTOR,
+        plan: EVRY_CONFIRMATION_FIXTURES.meeting.plan,
+      },
+    ]);
+  }
+
+  const fake = harness();
+  fake.setExecuteResult({
+    status: "retryable",
+    correlationId: "a0000000-0000-4000-8000-000000000003",
+    steps: EVRY_CONFIRMATION_FIXTURES.meeting.steps.map((step) => ({
+      stepId: step.stepId,
+      capabilityIdentity: "fixture.effect",
+      status: "retryable",
+      durable: false,
+      affectedCount: 0,
+      excludedCount: 0,
+    })),
+  });
+  let cleanupCalls = 0;
+  const retryable = await createEvryArtifactLifecycle({
+    ...fake.boundaries,
+    cleanupPlanResources: async () => void cleanupCalls++,
+  })(request("execute"));
+  assert.equal(retryable.status, "retryable");
+  assert.equal(cleanupCalls, 0);
 });
 
 test("a mismatched conversation plan reaches no plan or persistence boundary", async () => {
@@ -407,6 +525,7 @@ test("complete trusted matching rejects destructive downgrades and added disclos
   assert.equal(
     confirmationMatchesTrustedPlan(downgraded, {
       confirmation: destructive,
+      source: { kind: "generic" },
     }),
     false
   );
@@ -423,7 +542,10 @@ test("complete trusted matching rejects destructive downgrades and added disclos
     })),
   });
   assert.equal(
-    confirmationMatchesTrustedPlan(expanded, { confirmation: destructive }),
+    confirmationMatchesTrustedPlan(expanded, {
+      confirmation: destructive,
+      source: { kind: "generic" },
+    }),
     false
   );
 });

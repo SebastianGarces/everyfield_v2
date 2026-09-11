@@ -463,7 +463,13 @@ export async function createPerson(
     householdRole: data.householdRole,
   };
 
-  const [person] = await db.insert(persons).values(values).returning();
+  const [, inserted] = await db.batch([
+    db.execute(
+      sql`select id from churches where id = ${churchId}::uuid for update`
+    ),
+    db.insert(persons).values(values).returning(),
+  ]);
+  const [person] = inserted;
 
   await emitPersonCreated(person);
 
@@ -527,17 +533,23 @@ export async function updatePerson(
   if (data.householdRole !== undefined)
     updateData.householdRole = data.householdRole;
 
-  const [updated] = await db
-    .update(persons)
-    .set(updateData)
-    .where(
-      and(
-        eq(persons.churchId, churchId),
-        eq(persons.id, personId),
-        isNull(persons.deletedAt)
+  const [, updatedRows] = await db.batch([
+    db.execute(
+      sql`select id from churches where id = ${churchId}::uuid for update`
+    ),
+    db
+      .update(persons)
+      .set(updateData)
+      .where(
+        and(
+          eq(persons.churchId, churchId),
+          eq(persons.id, personId),
+          isNull(persons.deletedAt)
+        )
       )
-    )
-    .returning();
+      .returning(),
+  ]);
+  const [updated] = updatedRows;
 
   if (!updated) {
     throw new Error("Failed to update person");
@@ -560,16 +572,21 @@ export async function deletePerson(
     throw new Error("Person not found");
   }
 
-  await db
-    .update(persons)
-    .set({ deletedAt: new Date(), updatedAt: new Date() })
-    .where(
-      and(
-        eq(persons.churchId, churchId),
-        eq(persons.id, personId),
-        isNull(persons.deletedAt)
-      )
-    );
+  await db.batch([
+    db.execute(
+      sql`select id from churches where id = ${churchId}::uuid for update`
+    ),
+    db
+      .update(persons)
+      .set({ deletedAt: new Date(), updatedAt: new Date() })
+      .where(
+        and(
+          eq(persons.churchId, churchId),
+          eq(persons.id, personId),
+          isNull(persons.deletedAt)
+        )
+      ),
+  ]);
 }
 
 /**
@@ -591,11 +608,17 @@ export async function restorePerson(
     throw new Error("Person is not deleted");
   }
 
-  const [restored] = await db
-    .update(persons)
-    .set({ deletedAt: null, updatedAt: new Date() })
-    .where(and(eq(persons.churchId, churchId), eq(persons.id, personId)))
-    .returning();
+  const [, restoredRows] = await db.batch([
+    db.execute(
+      sql`select id from churches where id = ${churchId}::uuid for update`
+    ),
+    db
+      .update(persons)
+      .set({ deletedAt: null, updatedAt: new Date() })
+      .where(and(eq(persons.churchId, churchId), eq(persons.id, personId)))
+      .returning(),
+  ]);
+  const [restored] = restoredRows;
 
   if (!restored) {
     throw new Error("Failed to restore person");

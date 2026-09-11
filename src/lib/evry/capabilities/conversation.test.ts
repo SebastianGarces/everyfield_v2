@@ -154,7 +154,50 @@ test("composition evaluates every pure matcher then shared code appends one resu
     replayReference: null,
     activePlan: { mode: "preserve" },
     createdAt: new Date("2026-08-29T12:00:00.000Z"),
+    knownConversation: conversation(),
   });
+});
+
+test("a new request takes precedence over a pending clarification, including before reference resolution", async () => {
+  const calls: string[] = [];
+  const continuation = composeEvryCapabilityConversationContinuations([
+    {
+      ...registration({ identity: "meeting", match: false, calls }),
+      referencePolicy: "self_contained",
+      matchesFollowUp: () => true,
+    },
+    registration({
+      identity: "tasks",
+      match: true,
+      calls,
+      result: { body: "Your tasks", artifacts: [clarification] },
+    }),
+  ]);
+  const input = selectionInput({ appendCalls: [] });
+  assert.equal(continuation.matchesBeforeReferences(input), false);
+  await continuation(input);
+  assert.ok(calls.includes("continue:tasks"));
+  assert.ok(!calls.includes("continue:meeting"));
+});
+
+test("a focused clarification reply still resumes when no new request matches", async () => {
+  const calls: string[] = [];
+  const continuation = composeEvryCapabilityConversationContinuations([
+    {
+      ...registration({
+        identity: "meeting",
+        match: false,
+        calls,
+        result: { body: "Review meeting", artifacts: [clarification] },
+      }),
+      referencePolicy: "self_contained",
+      matchesFollowUp: () => true,
+    },
+  ]);
+  const input = selectionInput({ appendCalls: [] });
+  assert.equal(continuation.matchesBeforeReferences(input), true);
+  await continuation(input);
+  assert.ok(calls.includes("continue:meeting"));
 });
 
 test("ambiguous packs fail before any continuation or append can mutate", async () => {
@@ -192,7 +235,7 @@ test("a durable request result is recovered before match or append work", async 
 test("interrupted, empty, and corrupt deterministic rows do not count as durable results", () => {
   const malformed = [
     durableResultMessage({ deliveryStatus: "interrupted" }),
-    durableResultMessage({ artifacts: [] }),
+    durableResultMessage({ body: "", artifacts: [] }),
     durableResultMessage({
       artifacts: [
         {
@@ -214,6 +257,42 @@ test("interrupted, empty, and corrupt deterministic rows do not count as durable
       false
     );
   }
+});
+
+test("plain replies preserve a pending plan and replay without duplication", async () => {
+  const appendCalls: unknown[] = [];
+  const dispatcher = composeEvryCapabilityConversationContinuations([
+    {
+      identity: "plain-reply-test",
+      referencePolicy: "self_contained",
+      matches: () => true,
+      continue: async () => ({
+        body: "I can help you find people who need follow-up.",
+        artifacts: [],
+      }),
+    },
+  ]);
+  const input = selectionInput({ appendCalls });
+  Object.assign(input, { literalUserText: "What can you do for me?" });
+  assert.equal(dispatcher.matchesBeforeReferences(input), true);
+  await dispatcher(input);
+  assert.equal(appendCalls.length, 1);
+  const result = appendCalls[0] as {
+    body: string;
+    artifacts: unknown[];
+    activePlan: unknown;
+  };
+  assert.match(result.body, /find people who need follow-up/);
+  assert.deepEqual(result.artifacts, []);
+  assert.deepEqual(result.activePlan, { mode: "preserve" });
+  const current = conversation([
+    durableResultMessage({ body: result.body, artifacts: [] }),
+  ]);
+  assert.equal(
+    await dispatcher(selectionInput({ current, appendCalls })),
+    current
+  );
+  assert.equal(appendCalls.length, 1);
 });
 
 test("an active plan is one-to-one with one exact trusted confirmation", async () => {

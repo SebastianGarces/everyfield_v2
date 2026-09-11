@@ -1,11 +1,11 @@
 "use client";
 
 import { Fragment, useEffect, useState, type JSX } from "react";
-import Link from "next/link";
 import { jsx, jsxs } from "react/jsx-runtime";
 import remarkGfm from "remark-gfm";
 import { X, ExternalLink, Clock, FileText, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { AuthenticatedLink } from "@/components/authenticated-navigation";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Callout } from "@/components/wiki/callout";
 import { WIKI_GUIDE_TRIGGER_ID } from "./wiki-guide-button";
@@ -243,9 +243,12 @@ export function WikiGuidePanel() {
                 asChild
                 className="cursor-pointer"
               >
-                <Link href={wikiHref(activeSlug)} title="Open in Wiki">
+                <AuthenticatedLink
+                  href={wikiHref(activeSlug)}
+                  title="Open in Wiki"
+                >
                   <ExternalLink className="size-3.5" />
-                </Link>
+                </AuthenticatedLink>
               </Button>
             )}
             <Button
@@ -310,13 +313,13 @@ export function WikiGuidePanel() {
 
                 {/* Footer link */}
                 <div className="mt-8 border-t pt-4 pb-2">
-                  <Link
+                  <AuthenticatedLink
                     href={wikiHref(article.slug)}
                     className="text-primary inline-flex cursor-pointer items-center gap-1.5 text-xs hover:underline"
                   >
                     <ExternalLink className="size-3" />
                     Read full article in Wiki
-                  </Link>
+                  </AuthenticatedLink>
                 </div>
               </>
             )}

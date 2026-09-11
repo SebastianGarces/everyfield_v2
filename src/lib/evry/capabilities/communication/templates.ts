@@ -38,6 +38,7 @@ import {
   getEvryCommunicationTemplateFork,
   getEvryCommunicationTemplateSnapshot,
 } from "@/lib/communication/evry-template-effect";
+import { findExactEvryDatabaseEffectClaim } from "@/lib/evry/executor/database-effect";
 import { communicationEvryEffectUuid } from "@/lib/communication/evry-effect";
 import { storedTemplateContent } from "@/lib/communication/templates";
 
@@ -268,6 +269,7 @@ function exactExecutionTuple(input: EvryEffectInput, identity: string) {
 export const COMMUNICATION_TEMPLATE_CREATE_EXECUTION =
   defineEvryExecutionCapability({
     planCapability: COMMUNICATION_TEMPLATE_CREATE_PLAN,
+    reconcileClaimed: findExactEvryDatabaseEffectClaim,
     async executeIfCurrent(input) {
       const parsed = createArgumentsSchema.safeParse(input.arguments);
       if (
@@ -292,6 +294,7 @@ export const COMMUNICATION_TEMPLATE_CREATE_EXECUTION =
 export const COMMUNICATION_TEMPLATE_UPDATE_EXECUTION =
   defineEvryExecutionCapability({
     planCapability: COMMUNICATION_TEMPLATE_UPDATE_PLAN,
+    reconcileClaimed: findExactEvryDatabaseEffectClaim,
     async executeIfCurrent(input) {
       const parsed = updateArgumentsSchema.safeParse(input.arguments);
       if (
@@ -326,6 +329,7 @@ export const COMMUNICATION_TEMPLATE_UPDATE_EXECUTION =
 export const COMMUNICATION_TEMPLATE_DELETE_EXECUTION =
   defineEvryExecutionCapability({
     planCapability: COMMUNICATION_TEMPLATE_DELETE_PLAN,
+    reconcileClaimed: findExactEvryDatabaseEffectClaim,
     async executeIfCurrent(input) {
       const parsed = deleteArgumentsSchema.safeParse(input.arguments);
       if (
@@ -351,6 +355,7 @@ export const COMMUNICATION_TEMPLATE_DELETE_EXECUTION =
 export const COMMUNICATION_TEMPLATE_FORK_EXECUTION =
   defineEvryExecutionCapability({
     planCapability: COMMUNICATION_TEMPLATE_FORK_PLAN,
+    reconcileClaimed: findExactEvryDatabaseEffectClaim,
     async executeIfCurrent(input) {
       const parsed = forkArgumentsSchema.safeParse(input.arguments);
       if (

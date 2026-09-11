@@ -6,6 +6,7 @@ import { test } from "node:test";
 
 import {
   SEAT_GUARD,
+  SESSION_READS,
   SRC,
   TS_FILES,
   UNAUTHORIZED_RETHROW,
@@ -20,6 +21,7 @@ import {
   mintingNames,
   parsingServerActionExports,
   reachingNames,
+  reachingNamesAnalysis,
   resolveModule,
   rel,
   staticValueSpecifiers,
@@ -571,7 +573,7 @@ test("a module's own mint helper counts as the mint", () => {
   assert.ok(act.body.search(pattern) < act.body.indexOf(".safeParse("));
 });
 
-test("a cycle-cut result is not cached as a complete import subgraph", () => {
+test("a cyclic graph is solved once per symbol without changing its exports", () => {
   const fixture = mkdtempSync(path.join(tmpdir(), "evry-auth-reachability-"));
   const session = path.join(fixture, "session.ts");
   const a = path.join(fixture, "a.ts");
@@ -596,7 +598,19 @@ test("a cycle-cut result is not cached as a complete import subgraph", () => {
       'import { fromA } from "./a";\nexport function endpoint() { fromA(); }\n'
     );
 
+    // The explicit exclusion seam still asks about the deliberately cut graph.
     assert.deepEqual([...mintingExportsOf(a, new Set([b]))], []);
+
+    const analysis = reachingNamesAnalysis(root, codeOf(root), SESSION_READS);
+    assert.deepEqual(
+      [...analysis.names],
+      ["verifySession", "getCurrentSession", "fromA", "endpoint"]
+    );
+    assert.deepEqual(analysis.stats, {
+      moduleCount: 4,
+      edgeCount: 8,
+      visitedNameCount: 14,
+    });
     assert.deepEqual([...mintingExportsOf(root, new Set())], ["endpoint"]);
   } finally {
     rmSync(fixture, { recursive: true, force: true });

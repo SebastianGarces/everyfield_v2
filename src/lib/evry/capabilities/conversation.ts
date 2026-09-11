@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 
 import { z } from "zod";
+import type { EvryResponsePreview } from "./response-parts";
+import { validEvryResponseLayout } from "@/lib/evry/conversations/response-layout";
 
 import {
   parseEvryConversationArtifactDocument,
@@ -38,6 +40,7 @@ export type EvryCapabilityConversationSelectionInput = Readonly<{
   pageContext: EvryResolvedPageContext | null;
   requestPageContext: EvryPageContext | null;
   now: Date;
+  reportResponse?: (response: EvryResponsePreview) => void | Promise<void>;
 }>;
 
 export type EvryCapabilityConversationResultIdentity = Readonly<{
@@ -62,11 +65,28 @@ export type EvryCapabilityConversationResult = Readonly<{
  */
 export type EvryCapabilityConversationContinuation = Readonly<{
   identity: string;
+  /** A self-contained request must reach this pack before pronoun resolution. */
+  referencePolicy?: "self_contained";
   matches(input: EvryCapabilityConversationSelectionInput): boolean;
+  /** A focused answer to a previous question, considered only after new requests. */
+  matchesFollowUp?(input: EvryCapabilityConversationSelectionInput): boolean;
   continue(
     input: EvryCapabilityConversationSelectionInput
   ): Promise<EvryCapabilityConversationResult | null>;
 }>;
+
+export type EvryCapabilityConversationRunner = (
+  input: EvryCapabilityConversationSelectionInput &
+    Readonly<{ store: EvryCapabilityConversationStore }>
+) => Promise<EvryStoredConversation | null>;
+
+export type EvryCapabilityConversationDispatcher =
+  EvryCapabilityConversationRunner &
+    Readonly<{
+      matchesBeforeReferences(
+        input: EvryCapabilityConversationSelectionInput
+      ): boolean;
+    }>;
 
 export class EvryCapabilityConversationAmbiguityError extends Error {
   constructor(identities: readonly string[]) {
@@ -143,7 +163,7 @@ const activePlanMutationSchema = z.discriminatedUnion("mode", [
 ]);
 const resultSchema = z.strictObject({
   body: z.string().trim().min(1).max(EVRY_CONVERSATION_MAX_MESSAGE_CHARACTERS),
-  artifacts: z.array(z.unknown()).min(1).max(16),
+  artifacts: z.array(z.unknown()).max(16),
   activePlan: activePlanMutationSchema.optional(),
 });
 
@@ -154,6 +174,8 @@ function parseCapabilityResult(
   const artifacts = Object.freeze(
     parsed.artifacts.map(parseEvryConversationArtifactDocument)
   );
+  if (!validEvryResponseLayout(parsed.body, artifacts))
+    throw new Error("Invalid response component placement");
   const confirmationPlans = artifacts.flatMap((artifact) =>
     artifact.kind === "confirmation" ? [artifact.plan] : []
   );
@@ -185,7 +207,6 @@ function isCompleteCapabilityResultMessage(
     message.deliveryStatus !== "complete" ||
     message.body.trim().length === 0 ||
     message.body.length > EVRY_CONVERSATION_MAX_MESSAGE_CHARACTERS ||
-    message.artifacts.length < 1 ||
     message.artifacts.length > 16
   ) {
     return false;
@@ -200,7 +221,7 @@ function isCompleteCapabilityResultMessage(
   });
 }
 
-async function appendResult(input: {
+export async function appendEvryCapabilityConversationResult(input: {
   selection: EvryCapabilityConversationSelectionInput;
   store: EvryCapabilityConversationStore;
   identity: EvryCapabilityConversationResultIdentity;
@@ -226,16 +247,14 @@ async function appendResult(input: {
     replayReference: null,
     activePlan: result.activePlan ?? { mode: "preserve" },
     createdAt: input.selection.now,
+    knownConversation: input.selection.conversation,
   });
 }
 
 /** Recover a request's durable result, then select exactly one closed pack. */
 export function composeEvryCapabilityConversationContinuations(
   continuations: readonly EvryCapabilityConversationContinuation[]
-): (
-  input: EvryCapabilityConversationSelectionInput &
-    Readonly<{ store: EvryCapabilityConversationStore }>
-) => Promise<EvryStoredConversation | null> {
+): EvryCapabilityConversationDispatcher {
   const identities = continuations.map(({ identity }) => identity);
   if (
     identities.some((identity) => identity.trim().length === 0) ||
@@ -244,37 +263,61 @@ export function composeEvryCapabilityConversationContinuations(
     throw new Error("Evry capability continuation identities must be unique");
   }
 
-  return async function continueEvryCapabilityConversation(input) {
-    if (
-      hasDurableEvryCapabilityConversationResult({
-        conversation: input.conversation,
-        userRequestKey: input.userRequestKey,
-      })
-    ) {
-      return input.conversation;
-    }
-
-    const selectionInput: EvryCapabilityConversationSelectionInput = input;
-    const matches = continuations.filter((continuation) =>
-      continuation.matches(selectionInput)
+  function select(
+    input: EvryCapabilityConversationSelectionInput,
+    candidates = continuations
+  ) {
+    const directMatches = candidates.filter((continuation) =>
+      continuation.matches(input)
     );
+    const matches = directMatches.length
+      ? directMatches
+      : candidates.filter((continuation) =>
+          continuation.matchesFollowUp?.(input)
+        );
     if (matches.length > 1) {
       throw new EvryCapabilityConversationAmbiguityError(
         matches.map(({ identity }) => identity)
       );
     }
-    const selected = matches[0];
-    if (!selected) return null;
-    const result = await selected.continue(selectionInput);
-    if (!result) return null;
-    return appendResult({
-      selection: selectionInput,
-      store: input.store,
-      identity: evryCapabilityConversationResultIdentity({
-        conversationId: input.conversation.id,
-        userRequestKey: input.userRequestKey,
-      }),
-      result,
-    });
-  };
+    return matches[0] ?? null;
+  }
+
+  const dispatch: EvryCapabilityConversationRunner =
+    async function continueEvryCapabilityConversation(input) {
+      if (
+        hasDurableEvryCapabilityConversationResult({
+          conversation: input.conversation,
+          userRequestKey: input.userRequestKey,
+        })
+      ) {
+        return input.conversation;
+      }
+
+      const selectionInput: EvryCapabilityConversationSelectionInput = input;
+      const selected = select(selectionInput);
+      if (!selected) return null;
+      const result = await selected.continue(selectionInput);
+      if (!result) return null;
+      return appendEvryCapabilityConversationResult({
+        selection: selectionInput,
+        store: input.store,
+        identity: evryCapabilityConversationResultIdentity({
+          conversationId: input.conversation.id,
+          userRequestKey: input.userRequestKey,
+        }),
+        result,
+      });
+    };
+  return Object.assign(dispatch, {
+    matchesBeforeReferences(input: EvryCapabilityConversationSelectionInput) {
+      if (
+        !continuations.some(
+          ({ referencePolicy }) => referencePolicy === "self_contained"
+        )
+      )
+        return false;
+      return select(input)?.referencePolicy === "self_contained";
+    },
+  });
 }

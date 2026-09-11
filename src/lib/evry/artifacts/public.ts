@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { EvryHydratedConversationArtifact } from "@/lib/evry/conversations/artifacts";
 import {
   EVRY_CONVERSATION_DURABLE_RESULT_CODES,
+  EVRY_READ_ITEM_MAX_FACTS,
   evryConversationPlanIdentitySchema,
   storedEvryArtifactFactSchema,
 } from "@/lib/evry/conversations/contract";
@@ -17,9 +18,11 @@ import {
 const titleSchema = z.string().trim().min(1).max(200);
 const labelSchema = z.string().trim().min(1).max(160);
 
-const publicReadArtifactSchema = z
+export const publicReadArtifactSchema = z
   .strictObject({
     kind: z.literal("read"),
+    resultMode: z.enum(["list", "count", "group"]).optional(),
+    textOffset: z.number().int().min(0).max(8000).optional(),
     title: titleSchema,
     filters: z
       .array(
@@ -51,7 +54,9 @@ const publicReadArtifactSchema = z
           .strictObject({
             id: z.string().min(1).max(160),
             label: labelSchema,
-            facts: z.array(storedEvryArtifactFactSchema).max(12),
+            facts: z
+              .array(storedEvryArtifactFactSchema)
+              .max(EVRY_READ_ITEM_MAX_FACTS),
             sourceLink: evryReviewSourceLinkSchema,
           })
           .readonly()
@@ -67,7 +72,10 @@ const publicReadArtifactSchema = z
     if (
       artifact.counts.returned !== artifact.items.length ||
       artifact.counts.excluded !== excluded ||
-      artifact.counts.matched !== artifact.items.length + excluded
+      (artifact.resultMode === undefined
+        ? artifact.counts.matched !== artifact.items.length + excluded
+        : artifact.resultMode !== "count" &&
+          artifact.counts.matched < artifact.items.length)
     ) {
       context.addIssue({
         code: "custom",
@@ -217,6 +225,9 @@ export function publicEvryArtifact(
         ...artifact,
         items: artifact.items.map((item) => ({
           ...item,
+          facts: item.facts
+            .filter((fact) => !fact.modelOnly)
+            .map(({ label, value }) => ({ label, value })),
           sourceLink: publicLink(item.sourceLink),
         })),
         sourceLinks: artifact.sourceLinks.map(publicLink),

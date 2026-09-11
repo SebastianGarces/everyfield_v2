@@ -173,7 +173,7 @@ export async function completeEvryActiveRun(input: {
     .set({
       status: "completed",
       conversationId: sql`case
-        when ${evryActiveRuns.operation} = 'create'
+        when ${evryActiveRuns.operation} in ('create', 'reuse')
           then coalesce(${evryActiveRuns.conversationId}, ${input.conversationId})
         else ${evryActiveRuns.conversationId}
       end`,
@@ -192,6 +192,7 @@ export async function completeEvryActiveRun(input: {
           : [eq(evryActiveRuns.version, input.expectedVersion)]),
         or(
           eq(evryActiveRuns.operation, "create"),
+          eq(evryActiveRuns.operation, "reuse"),
           eq(evryActiveRuns.conversationId, input.conversationId)
         )
       )
@@ -216,7 +217,7 @@ export async function failEvryActiveRun(input: {
         ? {}
         : {
             conversationId: sql`case
-              when ${evryActiveRuns.operation} = 'create'
+              when ${evryActiveRuns.operation} in ('create', 'reuse')
                 then coalesce(${evryActiveRuns.conversationId}, ${input.conversationId})
               else ${evryActiveRuns.conversationId}
             end`,

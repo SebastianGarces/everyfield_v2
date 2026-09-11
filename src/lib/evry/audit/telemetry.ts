@@ -13,15 +13,21 @@ import type { EvryCorrelationId } from "./identity";
 
 export type EvryRedactedTelemetryRecord = Readonly<{
   correlationId: string;
-  recordKind: "audit_event" | "execution_attempt" | "execution_outcome";
+  recordKind:
+    | "audit_event"
+    | "execution_attempt"
+    | "effect_claim"
+    | "execution_outcome";
   eventName:
     | (typeof evryAuditEventTypes)[number]
     | "attempt_started"
+    | "domain_mutation_claimed"
     | (typeof evryExecutionOutcomeSubjects)[number];
   capabilityIdentity: string | null;
   status:
     | (typeof evryExecutionOutcomeStatuses)[number]
     | (typeof evryRequestAuditResultCodes)[number]
+    | "reconciling"
     | null;
   resultCode:
     | (typeof evryExecutionResultCodes)[number]

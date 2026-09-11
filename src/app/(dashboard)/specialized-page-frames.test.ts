@@ -148,7 +148,7 @@ const SPECIALIZED_ROUTE_FAMILIES: readonly SpecializedRouteFamily[] = [
   {
     routes: ["/evry"],
     owner: "src/components/evry/evry-workspace.tsx",
-    composition: "attached-workspace",
+    composition: "context-free-workspace",
     markers: [/PageCanvas/, /WorkspacePanel/, /ConversationSurface/],
   },
 ];

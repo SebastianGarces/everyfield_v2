@@ -275,11 +275,12 @@ test(
       plantId: plant.id,
     });
     assert.ok(stored);
-    assert.equal(stored.messages.length, 5);
+    assert.equal(stored.messages.length, 7);
     assert.equal(stored.messages[0]?.body, LITERAL);
     assert.equal(stored.messages[1]?.artifacts.length, 1);
-    assert.equal(stored.messages[1]?.artifacts[0]?.kind, "clarification");
-    assert.equal(stored.messages[3]?.artifacts[0]?.kind, "confirmation");
+    assert.equal(stored.messages[1]?.artifacts[0]?.kind, "boundary");
+    assert.equal(stored.messages[2]?.artifacts[0]?.kind, "clarification");
+    assert.equal(stored.messages[4]?.artifacts[0]?.kind, "confirmation");
     assert.equal(
       stored.state.explicitChoices[0]?.selectedEntityId,
       secondPerson.id
@@ -294,7 +295,7 @@ test(
       .where(eq(evryConversationStates.conversationId, conversationId));
     assert.match(
       runWorker("retry", resumeEnvironment),
-      /Evry changed-state replay proof passed/
+      /Evry changed-state replay recovery proof passed/
     );
     const afterChangedReplay = await findEvryConversationRecord({
       conversationId,
@@ -302,7 +303,7 @@ test(
       plantId: plant.id,
     });
     assert.ok(afterChangedReplay);
-    assert.equal(afterChangedReplay.messages.length, 5);
+    assert.equal(afterChangedReplay.messages.length, 7);
     await db
       .update(evryConversationStates)
       .set({ document: stored.state })
@@ -489,7 +490,7 @@ test(
         messages: Number(counts.messages),
         artifacts: Number(counts.artifacts),
       },
-      { messages: 6, artifacts: 2 }
+      { messages: 8, artifacts: 4 }
     );
   }
 );

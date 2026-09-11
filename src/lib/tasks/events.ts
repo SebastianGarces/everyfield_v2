@@ -10,11 +10,16 @@ import {
 import { and, eq, inArray, isNull, ne } from "drizzle-orm";
 import { eventBus } from "@/lib/events/event-bus";
 import type { FinalizedAttendee } from "@/lib/meetings/events";
-import { churchHasNoPlanter } from "@/lib/onboarding/leadership";
+import { meetingFinalizationTaskAssigneeId } from "@/lib/meetings/finalization";
 
 import { addCalendarDays } from "@/lib/datetime";
 
 import { syncTaskNotificationsFor } from "./notifications";
+import { exactTaskAssigneeJoin, TASK_ASSIGNEE_ERROR } from "./assignees";
+import {
+  insertExactTenantTasks,
+  type ExactTenantTaskInsertOptions,
+} from "./write-boundary";
 
 // ============================================================================
 // Event Types
@@ -34,6 +39,8 @@ export interface TaskCompletedEvent {
   relatedId: string | null;
   completedById: string;
   timestamp: Date;
+  /** Stable approved effect identity when completion came through Evry. */
+  occurrenceKey?: string;
 }
 
 // ============================================================================
@@ -49,18 +56,24 @@ export async function emitTaskCompleted(
   category: string | null,
   relatedType: string | null,
   relatedId: string | null,
-  completedById: string
+  completedById: string,
+  timestamp: Date = new Date(),
+  occurrenceKey?: string
 ): Promise<void> {
-  await eventBus.emit<TaskCompletedEvent>({
-    type: "task.completed",
-    taskId,
-    churchId,
-    category,
-    relatedType,
-    relatedId,
-    completedById,
-    timestamp: new Date(),
-  });
+  await eventBus.emit<TaskCompletedEvent>(
+    {
+      type: "task.completed",
+      taskId,
+      churchId,
+      category,
+      relatedType,
+      relatedId,
+      completedById,
+      timestamp,
+      ...(occurrenceKey ? { occurrenceKey } : {}),
+    },
+    { strict: occurrenceKey !== undefined }
+  );
 }
 
 // ============================================================================
@@ -250,7 +263,8 @@ export async function handleMeetingAttendanceFinalized(
   meetingId: string,
   meetingType: string,
   churchId: string,
-  attendees: FinalizedAttendee[]
+  attendees: FinalizedAttendee[],
+  options: Pick<ExactTenantTaskInsertOptions, "beforeInsert"> = {}
 ): Promise<void> {
   // Only create follow-up tasks for vision meetings
   if (meetingType !== "vision_meeting") {
@@ -304,17 +318,16 @@ export async function handleMeetingAttendanceFinalized(
     .limit(1);
 
   // 2. Otherwise: infer the planter from the OWNER seat, as before.
-  const planter = churchHasNoPlanter({
-    leadershipStatus: church?.leadershipStatus,
-  })
-    ? []
-    : await db
-        .select({ id: users.id })
-        .from(users)
-        .where(and(eq(users.churchId, churchId), eq(users.seat, "owner")))
-        .limit(1);
-
-  const planterId = planter[0]?.id;
+  const planter = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(and(exactTaskAssigneeJoin(churchId), eq(users.seat, "owner")))
+    .limit(1);
+  const planterId = meetingFinalizationTaskAssigneeId({
+    meetingType,
+    leadershipStatus: church?.leadershipStatus ?? null,
+    ownerId: planter[0]?.id ?? null,
+  });
   if (!planterId) {
     // Deliberately NOT an error: with no planter there is nobody to assign the
     // tasks to, and that is a stable data condition rather than a transient
@@ -449,11 +462,13 @@ export async function handleMeetingAttendanceFinalized(
   // so it covers both indexes rather than one named arbiter. `returning()`
   // yields only the rows that LANDED, which is what the notification sync
   // below needs.
-  const created = await db
-    .insert(tasks)
-    .values(tasksToCreate)
-    .onConflictDoNothing()
-    .returning({ id: tasks.id });
+  const write = await insertExactTenantTasks(tasksToCreate, {
+    ...options,
+    authorityUserId: planterId,
+    onConflictDoNothing: true,
+  });
+  if (!write.authorized) throw new Error(TASK_ASSIGNEE_ERROR);
+  const created = write.inserted;
 
   // T-018. Every generated row carries an assignee (the planter) and a due
   // date, so every one owes a due and an overdue notification — and a

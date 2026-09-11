@@ -2,10 +2,10 @@
 
 import { MessageSquare } from "lucide-react";
 
-import Link from "next/link";
 import { usePathname } from "next/navigation";
 import * as React from "react";
 
+import { AuthenticatedLink } from "@/components/authenticated-navigation";
 import { NavMain } from "@/components/nav-main";
 import { SidebarIdentity } from "@/components/nav-user";
 import {
@@ -135,10 +135,13 @@ function AssignedPlantsGroup({
                   tooltip={item.title}
                   isActive={item.href === coachingActive}
                 >
-                  <Link href={item.href ?? "#"} className="cursor-pointer">
+                  <AuthenticatedLink
+                    href={item.href ?? "#"}
+                    className="cursor-pointer"
+                  >
                     {item.icon && <item.icon />}
                     <span>{item.title}</span>
-                  </Link>
+                  </AuthenticatedLink>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             ))}
@@ -191,10 +194,13 @@ export function AppSidebar({
                   tooltip="Feedback"
                   isActive={adminActive}
                 >
-                  <Link href="/admin/feedback" className="cursor-pointer">
+                  <AuthenticatedLink
+                    href="/admin/feedback"
+                    className="cursor-pointer"
+                  >
                     <MessageSquare />
                     <span>Feedback</span>
-                  </Link>
+                  </AuthenticatedLink>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>

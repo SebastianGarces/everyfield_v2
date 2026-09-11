@@ -63,13 +63,16 @@ test("the plant's launch row is LOCKED before anything is written", () => {
   );
 });
 
-test("the first schedule cannot double-insert: the unique index is the guard", () => {
+test("the first schedule cannot double-insert on either church or reviewed id", () => {
   // `FOR UPDATE` locks nothing when the row does not exist, so two concurrent
   // FIRST schedules both see an empty `current`. `on conflict do nothing` is
   // what makes one of them lose — and lose completely, journal included.
-  const sql = sqlFor();
+  const sql = sqlFor({
+    launchId: "33333333-3333-4333-8333-333333333333",
+  });
   assert.match(sql, /where not exists \(select 1 from current\)/);
-  assert.match(sql, /on conflict \(church_id\) do nothing/);
+  assert.match(sql, /on conflict do nothing/);
+  assert.doesNotMatch(sql, /on conflict \(church_id\)/);
 });
 
 test("re-saving the same date writes nothing — the compare-and-set is in the WHERE", () => {

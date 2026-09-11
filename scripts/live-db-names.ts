@@ -20,13 +20,13 @@
 // commit (PR #586).
 //
 // THE LIST IS DATA, NOT A COMMAND LINE. `LIVE_SUITES` below is the one place
-// the membership lives, and every consumer imports it: the runner that spawns
-// node:test, the preload that repoints each child, the preparer that creates
-// the databases, and the coverage test that holds it to the files which
-// actually opt into `LIVE_DB_TESTS`. It used to live inside the `test:live`
-// string in package.json and be recovered from there by regex — which meant an
-// invariant about fourteen databases rested on string-matching a shell command,
-// and consumers could disagree about membership without anything noticing.
+// the membership lives. The runner consumes phases derived from it, the preload
+// repoints each child, the preparer creates the databases, and the coverage test
+// holds it to the files which actually opt into `LIVE_DB_TESTS`. It used to live
+// inside the `test:live` string in package.json and be recovered from there by
+// regex — which meant an invariant about fourteen databases rested on
+// string-matching a shell command, and consumers could disagree about
+// membership without anything noticing.
 //
 // WHY DATABASES AND NOT SCHEMAS. The ruling on #594 offered schema-per-suite
 // with `search_path` as the lighter option. It is not reachable through this
@@ -52,7 +52,31 @@ import { fileURLToPath } from "node:url";
  * `src/db/live-suite-coverage.test.ts` fails the build on any that opts in and
  * is missing, so this list cannot quietly go short.
  */
+export const PEOPLE_EFFECT_LIVE_SUITE =
+  "src/lib/people/evry-effect-live.test.ts" as const;
+export const DOCUMENTS_WIKI_EFFECT_LIVE_SUITE =
+  "src/lib/evry/capabilities/documents-wiki/effect-live.test.ts" as const;
+
+export const TASK_EFFECT_LIVE_SUITE =
+  "src/lib/evry/capabilities/tasks/effect-live.test.ts" as const;
+
+export const NESTED_PROOF_LIVE_SUITES = [
+  "src/lib/evry/capabilities/platform/effect-live.test.ts",
+  "src/lib/evry/capabilities/plant-intelligence/effect-live.test.ts",
+  DOCUMENTS_WIKI_EFFECT_LIVE_SUITE,
+  PEOPLE_EFFECT_LIVE_SUITE,
+  "src/lib/communication/evry-effect-live.test.ts",
+  "src/lib/evry/conversations/conversations-live.test.ts",
+  "src/lib/evry/capabilities/meetings/effect-live.test.ts",
+  "src/lib/evry/capabilities/meetings/read-live.test.ts",
+  TASK_EFFECT_LIVE_SUITE,
+  "src/lib/evry/capabilities/teams/effect-live.test.ts",
+  "src/lib/evry/executor/executor-live.test.ts",
+  "src/lib/evry/capabilities/launch/effect-live.test.ts",
+  "src/lib/evry/recipes/recipe-live.test.ts",
+] as const;
 export const LIVE_SUITES = [
+  "src/lib/evry/capabilities/tasks/query-filters.test.ts",
   "src/db/seat-owner-uniqueness.test.ts",
   "src/lib/auth/access.test.ts",
   "src/lib/auth/email-change-live.test.ts",
@@ -61,7 +85,13 @@ export const LIVE_SUITES = [
   "src/lib/evry/plans/confirmation-race.test.ts",
   "src/lib/evry/audit/audit-live.test.ts",
   "src/lib/evry/conversations/conversations-live.test.ts",
+  "src/lib/evry/capabilities/meetings/effect-live.test.ts",
+  "src/lib/evry/capabilities/meetings/read-live.test.ts",
+  TASK_EFFECT_LIVE_SUITE,
+  "src/lib/evry/capabilities/teams/effect-live.test.ts",
   "src/lib/evry/executor/executor-live.test.ts",
+  "src/lib/evry/capabilities/launch/effect-live.test.ts",
+  "src/lib/evry/capabilities/platform/effect-live.test.ts",
   "src/lib/evry/recipes/recipe-live.test.ts",
   "src/lib/evry/runs/runs-live.test.ts",
   "src/lib/ministry-teams/leader-sync-live.test.ts",
@@ -72,10 +102,35 @@ export const LIVE_SUITES = [
   "src/lib/invitations/seat-invitations-live.test.ts",
   "src/lib/launch/readiness-converge-live.test.ts",
   "src/lib/people/person-link-live.test.ts",
+  "src/lib/people/duplicate-match-live.test.ts",
+  PEOPLE_EFFECT_LIVE_SUITE,
+  DOCUMENTS_WIKI_EFFECT_LIVE_SUITE,
+  "src/lib/evry/capabilities/plant-intelligence/effect-live.test.ts",
   "src/lib/phase-engine/transitions/declaration-race.test.ts",
   "src/lib/seats/seat-removal-live.test.ts",
   "src/lib/tasks/follow-up-race.test.ts",
   "src/lib/tasks/subtask-parent-fk.test.ts",
+] as const;
+
+/**
+ * These wrappers each synchronously own a second proof process. Running the
+ * wrappers together multiplies the hosted runner's process count and makes
+ * their bounded deadlock timeouts measure sibling contention instead of the
+ * proof they guard. Give every nested proof its own phase; ordinary suites
+ * still share the final parallel phase.
+ */
+export const DEDICATED_LIVE_SUITES = NESTED_PROOF_LIVE_SUITES;
+
+const dedicatedLiveSuites = new Set<string>(DEDICATED_LIVE_SUITES);
+
+export const PARALLEL_LIVE_SUITES = LIVE_SUITES.filter(
+  (suite) => !dedicatedLiveSuites.has(suite)
+);
+
+/** Ordered, fail-fast phases: each monolithic proof runs without a sibling. */
+export const LIVE_SUITE_PHASES = [
+  ...DEDICATED_LIVE_SUITES.map((suite) => [suite] as const),
+  PARALLEL_LIVE_SUITES,
 ] as const;
 
 /**

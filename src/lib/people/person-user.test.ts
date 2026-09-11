@@ -42,6 +42,8 @@ test("the join matches on address and scopes the user to the church", () => {
 
   assert.match(sql, /lower\("users"\."email"\) = lower\("persons"\."email"\)/);
   assert.match(sql, /"users"\."church_id" = \$\d/);
+  assert.match(sql, /"users"\."sending_church_id" is null/);
+  assert.match(sql, /"users"\."sending_network_id" is null/);
   assert.equal(
     params.filter((value) => value === CHURCH).length,
     2,

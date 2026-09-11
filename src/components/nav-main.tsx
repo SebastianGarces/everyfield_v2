@@ -1,9 +1,9 @@
 "use client";
 
 import { ChevronRight, Rocket } from "lucide-react";
-import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+import { AuthenticatedLink } from "@/components/authenticated-navigation";
 import {
   Collapsible,
   CollapsibleContent,
@@ -97,7 +97,7 @@ export function NavMain({
                               subItem.href === activeHref
                             }
                           >
-                            <Link
+                            <AuthenticatedLink
                               href={subItem.href || "#"}
                               aria-disabled={subItem.isDisabled}
                               className={
@@ -107,7 +107,7 @@ export function NavMain({
                               }
                             >
                               <span>{subItem.title}</span>
-                            </Link>
+                            </AuthenticatedLink>
                           </SidebarMenuSubButton>
                         </SidebarMenuSubItem>
                       ))}
@@ -150,19 +150,19 @@ export function NavMain({
                         {item.title} and all other planting tools.
                       </p>
                       <div className="flex items-center gap-3 text-xs">
-                        <Link
+                        <AuthenticatedLink
                           href="/dashboard"
                           className="text-primary cursor-pointer font-medium hover:underline"
                         >
                           Go to Dashboard
-                        </Link>
+                        </AuthenticatedLink>
                         <span className="text-muted-foreground">·</span>
-                        <Link
+                        <AuthenticatedLink
                           href="/wiki"
                           className="text-muted-foreground cursor-pointer hover:underline"
                         >
                           Explore the Wiki
-                        </Link>
+                        </AuthenticatedLink>
                       </div>
                     </div>
                   </HoverCardContent>
@@ -180,7 +180,7 @@ export function NavMain({
                 isActive={isActive}
                 disabled={item.isDisabled}
               >
-                <Link
+                <AuthenticatedLink
                   href={item.href || "#"}
                   aria-disabled={item.isDisabled}
                   className={
@@ -194,7 +194,7 @@ export function NavMain({
                       COMING SOON
                     </span>
                   )}
-                </Link>
+                </AuthenticatedLink>
               </SidebarMenuButton>
             </SidebarMenuItem>
           );

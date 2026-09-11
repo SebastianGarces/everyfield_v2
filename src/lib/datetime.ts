@@ -195,6 +195,13 @@ function zonedDateTimeFormatter(timeZone: string) {
   });
 }
 
+function timeZoneNameFormatter(timeZone: string) {
+  return formatter(`timeZoneName:short:${timeZone}`, {
+    timeZone,
+    timeZoneName: "short",
+  });
+}
+
 function tileFormatter(timeZone: string) {
   return formatter(`tile:${timeZone}`, {
     timeZone,
@@ -270,6 +277,18 @@ export function formatDateTimeWithZone(
   timeZone: string = APP_TIME_ZONE
 ): string {
   return zonedDateTimeFormatter(timeZone).format(date);
+}
+
+/** `"EDT"` in summer and `"EST"` in winter for America/New_York. */
+export function formatTimeZoneName(
+  date: Date,
+  timeZone: string = APP_TIME_ZONE
+): string {
+  return (
+    timeZoneNameFormatter(timeZone)
+      .formatToParts(date)
+      .find(({ type }) => type === "timeZoneName")?.value ?? timeZone
+  );
 }
 
 /**

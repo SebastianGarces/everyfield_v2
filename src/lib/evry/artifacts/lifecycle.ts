@@ -79,6 +79,9 @@ type AppendMessage = typeof appendTrustedEvryConversationMessage;
 
 export type EvryTrustedPlanReview = Readonly<{
   confirmation: EvryDetailedConfirmationArtifactDocument;
+  source:
+    | Readonly<{ kind: "generic" }>
+    | Readonly<{ kind: "recipe"; identity: string }>;
 }>;
 
 export type EvryArtifactLifecycleBoundaries = Readonly<{
@@ -95,6 +98,11 @@ export type EvryArtifactLifecycleBoundaries = Readonly<{
     plan: EvryConversationPlanIdentity;
     registry: EvryPlanCapabilityRegistry;
   }): Promise<EvryTrustedPlanReview | null>;
+  reusableRecipeIdentities?: ReadonlySet<string>;
+  cleanupPlanResources?(input: {
+    actor: EvryPlantActor;
+    plan: EvryConversationPlanIdentity;
+  }): Promise<void | Readonly<{ failed: number }>>;
   now(): Date;
   correlationId?(): string;
 }>;
@@ -116,6 +124,17 @@ export type EvryArtifactLifecycleResult =
 
 const UNAVAILABLE_MESSAGE =
   "This plan is no longer available. Review the conversation before trying another change.";
+
+async function cleanupPlanResources(
+  boundaries: EvryArtifactLifecycleBoundaries,
+  actor: EvryPlantActor,
+  plan: EvryConversationPlanIdentity
+) {
+  if (!boundaries.cleanupPlanResources) return;
+  const result = await boundaries.cleanupPlanResources({ actor, plan });
+  if (result && result.failed > 0)
+    throw new Error("Evry terminal resource cleanup remains incomplete");
+}
 
 function samePlan(
   left: EvryConversationPlanIdentity | null,
@@ -283,6 +302,7 @@ function publicStepError(status: "failed" | "refused") {
 export function receiptFromEvryExecution(input: {
   confirmation: EvryDetailedConfirmationArtifactDocument;
   result: ExecuteEvryActionPlanResult;
+  reuse?: EvryDetailedReceiptArtifactDocument["reuse"];
 }): EvryDetailedReceiptArtifactDocument {
   if (
     input.result.status === "retryable" ||
@@ -371,6 +391,7 @@ export function receiptFromEvryExecution(input: {
     plan: input.confirmation.plan,
     title: `Receipt: ${input.confirmation.title}`,
     status: receiptStatus(steps),
+    ...(input.reuse ? { reuse: input.reuse } : {}),
     steps,
   });
 }
@@ -544,6 +565,17 @@ export function createEvryArtifactLifecycle(
       input.request.requestKey,
       completionPurpose
     );
+    const receipt = detailedReceiptFor(
+      resumed.conversation,
+      input.request.plan
+    );
+    if (receipt) {
+      // The receipt is durable before external-object cleanup. A response loss
+      // or cleanup failure re-enters here, retries cleanup idempotently, and
+      // never starts the completed effects again.
+      await cleanupPlanResources(boundaries, input.actor, input.request.plan);
+      return { status: "already_finished", resumed };
+    }
     if (hasRequestKey(resumed.conversation.messages, completionKey)) {
       return {
         status:
@@ -556,25 +588,21 @@ export function createEvryArtifactLifecycle(
       };
     }
 
-    const receipt = detailedReceiptFor(
-      resumed.conversation,
-      input.request.plan
-    );
-    if (receipt) return { status: "already_finished", resumed };
-
     const confirmation = detailedConfirmationFor(
       resumed.conversation,
       input.request.plan
     );
     const revalidated = resumed.activePlan;
-    if (
-      !confirmation ||
-      !samePlan(resumed.conversation.activePlan, input.request.plan) ||
-      !revalidated ||
-      !samePlan(revalidated.identity, input.request.plan) ||
-      revalidated.status === "stale" ||
-      revalidated.status === "expired"
-    ) {
+    const ownsRequestedPlan =
+      confirmation !== null &&
+      samePlan(resumed.conversation.activePlan, input.request.plan) &&
+      revalidated !== null &&
+      samePlan(revalidated.identity, input.request.plan);
+    if (!ownsRequestedPlan) {
+      return { status: "unavailable", message: UNAVAILABLE_MESSAGE };
+    }
+    if (revalidated.status === "stale" || revalidated.status === "expired") {
+      await cleanupPlanResources(boundaries, input.actor, input.request.plan);
       return { status: "unavailable", message: UNAVAILABLE_MESSAGE };
     }
 
@@ -595,6 +623,7 @@ export function createEvryArtifactLifecycle(
       if (!cancelled) {
         return { status: "unavailable", message: UNAVAILABLE_MESSAGE };
       }
+      await cleanupPlanResources(boundaries, input.actor, input.request.plan);
       const edited = input.request.action === "edit";
       await appendLifecycleMessage({
         boundaries,
@@ -682,6 +711,11 @@ export function createEvryArtifactLifecycle(
           confirmed.status !== "approved" &&
           confirmed.status !== "already_approved"
         ) {
+          await cleanupPlanResources(
+            boundaries,
+            input.actor,
+            input.request.plan
+          );
           return { status: "unavailable", message: UNAVAILABLE_MESSAGE };
         }
       }
@@ -804,6 +838,15 @@ export function createEvryArtifactLifecycle(
     const executionReceipt = receiptFromEvryExecution({
       confirmation,
       result: execution,
+      reuse:
+        execution.status === "completed" &&
+        trustedReview.source.kind === "recipe" &&
+        boundaries.reusableRecipeIdentities?.has(trustedReview.source.identity)
+          ? {
+              recipeIdentity: trustedReview.source.identity,
+              label: "Reuse",
+            }
+          : undefined,
     });
     await appendLifecycleMessage({
       boundaries,
@@ -819,6 +862,7 @@ export function createEvryArtifactLifecycle(
       clearPlan: true,
       now,
     });
+    await cleanupPlanResources(boundaries, input.actor, input.request.plan);
     resumed = await resumeRequired({
       boundaries,
       actor: input.actor,

@@ -23,11 +23,14 @@ import {
   isNull,
   lte,
   ne,
+  not,
+  notExists,
   or,
   sql,
   type SQL,
 } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
+import { z } from "zod";
 // Task descriptions are rich text (T-021), sharing COM-017's editor and its
 // sanitiser. `descriptions.ts` owns both halves of that — the write gate and
 // the list surfaces' readable preview — and its header states the rules.
@@ -44,16 +47,27 @@ import { emitTaskCompleted } from "./events";
 // question is asked. Each call swallows its own failures, so a notification can
 // never fail the write it follows.
 import {
-  cancelTaskNotifications,
   cancelTaskNotificationsFor,
   syncTaskNotifications,
   syncTaskNotificationsFor,
   taskNotificationsDiffer,
+  type TaskNotificationFacts,
 } from "./notifications";
 import { toCalendarDate } from "@/lib/datetime";
 import { blockedTaskIdsAmong } from "./dependencies";
 import { assertMayOwnFollowUp } from "./follow-up-ownership";
+import {
+  assertExactTaskAssignee,
+  exactTaskAssigneeJoin,
+  taskAssigneeIsAvailable,
+  TASK_ASSIGNEE_ERROR,
+} from "./assignees";
 import { mayActOnTaskRow } from "./own-duty";
+import { taskStructureLockStatement } from "./structure-lock";
+import {
+  insertExactTenantTasks,
+  type ExactTenantTaskInsertOptions,
+} from "./write-boundary";
 import {
   nextRecurrenceDueDate,
   parseRecurrenceRule,
@@ -89,6 +103,8 @@ export interface ListTasksOptions {
   sortBy?: TaskSortBy;
   sortDir?: "asc" | "desc";
 }
+
+const TASK_LIST_CURSOR_SCHEMA = z.string().uuid();
 
 /** The orders `/tasks` can be read in. */
 export type TaskSortBy =
@@ -174,6 +190,8 @@ export type TaskListRow = WithDescriptionPreview<TaskWithAssignee> & {
 /** `ListTasksResult` over the row type above. */
 export interface TaskListResult extends Omit<ListTasksResult, "tasks"> {
   tasks: TaskListRow[];
+  /** False when the requested cursor is not a row in this exact result set. */
+  cursorAvailable: boolean;
 }
 
 // ============================================================================
@@ -205,7 +223,10 @@ const taskWithAssigneeColumns = {
   priority: tasks.priority,
   dueDate: tasks.dueDate,
   dueTime: tasks.dueTime,
-  assignedToId: tasks.assignedToId,
+  // A malformed/foreign assignee is absent everywhere outside the owning
+  // table. In particular, own-duty checks must never see the raw FK and mistake
+  // it for the current viewer merely because the UUIDs match.
+  assignedToId: users.id,
   category: tasks.category,
   relatedType: tasks.relatedType,
   relatedId: tasks.relatedId,
@@ -223,6 +244,30 @@ const taskWithAssigneeColumns = {
   assigneeEmail: users.email,
 } satisfies Record<keyof TaskWithAssignee, unknown>;
 
+/** Used only to classify a failed atomic write without exposing the raw FK. */
+async function taskHasUnavailableAssignee(
+  churchId: string,
+  taskId: string
+): Promise<boolean> {
+  const [row] = await db
+    .select({ assignedToId: tasks.assignedToId, exactAssigneeId: users.id })
+    .from(tasks)
+    .leftJoin(
+      users,
+      and(eq(tasks.assignedToId, users.id), exactTaskAssigneeJoin(churchId))
+    )
+    .where(
+      and(
+        eq(tasks.churchId, churchId),
+        eq(tasks.id, taskId),
+        isNull(tasks.deletedAt)
+      )
+    )
+    .limit(1);
+
+  return Boolean(row?.assignedToId && !row.exactAssigneeId);
+}
+
 /**
  * Get a single task by ID with assignee info.
  * Returns null if not found or soft-deleted.
@@ -238,7 +283,10 @@ export async function getTask(
   const result = await db
     .select(taskWithAssigneeColumns)
     .from(tasks)
-    .leftJoin(users, eq(tasks.assignedToId, users.id))
+    .leftJoin(
+      users,
+      and(eq(tasks.assignedToId, users.id), exactTaskAssigneeJoin(churchId))
+    )
     .where(
       and(
         eq(tasks.churchId, churchId),
@@ -397,17 +445,19 @@ export async function listTasks(
 ): Promise<TaskListResult> {
   const { cursor, limit = 50, sortBy = "due_date", sortDir = "asc" } = options;
 
+  // UUID-typed Postgres parameters reject malformed strings. This untrusted
+  // value comes from both the page URL and the load-more action, so refuse it
+  // before the first query and keep the result distinguishable from page one.
+  if (
+    cursor !== undefined &&
+    !TASK_LIST_CURSOR_SCHEMA.safeParse(cursor).success
+  ) {
+    return { tasks: [], total: 0, nextCursor: null, cursorAvailable: false };
+  }
+
   const safeLimit = Math.min(Math.max(1, limit), 100);
 
   const baseConditions = taskListConditions(churchId, options);
-
-  // Get total count
-  const [countResult] = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(tasks)
-    .where(and(...baseConditions));
-
-  const total = countResult?.count ?? 0;
 
   // THE SORT KEY AND THE CURSOR ARE THE SAME EXPRESSION, from one entry in
   // TASK_SORT_KEYS. The id is the tie-break, in the SAME direction as the key,
@@ -416,30 +466,45 @@ export async function listTasks(
   const orderFn = sortDir === "desc" ? desc : asc;
 
   // Cursor-based pagination. The cursor is a task id; its position is the
-  // (key, id) pair, looked up church-scoped so a cursor cannot be aimed across
-  // tenants.
+  // (key, id) pair. The lookup uses the list's EXACT predicates: a foreign,
+  // missing, completed-hidden, or otherwise filtered-out row is not a position
+  // in this result set and must not silently restart it from page one.
   const queryConditions = [...baseConditions];
   if (cursor) {
     const cursorTask = await db
       .select({ sortValue: sortKey.sql })
       .from(tasks)
-      .where(and(eq(tasks.id, cursor), eq(tasks.churchId, churchId)))
+      .where(and(eq(tasks.id, cursor), ...baseConditions))
       .limit(1);
 
-    if (cursorTask[0]) {
-      queryConditions.push(
-        sortDir === "desc"
-          ? sql`(${sortKey.sql}, ${tasks.id}) < (${cursorTask[0].sortValue}, ${cursor})`
-          : sql`(${sortKey.sql}, ${tasks.id}) > (${cursorTask[0].sortValue}, ${cursor})`
-      );
+    if (!cursorTask[0]) {
+      return { tasks: [], total: 0, nextCursor: null, cursorAvailable: false };
     }
+    queryConditions.push(
+      sortDir === "desc"
+        ? sql`(${sortKey.sql}, ${tasks.id}) < (${cursorTask[0].sortValue}, ${cursor})`
+        : sql`(${sortKey.sql}, ${tasks.id}) > (${cursorTask[0].sortValue}, ${cursor})`
+    );
   }
+
+  // Count only after a supplied cursor proves it belongs to this exact result
+  // set. An unavailable cursor returns one neutral shape without doing a
+  // broader census first.
+  const [countResult] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(tasks)
+    .where(and(...baseConditions));
+
+  const total = countResult?.count ?? 0;
 
   // Fetch tasks with assignee info
   const result = await db
     .select(taskWithAssigneeColumns)
     .from(tasks)
-    .leftJoin(users, eq(tasks.assignedToId, users.id))
+    .leftJoin(
+      users,
+      and(eq(tasks.assignedToId, users.id), exactTaskAssigneeJoin(churchId))
+    )
     .where(and(...queryConditions))
     .orderBy(orderFn(sortKey.sql), orderFn(tasks.id))
     .limit(safeLimit + 1);
@@ -464,6 +529,7 @@ export async function listTasks(
     })),
     total,
     nextCursor,
+    cursorAvailable: true,
   };
 }
 
@@ -723,7 +789,10 @@ export async function listSubtasks(
   const result = await db
     .select(taskWithAssigneeColumns)
     .from(tasks)
-    .leftJoin(users, eq(tasks.assignedToId, users.id))
+    .leftJoin(
+      users,
+      and(eq(tasks.assignedToId, users.id), exactTaskAssigneeJoin(churchId))
+    )
     .where(
       and(
         eq(tasks.churchId, churchId),
@@ -787,7 +856,8 @@ export async function createTask(
   churchId: string,
   userId: string,
   data: TaskCreateInput,
-  recurrence?: TaskRecurrencePatch
+  recurrence?: TaskRecurrencePatch,
+  options: Pick<ExactTenantTaskInsertOptions, "beforeInsert"> = {}
 ): Promise<Task> {
   const parentTaskId = data.parentTaskId || null;
 
@@ -804,6 +874,7 @@ export async function createTask(
   // #470 D2 — only a committed member owns a follow-up. Checked on the RESOLVED
   // assignee, so a subtask inheriting its parent's owner is checked too, and
   // before the insert, so a refusal is a refusal rather than a row to undo.
+  await assertExactTaskAssignee(churchId, assignedToId);
   await assertMayOwnFollowUp(churchId, data.category, assignedToId);
 
   const values: NewTask = applyRecurrence(
@@ -828,7 +899,13 @@ export async function createTask(
     recurrence
   );
 
-  const [task] = await db.insert(tasks).values(values).returning();
+  const write = await insertExactTenantTasks([values], {
+    ...options,
+    authorityUserId: userId,
+  });
+  if (!write.authorized) throw new Error(TASK_ASSIGNEE_ERROR);
+  const [task] = write.inserted;
+  if (!task) throw new Error("Task insert did not land");
 
   // The row exists before anything is announced about it (T-018). A task with
   // no assignee or no due date enqueues nothing — the plan says so, not this
@@ -865,10 +942,13 @@ export async function updateTask(
   // (#470 D2). Both halves can arrive alone: assigning an ineligible member to
   // a follow-up, and re-categorising an already-assigned task INTO follow-up,
   // are the same violation and an undefined field means "keep what is stored".
+  const resultingAssigneeId =
+    data.assignedToId !== undefined ? data.assignedToId : existing.assignedToId;
+  await assertExactTaskAssignee(churchId, resultingAssigneeId);
   await assertMayOwnFollowUp(
     churchId,
     data.category !== undefined ? data.category : existing.category,
-    data.assignedToId !== undefined ? data.assignedToId : existing.assignedToId
+    resultingAssigneeId
   );
 
   // Editing the schedule of an instance that is already mid-chain must not
@@ -913,20 +993,32 @@ export async function updateTask(
   if (data.parentTaskId !== undefined)
     updateData.parentTaskId = data.parentTaskId ?? null;
 
-  const [updated] = await db
-    .update(tasks)
-    .set(updateData)
-    .where(
-      and(
-        eq(tasks.churchId, churchId),
-        eq(tasks.id, taskId),
-        isNull(tasks.deletedAt)
+  const [, [updated]] = await db.batch([
+    taskStructureLockStatement(churchId),
+    db
+      .update(tasks)
+      .set(updateData)
+      .where(
+        and(
+          eq(tasks.churchId, churchId),
+          eq(tasks.id, taskId),
+          isNull(tasks.deletedAt),
+          taskAssigneeIsAvailable(churchId, tasks.assignedToId),
+          // Protect the RESULTING assignment too. The earlier assertion gives
+          // callers a useful refusal; this correlated condition closes the
+          // window where that user changes tenancy before the UPDATE lands.
+          taskAssigneeIsAvailable(churchId, sql`${resultingAssigneeId}::uuid`)
+        )
       )
-    )
-    .returning();
+      .returning(),
+  ]);
 
   if (!updated) {
-    throw new Error("Failed to update task");
+    throw new Error(
+      (await taskHasUnavailableAssignee(churchId, taskId))
+        ? TASK_ASSIGNEE_ERROR
+        : "Failed to update task"
+    );
   }
 
   // An edit may have moved the due date, changed the assignee, or closed the
@@ -1018,13 +1110,25 @@ export function planRecurrenceChildren(
 export interface RecurrenceDeps {
   /** Ids of open instances already in this series. */
   findOpenInSeries(churchId: string, seriesId: string): Promise<string[]>;
-  insertSuccessor(values: NewTask): Promise<Task | null>;
+  insertSuccessor(
+    values: NewTask,
+    options: Pick<
+      ExactTenantTaskInsertOptions,
+      "authorityUserId" | "beforeInsert"
+    >
+  ): Promise<Task | null>;
   /** The completed instance's checklist, in checklist order. */
   listChildren(
     churchId: string,
     parentTaskId: string
   ): Promise<RecurrenceChild[]>;
-  insertChildren(values: NewTask[]): Promise<void>;
+  insertChildren(
+    values: NewTask[],
+    options: Pick<
+      ExactTenantTaskInsertOptions,
+      "authorityUserId" | "beforeInsert"
+    >
+  ): Promise<void>;
 }
 
 export const defaultRecurrenceDeps: RecurrenceDeps = {
@@ -1046,9 +1150,13 @@ export const defaultRecurrenceDeps: RecurrenceDeps = {
     return open.map((row) => row.id);
   },
 
-  async insertSuccessor(values) {
-    const [next] = await db.insert(tasks).values(values).returning();
-    return next ?? null;
+  async insertSuccessor(values, options) {
+    await assertExactTaskAssignee(values.churchId, values.assignedToId);
+    const write = await insertExactTenantTasks([values], options);
+    if (!write.authorized) throw new Error(TASK_ASSIGNEE_ERROR);
+    const [next] = write.inserted;
+    if (!next) throw new Error("Recurring task insert did not land");
+    return next;
   },
 
   async listChildren(churchId, parentTaskId) {
@@ -1074,9 +1182,22 @@ export const defaultRecurrenceDeps: RecurrenceDeps = {
       .orderBy(asc(tasks.createdAt), asc(tasks.id));
   },
 
-  async insertChildren(values) {
+  async insertChildren(values, options) {
     if (values.length === 0) return;
-    await db.insert(tasks).values(values);
+    for (const assigneeId of new Set(
+      values
+        .map(({ assignedToId }) => assignedToId)
+        .filter((id): id is string => typeof id === "string")
+    )) {
+      await assertExactTaskAssignee(values[0]!.churchId, assigneeId);
+    }
+    const write = await insertExactTenantTasks(values, options);
+    if (!write.authorized) {
+      throw new Error(TASK_ASSIGNEE_ERROR);
+    }
+    if (write.inserted.length !== values.length) {
+      throw new Error("Recurring checklist insert did not land every row");
+    }
   },
 };
 
@@ -1103,7 +1224,12 @@ export const defaultRecurrenceDeps: RecurrenceDeps = {
 export async function createNextRecurrence(
   completed: Task,
   completedOn: string,
-  deps: RecurrenceDeps = defaultRecurrenceDeps
+  deps: RecurrenceDeps = defaultRecurrenceDeps,
+  options: {
+    /** Test seams: production never supplies these. */
+    beforeSuccessorInsert?: () => Promise<void>;
+    beforeChildrenInsert?: () => Promise<void>;
+  } = {}
 ): Promise<Task | null> {
   if (!completed.isRecurring) return null;
 
@@ -1120,6 +1246,7 @@ export async function createNextRecurrence(
   if (!nextDueDate) return null;
 
   const seriesId = seriesIdOf(completed);
+  const authorityUserId = completed.completedById ?? completed.createdById;
 
   // ONE open instance at a time. The chain shape already guarantees this (an
   // instance is minted only by completing its predecessor), so this is the
@@ -1128,26 +1255,29 @@ export async function createNextRecurrence(
   const open = await deps.findOpenInSeries(completed.churchId, seriesId);
   if (open.length > 0) return null;
 
-  const next = await deps.insertSuccessor({
-    churchId: completed.churchId,
-    title: completed.title,
-    description: completed.description,
-    status: "not_started",
-    // Carried forward so the next occurrence is the same piece of work:
-    // whoever owns it, how urgent it is, what it is about, and what it hangs
-    // off. Only the schedule moves.
-    priority: completed.priority,
-    dueDate: nextDueDate,
-    dueTime: completed.dueTime,
-    assignedToId: completed.assignedToId,
-    category: completed.category,
-    relatedType: completed.relatedType,
-    relatedId: completed.relatedId,
-    parentTaskId: completed.parentTaskId,
-    isRecurring: true,
-    recurrenceRule: { ...rule, seriesId },
-    createdById: completed.createdById,
-  });
+  const next = await deps.insertSuccessor(
+    {
+      churchId: completed.churchId,
+      title: completed.title,
+      description: completed.description,
+      status: "not_started",
+      // Carried forward so the next occurrence is the same piece of work:
+      // whoever owns it, how urgent it is, what it is about, and what it hangs
+      // off. Only the schedule moves.
+      priority: completed.priority,
+      dueDate: nextDueDate,
+      dueTime: completed.dueTime,
+      assignedToId: completed.assignedToId,
+      category: completed.category,
+      relatedType: completed.relatedType,
+      relatedId: completed.relatedId,
+      parentTaskId: completed.parentTaskId,
+      isRecurring: true,
+      recurrenceRule: { ...rule, seriesId },
+      createdById: completed.createdById,
+    },
+    { authorityUserId, beforeInsert: options.beforeSuccessorInsert }
+  );
 
   if (!next) return null;
 
@@ -1159,7 +1289,8 @@ export async function createNextRecurrence(
     const children = await deps.listChildren(completed.churchId, completed.id);
     if (children.length > 0) {
       await deps.insertChildren(
-        planRecurrenceChildren(children, next, new Date())
+        planRecurrenceChildren(children, next, new Date()),
+        { authorityUserId, beforeInsert: options.beforeChildrenInsert }
       );
     }
   } catch (error) {
@@ -1245,6 +1376,486 @@ export function assertMayActOnTask(
   if (!mayActOnTask(actor, task)) throw new SeatRefusalError("tasks.own");
 }
 
+export function completeTaskStatement(input: {
+  churchId: string;
+  taskId: string;
+  actorUserId: string;
+  completedAt: Date;
+  expectedTitle?: string;
+  expectedStatus?: TaskStatus;
+  expectedAssignedToId?: string | null;
+  expectedIsRecurring?: boolean;
+  expectedDescription?: string | null;
+  expectedPriority?: TaskPriority;
+  expectedDueDate?: string | null;
+  expectedDueTime?: string | null;
+  expectedCategory?: TaskCategory | null;
+  expectedRelatedType?: string | null;
+  expectedRelatedId?: string | null;
+  expectedParentTaskId?: string | null;
+  expectedRecurrenceRule?: unknown;
+  expectedCompletionEvent?: string | null;
+  expectedCreatedById?: string;
+  expectedUpdatedAt?: Date;
+  launchMilestoneId?: string;
+  /** Trusted outer write gate used by the Evry exact-effect transaction. */
+  writeEligibility?: SQL;
+}): SQL {
+  return sql`
+    update tasks t
+    set status = 'complete', completed_at = ${input.completedAt},
+        completed_by_id = ${input.actorUserId}::uuid,
+        updated_at = ${input.completedAt}
+    where t.church_id = ${input.churchId}::uuid
+      and t.id = ${input.taskId}::uuid
+      and t.deleted_at is null
+      and t.status <> 'complete'
+      ${input.expectedTitle ? sql`and t.title = ${input.expectedTitle}` : sql``}
+      ${
+        input.expectedDescription === undefined
+          ? sql``
+          : sql`and t.description is not distinct from ${input.expectedDescription}`
+      }
+      ${
+        input.expectedPriority
+          ? sql`and t.priority = ${input.expectedPriority}`
+          : sql``
+      }
+      ${input.expectedStatus ? sql`and t.status = ${input.expectedStatus}` : sql``}
+      ${
+        input.expectedAssignedToId === undefined
+          ? sql``
+          : input.expectedAssignedToId === null
+            ? sql`and t.assigned_to_id is null`
+            : sql`and t.assigned_to_id = ${input.expectedAssignedToId}::uuid`
+      }
+      ${
+        input.expectedIsRecurring === undefined
+          ? sql``
+          : sql`and t.is_recurring = ${input.expectedIsRecurring}`
+      }
+      ${
+        input.expectedDueDate === undefined
+          ? sql``
+          : sql`and t.due_date is not distinct from ${input.expectedDueDate}::date`
+      }
+      ${
+        input.expectedDueTime === undefined
+          ? sql``
+          : sql`and t.due_time is not distinct from ${input.expectedDueTime}::time`
+      }
+      ${
+        input.expectedCategory === undefined
+          ? sql``
+          : sql`and t.category is not distinct from ${input.expectedCategory}::varchar`
+      }
+      ${
+        input.expectedRelatedType === undefined
+          ? sql``
+          : sql`and t.related_type is not distinct from ${input.expectedRelatedType}::varchar`
+      }
+      ${
+        input.expectedRelatedId === undefined
+          ? sql``
+          : input.expectedRelatedId === null
+            ? sql`and t.related_id is null`
+            : sql`and t.related_id = ${input.expectedRelatedId}::uuid`
+      }
+      ${
+        input.expectedParentTaskId === undefined
+          ? sql``
+          : input.expectedParentTaskId === null
+            ? sql`and t.parent_task_id is null`
+            : sql`and t.parent_task_id = ${input.expectedParentTaskId}::uuid`
+      }
+      ${
+        input.expectedRecurrenceRule === undefined
+          ? sql``
+          : input.expectedRecurrenceRule === null
+            ? sql`and t.recurrence_rule is null`
+            : sql`and t.recurrence_rule is not distinct from ${JSON.stringify(input.expectedRecurrenceRule)}::jsonb`
+      }
+      ${
+        input.expectedCreatedById
+          ? sql`and t.created_by_id = ${input.expectedCreatedById}::uuid`
+          : sql``
+      }
+      ${
+        input.expectedCompletionEvent === undefined
+          ? sql``
+          : sql`and t.completion_event is not distinct from ${input.expectedCompletionEvent}`
+      }
+      and ${input.writeEligibility ?? sql`true`}
+      ${
+        input.expectedUpdatedAt
+          ? sql`and date_trunc('milliseconds', t.updated_at at time zone 'UTC') = ${input.expectedUpdatedAt}`
+          : sql``
+      }
+      ${
+        input.launchMilestoneId
+          ? sql`and exists (
+              select 1 from launch_milestone_tasks lmt
+              where lmt.task_id = t.id
+                and lmt.church_id = t.church_id
+                and lmt.milestone_id = ${input.launchMilestoneId}::uuid
+            )`
+          : sql``
+      }
+    returning t.id, 1::int affected_count, 0::int excluded_count
+  `;
+}
+
+export function reopenTaskStatement(input: {
+  churchId: string;
+  taskId: string;
+  expectedTitle?: string;
+  expectedStatus?: TaskStatus;
+  expectedAssignedToId?: string | null;
+  expectedIsRecurring?: boolean;
+  expectedDescription?: string | null;
+  expectedPriority?: TaskPriority;
+  expectedDueDate?: string | null;
+  expectedDueTime?: string | null;
+  expectedCategory?: TaskCategory | null;
+  expectedRelatedType?: string | null;
+  expectedRelatedId?: string | null;
+  expectedParentTaskId?: string | null;
+  expectedRecurrenceRule?: unknown;
+  expectedCompletionEvent?: string | null;
+  expectedCreatedById?: string;
+  expectedUpdatedAt?: Date;
+  launchMilestoneId?: string;
+  /** Trusted outer write gate used by the Evry exact-effect transaction. */
+  writeEligibility?: SQL;
+}): SQL {
+  return sql`
+    update tasks t
+    set status = 'not_started', completed_at = null,
+        completed_by_id = null, updated_at = transaction_timestamp()
+    where t.church_id = ${input.churchId}::uuid
+      and t.id = ${input.taskId}::uuid
+      and t.deleted_at is null
+      and t.status = 'complete'
+      ${input.expectedTitle ? sql`and t.title = ${input.expectedTitle}` : sql``}
+      ${
+        input.expectedDescription === undefined
+          ? sql``
+          : sql`and t.description is not distinct from ${input.expectedDescription}`
+      }
+      ${
+        input.expectedPriority
+          ? sql`and t.priority = ${input.expectedPriority}`
+          : sql``
+      }
+      ${input.expectedStatus ? sql`and t.status = ${input.expectedStatus}` : sql``}
+      ${
+        input.expectedAssignedToId === undefined
+          ? sql``
+          : input.expectedAssignedToId === null
+            ? sql`and t.assigned_to_id is null`
+            : sql`and t.assigned_to_id = ${input.expectedAssignedToId}::uuid`
+      }
+      ${
+        input.expectedIsRecurring === undefined
+          ? sql``
+          : sql`and t.is_recurring = ${input.expectedIsRecurring}`
+      }
+      ${
+        input.expectedDueDate === undefined
+          ? sql``
+          : sql`and t.due_date is not distinct from ${input.expectedDueDate}::date`
+      }
+      ${
+        input.expectedDueTime === undefined
+          ? sql``
+          : sql`and t.due_time is not distinct from ${input.expectedDueTime}::time`
+      }
+      ${
+        input.expectedCategory === undefined
+          ? sql``
+          : sql`and t.category is not distinct from ${input.expectedCategory}::varchar`
+      }
+      ${
+        input.expectedRelatedType === undefined
+          ? sql``
+          : sql`and t.related_type is not distinct from ${input.expectedRelatedType}::varchar`
+      }
+      ${
+        input.expectedRelatedId === undefined
+          ? sql``
+          : input.expectedRelatedId === null
+            ? sql`and t.related_id is null`
+            : sql`and t.related_id = ${input.expectedRelatedId}::uuid`
+      }
+      ${
+        input.expectedParentTaskId === undefined
+          ? sql``
+          : input.expectedParentTaskId === null
+            ? sql`and t.parent_task_id is null`
+            : sql`and t.parent_task_id = ${input.expectedParentTaskId}::uuid`
+      }
+      ${
+        input.expectedRecurrenceRule === undefined
+          ? sql``
+          : input.expectedRecurrenceRule === null
+            ? sql`and t.recurrence_rule is null`
+            : sql`and t.recurrence_rule is not distinct from ${JSON.stringify(input.expectedRecurrenceRule)}::jsonb`
+      }
+      ${
+        input.expectedCreatedById
+          ? sql`and t.created_by_id = ${input.expectedCreatedById}::uuid`
+          : sql``
+      }
+      ${
+        input.expectedCompletionEvent === undefined
+          ? sql``
+          : sql`and t.completion_event is not distinct from ${input.expectedCompletionEvent}`
+      }
+      and ${input.writeEligibility ?? sql`true`}
+      ${
+        input.expectedUpdatedAt
+          ? sql`and date_trunc('milliseconds', t.updated_at at time zone 'UTC') = ${input.expectedUpdatedAt}`
+          : sql``
+      }
+      ${
+        input.launchMilestoneId
+          ? sql`and exists (
+              select 1 from launch_milestone_tasks lmt
+              where lmt.task_id = t.id
+                and lmt.church_id = t.church_id
+                and lmt.milestone_id = ${input.launchMilestoneId}::uuid
+            )`
+          : sql``
+      }
+    returning t.id, 1::int affected_count, 0::int excluded_count
+  `;
+}
+
+/**
+ * Finish the owner-side work owed by a durable task completion.
+ *
+ * This is deliberately replay-safe: notification cancellation and completion
+ * event consumers converge on the task identity, while recurring successors
+ * are guarded by the series' single-open-instance invariant. Evry can therefore
+ * retry this after its task row and execution outcome committed together.
+ */
+async function reconcileTaskCompletionEffects(
+  completed: Pick<
+    Task,
+    "id" | "churchId" | "category" | "relatedType" | "relatedId"
+  >,
+  completedById: string,
+  completedAt?: Date,
+  occurrenceKey?: string
+): Promise<void> {
+  await emitTaskCompleted(
+    completed.id,
+    completed.churchId,
+    completed.category,
+    completed.relatedType,
+    completed.relatedId,
+    completedById,
+    completedAt,
+    occurrenceKey
+  );
+  // Reconcile from the live projection, not from the historical completion.
+  // A crash retry after a later reopen must restore the reopened task's rows,
+  // never cancel them using stale completion facts.
+  await syncTaskNotificationsFor(completed.churchId, [completed.id], {
+    mustCancel: true,
+    now: completedAt,
+    failureMode: occurrenceKey ? "required" : "best_effort",
+  });
+}
+
+/** Exact completion effects for a reviewed task that cannot recur. */
+export async function reconcileNonRecurringCompletedTaskAfterWrite(
+  completed: Pick<
+    Task,
+    "id" | "churchId" | "category" | "relatedType" | "relatedId" | "isRecurring"
+  >,
+  completedById: string,
+  completedAt?: Date
+): Promise<void> {
+  if (completed.isRecurring) {
+    throw new Error("Recurring task completion needs a successor-aware plan");
+  }
+  await reconcileTaskCompletionEffects(completed, completedById, completedAt);
+}
+
+export type ReviewedRecurringTaskRow = Pick<
+  Task,
+  | "id"
+  | "churchId"
+  | "title"
+  | "description"
+  | "status"
+  | "priority"
+  | "dueDate"
+  | "dueTime"
+  | "assignedToId"
+  | "category"
+  | "relatedType"
+  | "relatedId"
+  | "parentTaskId"
+  | "isRecurring"
+  | "recurrenceRule"
+  | "createdById"
+  | "createdAt"
+>;
+
+export type ReviewedTaskRecurrencePlan = Readonly<{
+  successor: ReviewedRecurringTaskRow;
+  children: readonly ReviewedRecurringTaskRow[];
+}>;
+
+function sameReviewedRecurringTask(
+  current: ReviewedRecurringTaskRow,
+  reviewed: ReviewedRecurringTaskRow
+): boolean {
+  return (
+    current.id === reviewed.id &&
+    current.churchId === reviewed.churchId &&
+    current.title === reviewed.title &&
+    current.description === reviewed.description &&
+    current.status === reviewed.status &&
+    current.priority === reviewed.priority &&
+    current.dueDate === reviewed.dueDate &&
+    current.dueTime === reviewed.dueTime &&
+    current.assignedToId === reviewed.assignedToId &&
+    current.category === reviewed.category &&
+    current.relatedType === reviewed.relatedType &&
+    current.relatedId === reviewed.relatedId &&
+    current.parentTaskId === reviewed.parentTaskId &&
+    current.isRecurring === reviewed.isRecurring &&
+    JSON.stringify(current.recurrenceRule) ===
+      JSON.stringify(reviewed.recurrenceRule) &&
+    current.createdById === reviewed.createdById &&
+    current.createdAt.getTime() === reviewed.createdAt.getTime()
+  );
+}
+
+async function reconcileReviewedRecurrence(
+  completed: Task,
+  reviewed: ReviewedTaskRecurrencePlan,
+  occurrenceKey?: string
+): Promise<Task> {
+  await db
+    .insert(tasks)
+    .values(reviewed.successor)
+    // The exact same reviewed successor races on both its primary key and the
+    // recurrence-series arbiter. PostgreSQL is free to report either unique
+    // index first, so targeting only the primary key makes an otherwise
+    // identical replay intermittently throw on the series index. Suppress any
+    // unique collision, then prove the stored row below is the exact reviewed
+    // successor; a different-series winner therefore still fails closed.
+    .onConflictDoNothing();
+
+  const [successor] = await db
+    .select()
+    .from(tasks)
+    .where(
+      and(
+        eq(tasks.id, reviewed.successor.id),
+        eq(tasks.churchId, completed.churchId),
+        isNull(tasks.deletedAt)
+      )
+    )
+    .limit(1);
+  if (!successor || !sameReviewedRecurringTask(successor, reviewed.successor)) {
+    throw new Error("Reviewed recurring successor no longer matches");
+  }
+
+  if (reviewed.children.length > 0) {
+    await db
+      .insert(tasks)
+      .values([...reviewed.children])
+      .onConflictDoNothing({ target: tasks.id });
+    const storedChildren = await db
+      .select()
+      .from(tasks)
+      .where(
+        and(
+          eq(tasks.churchId, completed.churchId),
+          inArray(
+            tasks.id,
+            reviewed.children.map(({ id }) => id)
+          ),
+          isNull(tasks.deletedAt)
+        )
+      );
+    const byId = new Map(storedChildren.map((row) => [row.id, row]));
+    if (
+      reviewed.children.some((child) => {
+        const stored = byId.get(child.id);
+        return !stored || !sameReviewedRecurringTask(stored, child);
+      })
+    ) {
+      throw new Error("Reviewed recurring checklist no longer matches");
+    }
+  }
+
+  await syncTaskNotifications(successor, {
+    mustCancel: false,
+    failureMode: occurrenceKey ? "required" : "best_effort",
+  });
+  return successor;
+}
+
+export async function reconcileCompletedTaskAfterWrite(
+  completed: Task,
+  completedById: string,
+  reviewedRecurrence?: ReviewedTaskRecurrencePlan | null,
+  reviewedCompletedAt?: Date,
+  occurrenceKey?: string
+): Promise<Task | null> {
+  await reconcileTaskCompletionEffects(
+    completed,
+    completedById,
+    reviewedCompletedAt,
+    occurrenceKey
+  );
+
+  if (reviewedRecurrence !== undefined) {
+    if (!completed.isRecurring) {
+      if (reviewedRecurrence !== null) {
+        throw new Error("A non-recurring task cannot have a successor plan");
+      }
+      return null;
+    }
+    return reviewedRecurrence
+      ? reconcileReviewedRecurrence(
+          completed,
+          reviewedRecurrence,
+          occurrenceKey
+        )
+      : null;
+  }
+
+  try {
+    return await createNextRecurrence(
+      completed,
+      toCalendarDate(completed.completedAt ?? new Date())
+    );
+  } catch (error) {
+    // The completion is already durable. A missing successor is repaired by
+    // replaying this reconciliation (or by reopening and completing again).
+    console.error(
+      `completeTask failed to create the next recurrence of ${completed.id}:`,
+      error
+    );
+    return null;
+  }
+}
+
+/** Re-enqueue the notifications owed by a durable reopen; safe on replay. */
+export async function reconcileReopenedTaskAfterWrite(
+  reopened: TaskNotificationFacts,
+  mustCancel: boolean
+): Promise<void> {
+  await syncTaskNotifications(reopened, { mustCancel });
+}
+
 export async function completeTask(
   churchId: string,
   taskId: string,
@@ -1281,6 +1892,7 @@ export async function completeTask(
         eq(tasks.churchId, churchId),
         eq(tasks.id, taskId),
         isNull(tasks.deletedAt),
+        taskAssigneeIsAvailable(churchId, tasks.assignedToId),
         ne(tasks.status, "complete")
       )
     )
@@ -1288,39 +1900,17 @@ export async function completeTask(
 
   if (!completed) {
     // The CAS lost: somebody else completed it between the read and the write.
-    throw new Error("Task is already complete");
+    throw new Error(
+      (await taskHasUnavailableAssignee(churchId, taskId))
+        ? TASK_ASSIGNEE_ERROR
+        : "Task is already complete"
+    );
   }
 
-  // The subject is resolved: nothing pending about this task may still be
-  // announced (N-011). By ENTITY REFERENCE, so it reaches every recipient's row
-  // and every condition at once — the assignee may have changed since.
-  await cancelTaskNotifications(churchId, completed.id);
-
-  // Emit task.completed event
-  await emitTaskCompleted(
-    completed.id,
-    completed.churchId,
-    completed.category,
-    completed.relatedType,
-    completed.relatedId,
+  const nextInstance = await reconcileCompletedTaskAfterWrite(
+    completed,
     actor.id
   );
-
-  let nextInstance: Task | null = null;
-  try {
-    nextInstance = await createNextRecurrence(
-      completed,
-      toCalendarDate(completedAt)
-    );
-  } catch (error) {
-    // The completion already landed and is correct on its own. A missing
-    // successor is repairable (reopen, re-complete); throwing here would tell
-    // the planter their completed task failed to complete.
-    console.error(
-      `completeTask failed to create the next recurrence of ${completed.id}:`,
-      error
-    );
-  }
 
   return { task: completed, nextInstance };
 }
@@ -1356,13 +1946,18 @@ export async function reopenTask(
       and(
         eq(tasks.churchId, churchId),
         eq(tasks.id, taskId),
-        isNull(tasks.deletedAt)
+        isNull(tasks.deletedAt),
+        taskAssigneeIsAvailable(churchId, tasks.assignedToId)
       )
     )
     .returning();
 
   if (!reopened) {
-    throw new Error("Failed to reopen task");
+    throw new Error(
+      (await taskHasUnavailableAssignee(churchId, taskId))
+        ? TASK_ASSIGNEE_ERROR
+        : "Failed to reopen task"
+    );
   }
 
   // Reopen is a re-enqueue, and it works because cancelling RELEASED the dedupe
@@ -1405,18 +2000,41 @@ export async function deleteTask(
   }
 
   const now = new Date();
-
-  const deleted = await db
-    .update(tasks)
-    .set({ deletedAt: now, updatedAt: now })
+  const deleteFamily = alias(tasks, "delete_family");
+  const malformedFamilyMember = db
+    .select({ id: deleteFamily.id })
+    .from(deleteFamily)
     .where(
       and(
-        eq(tasks.churchId, churchId),
-        or(eq(tasks.id, taskId), eq(tasks.parentTaskId, taskId)),
-        isNull(tasks.deletedAt)
+        eq(deleteFamily.churchId, churchId),
+        or(eq(deleteFamily.id, taskId), eq(deleteFamily.parentTaskId, taskId)),
+        isNull(deleteFamily.deletedAt),
+        not(taskAssigneeIsAvailable(churchId, deleteFamily.assignedToId))
       )
-    )
-    .returning({ id: tasks.id });
+    );
+
+  const [, deleted] = await db.batch([
+    taskStructureLockStatement(churchId),
+    db
+      .update(tasks)
+      .set({ deletedAt: now, updatedAt: now })
+      .where(
+        and(
+          eq(tasks.churchId, churchId),
+          or(eq(tasks.id, taskId), eq(tasks.parentTaskId, taskId)),
+          isNull(tasks.deletedAt),
+          notExists(malformedFamilyMember)
+        )
+      )
+      .returning({ id: tasks.id }),
+  ]);
+
+  if (
+    deleted.length === 0 &&
+    (await malformedFamilyMember.limit(1)).length > 0
+  ) {
+    throw new Error(TASK_ASSIGNEE_ERROR);
+  }
 
   // Every row the statement actually touched — the parent AND its checklist
   // items, which are tasks with due dates of their own. The ids come from the
@@ -1647,14 +2265,19 @@ export const defaultBulkTaskDeps: BulkTaskDeps = {
         category: tasks.category,
         relatedType: tasks.relatedType,
         relatedId: tasks.relatedId,
-        assignedToId: tasks.assignedToId,
+        assignedToId: users.id,
       })
       .from(tasks)
+      .leftJoin(
+        users,
+        and(eq(tasks.assignedToId, users.id), exactTaskAssigneeJoin(churchId))
+      )
       .where(
         and(
           eq(tasks.churchId, churchId),
           inArray(tasks.id, taskIds),
-          isNull(tasks.deletedAt)
+          isNull(tasks.deletedAt),
+          taskAssigneeIsAvailable(churchId, tasks.assignedToId)
         )
       );
   },
@@ -1675,6 +2298,7 @@ export const defaultBulkTaskDeps: BulkTaskDeps = {
           eq(tasks.churchId, churchId),
           inArray(tasks.id, taskIds),
           isNull(tasks.deletedAt),
+          taskAssigneeIsAvailable(churchId, tasks.assignedToId),
           ne(tasks.status, "complete")
         )
       )
@@ -1692,6 +2316,7 @@ export const defaultBulkTaskDeps: BulkTaskDeps = {
           eq(tasks.churchId, churchId),
           inArray(tasks.id, taskIds),
           isNull(tasks.deletedAt),
+          taskAssigneeIsAvailable(churchId, tasks.assignedToId),
           // Mirrors the planner's rejectCompleted guard. Belt and braces: if a
           // task is completed between the load and this write, it is reported
           // as a failure rather than quietly given a new due date.
@@ -1728,7 +2353,8 @@ export const defaultBulkTaskDeps: BulkTaskDeps = {
           eq(tasks.churchId, churchId),
           inArray(tasks.id, taskIds),
           eq(tasks.isRecurring, true),
-          isNull(tasks.deletedAt)
+          isNull(tasks.deletedAt),
+          taskAssigneeIsAvailable(churchId, tasks.assignedToId)
         )
       );
 

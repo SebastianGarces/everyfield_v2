@@ -39,6 +39,11 @@ import {
   type FollowUpHandoff,
   type OpenFollowUpTask,
 } from "./follow-up-ownership.shared";
+import {
+  exactTaskAssigneeConditions,
+  exactTaskAssigneeJoin,
+  isExactTaskAssignee,
+} from "./assignees";
 
 export * from "./follow-up-ownership.shared";
 
@@ -93,7 +98,7 @@ export async function listFollowUpAssignees(
     )
     .where(
       and(
-        eq(users.churchId, churchId),
+        ...exactTaskAssigneeConditions(churchId),
         inArray(persons.status, [...COMMITTED_STATUSES])
       )
     )
@@ -134,7 +139,7 @@ export async function mayOwnFollowUp(
     .where(
       and(
         eq(users.id, assigneeId),
-        eq(users.churchId, churchId),
+        ...exactTaskAssigneeConditions(churchId),
         inArray(persons.status, [...COMMITTED_STATUSES])
       )
     )
@@ -182,7 +187,10 @@ export async function listOpenFollowUpTasks(
       dueDate: tasks.dueDate,
       relatedType: tasks.relatedType,
       relatedId: tasks.relatedId,
-      assignedToId: tasks.assignedToId,
+      // The stored FK alone is not ownership. Only an account that survives
+      // the exact-tenancy join reaches this projection; a malformed target is
+      // indistinguishable from no current owner.
+      assignedToId: users.id,
       ownerName: users.name,
       ownerEmail: users.email,
       ownerSeat: users.seat,
@@ -191,7 +199,7 @@ export async function listOpenFollowUpTasks(
     .from(tasks)
     .leftJoin(
       users,
-      and(eq(users.id, tasks.assignedToId), eq(users.churchId, churchId))
+      and(eq(users.id, tasks.assignedToId), exactTaskAssigneeJoin(churchId))
     )
     .leftJoin(
       persons,
@@ -291,6 +299,7 @@ export async function planFollowUpHandoff(
 
   if (!person?.userId) return null;
   const fromUserId = person.userId;
+  if (!(await isExactTaskAssignee(churchId, fromUserId))) return null;
 
   const [open, assignees] = await Promise.all([
     db
@@ -330,6 +339,7 @@ export async function listFollowUpTaskIdsOwnedBy(
   churchId: string,
   userId: string
 ): Promise<string[]> {
+  if (!(await isExactTaskAssignee(churchId, userId))) return [];
   const rows = await db
     .select({ id: tasks.id })
     .from(tasks)

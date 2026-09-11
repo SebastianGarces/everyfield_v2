@@ -6,6 +6,11 @@ export const PARITY_CAPABILITIES = defineEvryParityCapabilities({
   selectors: [
     { kind: "route", match: "prefix", path: "/meetings" },
     {
+      kind: "route",
+      match: "exact",
+      path: "/teams/[teamId]/meetings",
+    },
+    {
       kind: "action-source",
       match: "exact",
       source: "src/app/(dashboard)/meetings/actions.ts",

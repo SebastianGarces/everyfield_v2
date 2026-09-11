@@ -22,8 +22,15 @@ const fingerprintSchema = z.string().regex(/^[0-9a-f]{64}$/);
 export type EvryActiveRunIdentity =
   | Readonly<{
       kind: "conversation";
-      operation: "create" | "continue";
-      conversationId: string | null;
+      operation: "create" | "reuse";
+      conversationId: null;
+      planId: null;
+      planFingerprint: null;
+    }>
+  | Readonly<{
+      kind: "conversation";
+      operation: "continue";
+      conversationId: string;
       planId: null;
       planFingerprint: null;
     }>
@@ -147,14 +154,18 @@ export function parseEvryActiveRunRecord(input: {
         (row.status !== "completed" || row.conversationId !== null);
   const conversationShape =
     row.kind === "conversation" &&
-    (row.operation === "create" || row.operation === "continue") &&
+    (row.operation === "create" ||
+      row.operation === "continue" ||
+      row.operation === "reuse") &&
     row.planId === null &&
     row.planFingerprint === null &&
     row.stage !== "executing" &&
     (row.operation === "continue" ||
       row.status !== "active" ||
       row.conversationId === null) &&
-    (row.operation === "create" || row.conversationId !== null);
+    (row.operation === "create" ||
+      row.operation === "reuse" ||
+      row.conversationId !== null);
   const executionShape =
     row.kind === "execution" &&
     (row.operation === "execute" || row.operation === "retry") &&
@@ -205,7 +216,8 @@ export function sameEvryActiveRunIdentity(
 ): boolean {
   const sameConversation =
     row.conversationId === identity.conversationId ||
-    (row.operation === "create" && identity.conversationId === null);
+    ((row.operation === "create" || row.operation === "reuse") &&
+      identity.conversationId === null);
   return (
     row.requestFingerprint === requestFingerprint &&
     row.kind === identity.kind &&

@@ -52,6 +52,14 @@ export function visibleEvryPageContextFor(
   pathname: string,
   breadcrumbs: readonly HeaderBreadcrumbItem[]
 ): VisibleEvryPageContext | null {
+  if (pathname === "/phase" || pathname.startsWith("/phase/")) {
+    return {
+      key: "plant_intelligence:current",
+      label: finalBreadcrumbLabel(breadcrumbs) ?? "Plant Intelligence",
+      wire: { kind: "plant_intelligence", recordId: "current" },
+    };
+  }
+
   if (pathname === "/launch" || pathname.startsWith("/launch/")) {
     return {
       key: "launch:current",

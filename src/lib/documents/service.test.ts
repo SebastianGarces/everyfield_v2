@@ -11,12 +11,15 @@ import { assertInOrder, sourceReader } from "@/lib/testing/source-span";
 import {
   GENERATED_DOCUMENT_HISTORY_LIMIT,
   GENERATED_DOCUMENT_SIGNED_URL_EXPIRES_IN,
+  decodeGeneratedDocumentCursor,
+  encodeGeneratedDocumentCursor,
   generatedDocumentFilename,
   generatedDocumentForChurchQuery,
   generatedDocumentRow,
   generatedDocumentsForChurchQuery,
   generatedDocumentStorageKey,
   insertGeneratedDocumentQuery,
+  listGeneratedDocumentPage,
   recordGeneratedDocument,
   toGeneratedDocumentListItem,
   type GeneratedDocumentEffects,
@@ -53,6 +56,48 @@ const service = sourceReader(serviceSource, "service.ts");
 const recordBody = service.after(
   "export async function recordGeneratedDocument"
 );
+
+test("document cursors reject regex-shaped impossible timestamps and UUIDs", () => {
+  const valid = encodeGeneratedDocumentCursor({
+    createdAtExact: "2026-08-30 23:59:59.123456",
+    id: ARTIFACT_ID,
+  });
+  assert.deepEqual(decodeGeneratedDocumentCursor(valid), {
+    createdAtExact: "2026-08-30 23:59:59.123456",
+    id: ARTIFACT_ID,
+  });
+  for (const candidate of [
+    { createdAtExact: "2026-02-30 12:00:00", id: ARTIFACT_ID },
+    { createdAtExact: "2026-13-01 12:00:00", id: ARTIFACT_ID },
+    { createdAtExact: "2026-08-30 24:00:00", id: ARTIFACT_ID },
+    {
+      createdAtExact: "2026-08-30 12:00:00",
+      id: "zzzzzzzz-zzzz-4zzz-8zzz-zzzzzzzzzzzz",
+    },
+    {
+      createdAtExact: "2026-08-30 12:00:00",
+      id: "00000000-0000-9000-8000-000000000000",
+    },
+  ]) {
+    assert.equal(
+      decodeGeneratedDocumentCursor(
+        Buffer.from(JSON.stringify(candidate), "utf8").toString("base64url")
+      ),
+      null
+    );
+  }
+});
+
+test("a semantically invalid history cursor returns neutral unavailable before querying", async () => {
+  const invalid = Buffer.from(
+    JSON.stringify({
+      createdAtExact: "2026-02-30 12:00:00",
+      id: ARTIFACT_ID,
+    }),
+    "utf8"
+  ).toString("base64url");
+  assert.equal(await listGeneratedDocumentPage(CHURCH_A, invalid), null);
+});
 
 // ============================================================================
 // Insert shape and key convention

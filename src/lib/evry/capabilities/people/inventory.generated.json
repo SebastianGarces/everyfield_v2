@@ -1613,19 +1613,6 @@
       "classification": { "state": "supported" }
     },
     {
-      "kind": "product_gap",
-      "identity": "product-gap:people.duplicates.merge",
-      "source": "src/lib/people/duplicates.ts",
-      "exportName": null,
-      "capabilityIdentity": "people.crm.duplicates.merge",
-      "domain": "duplicates",
-      "operationKind": "excluded",
-      "applicationCapability": null,
-      "confirmation": "excluded",
-      "mutationShape": null,
-      "classification": { "state": "excluded", "reason": "owning_product_gap" }
-    },
-    {
       "kind": "route",
       "identity": "route:/people",
       "source": "src/app/(dashboard)/people/page.tsx",
@@ -2008,7 +1995,7 @@
     "routes": 10,
     "routeHandlers": 1,
     "rscReads": 19,
-    "productGaps": 1,
+    "productGaps": 0,
     "readCapabilities": 22,
     "effectCapabilities": 30,
     "unclassified": 0

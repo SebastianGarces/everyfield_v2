@@ -66,7 +66,10 @@ test("generic capability packs derive complete review from exact plan arguments"
       }),
     ]),
   });
-  assert.deepEqual(review, { confirmation });
+  assert.deepEqual(review, {
+    confirmation,
+    source: { kind: "generic" },
+  });
   assert.equal(Object.isFrozen(review?.confirmation.steps[0]), true);
 });
 
@@ -140,8 +143,10 @@ test("recipe review accepts only the live registered recipe disclosure", () => {
     }),
   ]);
 
-  assert.ok(
+  assert.deepEqual(
     trustedReviewForEvryPlanDocument({ plan, document, reviewRegistry })
+      ?.source,
+    { kind: "recipe", identity: RECIPE_IDENTITY }
   );
   const firstStep = document.steps[0];
   const disclosure = firstStep.disclosure;

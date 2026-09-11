@@ -16,6 +16,7 @@ const recipeIdentitySchema = z.string().regex(RECIPE_ID_PATTERN);
 const stepIdSchema = z.string().regex(STEP_ID_PATTERN);
 const inputKeySchema = z.string().regex(INPUT_KEY_PATTERN);
 const argumentKeySchema = z.string().regex(ARGUMENT_KEY_PATTERN);
+const pathSegmentSchema = z.string().min(1).max(64);
 const capabilityIdentitySchema = z.string().trim().min(1).max(300);
 const displayTextSchema = z.string().trim().min(1).max(1_000);
 
@@ -47,12 +48,22 @@ const recordResolverUseSchema = z.strictObject({
 
 const argumentBindingSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("input"), inputKey: inputKeySchema }),
+  z.strictObject({
+    kind: z.literal("input_path"),
+    inputKey: inputKeySchema,
+    path: z.array(pathSegmentSchema).min(1).max(16),
+  }),
   z.strictObject({ kind: z.literal("literal"), value: jsonValueSchema }),
 ]);
 
 const disclosureValueSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("argument"),
+    argumentKey: argumentKeySchema,
+    absentValue: z.string().min(1).max(1_000).optional(),
+  }),
+  z.strictObject({
+    kind: z.literal("argument_summary"),
     argumentKey: argumentKeySchema,
     absentValue: z.string().min(1).max(1_000).optional(),
   }),
@@ -101,9 +112,14 @@ const recipeDefinitionSchema = z.strictObject({
   steps: z.array(recipeStepSchema).min(1),
 });
 
-export type EvryRecipeArgumentBinding = Readonly<
-  z.infer<typeof argumentBindingSchema>
->;
+export type EvryRecipeArgumentBinding =
+  | Readonly<{ kind: "input"; inputKey: string }>
+  | Readonly<{
+      kind: "input_path";
+      inputKey: string;
+      path: readonly string[];
+    }>
+  | Readonly<{ kind: "literal"; value: EvryJsonValue }>;
 export type EvryRecipeDisclosureValue = Readonly<
   z.infer<typeof disclosureValueSchema>
 >;
@@ -330,7 +346,9 @@ function freezeDefinition(
               Object.freeze(
                 binding.kind === "literal"
                   ? { ...binding, value: freezeJson(binding.value) }
-                  : { ...binding }
+                  : binding.kind === "input_path"
+                    ? { ...binding, path: Object.freeze([...binding.path]) }
+                    : { ...binding }
               ),
             ])
           )
@@ -428,19 +446,19 @@ function validateDefinition(input: {
     usedCapabilities.add(step.capabilityIdentity);
 
     for (const binding of Object.values(step.arguments)) {
-      if (binding.kind === "input" && !inputKeys.has(binding.inputKey)) {
+      if (binding.kind !== "literal" && !inputKeys.has(binding.inputKey)) {
         throw new EvryRecipeRegistrationError(
           `Evry recipe step ${step.id} binds unknown input ${binding.inputKey}`
         );
       }
     }
     const disclosedArguments = step.disclosure.items.flatMap((item) =>
-      item.value.kind === "argument" ? [item.value.argumentKey] : []
+      item.value.kind === "literal" ? [] : [item.value.argumentKey]
     );
     unique(disclosedArguments, `disclosed argument on ${step.id}`);
     for (const item of step.disclosure.items) {
       if (
-        item.value.kind === "argument" &&
+        item.value.kind !== "literal" &&
         !Object.hasOwn(step.arguments, item.value.argumentKey)
       ) {
         throw new EvryRecipeRegistrationError(

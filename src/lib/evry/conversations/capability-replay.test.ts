@@ -16,8 +16,16 @@ import {
   continueEvryConversation,
   type EvryConversationStore,
 } from "./service";
-import { composeEvryCapabilityConversationContinuations } from "../capabilities/conversation";
+import {
+  composeEvryCapabilityConversationContinuations,
+  type EvryCapabilityConversationRunner,
+} from "../capabilities/conversation";
 import type { EvryPlantActor } from "../eligibility/viewer";
+import {
+  buildEvryReadArtifact,
+  trustedEvryApplicationSourceLink,
+} from "../artifacts/core";
+import type { EvryConversationStreamReport } from "../streaming/conversation-wire";
 
 const ACTOR = {
   userId: "10000000-0000-4000-8000-000000000001",
@@ -29,6 +37,100 @@ const CREATE_REQUEST = "40000000-0000-4000-8000-000000000001" as never;
 const CONTINUE_REQUEST = "50000000-0000-4000-8000-000000000001" as never;
 const NOW = new Date("2026-08-29T12:00:00.000Z");
 
+for (const path of ["create", "continue"] as const) {
+  test(`${path} service projects model-only facts out of fresh and recovered response previews`, async () => {
+    const store = memoryStore({ throwAfterFirstResultCommit: false });
+    const sourceLink = trustedEvryApplicationSourceLink({
+      label: "Open Tasks",
+      href: "/tasks",
+    });
+    const artifact = buildEvryReadArtifact({
+      title: "Tasks",
+      filters: [],
+      exclusions: [],
+      items: [
+        {
+          id: "task",
+          label: "Call Alex",
+          sourceLink,
+          facts: [
+            { label: "Status", value: "Open" },
+            {
+              label: "Assignee account ID",
+              value: ACTOR.userId,
+              modelOnly: true,
+            },
+          ],
+        },
+      ],
+      sourceLinks: [sourceLink],
+    });
+    const stages: EvryConversationStreamReport[] = [];
+    let attempts = 0;
+    const input = {
+      actor: ACTOR,
+      requestKey: path === "create" ? CREATE_REQUEST : CONTINUE_REQUEST,
+      message: "Show tasks",
+      pageContext: null,
+      requestPageContext: null,
+      now: NOW,
+      store,
+      reportStage(stage: EvryConversationStreamReport) {
+        stages.push(stage);
+      },
+      async continueCapabilityConversation(
+        selection: Parameters<EvryCapabilityConversationRunner>[0]
+      ) {
+        attempts++;
+        await selection.reportResponse?.({
+          body: "Here are your tasks.",
+          artifacts: [artifact],
+        });
+        if (attempts === 1)
+          throw new Error(
+            "Simulated interruption after preview before durable result"
+          );
+        return selection.conversation;
+      },
+    };
+    if (path === "continue")
+      await store.create({
+        actorUserId: ACTOR.userId,
+        plantId: ACTOR.plantId,
+        requestKey: CREATE_REQUEST,
+        body: "Start",
+        pageContext: null,
+        requestPageContext: null,
+        createdAt: NOW,
+      });
+    const run = () =>
+      path === "create"
+        ? createEvryConversation(input)
+        : continueEvryConversation({
+            ...input,
+            conversationId: CONVERSATION_ID,
+            resolveReference: () => ({ status: "not_applicable" }),
+          });
+    await assert.rejects(run(), /Simulated interruption after preview/);
+    assert.ok(await run());
+    const previews = stages.filter(
+      (stage) => typeof stage !== "string" && stage.type === "response"
+    );
+    assert.equal(previews.length, 2);
+    for (const preview of previews) {
+      assert.notEqual(typeof preview, "string");
+      if (typeof preview === "string")
+        throw new Error("Expected response preview");
+      assert.deepEqual(preview.response.artifacts[0]!.items[0]!.facts, [
+        { label: "Status", value: "Open" },
+      ]);
+      assert.ok(!JSON.stringify(preview).includes(ACTOR.userId));
+    }
+    assert.equal(artifact.items[0]!.facts[1]!.modelOnly, true);
+    assert.equal(attempts, 2);
+  });
+}
+
 function message(input: {
   id: string;
   requestKey: string;
@@ -37,6 +139,7 @@ function message(input: {
   body: string;
   createdAt: Date;
   pageContext?: EvryStoredConversationMessage["pageContext"];
+  requestPageContext?: EvryStoredConversationMessage["requestPageContext"];
   relevanceKeys?: EvryStoredConversationMessage["relevanceKeys"];
   replayReference?: EvryStoredConversationMessage["replayReference"];
   artifacts?: EvryStoredConversationMessage["artifacts"];
@@ -46,6 +149,7 @@ function message(input: {
     id: input.id as never,
     requestKey: input.requestKey as never,
     pageContext: input.pageContext ?? null,
+    requestPageContext: input.requestPageContext,
     replayReference: input.replayReference ?? null,
     relevanceKeys: input.relevanceKeys ?? [],
     deliveryStatus: "complete",
@@ -83,6 +187,8 @@ function memoryStore(loss: {
             author: "user",
             body: input.body,
             createdAt: input.createdAt,
+            pageContext: input.pageContext,
+            requestPageContext: input.requestPageContext,
             replayReference: null,
           }),
         ],
@@ -107,6 +213,7 @@ function memoryStore(loss: {
         body: input.body,
         createdAt: input.createdAt,
         pageContext: input.pageContext,
+        requestPageContext: input.requestPageContext,
         relevanceKeys: input.relevanceKeys,
         replayReference: input.replayReference,
         artifacts: input.artifacts.map((document, ordinal) => ({
@@ -210,6 +317,75 @@ function lostResponseContinuation(calls: {
   ]);
 }
 
+test("self-contained capability requests bypass unrelated pronoun clarification", async () => {
+  const store = memoryStore({ throwAfterFirstResultCommit: false });
+  await store.create({
+    actorUserId: ACTOR.userId,
+    plantId: ACTOR.plantId,
+    requestKey: CREATE_REQUEST,
+    body: "Start",
+    pageContext: null,
+    requestPageContext: null,
+    createdAt: NOW,
+  });
+  let referenceReads = 0;
+  const continueCapabilityConversation =
+    composeEvryCapabilityConversationContinuations([
+      {
+        identity: "self-contained-action",
+        referencePolicy: "self_contained",
+        matches({ literalUserText }) {
+          return literalUserText.includes("send it to them");
+        },
+        async continue() {
+          return {
+            body: "Review the self-contained action.",
+            artifacts: [
+              storedEvryClarificationArtifactDocument({
+                kind: "clarification",
+                mode: "missing",
+                entityType: "confirmation",
+                prompt: "Confirm the action.",
+              }),
+            ],
+          };
+        },
+      },
+    ]);
+
+  const result = await continueEvryConversation({
+    actor: ACTOR,
+    conversationId: CONVERSATION_ID,
+    requestKey: CONTINUE_REQUEST,
+    message: "Draft the invitation and send it to them",
+    pageContext: null,
+    requestPageContext: null,
+    now: NOW,
+    store,
+    continueCapabilityConversation,
+    resolveReference() {
+      referenceReads += 1;
+      return {
+        status: "clarification" as const,
+        reason: "missing" as const,
+        artifact: {
+          kind: "clarification" as const,
+          mode: "missing" as const,
+          entityType: "record",
+          prompt: "Which EveryField record do you mean?",
+        },
+      };
+    },
+  });
+
+  assert.equal(referenceReads, 0);
+  assert.equal(result?.reference.status, "not_applicable");
+  assert.equal(
+    result?.resumed.conversation.messages.at(-1)?.body,
+    "Review the self-contained action."
+  );
+});
+
 test("create replay recovers the committed capability result before source work", async () => {
   const loss = { throwAfterFirstResultCommit: true };
   const store = memoryStore(loss);
@@ -247,7 +423,7 @@ test("create replay recovers the committed capability result before source work"
   );
 });
 
-test("continue replay survives bounded-reference pruning with zero rerun work", async () => {
+test("continue replay uses immutable wire context after record deletion with zero rerun work", async () => {
   const loss = { throwAfterFirstResultCommit: true };
   const store = memoryStore(loss);
   await store.create({
@@ -271,8 +447,15 @@ test("continue replay survives bounded-reference pruning with zero rerun work", 
     conversationId: CONVERSATION_ID,
     requestKey: CONTINUE_REQUEST,
     message: "List people",
-    pageContext: null,
-    requestPageContext: null,
+    pageContext: {
+      kind: "task" as const,
+      recordId: "90000000-0000-4000-8000-000000000001",
+      label: "Original task",
+    },
+    requestPageContext: {
+      kind: "task" as const,
+      recordId: "90000000-0000-4000-8000-000000000001",
+    },
     now: NOW,
     store,
     continueCapabilityConversation,
@@ -300,7 +483,10 @@ test("continue replay survives bounded-reference pruning with zero rerun work", 
     false
   );
   calls.source = "Changed People result";
-  const replay = await continueEvryConversation(input);
+  const replay = await continueEvryConversation({
+    ...input,
+    pageContext: null,
+  });
 
   assert.ok(replay);
   assert.equal(
@@ -322,6 +508,27 @@ test("continue replay survives bounded-reference pruning with zero rerun work", 
     assert.equal(replay.reference.reference.entityType, "person");
     assert.equal(replay.reference.reference.entityId, "person-99");
   }
+
+  await assert.rejects(
+    continueEvryConversation({
+      ...input,
+      pageContext: null,
+      requestPageContext: {
+        kind: "task",
+        recordId: "90000000-0000-4000-8000-000000000002",
+      },
+    }),
+    /request key was already used/
+  );
+  assert.deepEqual(
+    {
+      matches: calls.matches,
+      reads: calls.reads,
+      references: calls.references,
+      messages: store.current()?.messages.length,
+    },
+    { matches: 1, reads: 1, references: 1, messages: 3 }
+  );
 });
 
 test("missing or malformed replay metadata fails before any replay work", async () => {
@@ -391,4 +598,71 @@ test("missing or malformed replay metadata fails before any replay work", async 
       { matches: 1, reads: 1, references: 1, revalidations: 0, messages: 3 }
     );
   }
+});
+
+test("an unmatched create persists an assistant clarification", async () => {
+  const store = memoryStore({ throwAfterFirstResultCommit: false });
+  const created = await createEvryConversation({
+    actor: ACTOR,
+    requestKey: CREATE_REQUEST,
+    message: "A request no capability recognizes",
+    pageContext: null,
+    requestPageContext: null,
+    now: NOW,
+    store,
+    async continueCapabilityConversation() {
+      return null;
+    },
+  });
+
+  assert.equal(created.conversation.messages.length, 2);
+  const response = created.conversation.messages.at(-1);
+  assert.equal(response?.author, "assistant");
+  assert.match(response?.body ?? "", /Nothing has been changed/i);
+  assert.deepEqual(
+    response?.artifacts.map(({ document }) => document),
+    [{ kind: "boundary", classification: "ambiguous" }]
+  );
+});
+
+test("an unmatched continuation never leaves a bare user message", async () => {
+  const store = memoryStore({ throwAfterFirstResultCommit: false });
+  await store.create({
+    actorUserId: ACTOR.userId,
+    plantId: ACTOR.plantId,
+    requestKey: CREATE_REQUEST,
+    body: "Start",
+    pageContext: null,
+    requestPageContext: null,
+    createdAt: NOW,
+  });
+
+  const continued = await continueEvryConversation({
+    actor: ACTOR,
+    conversationId: CONVERSATION_ID,
+    requestKey: CONTINUE_REQUEST,
+    message: "Another request no capability recognizes",
+    pageContext: null,
+    requestPageContext: null,
+    now: NOW,
+    store,
+    async continueCapabilityConversation() {
+      return null;
+    },
+    resolveReference() {
+      return { status: "not_applicable" };
+    },
+  });
+
+  assert.ok(continued);
+  assert.deepEqual(
+    continued.resumed.conversation.messages.map(({ author }) => author),
+    ["user", "user", "assistant"]
+  );
+  assert.deepEqual(
+    continued.resumed.conversation.messages
+      .at(-1)
+      ?.artifacts.map(({ document }) => document),
+    [{ kind: "boundary", classification: "ambiguous" }]
+  );
 });

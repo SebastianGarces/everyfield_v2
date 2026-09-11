@@ -176,7 +176,9 @@ test("the gear menu keeps identity, SettingsLink, and the logout action", () => 
   assertInOrder(menu, [
     "<DropdownMenuLabel",
     "<SettingsLink",
-    "<form action={logout}",
+    "<form",
+    "action={logout}",
+    'recordNavigationIntent("/login")',
   ]);
 });
 

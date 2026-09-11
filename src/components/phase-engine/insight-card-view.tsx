@@ -76,6 +76,8 @@ export interface InsightArticleRef {
 
 interface InsightCardViewProps {
   insight: InsightCardData;
+  /** Optional app action. Static and marketing renders omit it. */
+  actionSlot?: ReactNode;
   /**
    * Currently published articles, for resolving the insight's stored slugs
    * (PE-024). Empty (the default) means no "how to improve" section renders —
@@ -123,6 +125,7 @@ const ARTICLE_LINK_CLASS =
 
 export function InsightCardView({
   insight,
+  actionSlot,
   articleRefs = [],
   feedbackSlot,
   linkStatic,
@@ -223,6 +226,10 @@ export function InsightCardView({
           </ul>
         </div>
       )}
+
+      {actionSlot ? (
+        <div className="mt-3 flex justify-end">{actionSlot}</div>
+      ) : null}
 
       {feedbackSlot}
     </article>

@@ -45,9 +45,9 @@ test("conversation reads scope every row to the exact actor and plant", () => {
   );
   assert.match(read, /row\.state\.version !== messages\.length - 1/);
   assert.match(read, /sourceMessageIds\.some/);
-  assert.equal(
-    read.indexOf("const artifactRows") > read.indexOf("const messageRows"),
-    true
+  assert.match(
+    read,
+    /db\.batch\(\[\s*conversationQuery,\s*messageQuery,\s*artifactQuery/
   );
   assert.match(
     repository,

@@ -155,6 +155,8 @@ async function main(): Promise<void> {
       },
     }
   );
+  const successfulReviewRegistry =
+    fixtures.createFixtureRecipeReviewRegistry(successfulRegistry);
 
   async function assertPlanningFailureDoesNotPersist(
     registry: ReturnType<typeof fixtures.createFixtureRecipeRegistry>
@@ -168,6 +170,7 @@ async function main(): Promise<void> {
         inputValues: FIXTURE_RECIPE_VALUES,
         requestKey: plans.mintEvryPlanRequestKey(),
         registry,
+        reviewRegistry: fixtures.createFixtureRecipeReviewRegistry(registry),
         eligibleCapabilities,
       }),
       recipes.EvryRecipeCompilationError
@@ -212,6 +215,7 @@ async function main(): Promise<void> {
         inputValues: FIXTURE_RECIPE_VALUES,
         requestKey: context.planRequestKey,
         registry: successfulRegistry,
+        reviewRegistry: successfulReviewRegistry,
         eligibleCapabilities: context.eligibleCapabilities,
       });
       return {

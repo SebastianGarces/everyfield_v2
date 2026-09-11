@@ -68,12 +68,17 @@ export type EvryReadExclusion = Readonly<{
 export type EvryReadItem = Readonly<{
   id: string;
   label: string;
-  facts: readonly EvryArtifactFact[];
+  /** Internal relationship identifiers remain available for planning, not display. */
+  facts: readonly (EvryArtifactFact & { readonly modelOnly?: true })[];
   sourceLink: TrustedEvryApplicationSourceLink;
 }>;
 
 export type EvryReadArtifact = Readonly<{
   kind: "read";
+  /** Absent on historical snapshot cards. Query totals cover the full population. */
+  resultMode?: "list" | "count" | "group";
+  /** UTF-16 offset in the assistant message body, computed by the composer. */
+  textOffset?: number;
   title: string;
   filters: readonly EvryReadFilter[];
   counts: Readonly<{

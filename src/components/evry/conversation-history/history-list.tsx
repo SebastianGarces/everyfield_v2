@@ -1,7 +1,6 @@
 "use client";
 
 import { LoaderCircle, MessageSquarePlus, Search, X } from "lucide-react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTransition, type RefObject } from "react";
 
@@ -10,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { EvryConversationHistoryItem } from "@/lib/evry/conversations/history";
 import { cn } from "@/lib/utils";
+import { AuthenticatedLink } from "@/components/authenticated-navigation";
 
 import {
   EVRY_HISTORY_STATE_PRESENTATION,
@@ -42,6 +42,7 @@ export function ConversationHistoryList({
   blocked,
   conversations,
   headingRef,
+  onNew,
   onSelect,
   newConversationHref,
   searchQuery,
@@ -51,6 +52,7 @@ export function ConversationHistoryList({
   conversations: readonly EvryConversationHistoryItem[];
   headingRef: RefObject<HTMLHeadingElement | null>;
   newConversationHref: string;
+  onNew: () => void;
   onSelect: (conversationId: string) => void;
   searchQuery: string | null;
   selectedConversationId: string | null;
@@ -96,6 +98,8 @@ export function ConversationHistoryList({
                 ) {
                   return;
                 }
+                event.preventDefault();
+                onNew();
               }}
               data-testid="evry-history-new"
               className={cn(
@@ -189,7 +193,7 @@ export function ConversationHistoryList({
                     key={conversation.id}
                     className="[contain-intrinsic-size:auto_5rem] [content-visibility:auto]"
                   >
-                    <Link
+                    <AuthenticatedLink
                       href={evryHistoryHref({
                         conversationId: conversation.id,
                         search: searchQuery,
@@ -236,7 +240,7 @@ export function ConversationHistoryList({
                           state={conversation.actionableState}
                         />
                       </span>
-                    </Link>
+                    </AuthenticatedLink>
                   </li>
                 );
               })}
@@ -256,7 +260,7 @@ export function ConversationHistoryList({
             </p>
             {searchQuery ? (
               <Button asChild variant="ghost" size="sm" className="mt-3">
-                <Link
+                <AuthenticatedLink
                   href={evryHistoryHref({
                     conversationId: selectedConversationId,
                   })}
@@ -271,7 +275,7 @@ export function ConversationHistoryList({
                 >
                   <X aria-hidden="true" />
                   Clear search
-                </Link>
+                </AuthenticatedLink>
               </Button>
             ) : (
               <Button asChild size="sm">
@@ -291,6 +295,8 @@ export function ConversationHistoryList({
                     ) {
                       return;
                     }
+                    event.preventDefault();
+                    onNew();
                   }}
                   className={cn(
                     "mt-3 cursor-pointer active:scale-[0.96]",

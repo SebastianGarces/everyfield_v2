@@ -23,7 +23,7 @@ const PLANT_USER: SessionUser = {
   seat: "admin",
 };
 
-const TASKS_READ_IDENTITY = "tasks.list";
+const TASKS_READ_IDENTITY = "tasks.read.list";
 const PEOPLE_READ_IDENTITY = "people.crm.people.load-more-people";
 const PEOPLE_WRITE_IDENTITY = "people.crm.people.update-person";
 

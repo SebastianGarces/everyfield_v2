@@ -385,21 +385,7 @@ function rscReadSurfaces(repoRoot: string): PeopleEvrySurface[] {
   return entries;
 }
 
-const PRODUCT_GAPS: readonly PeopleEvrySurface[] = [
-  {
-    kind: "product_gap",
-    identity: "product-gap:people.duplicates.merge",
-    source: "src/lib/people/duplicates.ts",
-    exportName: null,
-    capabilityIdentity: "people.crm.duplicates.merge",
-    domain: "duplicates",
-    operationKind: "excluded",
-    applicationCapability: null,
-    confirmation: "excluded",
-    mutationShape: null,
-    classification: { state: "excluded", reason: "owning_product_gap" },
-  },
-];
+const PRODUCT_GAPS: readonly PeopleEvrySurface[] = [];
 
 function assertBijection(entries: readonly PeopleEvrySurface[]): void {
   const identities = entries.map(({ identity }) => identity);

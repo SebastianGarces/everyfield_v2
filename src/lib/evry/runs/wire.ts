@@ -13,7 +13,7 @@ export const evryRunRecoveryResponseSchema = z.union([
       status: z.literal("active"),
       ...sequencedRunBase,
       kind: z.literal("conversation"),
-      operation: z.literal("create"),
+      operation: z.enum(["create", "reuse"]),
       stage: z.enum([
         "accepted",
         "resolving_references",
@@ -78,7 +78,7 @@ export const evryRunRecoveryResponseSchema = z.union([
       status: z.literal("expired"),
       ...sequencedRunBase,
       kind: z.literal("conversation"),
-      operation: z.enum(["create", "continue"]),
+      operation: z.enum(["create", "continue", "reuse"]),
       conversationId: z.string().uuid().nullable(),
     })
     .strict()

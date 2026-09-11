@@ -459,10 +459,11 @@ test("reopening a task re-enqueues, because cancelling released the key", async 
 //
 // Pinned as a PROPERTY over the directory rather than as two call sites: nothing
 // about the notification module distinguishes those rows, so the only thing that
-// can go wrong again is a THIRD writer that does not ask. A `db.insert(tasks)`
-// cannot be executed in a unit test's process, so this is source-shaped by
-// necessity — the behaviour it stands for is covered by every
-// `syncTaskNotificationsFor` test above.
+// can go wrong again is a THIRD writer that does not ask. The physical insert
+// now lives in one tenancy boundary; this scans the semantic call sites rather
+// than mistaking that boundary for the owner of each row's notification rule.
+// The behaviour it stands for is covered by every `syncTaskNotificationsFor`
+// test above.
 
 test("no module inserts into tasks without asking for notifications", () => {
   const dir = path.join(process.cwd(), "src/lib/tasks");
@@ -472,7 +473,12 @@ test("no module inserts into tasks without asking for notifications", () => {
       name,
       source: readFileSync(path.join(dir, name), "utf8"),
     }))
-    .filter(({ source }) => /\.insert\(tasks\)/.test(stripComments(source)));
+    .filter(({ name, source }) => {
+      if (name === "write-boundary.ts") return false;
+      return /(?:\.insert\(tasks\)|insertExactTenantTasks\()/.test(
+        stripComments(source)
+      );
+    });
 
   assert.ok(writers.length >= 3, "the writer scan found nothing to check");
 

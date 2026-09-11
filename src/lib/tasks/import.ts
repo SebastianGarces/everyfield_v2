@@ -1,12 +1,16 @@
-import { db } from "@/db";
-import { tasks, type NewTask, type Task } from "@/db/schema";
+import type { NewTask, Task } from "@/db/schema";
 import type { TaskCategory, TaskPriority } from "@/db/schema/tasks";
 import type { PhaseNumber } from "@/lib/constants";
 
 import { addCalendarDays, toCalendarDate } from "@/lib/datetime";
 
 import { normalizeTaskDescription } from "./descriptions";
+import { assertExactTaskAssignee, TASK_ASSIGNEE_ERROR } from "./assignees";
 import { syncTaskNotificationsFor } from "./notifications";
+import {
+  insertExactTenantTasks,
+  type ExactTenantTaskInsertOptions,
+} from "./write-boundary";
 import {
   UNKNOWN_TEMPLATE_ERROR,
   findTaskTemplate,
@@ -39,8 +43,8 @@ import {
 // planter must never get is a second copy they did not ask for and cannot see
 // coming, which is what the note prevents.
 //
-// THIS MODULE IS SERVER-ONLY, AND NOT BY CONVENTION. Line 1 imports `@/db`,
-// whose module scope calls `neon(process.env.DATABASE_URL!)`. Anything a
+// THIS MODULE IS SERVER-ONLY, AND NOT BY CONVENTION. Its write-boundary import
+// reaches `@/db`, whose module scope calls `neon(process.env.DATABASE_URL!)`. Anything a
 // `"use client"` file imports from here comes with drizzle, the schema and
 // `@neondatabase/serverless` attached, and the chunk throws while it evaluates.
 // That is what killed /tasks/templates: the picker imported one *string*.
@@ -175,8 +179,11 @@ export interface ImportTaskTemplateInput {
  * random-UUID tiebreak.
  */
 export async function importTaskTemplate(
-  input: ImportTaskTemplateInput
+  input: ImportTaskTemplateInput,
+  options: Pick<ExactTenantTaskInsertOptions, "beforeInsert"> = {}
 ): Promise<TemplateImportResult> {
+  await assertExactTaskAssignee(input.churchId, input.userId);
+
   const template = findTaskTemplate(input.templateKey);
   if (!template) {
     throw new Error(UNKNOWN_TEMPLATE_ERROR);
@@ -204,7 +211,17 @@ export async function importTaskTemplate(
     createdAt: new Date(stampedAt + index),
   }));
 
-  const created = await db.insert(tasks).values(values).returning();
+  const write = await insertExactTenantTasks(values, {
+    ...options,
+    authorityUserId: input.userId,
+  });
+  if (!write.authorized) {
+    throw new Error(TASK_ASSIGNEE_ERROR);
+  }
+  if (write.inserted.length !== values.length) {
+    throw new Error("Task template insert did not land every row");
+  }
+  const created = write.inserted;
 
   // T-018. Every imported row carries an assignee (the importer) and a computed
   // due date, so every one of them owes a due and an overdue notification —

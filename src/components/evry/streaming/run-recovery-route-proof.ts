@@ -83,7 +83,13 @@ test("navigation pauses one observation, rejects its stale completion, and recon
     if (String(args[0]).includes("react-test-renderer is deprecated")) return;
     process.stderr.write(`${args.map(String).join(" ")}\n`);
   });
-  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  Object.assign(globalThis, {
+    IS_REACT_ACT_ENVIRONMENT: true,
+    ResizeObserver: class {
+      observe() {}
+      disconnect() {}
+    },
+  });
   const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
   const storage = memoryStorage();
   Object.defineProperty(globalThis, "window", {
@@ -138,7 +144,6 @@ test("navigation pauses one observation, rejects its stale completion, and recon
     renderer = create(
       createElement(EvryShell, {
         enabled: true,
-        eligibleSuggestions: [],
         children: createElement(Probe),
       })
     );
@@ -218,7 +223,13 @@ test("reconnect hands focus to the stable status before its control unmounts", a
     if (String(args[0]).includes("react-test-renderer is deprecated")) return;
     process.stderr.write(`${args.map(String).join(" ")}\n`);
   });
-  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  Object.assign(globalThis, {
+    IS_REACT_ACT_ENVIRONMENT: true,
+    ResizeObserver: class {
+      observe() {}
+      disconnect() {}
+    },
+  });
   routeSnapshot = {
     pathname: "/evry",
     search: `?conversation=${CONVERSATION_A_ID}`,
@@ -302,7 +313,6 @@ test("reconnect hands focus to the stable status before its control unmounts", a
     renderer = create(
       createElement(shellModule.EvryShell, {
         enabled: true,
-        eligibleSuggestions: [],
         children: createElement(surfaceModule.ConversationSurface),
       }),
       {

@@ -22,6 +22,7 @@ import {
   COMMUNICATION_RESEND_NON_OPENERS_IDENTITY,
   proposeCommunicationEvryMessageEffect,
   selectCommunicationEvryMessageEffect,
+  type CommunicationEvryMessageSelection,
 } from "./messages";
 import {
   continueCommunicationEvryRead,
@@ -34,6 +35,7 @@ import {
   COMMUNICATION_TEMPLATE_UPDATE_IDENTITY,
   proposeCommunicationEvryTemplateEffect,
   selectCommunicationEvryTemplateEffect,
+  type CommunicationEvryTemplateSelection,
 } from "./templates";
 import {
   COMMUNICATION_EVRY_PLAN_REGISTRY,
@@ -119,7 +121,10 @@ function recoveredPlanResult(input: {
 
 /** One closed Communication continuation: deterministic reads or reviewed effects. */
 export function createCommunicationEvryConversationContinuation(
-  dependencies: CommunicationEvryConversationDependencies = productionDependencies
+  dependencies: CommunicationEvryConversationDependencies = productionDependencies,
+  preparedSelection?:
+    | CommunicationEvryMessageSelection
+    | CommunicationEvryTemplateSelection
 ): EvryCapabilityConversationContinuation {
   return {
     identity: "communication",
@@ -131,7 +136,9 @@ export function createCommunicationEvryConversationContinuation(
       );
     },
     async continue(input) {
-      const readSelection = selectCommunicationEvryRead(input.literalUserText);
+      const readSelection = preparedSelection
+        ? null
+        : selectCommunicationEvryRead(input.literalUserText);
       if (readSelection) {
         const artifact = await continueCommunicationEvryRead({
           eligibleCapabilities: eligibleEvryCapabilitiesFor(input.actor),
@@ -146,12 +153,18 @@ export function createCommunicationEvryConversationContinuation(
           : null;
       }
 
-      const templateSelection = selectCommunicationEvryTemplateEffect(
-        input.literalUserText
-      );
-      const messageSelection = selectCommunicationEvryMessageEffect(
-        input.literalUserText
-      );
+      const templateSelection = preparedSelection
+        ? preparedSelection.kind === "send" ||
+          preparedSelection.kind === "resend"
+          ? null
+          : preparedSelection
+        : selectCommunicationEvryTemplateEffect(input.literalUserText);
+      const messageSelection = preparedSelection
+        ? preparedSelection.kind === "send" ||
+          preparedSelection.kind === "resend"
+          ? preparedSelection
+          : null
+        : selectCommunicationEvryMessageEffect(input.literalUserText);
       if (!templateSelection && !messageSelection) return null;
       if (
         messageSelection?.kind === "send" &&
@@ -206,7 +219,7 @@ export function createCommunicationEvryConversationContinuation(
             pageContext: input.pageContext,
             selection: messageSelection!,
             requestKey,
-            now: new Date(),
+            now: input.now,
           });
       if (proposal.kind === "refusal") {
         return {

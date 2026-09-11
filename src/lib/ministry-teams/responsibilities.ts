@@ -111,6 +111,18 @@ export async function listResponsibilities(
 ): Promise<TeamResponsibility[]> {
   await seedPlaybookResponsibilities(churchId, teamId, userId);
 
+  return listStoredResponsibilities(churchId, teamId);
+}
+
+/**
+ * Read only the rows a team currently owns. Evry uses this after treating the
+ * first-view playbook seed as its own confirmed effect; it must never smuggle
+ * that durable initialization through an immediate read.
+ */
+export async function listStoredResponsibilities(
+  churchId: string,
+  teamId: string
+): Promise<TeamResponsibility[]> {
   return db
     .select()
     .from(teamResponsibilities)

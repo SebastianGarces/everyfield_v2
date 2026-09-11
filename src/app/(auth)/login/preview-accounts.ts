@@ -98,6 +98,27 @@ const POPULATED_EVAL_KEYS = new Set(["dayspring", "evergreen"]);
 
 const PREVIEW_ACCOUNTS: PreviewAccount[] = [
   {
+    email: "evry-test@everyfield.app",
+    password: SEED_PASSWORD,
+    name: "Evry Test",
+    note: "Plant owner · complete renewable Evry QA dataset",
+    group: "Plants & teams",
+  },
+  {
+    email: "evry-test-admin@everyfield.app",
+    password: SEED_PASSWORD,
+    name: "Morgan Test",
+    note: "Evry QA plant · Admin permissions and assigned tasks",
+    group: "Plants & teams",
+  },
+  {
+    email: "evry-test-member@everyfield.app",
+    password: SEED_PASSWORD,
+    name: "Jordan Test",
+    note: "Evry QA plant · Member permissions and own tasks",
+    group: "Plants & teams",
+  },
+  {
     email: `planter1@${SEED_DOMAIN}`,
     password: SEED_PASSWORD,
     name: "John Planter",

@@ -2,6 +2,7 @@
 
 import { LogOut, Settings } from "lucide-react";
 
+import { useAuthenticatedNavigationIntent } from "@/components/authenticated-navigation";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -42,6 +43,7 @@ type NavUserProps = {
  * no picture exists or its private object is unavailable.
  */
 export function NavUser({ user }: NavUserProps) {
+  const recordNavigationIntent = useAuthenticatedNavigationIntent();
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -94,7 +96,13 @@ export function NavUser({ user }: NavUserProps) {
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuItem asChild>
-          <form action={logout} className="w-full">
+          <form
+            action={logout}
+            className="w-full"
+            onSubmit={(event) => {
+              if (!event.defaultPrevented) recordNavigationIntent("/login");
+            }}
+          >
             <button type="submit" className="flex w-full items-center gap-2">
               <LogOut className="size-4" />
               Log out

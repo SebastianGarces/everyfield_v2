@@ -2,6 +2,7 @@ import {
   and,
   asc,
   eq,
+  getTableColumns,
   isNotNull,
   isNull,
   notExists,
@@ -142,7 +143,11 @@ export function visibleArticlesQuery(churchId: string | null) {
         notOverriddenByChurch(churchId)
       )
     )
-    .orderBy(asc(wikiArticles.sortOrder));
+    .orderBy(
+      asc(wikiArticles.sortOrder),
+      asc(wikiArticles.slug),
+      asc(wikiArticles.id)
+    );
 }
 
 /**
@@ -162,7 +167,13 @@ export function visibleArticlesQuery(churchId: string | null) {
  */
 export function articleBySlugQuery(slug: string, churchId: string | null) {
   return db
-    .select()
+    .select({
+      ...getTableColumns(wikiArticles),
+      // Drizzle's Date mapping truncates Postgres's microseconds. Effects
+      // persist this exact database token so the atomic mutation predicate
+      // cannot mistake two writes in the same JavaScript millisecond.
+      updatedAtExact: sql<string>`${wikiArticles.updatedAt}::text`,
+    })
     .from(wikiArticles)
     .where(
       and(

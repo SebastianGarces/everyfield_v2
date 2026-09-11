@@ -1,6 +1,6 @@
 import { Bell } from "lucide-react";
-import Link from "next/link";
 
+import { AuthenticatedLink } from "@/components/authenticated-navigation";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -115,7 +115,7 @@ export function NotificationBell({
       size="icon-sm"
       className={cn("relative cursor-pointer", className)}
     >
-      <Link
+      <AuthenticatedLink
         href="/notifications"
         aria-label={
           counted ? unreadBellLabel(unreadCount) : UNCOUNTED_BELL_LABEL
@@ -150,7 +150,7 @@ export function NotificationBell({
             {formatUnreadBadge(unreadCount)}
           </span>
         )}
-      </Link>
+      </AuthenticatedLink>
     </Button>
   );
 }

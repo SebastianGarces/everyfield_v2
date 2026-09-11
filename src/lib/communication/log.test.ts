@@ -144,6 +144,8 @@ test("both writes carry the church and land in one batch", () => {
   // The parent first — the FK points that way.
   assert.match(entry.sql, /insert into "communications"/);
   assert.match(recipient.sql, /insert into "communication_recipients"/);
+  assert.match(entry.sql, /on conflict \("id"\) do nothing/);
+  assert.match(recipient.sql, /on conflict \("id"\) do nothing/);
 
   for (const { params } of [entry, recipient]) {
     assert.ok(params.includes(CHURCH_A), "every write is church-scoped");

@@ -45,51 +45,11 @@ import Link from "next/link";
 // Config
 // ============================================================================
 
-export const PRIORITY_CONFIG: Record<
-  string,
-  { label: string; color: string; icon: string }
-> = {
-  urgent: {
-    label: "Urgent",
-    color: "text-red-600 bg-red-50 border-red-200",
-    icon: "!",
-  },
-  high: {
-    label: "High",
-    color: "text-orange-600 bg-orange-50 border-orange-200",
-    icon: "!",
-  },
-  medium: {
-    label: "Medium",
-    color: "text-blue-600 bg-blue-50 border-blue-200",
-    icon: "",
-  },
-  low: {
-    label: "Low",
-    color: "text-slate-500 bg-slate-50 border-slate-200",
-    icon: "",
-  },
-};
-
-export const CATEGORY_CONFIG: Record<string, { label: string }> = {
-  vision_meeting: { label: "Vision Meeting" },
-  follow_up: { label: "Follow-up" },
-  training: { label: "Training" },
-  facilities: { label: "Facilities" },
-  promotion: { label: "Promotion" },
-  administrative: { label: "Administrative" },
-  ministry_team: { label: "Ministry Team" },
-  launch_prep: { label: "Launch Prep" },
-  recurring: { label: "Recurring" },
-  general: { label: "General" },
-};
-
-export const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
-  not_started: { label: "Not Started", color: "text-slate-500" },
-  in_progress: { label: "In Progress", color: "text-blue-600" },
-  blocked: { label: "Blocked", color: "text-red-600" },
-  complete: { label: "Complete", color: "text-green-600" },
-};
+import {
+  CATEGORY_CONFIG,
+  PRIORITY_CONFIG,
+  STATUS_CONFIG,
+} from "@/lib/tasks/presentation";
 
 // ============================================================================
 // Helpers

@@ -1,6 +1,22 @@
+import documentsWikiInventory from "@/lib/evry/capabilities/documents-wiki/inventory.generated.json";
 import communicationInventory from "@/lib/evry/capabilities/communication/inventory.generated.json";
+import launchInventory from "@/lib/evry/capabilities/launch/inventory.generated.json";
 import peopleInventory from "@/lib/evry/capabilities/people/inventory.generated.json";
+import meetingsInventory from "@/lib/evry/capabilities/meetings/inventory.generated.json";
+import { MEETINGS_OPERATION_REGISTRATIONS } from "@/lib/evry/capabilities/meetings/registrations";
 import parityInventory from "@/lib/evry/capabilities/inventory.generated.json";
+import { TASK_AUTHORITATIVE_SURFACES } from "@/lib/evry/capabilities/tasks/catalog";
+import { TASK_CAPABILITY_REGISTRATIONS } from "@/lib/evry/capabilities/tasks/registrations";
+import { TEAMS_AUTHORITATIVE_SURFACES } from "@/lib/evry/capabilities/teams/catalog";
+import { TEAMS_CAPABILITY_REGISTRATIONS } from "@/lib/evry/capabilities/teams/registrations";
+import {
+  PLANT_INTELLIGENCE_AUTHORITATIVE_SURFACES,
+  PLANT_INTELLIGENCE_CAPABILITIES,
+} from "@/lib/evry/capabilities/plant-intelligence/catalog";
+import {
+  PLATFORM_AUTHORITATIVE_SURFACES,
+  PLATFORM_CAPABILITIES,
+} from "@/lib/evry/capabilities/platform/catalog";
 import {
   ALL_CAPABILITIES,
   holdsSeatFor,
@@ -118,54 +134,31 @@ function generatedCommunicationRegistrations(): EvryCapabilityRegistration[] {
   });
 }
 
+function generatedLaunchRegistrations(): EvryCapabilityRegistration[] {
+  return launchInventory.capabilities.map((capability) => {
+    const [firstSurface, ...otherSurfaces] = capability.surfaceIdentities;
+    if (
+      !isApplicationCapability(capability.applicationCapability) ||
+      !firstSurface ||
+      (capability.operationKind !== "read" &&
+        capability.operationKind !== "effect")
+    ) {
+      throw new Error(
+        `Invalid generated Launch capability: ${capability.identity}`
+      );
+    }
+    return defineEvryCapabilityRegistration({
+      identity: capability.identity,
+      surfaceIdentities: [firstSurface, ...otherSurfaces],
+      parityCapability: capability.parityCapability,
+      operationKind: capability.operationKind,
+      applicationCapability: capability.applicationCapability,
+    });
+  });
+}
+
 /** Explicit shared proof registrations, replaced in place by owning packs. */
-const REFERENCE_REGISTRATIONS = [
-  defineEvryCapabilityRegistration({
-    identity: "tasks.list",
-    surfaceIdentities: [
-      "action:src/app/(dashboard)/tasks/actions.ts → loadMoreTasksAction",
-    ],
-    parityCapability: "tasks",
-    operationKind: "read",
-    applicationCapability: "read",
-  }),
-  defineEvryCapabilityRegistration({
-    identity: "tasks.complete",
-    surfaceIdentities: [
-      "action:src/app/(dashboard)/tasks/actions.ts → completeTaskAction",
-    ],
-    parityCapability: "tasks",
-    operationKind: "effect",
-    applicationCapability: "tasks.own",
-  }),
-  defineEvryCapabilityRegistration({
-    identity: "launch.schedule",
-    surfaceIdentities: [
-      "action:src/app/(dashboard)/launch/actions.ts → scheduleLaunchAction",
-    ],
-    parityCapability: "launch",
-    operationKind: "effect",
-    applicationCapability: "launch.schedule",
-  }),
-  defineEvryCapabilityRegistration({
-    identity: "meetings.create",
-    surfaceIdentities: [
-      "action:src/app/(dashboard)/meetings/actions.ts → createMeetingAction",
-    ],
-    parityCapability: "meetings",
-    operationKind: "effect",
-    applicationCapability: "meetings.write",
-  }),
-  defineEvryCapabilityRegistration({
-    identity: "meetings.add-guests",
-    surfaceIdentities: [
-      "action:src/app/(dashboard)/meetings/actions.ts → addToGuestListAction",
-    ],
-    parityCapability: "meetings",
-    operationKind: "effect",
-    applicationCapability: "meetings.write",
-  }),
-] as const;
+const REFERENCE_REGISTRATIONS: readonly EvryCapabilityRegistration[] = [];
 
 function generatedPeopleSurfaces(): EvryAuthoritativeCapabilitySurface[] {
   return peopleInventory.entries.flatMap((entry) => {
@@ -211,6 +204,29 @@ function generatedCommunicationSurfaces(): EvryAuthoritativeCapabilitySurface[] 
   });
 }
 
+function generatedLaunchSurfaces(): EvryAuthoritativeCapabilitySurface[] {
+  return launchInventory.entries.flatMap((entry) => {
+    if (
+      entry.classification.state !== "supported" ||
+      (entry.operationKind !== "read" && entry.operationKind !== "effect") ||
+      entry.applicationCapability === null ||
+      entry.capabilityIdentity === null ||
+      !isApplicationCapability(entry.applicationCapability)
+    ) {
+      return [];
+    }
+    return [
+      {
+        identity: entry.identity,
+        capabilityIdentity: entry.capabilityIdentity,
+        parityCapability: "launch" as const,
+        operationKind: entry.operationKind,
+        applicationCapability: entry.applicationCapability,
+      },
+    ];
+  });
+}
+
 function referenceSurfaces(): EvryAuthoritativeCapabilitySurface[] {
   return REFERENCE_REGISTRATIONS.flatMap((registration) =>
     registration.surfaceIdentities.map((surfaceIdentity) => {
@@ -238,15 +254,117 @@ function referenceSurfaces(): EvryAuthoritativeCapabilitySurface[] {
   );
 }
 
+function generatedMeetingsSurfaces(): EvryAuthoritativeCapabilitySurface[] {
+  return meetingsInventory.entries.flatMap((entry) => {
+    if (entry.classification.state !== "supported") return [];
+    if (
+      !entry.capabilityIdentity ||
+      (entry.operationKind !== "read" && entry.operationKind !== "effect") ||
+      !entry.applicationCapability ||
+      !isApplicationCapability(entry.applicationCapability)
+    ) {
+      throw new Error(`Invalid generated Meetings surface: ${entry.identity}`);
+    }
+    return [
+      {
+        identity: entry.identity,
+        capabilityIdentity: entry.capabilityIdentity,
+        parityCapability: entry.parityCapability,
+        operationKind: entry.operationKind,
+        applicationCapability: entry.applicationCapability,
+      },
+    ];
+  });
+}
+
+function generatedDocumentsWikiRegistrations(): EvryCapabilityRegistration[] {
+  return documentsWikiInventory.capabilities.map((capability) => {
+    const [firstSurface, ...otherSurfaces] = capability.surfaceIdentities;
+    if (
+      !isApplicationCapability(capability.applicationCapability) ||
+      !firstSurface ||
+      (capability.operationKind !== "read" &&
+        capability.operationKind !== "effect")
+    ) {
+      throw new Error(
+        `Invalid generated Documents/wiki capability: ${capability.identity}`
+      );
+    }
+    return defineEvryCapabilityRegistration({
+      identity: capability.identity,
+      surfaceIdentities: [firstSurface, ...otherSurfaces],
+      parityCapability: capability.parityCapability,
+      operationKind: capability.operationKind,
+      applicationCapability: capability.applicationCapability,
+    });
+  });
+}
+
+function generatedDocumentsWikiSurfaces(): EvryAuthoritativeCapabilitySurface[] {
+  return documentsWikiInventory.entries.flatMap((entry) => {
+    if (
+      entry.classification.state !== "supported" ||
+      (entry.operationKind !== "read" && entry.operationKind !== "effect") ||
+      entry.applicationCapability === null ||
+      !isApplicationCapability(entry.applicationCapability)
+    )
+      return [];
+    return [
+      {
+        identity: entry.identity,
+        capabilityIdentity: entry.capabilityIdentity,
+        parityCapability:
+          entry.domain === "documents" ? "documents-and-files" : "wiki",
+        operationKind: entry.operationKind,
+        applicationCapability: entry.applicationCapability,
+      },
+    ];
+  });
+}
+
+function generatedPlantIntelligenceRegistrations(): EvryCapabilityRegistration[] {
+  return PLANT_INTELLIGENCE_CAPABILITIES.map((capability) =>
+    defineEvryCapabilityRegistration({
+      identity: capability.identity,
+      surfaceIdentities: capability.surfaceIdentities,
+      parityCapability: capability.parityCapability,
+      operationKind: capability.operationKind,
+      applicationCapability: capability.applicationCapability,
+    })
+  );
+}
+
 const REGISTRY = createEvryCapabilityRegistry({
   registrations: [
     ...generatedPeopleRegistrations(),
     ...generatedCommunicationRegistrations(),
+    ...generatedDocumentsWikiRegistrations(),
+    ...generatedPlantIntelligenceRegistrations(),
+    ...generatedLaunchRegistrations(),
+    ...MEETINGS_OPERATION_REGISTRATIONS,
+    ...TASK_CAPABILITY_REGISTRATIONS,
+    ...TEAMS_CAPABILITY_REGISTRATIONS,
+    ...PLATFORM_CAPABILITIES.map((capability) =>
+      defineEvryCapabilityRegistration({
+        identity: capability.identity,
+        surfaceIdentities: capability.surfaceIdentities,
+        parityCapability: capability.parityCapability,
+        operationKind: capability.operationKind,
+        applicationCapability: capability.applicationCapability,
+      })
+    ),
     ...REFERENCE_REGISTRATIONS,
   ],
   authoritativeSurfaces: [
     ...generatedPeopleSurfaces(),
     ...generatedCommunicationSurfaces(),
+    ...generatedDocumentsWikiSurfaces(),
+    ...PLANT_INTELLIGENCE_AUTHORITATIVE_SURFACES,
+    ...generatedLaunchSurfaces(),
+    ...generatedMeetingsSurfaces(),
+    ...TASK_AUTHORITATIVE_SURFACES,
+    ...TEAMS_AUTHORITATIVE_SURFACES,
+    ...PLATFORM_AUTHORITATIVE_SURFACES,
     ...referenceSurfaces(),
   ],
 });
@@ -269,11 +387,13 @@ export const EVRY_PEOPLE_READ_PROBE_IDENTITY =
 export const EVRY_PEOPLE_WRITE_PROBE_IDENTITY =
   "people.crm.people.update-person";
 
-export const EVRY_TASKS_READ_PROBE_IDENTITY = "tasks.list";
-export const EVRY_TASKS_COMPLETE_PROBE_IDENTITY = "tasks.complete";
+export const EVRY_TASKS_READ_PROBE_IDENTITY = "tasks.read.list";
+export const EVRY_TASKS_COMPLETE_PROBE_IDENTITY = "tasks.lifecycle.complete";
 export const EVRY_LAUNCH_SCHEDULE_PROBE_IDENTITY = "launch.schedule";
 
-function seatFieldsOf(actor: EvryPlantActor): SeatFields {
+type EvryPlantSeat = Readonly<Pick<EvryPlantActor, "plantId" | "seat">>;
+
+function seatFieldsOf(actor: EvryPlantSeat): SeatFields {
   return {
     ...tenancyColumns({ type: "church", id: actor.plantId }),
     seat: actor.seat,
@@ -281,8 +401,8 @@ function seatFieldsOf(actor: EvryPlantActor): SeatFields {
 }
 
 /** Ask the application's one capability table whether this fresh actor may act. */
-function actorHolds(
-  actor: EvryPlantActor,
+export function evryActorHoldsApplicationCapability(
+  actor: EvryPlantSeat,
   applicationCapability: Capability
 ): boolean {
   return holdsSeatFor(seatFieldsOf(actor), applicationCapability);
@@ -299,7 +419,10 @@ export function eligibleEvryCapabilitiesFor(
   actor: EvryPlantActor
 ): readonly EvryCapabilityRegistration[] {
   return REGISTRY.registrations().filter((registration) =>
-    actorHolds(actor, registration.applicationCapability)
+    evryActorHoldsApplicationCapability(
+      actor,
+      registration.applicationCapability
+    )
   );
 }
 
@@ -324,7 +447,13 @@ export async function authorizeEvryCapability(
   const actor = await requireEvryPlantViewer();
   const registration = REGISTRY.registrationFor(identity);
 
-  if (!registration || !actorHolds(actor, registration.applicationCapability)) {
+  if (
+    !registration ||
+    !evryActorHoldsApplicationCapability(
+      actor,
+      registration.applicationCapability
+    )
+  ) {
     return null;
   }
 
@@ -353,13 +482,24 @@ export function isEvryEffectCapabilityIdentity(identity: string): boolean {
 export async function authorizeEvryReadCapability(
   identity: string
 ): Promise<EvryReadCapabilityAuthorization | null> {
-  const actor = await requireEvryPlantViewer();
+  let actor: EvryPlantActor;
+  try {
+    actor = await requireEvryPlantViewer();
+  } catch (error) {
+    if (error instanceof EvryPlantViewerRefusalError || isUnauthorized(error)) {
+      return null;
+    }
+    throw error;
+  }
   const registration = REGISTRY.registrationFor(identity);
 
   if (
     !registration ||
     !isReadRegistration(registration) ||
-    !actorHolds(actor, registration.applicationCapability)
+    !evryActorHoldsApplicationCapability(
+      actor,
+      registration.applicationCapability
+    )
   ) {
     return null;
   }
@@ -389,7 +529,10 @@ export async function authorizeEvryEffectCapability(
   if (
     !registration ||
     !isEffectRegistration(registration) ||
-    !actorHolds(actor, registration.applicationCapability)
+    !evryActorHoldsApplicationCapability(
+      actor,
+      registration.applicationCapability
+    )
   ) {
     return null;
   }

@@ -17,6 +17,7 @@ export {
 export {
   createEvryPlanCapabilityRegistry,
   defineEvryPlanCapability,
+  defineEvryPlanCapabilitySchema,
   EVRY_EFFECT_CLASSES,
   type EvryEffectClass,
   type EvryPlanCapabilityRegistration,

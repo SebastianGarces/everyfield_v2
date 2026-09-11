@@ -1,19 +1,29 @@
 import { createHash, randomUUID } from "node:crypto";
+import {
+  publicEvryArtifact,
+  publicReadArtifactSchema,
+} from "@/lib/evry/artifacts/public";
 
 import type {
   EvryConversationAuthor,
   EvryConversationDeliveryStatus,
 } from "@/db/schema";
-import { hasDurableEvryCapabilityConversationResult } from "@/lib/evry/capabilities/conversation";
+import {
+  evryCapabilityConversationResultIdentity,
+  hasDurableEvryCapabilityConversationResult,
+  type EvryCapabilityConversationRunner,
+} from "@/lib/evry/capabilities/conversation";
 import { continueProductionEvryCapabilityConversation } from "@/lib/evry/capabilities/production";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
+import { boundaryArtifactFor } from "@/lib/evry/policy/artifacts";
 import type {
   EvryPageContext,
   EvryResolvedPageContext,
 } from "@/lib/evry/resolvers/contract";
-import type { EvryConversationStreamStage } from "@/lib/evry/streaming/conversation-wire";
+import type { EvryConversationStreamReport } from "@/lib/evry/streaming/conversation-wire";
 
 import {
+  evryBoundaryArtifactDocument,
   storedEvryClarificationArtifactDocument,
   type StoredEvryConversationArtifactDocument,
 } from "./artifacts";
@@ -64,11 +74,75 @@ export const evryConversationStore: EvryConversationStore = Object.freeze({
   append: appendEvryConversationRecord,
 });
 
+async function appendUnmatchedEvryConversationResult(input: {
+  actor: EvryPlantActor;
+  conversation: EvryStoredConversation;
+  userRequestKey: EvryConversationRequestKey;
+  now: Date;
+  store: EvryConversationStore;
+}): Promise<EvryStoredConversation> {
+  const identity = evryCapabilityConversationResultIdentity({
+    conversationId: input.conversation.id,
+    userRequestKey: input.userRequestKey,
+  });
+  const artifact = boundaryArtifactFor("ambiguous");
+  return appendTrustedEvryConversationMessage({
+    messageId: identity.messageId,
+    actor: input.actor,
+    conversationId: input.conversation.id,
+    requestKey: identity.requestKey,
+    expectedStateVersion: input.conversation.stateVersion,
+    state: input.conversation.state,
+    author: "assistant",
+    body: artifact.message,
+    pageContext: null,
+    requestPageContext: null,
+    relevanceKeys: [],
+    deliveryStatus: "complete",
+    artifacts: [evryBoundaryArtifactDocument("ambiguous")],
+    idempotencyContext: { status: "none" },
+    replayReference: null,
+    activePlan: { mode: "preserve" },
+    now: input.now,
+    store: input.store,
+    knownConversation: input.conversation,
+  });
+}
+
 export type EvryResumedConversation = Readonly<{
   conversation: EvryStoredConversation;
   activePlan: EvryRevalidatedActivePlan | null;
   context: EvryCompiledConversationContext;
 }>;
+
+async function resumeEvryConversationSnapshot(input: {
+  actor: EvryPlantActor;
+  conversation: EvryStoredConversation;
+  now: Date;
+  focusRelevanceKeys?: readonly EvryConversationRelevanceKey[];
+  revalidatePlan?: EvryConversationPlanResumeRevalidator;
+}): Promise<EvryResumedConversation> {
+  let activePlan: EvryRevalidatedActivePlan | null = null;
+  if (input.conversation.activePlan) {
+    activePlan = await (
+      input.revalidatePlan ?? revalidateProductionEvryConversationPlan
+    )({
+      actor: input.actor,
+      identity: input.conversation.activePlan,
+      checkedAt: input.now,
+    });
+  }
+
+  return Object.freeze({
+    conversation: input.conversation,
+    activePlan,
+    context: compileEvryConversationContext({
+      conversation: input.conversation,
+      activePlan,
+      focusRelevanceKeys: input.focusRelevanceKeys,
+    }),
+  });
+}
 
 export async function resumeEvryConversation(input: {
   actor: EvryPlantActor;
@@ -86,25 +160,12 @@ export async function resumeEvryConversation(input: {
   });
   if (!conversation) return null;
 
-  let activePlan: EvryRevalidatedActivePlan | null = null;
-  if (conversation.activePlan) {
-    activePlan = await (
-      input.revalidatePlan ?? revalidateProductionEvryConversationPlan
-    )({
-      actor: input.actor,
-      identity: conversation.activePlan,
-      checkedAt: input.now,
-    });
-  }
-
-  return Object.freeze({
+  return resumeEvryConversationSnapshot({
+    actor: input.actor,
     conversation,
-    activePlan,
-    context: compileEvryConversationContext({
-      conversation,
-      activePlan,
-      focusRelevanceKeys: input.focusRelevanceKeys,
-    }),
+    now: input.now,
+    focusRelevanceKeys: input.focusRelevanceKeys,
+    revalidatePlan: input.revalidatePlan,
   });
 }
 
@@ -116,8 +177,8 @@ export async function createEvryConversation(input: {
   requestPageContext: EvryPageContext | null;
   now: Date;
   store?: EvryConversationStore;
-  continueCapabilityConversation?: typeof continueProductionEvryCapabilityConversation;
-  reportStage?: (stage: EvryConversationStreamStage) => void | Promise<void>;
+  continueCapabilityConversation?: EvryCapabilityConversationRunner;
+  reportStage?: (stage: EvryConversationStreamReport) => void | Promise<void>;
 }): Promise<EvryResumedConversation> {
   const requestKey = evryConversationRequestKeySchema.parse(input.requestKey);
   const store = input.store ?? evryConversationStore;
@@ -143,25 +204,33 @@ export async function createEvryConversation(input: {
     requestPageContext: input.requestPageContext,
     now: input.now,
     store,
+    reportResponse: (response) =>
+      input.reportStage?.({
+        type: "response",
+        response: {
+          body: response.body,
+          artifacts: response.artifacts.map((artifact) =>
+            publicReadArtifactSchema.parse(publicEvryArtifact(artifact))
+          ),
+        },
+      }),
   });
   if (continued === null) {
-    return Object.freeze({
+    conversation = await appendUnmatchedEvryConversationResult({
+      actor: input.actor,
       conversation,
-      activePlan: null,
-      context: compileEvryConversationContext({
-        conversation,
-        activePlan: null,
-      }),
+      userRequestKey: requestKey,
+      now: input.now,
+      store,
     });
+  } else {
+    conversation = continued;
   }
-  conversation = continued;
-  const resumed = await resumeEvryConversation({
+  const resumed = await resumeEvryConversationSnapshot({
     actor: input.actor,
-    conversationId: conversation.id,
+    conversation,
     now: input.now,
-    store,
   });
-  if (!resumed) throw new Error("Created Evry conversation disappeared");
   return resumed;
 }
 
@@ -187,6 +256,7 @@ export async function appendTrustedEvryConversationMessage(input: {
     | Readonly<{ mode: "set"; plan: EvryConversationPlanIdentity }>;
   now: Date;
   store?: EvryConversationStore;
+  knownConversation?: EvryStoredConversation;
 }): Promise<EvryStoredConversation> {
   return (input.store ?? evryConversationStore).append({
     messageId: input.messageId,
@@ -207,6 +277,7 @@ export async function appendTrustedEvryConversationMessage(input: {
     replayReference: input.replayReference,
     activePlan: input.activePlan,
     createdAt: input.now,
+    knownConversation: input.knownConversation,
   });
 }
 
@@ -247,9 +318,19 @@ export type EvryConversationContinuation =
       >;
     }>;
 
-function sameResolvedPageContext(
-  left: EvryResolvedPageContext | null,
-  right: EvryResolvedPageContext | null
+type EvryConversationPageContextInput =
+  | Readonly<{
+      pageContext: EvryResolvedPageContext | null;
+      resolvePageContext?: never;
+    }>
+  | Readonly<{
+      pageContext?: never;
+      resolvePageContext: () => Promise<EvryResolvedPageContext | null>;
+    }>;
+
+function sameRequestPageContext(
+  left: EvryPageContext | null,
+  right: EvryPageContext | null
 ): boolean {
   return (
     (left === null && right === null) ||
@@ -260,11 +341,25 @@ function sameResolvedPageContext(
   );
 }
 
+function matchesLegacyRequestPageContext(
+  request: EvryPageContext | null,
+  stored: EvryResolvedPageContext | null
+): boolean {
+  if (request === null || stored === null) {
+    return request === null && stored === null;
+  }
+  return (
+    request.kind === stored.kind &&
+    (request.recordId === stored.recordId ||
+      (request.kind === "launch" && request.recordId === "current"))
+  );
+}
+
 function assertDurableCapabilityReplayRequest(input: {
   conversation: EvryStoredConversation;
   requestKey: EvryConversationRequestKey;
   message: string;
-  pageContext: EvryResolvedPageContext | null;
+  requestPageContext: EvryPageContext | null;
 }): void {
   const userMessage = input.conversation.messages.find(
     (message) =>
@@ -273,7 +368,15 @@ function assertDurableCapabilityReplayRequest(input: {
   if (
     !userMessage ||
     userMessage.body !== input.message ||
-    !sameResolvedPageContext(userMessage.pageContext, input.pageContext)
+    (userMessage.requestPageContext === undefined
+      ? !matchesLegacyRequestPageContext(
+          input.requestPageContext,
+          userMessage.pageContext
+        )
+      : !sameRequestPageContext(
+          userMessage.requestPageContext,
+          input.requestPageContext
+        ))
   ) {
     throw new EvryConversationIdempotencyError();
   }
@@ -297,20 +400,22 @@ function durableCapabilityReplayReference(input: {
 }
 
 /** Persist one user turn and any deterministic clarification; no model runs. */
-export async function continueEvryConversation(input: {
-  actor: EvryPlantActor;
-  conversationId: string;
-  requestKey: string;
-  message: string;
-  pageContext: EvryResolvedPageContext | null;
-  requestPageContext: EvryPageContext | null;
-  now: Date;
-  store?: EvryConversationStore;
-  continueCapabilityConversation?: typeof continueProductionEvryCapabilityConversation;
-  resolveReference?: typeof resolveEvryConversationReference;
-  revalidatePlan?: EvryConversationPlanResumeRevalidator;
-  reportStage?: (stage: EvryConversationStreamStage) => void | Promise<void>;
-}): Promise<EvryConversationContinuation | null> {
+export async function continueEvryConversation(
+  input: Readonly<{
+    actor: EvryPlantActor;
+    conversationId: string;
+    requestKey: string;
+    message: string;
+    requestPageContext: EvryPageContext | null;
+    now: Date;
+    store?: EvryConversationStore;
+    continueCapabilityConversation?: EvryCapabilityConversationRunner;
+    resolveReference?: typeof resolveEvryConversationReference;
+    revalidatePlan?: EvryConversationPlanResumeRevalidator;
+    reportStage?: (stage: EvryConversationStreamReport) => void | Promise<void>;
+  }> &
+    EvryConversationPageContextInput
+): Promise<EvryConversationContinuation | null> {
   const store = input.store ?? evryConversationStore;
   const conversationId = evryConversationIdSchema.safeParse(
     input.conversationId
@@ -340,7 +445,7 @@ export async function continueEvryConversation(input: {
       conversation: current,
       requestKey: requestKey.data,
       message: input.message,
-      pageContext: input.pageContext,
+      requestPageContext: input.requestPageContext,
     });
     const replayReference = durableCapabilityReplayReference({
       conversation: current,
@@ -362,14 +467,33 @@ export async function continueEvryConversation(input: {
       : null;
   }
 
+  const pageContext = input.resolvePageContext
+    ? await input.resolvePageContext()
+    : (input.pageContext ?? null);
+
   await input.reportStage?.("resolving_references");
-  const reference = (
-    input.resolveReference ?? resolveEvryConversationReference
-  )({
-    text: input.message,
-    state: current.state,
-    now: input.now,
-  });
+  const capabilityContinuation =
+    input.continueCapabilityConversation ??
+    continueProductionEvryCapabilityConversation;
+  const matchesBeforeReferences =
+    "matchesBeforeReferences" in capabilityContinuation &&
+    typeof capabilityContinuation.matchesBeforeReferences === "function" &&
+    capabilityContinuation.matchesBeforeReferences({
+      actor: input.actor,
+      conversation: current,
+      userRequestKey: requestKey.data,
+      literalUserText: input.message,
+      pageContext,
+      requestPageContext: input.requestPageContext,
+      now: input.now,
+    });
+  const reference = matchesBeforeReferences
+    ? ({ status: "not_applicable" } as const)
+    : (input.resolveReference ?? resolveEvryConversationReference)({
+        text: input.message,
+        state: current.state,
+        now: input.now,
+      });
   const relevanceKeys =
     reference.status === "resolved" ? reference.relevanceKeys : [];
   const idempotencyContext: EvryConversationMessageIdempotencyContext =
@@ -402,7 +526,7 @@ export async function continueEvryConversation(input: {
     state: current.state,
     author: "user",
     body: input.message,
-    pageContext: input.pageContext,
+    pageContext,
     requestPageContext: input.requestPageContext,
     relevanceKeys,
     deliveryStatus: "complete",
@@ -412,6 +536,7 @@ export async function continueEvryConversation(input: {
     activePlan: { mode: "preserve" },
     now: input.now,
     store,
+    knownConversation: current,
   });
 
   if (reference.status === "clarification") {
@@ -434,36 +559,50 @@ export async function continueEvryConversation(input: {
       activePlan: { mode: "preserve" },
       now: input.now,
       store,
+      knownConversation: appended,
     });
   } else {
+    const continued = await capabilityContinuation({
+      actor: input.actor,
+      conversation: appended,
+      userRequestKey: requestKey.data,
+      literalUserText: input.message,
+      pageContext,
+      requestPageContext: input.requestPageContext,
+      now: input.now,
+      store,
+      reportResponse: (response) =>
+        input.reportStage?.({
+          type: "response",
+          response: {
+            body: response.body,
+            artifacts: response.artifacts.map((artifact) =>
+              publicReadArtifactSchema.parse(publicEvryArtifact(artifact))
+            ),
+          },
+        }),
+    });
     appended =
-      (await (
-        input.continueCapabilityConversation ??
-        continueProductionEvryCapabilityConversation
-      )({
+      continued ??
+      (await appendUnmatchedEvryConversationResult({
         actor: input.actor,
         conversation: appended,
         userRequestKey: requestKey.data,
-        literalUserText: input.message,
-        pageContext: input.pageContext,
-        requestPageContext: input.requestPageContext,
         now: input.now,
         store,
-      })) ?? appended;
+      }));
   }
 
   await input.reportStage?.(
     current.activePlan ? "revalidating_plan" : "compiling_response"
   );
-  const resumed = await resumeEvryConversation({
+  const resumed = await resumeEvryConversationSnapshot({
     actor: input.actor,
-    conversationId: appended.id,
+    conversation: appended,
     now: input.now,
     focusRelevanceKeys: relevanceKeys,
-    store,
     revalidatePlan: input.revalidatePlan,
   });
-  if (!resumed) return null;
   return reference.status === "clarification"
     ? { status: "clarification", resumed, reference }
     : { status: "continued", resumed, reference };

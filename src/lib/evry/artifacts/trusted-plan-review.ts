@@ -240,6 +240,13 @@ export function trustedReviewForEvryPlanDocument(input: {
     }
     return Object.freeze({
       confirmation: deepFreezeEvryArtifact(confirmation),
+      source:
+        registration.source.kind === "recipe"
+          ? Object.freeze({
+              kind: "recipe" as const,
+              identity: registration.source.identity,
+            })
+          : Object.freeze({ kind: "generic" as const }),
     });
   } catch {
     return null;

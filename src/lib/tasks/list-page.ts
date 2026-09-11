@@ -31,6 +31,7 @@ export interface TaskListPage {
   tasks: TaskListRow[];
   total: number;
   nextCursor: string | null;
+  cursorAvailable: boolean;
   /** `personId` → latest note, for the person-related cards on THIS page. */
   personNotes: Record<string, string>;
 }
@@ -61,7 +62,10 @@ export function taskListScope(
     status: parsed.status,
     priority: parsed.priority,
     category: parsed.category,
-    assignedToId: parsed.view === "my_tasks" ? userId : undefined,
+    assignedToId: parsed.view === "my_tasks" ? userId : parsed.assignedToId,
+    ...(parsed.dueDateFrom ? { dueDateFrom: parsed.dueDateFrom } : {}),
+    ...(parsed.dueDateTo ? { dueDateTo: parsed.dueDateTo } : {}),
+    ...(parsed.search ? { search: parsed.search } : {}),
   };
 }
 
@@ -118,6 +122,7 @@ export async function readTaskListPage(
     tasks: result.tasks,
     total: result.total,
     nextCursor: result.nextCursor,
+    cursorAvailable: result.cursorAvailable,
     personNotes,
   };
 }

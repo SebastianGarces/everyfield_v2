@@ -254,11 +254,15 @@ const CHURCH_UPDATERS = [
 function sourceFiles(dir: string, found: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
     const full = path.join(dir, entry);
+    // Live-proof modules are test fixtures invoked only by their `.test.ts`
+    // owners; they are not application write surfaces.
+    const isTestSupport =
+      entry.includes(".test.") || entry.endsWith("-live-proof.ts");
     if (statSync(full).isDirectory()) {
       sourceFiles(full, found);
     } else if (
       (entry.endsWith(".ts") || entry.endsWith(".tsx")) &&
-      !entry.includes(".test.")
+      !isTestSupport
     ) {
       found.push(full);
     }

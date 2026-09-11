@@ -8,7 +8,8 @@ import { PgDialect } from "drizzle-orm/pg-core";
 import { keysetPage, orderByKeyset } from "@/lib/testing/keyset";
 import { sourceReader, stripComments } from "@/lib/testing/source-span";
 
-import { TASK_SORT_KEYS, type TaskSortableRow } from "./service";
+import { listTasks, TASK_SORT_KEYS, type TaskSortableRow } from "./service";
+import { readTaskListPage } from "./list-page";
 
 // ----------------------------------------------------------------------------
 // "LOAD MORE" ON /tasks CANNOT SKIP OR REPEAT A ROW (#320, P-006a).
@@ -163,5 +164,87 @@ test("listTasks orders by the same expression it pages by", () => {
   assert.ok(
     !listTasks.includes("${tasks.createdAt}, ${tasks.id}"),
     "the cursor must not compare created_at while ORDER BY uses another key"
+  );
+});
+
+test("listTasks accepts a cursor only inside the exact filtered result", () => {
+  const source = stripComments(
+    readFileSync(path.join(process.cwd(), "src/lib/tasks/service.ts"), "utf8")
+  );
+  const listTasks = sourceReader(source, "tasks/service.ts (stripped)").span(
+    "export async function listTasks(",
+    "export function taskCountConditions("
+  );
+  assert.match(
+    listTasks,
+    /where\(and\(eq\(tasks\.id, cursor\), \.\.\.baseConditions\)\)/,
+    "cursor lookup must carry completed, assignee, status, priority, category, and plant predicates"
+  );
+  assert.match(
+    listTasks,
+    /cursorAvailable: false/,
+    "an unavailable cursor must not fall through to the first page"
+  );
+});
+
+test("every supplied malformed direct-service cursor is unavailable before any database query", async () => {
+  // The plant id is deliberately malformed. If any supplied cursor reaches
+  // Postgres, the typed plant parameter is rejected; returning here proves the
+  // boundary did not collapse empty/whitespace/invalid input into omission and
+  // silently restart page one.
+  for (const cursor of ["", "   ", "not-a-task-uuid"]) {
+    assert.deepEqual(
+      await listTasks("not-a-plant-uuid", { cursor }),
+      {
+        tasks: [],
+        total: 0,
+        nextCursor: null,
+        cursorAvailable: false,
+      },
+      JSON.stringify(cursor)
+    );
+  }
+});
+
+test("empty, whitespace, and malformed URL/load-more cursors share the neutral unavailable page", async () => {
+  const expected = {
+    tasks: [],
+    total: 0,
+    nextCursor: null,
+    cursorAvailable: false,
+    personNotes: {},
+  };
+
+  for (const cursor of ["", "   ", "not-a-task-uuid"]) {
+    // `/tasks?cursor=…` supplies the cursor in params.
+    assert.deepEqual(
+      await readTaskListPage("not-a-plant-uuid", "not-a-user-uuid", {
+        cursor,
+      }),
+      expected,
+      `URL cursor ${JSON.stringify(cursor)}`
+    );
+    // `loadMoreTasksAction` supplies the fourth argument to this same reader.
+    assert.deepEqual(
+      await readTaskListPage("not-a-plant-uuid", "not-a-user-uuid", {}, cursor),
+      expected,
+      `action cursor ${JSON.stringify(cursor)}`
+    );
+  }
+
+  const actionSource = stripComments(
+    readFileSync(
+      path.join(process.cwd(), "src/app/(dashboard)/tasks/actions.ts"),
+      "utf8"
+    )
+  );
+  const loadMore = sourceReader(
+    actionSource,
+    "tasks/actions.ts (stripped)"
+  ).after("export async function loadMoreTasksAction(");
+  assert.match(
+    loadMore,
+    /readTaskListPage\(user\.churchId, user\.id, params, cursor\)/,
+    "the direct action must keep using the reader whose malformed-cursor behavior was exercised above"
   );
 });

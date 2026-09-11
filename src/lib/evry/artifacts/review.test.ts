@@ -300,6 +300,16 @@ test("progress and receipts reopen with every terminal and safe-retry state", as
     new Set(["completed", "failed", "refused", "skipped"])
   );
   assert.ok(receipt.steps.some(({ retry }) => retry.status === "safe_retry"));
+  assert.equal(
+    evryDetailedReceiptArtifactDocumentSchema.safeParse({
+      ...receipt,
+      reuse: {
+        recipeIdentity: "meeting.invitation.reference",
+        label: "Reuse",
+      },
+    }).success,
+    false
+  );
 });
 
 test("unexpected error documents have no field for internal detail", () => {

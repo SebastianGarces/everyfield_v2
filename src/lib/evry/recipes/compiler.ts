@@ -7,6 +7,10 @@ import {
 import type { EvryAllowedPolicyDecision } from "@/lib/evry/policy";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
 import {
+  assertEvryPlanDocumentReviewable,
+  type EvryArtifactReviewRegistry,
+} from "@/lib/evry/artifacts/trusted-plan-review";
+import {
   EVRY_PLAN_DOCUMENT_VERSION,
   parseEvryActionPlanCandidate,
   parseStoredEvryActionPlan,
@@ -211,7 +215,21 @@ function candidateArguments(
       values[argumentKey] = binding.value;
       continue;
     }
-    const value = inputs[binding.inputKey];
+    let value = inputs[binding.inputKey];
+    if (binding.kind === "input_path") {
+      for (const part of binding.path) {
+        if (
+          !value ||
+          typeof value !== "object" ||
+          Array.isArray(value) ||
+          !Object.hasOwn(value, part)
+        ) {
+          value = undefined;
+          break;
+        }
+        value = (value as Readonly<Record<string, EvryJsonValue>>)[part];
+      }
+    }
     if (value !== undefined) values[argumentKey] = value;
   }
   return values;
@@ -317,6 +335,7 @@ type CreateEvryRecipePlanInput = Readonly<{
   inputValues: unknown;
   requestKey: EvryPlanRequestKey;
   registry: EvryRecipeRegistry;
+  reviewRegistry: EvryArtifactReviewRegistry;
   eligibleCapabilities: readonly Readonly<{ identity: string }>[];
 }>;
 
@@ -341,6 +360,10 @@ export function createEvryRecipePlanCreator(
       );
     }
     const compiled = await boundaries.compile(input);
+    assertEvryPlanDocumentReviewable({
+      document: compiled.document,
+      reviewRegistry: input.reviewRegistry,
+    });
     return boundaries.persist({
       actorUserId: input.actor.userId,
       plantId: input.actor.plantId,

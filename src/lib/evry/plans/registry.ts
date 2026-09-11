@@ -50,6 +50,23 @@ export function defineEvryPlanCapability<Shape extends z.ZodRawShape>(input: {
   });
 }
 
+/** Register a trusted closed union when one authoritative effect has variants. */
+export function defineEvryPlanCapabilitySchema(input: {
+  identity: string;
+  effectClass: EvryEffectClass;
+  argumentsSchema: z.ZodType<Record<string, unknown>>;
+}): EvryPlanCapabilityRegistration {
+  if (input.identity.length === 0) {
+    throw new Error("An Evry plan capability needs an identity");
+  }
+  return Object.freeze({
+    identity: input.identity,
+    effectClass: input.effectClass,
+    argumentsSchema: input.argumentsSchema,
+    [EVRY_PLAN_CAPABILITY]: true as const,
+  });
+}
+
 /** One closed lookup table, assembled from trusted capability-pack code. */
 export function createEvryPlanCapabilityRegistry(
   registrations: readonly EvryPlanCapabilityRegistration[]

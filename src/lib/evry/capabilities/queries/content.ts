@@ -1,0 +1,25 @@
+import {
+  COMMUNICATION_QUERY,
+  COMMUNICATION_GET_MANY,
+} from "./content-communication";
+import { DOCUMENT_QUERY, DOCUMENT_READ } from "./content-documents";
+import { WIKI_SEARCH, WIKI_READ_MANY } from "./content-wiki";
+import {
+  LAUNCH_QUERY,
+  INTELLIGENCE_QUERY,
+  NOTIFICATIONS_QUERY,
+  FILES_INSPECT,
+} from "./content-platform";
+
+export const CONTENT_QUERY_READS = [
+  COMMUNICATION_QUERY,
+  COMMUNICATION_GET_MANY,
+  DOCUMENT_QUERY,
+  DOCUMENT_READ,
+  WIKI_SEARCH,
+  WIKI_READ_MANY,
+  LAUNCH_QUERY,
+  INTELLIGENCE_QUERY,
+  NOTIFICATIONS_QUERY,
+  FILES_INSPECT,
+] as const;

@@ -191,6 +191,8 @@ function createBehaviorHarness(input: {
         status: outcome.status,
         affectedCount: outcome.affectedCount,
         excludedCount: outcome.excludedCount,
+        effectKey: outcome.effectKey,
+        dependencyOutput: outcome.dependencyOutput ?? null,
       };
       durable.set(outcome.stepId, recorded);
       return recorded;

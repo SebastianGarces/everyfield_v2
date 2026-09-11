@@ -38,8 +38,8 @@ test("prohibited and unrelated requests render the same soft boundary", () => {
 
   assert.equal(theology, unrelated);
   assert.match(theology, /Ask Evry about EveryField/);
-  assert.match(theology, /Find overdue tasks/);
-  assert.match(theology, /Create a meeting/);
+  assert.match(theology, /Show me my tasks/);
+  assert.match(theology, /Show me meetings/);
 });
 
 test("all refusals keep one native, non-interactive public shape", () => {

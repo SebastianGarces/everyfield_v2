@@ -17,11 +17,11 @@ import {
 } from "@/lib/datetime";
 import { getTask, listSubtasks } from "@/lib/tasks/service";
 import { listFollowUpAssignees } from "@/lib/tasks/follow-up-ownership";
+import { exactTaskAssigneeJoin } from "@/lib/tasks/assignees";
 import {
   listPrerequisiteCandidates,
   listTaskPrerequisites,
 } from "@/lib/tasks/dependencies";
-import { eq } from "drizzle-orm";
 import {
   Calendar,
   CircleDot,
@@ -138,7 +138,7 @@ export default async function TaskDetailPage({ params }: TaskDetailPageProps) {
         email: users.email,
       })
       .from(users)
-      .where(eq(users.churchId, user.churchId)),
+      .where(exactTaskAssigneeJoin(user.churchId)),
     // #470 D2 — the Follow-up category may only be owned by a committed
     // member, so the select is fed the eligible set rather than filtering the
     // full one in the browser.

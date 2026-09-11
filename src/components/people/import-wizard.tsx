@@ -56,7 +56,7 @@ export function ImportWizard({ children }: ImportWizardProps) {
   const [summary, setSummary] = useState<ImportSummary | null>(null);
   const [importProgress, setImportProgress] = useState(0);
   const [duplicateResolutions, setDuplicateResolutions] = useState<
-    Record<number, "skip" | "create">
+    Record<number, "skip" | "create" | "merge">
   >({});
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -132,7 +132,8 @@ export function ImportWizard({ children }: ImportWizardProps) {
       setPreview(result.data);
 
       // Default all duplicate rows to "skip"
-      const defaultResolutions: Record<number, "skip" | "create"> = {};
+      const defaultResolutions: Record<number, "skip" | "create" | "merge"> =
+        {};
       for (const row of result.data.duplicateRows) {
         defaultResolutions[row.rowNumber] = "skip";
       }
@@ -192,13 +193,20 @@ export function ImportWizard({ children }: ImportWizardProps) {
   function toggleDuplicateResolution(rowNumber: number) {
     setDuplicateResolutions((prev) => ({
       ...prev,
-      [rowNumber]: prev[rowNumber] === "skip" ? "create" : "skip",
+      [rowNumber]:
+        prev[rowNumber] === "skip"
+          ? "merge"
+          : prev[rowNumber] === "merge"
+            ? "create"
+            : "skip",
     }));
   }
 
   const totalToImport = preview
     ? preview.validRows.length +
-      Object.values(duplicateResolutions).filter((v) => v === "create").length
+      Object.values(duplicateResolutions).filter(
+        (value) => value === "create" || value === "merge"
+      ).length
     : 0;
 
   return (
@@ -360,7 +368,7 @@ function PreviewStep({
   onBack,
 }: {
   preview: ImportPreview;
-  duplicateResolutions: Record<number, "skip" | "create">;
+  duplicateResolutions: Record<number, "skip" | "create" | "merge">;
   totalToImport: number;
   isPending: boolean;
   error: string | null;
@@ -547,11 +555,16 @@ function ResultsStep({
       </DialogHeader>
 
       <div className="space-y-4 py-4">
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
           <div className="rounded-lg border p-4 text-center">
             <CheckCircle2 className="mx-auto mb-2 h-6 w-6 text-green-500" />
             <p className="text-2xl font-bold">{summary.created}</p>
             <p className="text-muted-foreground text-xs">Created</p>
+          </div>
+          <div className="rounded-lg border p-4 text-center">
+            <CheckCircle2 className="text-primary mx-auto mb-2 h-6 w-6" />
+            <p className="text-2xl font-bold">{summary.merged}</p>
+            <p className="text-muted-foreground text-xs">Merged</p>
           </div>
           <div className="rounded-lg border p-4 text-center">
             <AlertTriangle className="text-muted-foreground mx-auto mb-2 h-6 w-6" />
@@ -601,7 +614,7 @@ function DuplicateRowDisplay({
   onToggle,
 }: {
   row: ImportRow;
-  resolution: "skip" | "create";
+  resolution: "skip" | "create" | "merge";
   onToggle: () => void;
 }) {
   const match = row.duplicates.exactMatch ?? row.duplicates.potentialMatches[0];
@@ -627,6 +640,8 @@ function DuplicateRowDisplay({
         <Button variant="ghost" size="sm" onClick={onToggle}>
           {resolution === "skip" ? (
             <span className="text-muted-foreground text-xs">Skip</span>
+          ) : resolution === "merge" ? (
+            <span className="text-xs">Merge</span>
           ) : (
             <span className="text-xs">Create</span>
           )}

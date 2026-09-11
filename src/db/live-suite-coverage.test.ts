@@ -4,10 +4,17 @@ import path from "node:path";
 import { test } from "node:test";
 
 import {
+  DEDICATED_LIVE_SUITES,
   databaseForSuite,
+  DOCUMENTS_WIKI_EFFECT_LIVE_SUITE,
+  LIVE_SUITE_PHASES,
   liveSuiteDatabases,
   LIVE_SUITES,
+  NESTED_PROOF_LIVE_SUITES,
+  PARALLEL_LIVE_SUITES,
+  PEOPLE_EFFECT_LIVE_SUITE,
   suiteForPath,
+  TASK_EFFECT_LIVE_SUITE,
 } from "../../scripts/live-db-names";
 import { preflight } from "../../scripts/live-db-preflight";
 
@@ -212,6 +219,56 @@ test("every live suite derives its own database, and no two collide", () => {
     () => databaseForSuite("scripts/not-a-suite.ts"),
     /not a live suite path/,
     "only suites under src/ get a database"
+  );
+});
+
+test("each nested proof wrapper owns a phase without dropping a live suite", () => {
+  assert.deepEqual(NESTED_PROOF_LIVE_SUITES, [
+    "src/lib/evry/capabilities/platform/effect-live.test.ts",
+    "src/lib/evry/capabilities/plant-intelligence/effect-live.test.ts",
+    DOCUMENTS_WIKI_EFFECT_LIVE_SUITE,
+    PEOPLE_EFFECT_LIVE_SUITE,
+    "src/lib/communication/evry-effect-live.test.ts",
+    "src/lib/evry/conversations/conversations-live.test.ts",
+    "src/lib/evry/capabilities/meetings/effect-live.test.ts",
+    "src/lib/evry/capabilities/meetings/read-live.test.ts",
+    TASK_EFFECT_LIVE_SUITE,
+    "src/lib/evry/capabilities/teams/effect-live.test.ts",
+    "src/lib/evry/executor/executor-live.test.ts",
+    "src/lib/evry/capabilities/launch/effect-live.test.ts",
+    "src/lib/evry/recipes/recipe-live.test.ts",
+  ]);
+  assert.deepEqual(
+    [...NESTED_PROOF_LIVE_SUITES].toSorted(),
+    LIVE_SUITES.filter((suite) =>
+      /\bspawnSync\s*\(/.test(
+        readFileSync(path.join(process.cwd(), suite), "utf8")
+      )
+    ).toSorted(),
+    "every live wrapper that synchronously owns a child proof must own a phase"
+  );
+  assert.deepEqual(DEDICATED_LIVE_SUITES, NESTED_PROOF_LIVE_SUITES);
+  for (const suite of DEDICATED_LIVE_SUITES) {
+    assert.equal(PARALLEL_LIVE_SUITES.includes(suite), false);
+  }
+
+  const phased = LIVE_SUITE_PHASES.flat();
+  assert.deepEqual(phased.toSorted(), [...LIVE_SUITES].toSorted());
+  assert.equal(new Set(phased).size, LIVE_SUITES.length);
+  assert.deepEqual(
+    LIVE_SUITE_PHASES.slice(0, DEDICATED_LIVE_SUITES.length),
+    DEDICATED_LIVE_SUITES.map((suite) => [suite])
+  );
+
+  const runner = readFileSync(
+    path.join(process.cwd(), "scripts", "live-db-run.ts"),
+    "utf8"
+  );
+  assert.match(runner, /for \(const suites of LIVE_SUITE_PHASES\)/);
+  assert.match(
+    runner,
+    /env: \{ \.\.\.process\.env, TZ: "UTC" \}/,
+    "live children must use the same UTC timestamp contract as CI and production"
   );
 });
 

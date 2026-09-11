@@ -242,8 +242,10 @@ export function latestEvryHistoryCheckpoint(
       return {
         messageId: latest.messageId,
         kind: artifact.kind,
-        label: "Request boundary",
-        title: "Evry kept this request inside EveryField work",
+        label: "Request not run",
+        title:
+          artifactString(artifact, "title") ??
+          "Evry couldn’t complete this request",
         detail: null,
         rebuildRequired: false,
       };
