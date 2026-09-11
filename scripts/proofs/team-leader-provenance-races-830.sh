@@ -34,4 +34,4 @@ proof_address="$(docker port "$proof_container" 5432)"
 export PROVENANCE_PG_URL="postgresql://postgres:proof830-local-only@${proof_address}/proof830"
 cd "$proof_root"
 node --no-warnings --experimental-test-module-mocks --import tsx \
-  scripts/proofs/team-leader-provenance-races-830.mjs
+  "${PROVENANCE_PROOF_SCRIPT:-scripts/proofs/team-leader-provenance-races-830.mjs}"
