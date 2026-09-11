@@ -45,3 +45,25 @@ Run the adjacent SQL with `psql -v ON_ERROR_STOP=1` in an owned disposable Postg
 The expected transcript includes a reproduced explicit-appointment loss, then passing checks for exact role/person matching, explicit preservation, tenant predicates, same-person conversion, source-independent cleanup, malformed states and reversible candidate-column DDL. This DDL experiment is not the required `pnpm db:migrate` apply/rollback evidence.
 
 Implementation acceptance criteria, ownership and the schema hold live on #830. No preview or PR has been produced by this preparation pass.
+
+## Reassessment against main on 2026-09-11
+
+The preparation branch was rebased locally onto `a5239fb47edbf3273d50da0e67cd36847f6737f5`. PR #840, merged at `2091b074`, closes #22 and adds Member leader authorization. It changes none of `leader-sync.ts`, `teams.ts`, `roles.ts`, `memberships.ts` or the ministry-team schema. The provenance defect therefore remains. The prior work was a SQL design proof and inventory, not a runtime implementation.
+
+`authorization.ts` resolves the live `leader_id` through a non-deleted, same-church person's `user_id`. An erroneous vacancy now also removes the Member's own-team write access. Preserve this authorization query and its action guards. In particular, `assignTeamLeaderAction` remains `teams.write`, reserved for Owner/Admin; role-derived leadership must not become a way for a Member to assign an explicit leader.
+
+The current active consolidated Evry PR is #825 at `a7acc48a6da8ae8f626bedbe82ddb8ccebff4e37`. Its `src/lib/evry/capabilities/teams/resolver.ts` still has the same leader writes at lines 257, 413, 524, 771, 799, 847, 952, 1206 and 1312. Its `atomic-effect.ts` still lists `leader_id` explicitly at line 180 and has no provenance writes. PR #821 remains open at the source commit recorded above. The mention of #875 is unresolved by the orchestrator; it is not treated as a replacement owner or permission to edit Evry.
+
+The smallest coordinated implementation for the issue's full acceptance criteria is:
+
+1. Add the candidate source kind and source-role columns with their closed state constraint, a reviewed historical backfill policy and a versioned migration/snapshot after a schema slot is granted.
+2. Update the native explicit writer, derived fill/vacancy and their role-id callers. Set or clear all provenance in the same leadership write. Same-person explicit appointment must replace provenance; role removal must match the source role.
+3. Preserve AS-016 by clearing all provenance in the seat-removal write. Keep person soft-delete outside this bounded fix unless its owner coordinates that separate cleanup.
+4. Have the Evry owner update its planner, import propagation, physical column writes and matching effect proofs to the same contract. Native-only provenance would leave its writes inconsistent, so it is not an independently releasable patch.
+5. Prove the coordinated implementation through the real services, source-role deletion and race cases, permission negatives and the final preview. The merged permission checks remain intact.
+
+No schema slot has been granted. Source-role foreign-key ordering and historical `legacy` policy remain integration decisions. No runtime or schema edits were made during this reassessment, and no shared database, new Docker stack, full build or publication was used.
+
+The independent PostgreSQL 16 run from 2026-09-09 passed the temporary-table design proof, including all six malformed-state cases, and confirmed owned-container cleanup. This supersedes the first local startup failures as the design's execution evidence. It does not prove application runtime, versioned migration apply/rollback, FK lifecycle, concurrency, authorization or browser outcomes.
+
+Focused local verification on the rebased branch passed 16 tests, with zero failures or skips: `node --import tsx --test 'src/app/(dashboard)/teams/authorization.test.ts' src/lib/auth/seats.test.ts`. The action proof mocks persistence; the capability tests exercise seat/tenancy predicates. The process used a dummy database URL and did not read `.env.local`. These tests confirm the local authorization checks and do not establish database persistence or fix the provenance bug. The first `tsx` CLI attempt was refused by the sandbox's IPC restriction; the direct Node invocation above completed successfully.
