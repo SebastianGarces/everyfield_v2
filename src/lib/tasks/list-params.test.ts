@@ -183,3 +183,72 @@ test("changing a view or a filter drops the cursor", () => {
   );
   assert.equal(next.get("view"), "all");
 });
+
+test("writes discard malformed siblings, duplicate enums and unknown parameters", () => {
+  const result = taskListParamsWith(
+    "view=all&status=bogus&status=blocked&status=blocked&priority=urgent&cursor=stale&unknown=x",
+    "category",
+    "general"
+  );
+  assert.equal(
+    result.toString(),
+    "view=all&status=blocked&priority=urgent&category=general"
+  );
+  assert.equal(
+    taskListParamsWith(result, "status", "bogus").has("status"),
+    false
+  );
+});
+
+test("scalar repetitions retain the page parser's default semantics", () => {
+  assert.equal(
+    taskListParamsCleared(
+      "view=all&view=assignments&completed=true&completed=true&status=blocked"
+    ).toString(),
+    ""
+  );
+  assert.equal(
+    taskListParamsCleared("view=invalid&completed=bogus").toString(),
+    ""
+  );
+});
+
+test("sibling changes preserve validated Evry deep-link filters, Clear removes them", () => {
+  const result = taskListParamsWith(
+    "view=all&completed=true&dueDateFrom=2026-09-01&dueDateTo=2026-09-30&search=++launch++&assignedToId=123e4567-e89b-42d3-a456-426614174000",
+    "priority",
+    "high"
+  );
+  assert.equal(result.get("dueDateFrom"), "2026-09-01");
+  assert.equal(result.get("dueDateTo"), "2026-09-30");
+  assert.equal(result.get("search"), "launch");
+  assert.equal(
+    result.get("assignedToId"),
+    "123e4567-e89b-42d3-a456-426614174000"
+  );
+  assert.equal(
+    taskListParamsCleared(result).toString(),
+    "view=all&completed=true"
+  );
+});
+
+test("invalid or repeated Evry scalar filters do not survive writes", () => {
+  const result = taskListParamsWith(
+    "dueDateFrom=no&dueDateTo=2026-02-30&assignedToId=not-a-uuid&search=a&search=b",
+    "view",
+    "all"
+  );
+  assert.equal(result.toString(), "view=all");
+});
+
+test("choosing Complete also enables completed rows in the same navigation", () => {
+  const written = taskListParamsWith(
+    "view=all&priority=high",
+    "status",
+    "complete"
+  );
+  const parsed = parseTaskListSearchParams(Object.fromEntries(written));
+  assert.deepEqual(parsed.status, ["complete"]);
+  assert.equal(parsed.showCompleted, true);
+  assert.equal(written.get("priority"), "high");
+});

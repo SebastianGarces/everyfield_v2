@@ -100,9 +100,10 @@ export function taskListParamsWith(
 
   if (value === null) params.delete(key);
   else params.set(key, value);
+  // The list otherwise excludes complete rows even with an explicit status filter.
+  if (key === "status" && value === "complete") params.set("completed", "true");
 
-  params.delete("cursor");
-  return params;
+  return canonicalTaskListParams(params);
 }
 
 /**
@@ -116,15 +117,43 @@ export function taskListParamsWith(
 export function taskListParamsCleared(
   current: URLSearchParams | string
 ): URLSearchParams {
-  const params = new URLSearchParams(current);
+  const { view, showCompleted } = parseTaskListQuery(current);
   const kept = new URLSearchParams();
-
-  for (const key of ["view", "completed"] as const) {
-    const value = params.get(key);
-    if (value !== null) kept.set(key, value);
-  }
-
+  if (view !== "my_tasks") kept.set("view", view);
+  if (showCompleted) kept.set("completed", "true");
   return kept;
+}
+
+/** Preserve Next's distinction between scalar and repeated query values. */
+export function parseTaskListQuery(current: URLSearchParams | string) {
+  const params = new URLSearchParams(current);
+  return parseTaskListSearchParams(
+    Object.fromEntries(
+      [...new Set(params.keys())].map((key) => {
+        const values = params.getAll(key);
+        return [key, values.length === 1 ? values[0] : values];
+      })
+    )
+  );
+}
+
+/** Rebuild from the shared reader; unknown keys and pagination never survive a filter edit. */
+function canonicalTaskListParams(current: URLSearchParams): URLSearchParams {
+  const parsed = parseTaskListQuery(current);
+  const result = taskListParamsCleared(current);
+  for (const key of ["status", "priority", "category"] as const) {
+    for (const value of parsed[key] ?? []) result.append(key, value);
+  }
+  for (const key of [
+    "dueDateFrom",
+    "dueDateTo",
+    "search",
+    "assignedToId",
+  ] as const) {
+    const value = parsed[key];
+    if (value !== undefined) result.set(key, value);
+  }
+  return result;
 }
 
 export interface TaskListSearchParams {
