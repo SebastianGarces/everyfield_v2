@@ -1,6 +1,6 @@
 # Team leader provenance design proof
 
-Preparation for [issue #830](https://github.com/SebastianGarces/everyfield_v2/issues/830), a child of Ministry Teams #84. Runtime and schema changes are held by orchestrator task `01a0876e-ceb0-7f32-a6f8-8806b1400213` until Evri lands. This document proposes a design; it does not amend canon.
+Local native implementation and evidence for [issue #830](https://github.com/SebastianGarces/everyfield_v2/issues/830), a child of Ministry Teams #84. The orchestrator authorized local schema and native writer changes on 2026-09-11. Numbered migrations, Evry adaptations, publication, shared databases and release remain held. Earlier design notes below are historical context; the local implementation section records the current result.
 
 The SQL beside this file reproduces the current vacancy predicate against a temporary table and tests proposed provenance predicates in PostgreSQL. It does not import application services, run a migration, exercise concurrency, validate authorization, or prove a browser outcome.
 
@@ -67,3 +67,38 @@ No schema slot has been granted. Source-role foreign-key ordering and historical
 The independent PostgreSQL 16 run from 2026-09-09 passed the temporary-table design proof, including all six malformed-state cases, and confirmed owned-container cleanup. This supersedes the first local startup failures as the design's execution evidence. It does not prove application runtime, versioned migration apply/rollback, FK lifecycle, concurrency, authorization or browser outcomes.
 
 Focused local verification on the rebased branch passed 16 tests, with zero failures or skips: `node --import tsx --test 'src/app/(dashboard)/teams/authorization.test.ts' src/lib/auth/seats.test.ts`. The action proof mocks persistence; the capability tests exercise seat/tenancy predicates. The process used a dummy database URL and did not read `.env.local`. These tests confirm the local authorization checks and do not establish database persistence or fix the provenance bug. The first `tsx` CLI attempt was refused by the sandbox's IPC restriction; the direct Node invocation above completed successfully.
+
+
+## Local native implementation, 2026-09-11
+
+The native implementation uses `leaderSource` / `leader_source` with `explicit`, `role` and `legacy`, plus nullable `leaderRoleId` / `leader_role_id`. The production schema declares `ministry_teams_leader_provenance_check`, closing the valid states and refusing SQL-null loopholes. No migration number, SQL migration, journal entry or snapshot has been allocated. Schema-to-snapshot alignment is therefore still part of the held migration work, and this branch cannot be released as-is.
+
+`assignTeamLeader` writes explicit provenance even for a same-person appointment. `syncLeaderOnFill` now takes the source role and asserts that exact role is a leadership role in the same team and plant with an active membership for the person. `syncLeaderOnVacate` requires the same source kind, role, person, team and plant. All role and membership callers pass that role id. AS-016 clears all provenance in the existing seat-removal write. Native eval seed and seat-removal test fixtures stamp explicit provenance for their intentional appointments. Neither `authorization.ts` nor its action guards changed.
+
+The role id is deliberately an internal historical token without an FK, preserving post-delete synchronization and preventing an FK action from revoking an explicit appointment. Historical non-null leaders will be backfilled as `legacy`; that choice is recorded in the decision ledger. No historical backfill has been applied.
+
+### Focused executable proof
+
+`team-leader-provenance-830.mjs` calls the real native services and `mayManageTeam` against an isolated in-memory PGlite PostgreSQL engine. Columns, defaults and CHECK constraints come from the production Drizzle schema. The proof uses Drizzle's PostgreSQL proxy driver with a sequential SQL transaction adapter for `db.batch`. Domain events are stubbed; it does not test notifications or person-status event subscribers. Unrelated FKs/indexes are omitted; the role-membership cascade and role-seat unique index are included. No environment file, shared database, Docker stack or server is used.
+
+Install the test-only dependency outside the repository, then run from the worktree:
+
+```sh
+npm install --prefix /tmp/ef830-pglite --no-audit --no-fund --ignore-scripts @electric-sql/pglite@0.5.8
+PGLITE_MODULE=/tmp/ef830-pglite/node_modules/@electric-sql/pglite/dist/index.js node --no-warnings --experimental-test-module-mocks --import tsx scripts/proofs/team-leader-provenance-830.mjs
+```
+
+The proof passed removal, unmarking and deletion for both explicit and derived paths, including repeat operations and same-person explicit conversion. It reads stored provenance after each operation and queries Member access: explicit appointments keep access, while source-derived vacancy removes it. It also passed unrelated-role/person/tenant vacancy, inactive/ordinary/unheld/wrong-team/foreign-tenant fill refusals, explicit and legacy preservation, six malformed provenance states and real seat removal across all three sources, retaining the person/roster and leaving a foreign plant unchanged.
+
+The 34 targeted local tests and the requirement-ID guard also passed: team-action authorization, seat capabilities, seat-removal source guards, membership-conflict handling and predefined-team guards. Four regressions were added to the existing Neon live suite for eventual coordinated migration verification; that suite has not been run against a migrated Neon-compatible database in this pass. Independent review ran the PGlite proof successfully and found fixture provenance gaps, subsequently corrected; final focused re-review reported no findings. Targeted formatting passed. ESLint reported no errors for the native source/test files; repository configuration ignores the proof and eval seed scripts, so those were not linted. Full typecheck/build and current-head CI were not run in this focused local pass.
+
+This establishes sequential native persistence through the test adapter. It does not establish migration apply/rollback, Neon transport, concurrent-writer correctness, browser behavior or release readiness. Two pre-existing races remain explicitly recorded in memory: a delete using a stale holder snapshot can miss a replacement holder's cleanup, and delayed vacancy can clear a same-person/same-role reassignment. Provenance alone does not serialize those writers.
+
+### Evry integration contract, owned by the orchestrator
+
+At the inspected #825 head `a7acc48a6da8ae8f626bedbe82ddb8ccebff4e37`, the required changes remain confined to its owner:
+
+- `src/lib/evry/capabilities/teams/resolver.ts`: empty team rows at 257 need both provenance columns null; explicit assignment at 524 writes `leader_source: "explicit", leader_role_id: null`, even for the same person. Confirmed-owner fill at 413, leadership marking at 771 and membership fill at 1206 write `leader_source: "role"` and the exact source role id. Role import at 952 must propagate all three leader fields, not only `leader_id`.
+- Vacancy plans at 799, 847 and 1312 must require source `role` plus matching role/person and clear all three fields. Explicit and legacy appointments remain intact.
+- `atomic-effect.ts:179-180`: JSON-populated inserts must include the valid provenance state whenever a leader is non-null; the explicit UPDATE column list must write `leader_source=p.leader_source, leader_role_id=p.leader_role_id` alongside `leader_id`. Both before/after snapshots and proof fixtures must include provenance so a same-person source change is visible to stale-plan checks.
+- Keep existing authority, effect claim, confirmation and retry rules. Run the owner's effect proofs against the coordinated schema and preserve #840's administrative explicit-appointment boundary. No Evry code was changed by this native branch.

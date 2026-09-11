@@ -315,7 +315,12 @@ export async function assignTeamLeader(
 
   const [updated] = await db
     .update(ministryTeams)
-    .set({ leaderId: personId, updatedAt: new Date() })
+    .set({
+      leaderId: personId,
+      leaderSource: "explicit",
+      leaderRoleId: null,
+      updatedAt: new Date(),
+    })
     .where(
       and(eq(ministryTeams.churchId, churchId), eq(ministryTeams.id, teamId))
     )

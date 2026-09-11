@@ -161,13 +161,13 @@ export async function updateRole(
     const holder = await activeRoleHolder(churchId, roleId);
     if (holder) {
       if (updated.isLeadershipRole) {
-        await syncLeaderOnFill(churchId, updated.teamId, holder);
+        await syncLeaderOnFill(churchId, updated.teamId, holder, roleId);
         // The same event `assignMember` emits when somebody lands in a
         // leadership seat, on the other door into that state — and only on a
         // real flip, so it never announces a change a rename did not make.
         await emitTeamLeaderAssigned(updated.teamId, holder, churchId, userId);
       } else {
-        await syncLeaderOnVacate(churchId, updated.teamId, holder);
+        await syncLeaderOnVacate(churchId, updated.teamId, holder, roleId);
       }
     }
   }
@@ -215,7 +215,7 @@ export async function deleteRole(
   // Derived after the fact, for the reason `removeMember` states: a leader that
   // lags the seat is repairable, one that leads it is a lie about a live row.
   if (holder) {
-    await syncLeaderOnVacate(churchId, role.teamId, holder);
+    await syncLeaderOnVacate(churchId, role.teamId, holder, roleId);
   }
 
   // Emit staffing changed

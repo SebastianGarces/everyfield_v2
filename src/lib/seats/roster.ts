@@ -413,7 +413,12 @@ function plantRemovalEffects(
     //    halves stay scoped to this plant.
     db
       .update(ministryTeams)
-      .set({ leaderId: null, updatedAt: new Date() })
+      .set({
+        leaderId: null,
+        leaderSource: null,
+        leaderRoleId: null,
+        updatedAt: new Date(),
+      })
       .where(
         and(
           eq(ministryTeams.churchId, churchId),

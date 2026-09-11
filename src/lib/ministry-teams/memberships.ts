@@ -361,7 +361,7 @@ export async function assignMember(
     // event has always fired here and drives the person's status hop; what it
     // never did was write `ministry_teams.leader_id`, so a plant could seat its
     // Senior Pastor and still read "No leader assigned" in the header.
-    await syncLeaderOnFill(churchId, teamId, personId);
+    await syncLeaderOnFill(churchId, teamId, personId, roleId);
     await emitTeamLeaderAssigned(teamId, personId, churchId, userId);
   }
 
@@ -381,7 +381,7 @@ export async function assignMember(
  * Remove (deactivate) a team membership.
  *
  * IF THE SEAT WAS A LEADERSHIP SEAT, THE TEAM'S LEADER FOLLOWS IT OUT — but
- * only when `leader_id` points at this person (#311 WS2, `leader-sync.ts`). The
+ * only when leadership was derived from this person and this role (#311 WS2, `leader-sync.ts`). The
  * role's flag is read in the SAME statement as the membership, because it is
  * one question ("what did this person hold?") and a role row always exists for
  * a membership: `role_id` is NOT NULL and cascades.
@@ -449,7 +449,12 @@ export async function removeMember(
   // assignment. One that LED would clear a leader whose seat is still filled,
   // which is a lie about a row that still exists.
   if (isLeadershipRole) {
-    await syncLeaderOnVacate(churchId, membership.teamId, membership.personId);
+    await syncLeaderOnVacate(
+      churchId,
+      membership.teamId,
+      membership.personId,
+      membership.roleId
+    );
   }
 
   // Emit staffing changed
