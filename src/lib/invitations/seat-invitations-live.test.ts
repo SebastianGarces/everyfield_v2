@@ -1,3 +1,10 @@
+import { createSession } from "@/lib/auth/session";
+import {
+  listSeatRoster,
+  removeSeat,
+  seatActorFromSession,
+} from "@/lib/seats/roster";
+import { sessions } from "@/db/schema";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, test } from "node:test";
@@ -6,6 +13,12 @@ import { and, eq, like, sql } from "drizzle-orm";
 
 import { createAccountEntities } from "@/app/(auth)/register/account-entities";
 import { db } from "@/db";
+import {
+  acceptSeatInvitationAs,
+  acceptSeatInvitationStatements,
+} from "./accept-seat";
+import { assignCoachOnAcceptStatement } from "@/lib/coaching/assignments";
+import { coachAssignments } from "@/db/schema";
 import {
   churches,
   persons,
@@ -23,7 +36,7 @@ import {
   invitationActorFromSession,
   InvitationError,
 } from "./core";
-import { invitationRegisterPath } from "./register-path";
+import { seatInvitationPath } from "./register-path";
 import {
   claimUserInvitationStatement,
   createUserInvitationAs,
@@ -103,6 +116,14 @@ async function sweep(): Promise<void> {
       select ${churches.id} from ${churches} where ${churches.name} = ${SCRATCH_NAME}
     )
   `);
+  await db.execute(sql`
+    delete from ${coachAssignments}
+    where ${coachAssignments.coachUserId} in (
+      select ${users.id} from ${users} where ${users.name} = ${SCRATCH_NAME}
+    )
+  `);
+  await db.execute(sql`delete from ${sessions} where ${sessions.userId} in
+    (select ${users.id} from ${users} where ${users.name} = ${SCRATCH_NAME})`);
   await db.delete(users).where(like(users.name, SCRATCH_NAME));
   await db.delete(churches).where(like(churches.name, SCRATCH_NAME));
   // The two org tables an org seat invitation writes into (#500). They come
@@ -356,7 +377,7 @@ test(
     // …and the link the email built is the shared `?invitation=` contract, so a
     // seat token and an org id arrive through ONE parameter.
     assert.ok(
-      mail.sent[0].text.includes(invitationRegisterPath(token)),
+      mail.sent[0].text.includes(seatInvitationPath(token)),
       "the email links somewhere other than the shared register path"
     );
 
@@ -389,7 +410,10 @@ test(
         "an oversight seat holder",
         { seat: "owner" as const, sendingNetworkId: null },
       ],
-      ["a coach, holding no seat", {}],
+      [
+        "a seatless account with a plant",
+        { seat: null, churchId: (await scratchPlant()).churchId },
+      ],
     ] as const;
 
     for (const [what, shape] of existing) {
@@ -1013,5 +1037,428 @@ test(
     assert.equal(rows.length, 1, "the account got a second person record");
     assert.equal(rows[0].id, existing.id);
     assert.equal(rows[0].userId, userId);
+  }
+);
+
+test(
+  "#568 first seat acceptance preserves coaching across every tenancy and refuses replay",
+  { skip },
+  async () => {
+    const plant = await scratchPlant();
+    for (const target of [
+      plant,
+      await scratchOrg("sending_church"),
+      await scratchOrg("network"),
+    ]) {
+      const [coach] = await db
+        .insert(users)
+        .values({
+          email: scratchEmail(),
+          name: SCRATCH_NAME,
+          passwordHash: "scratch",
+          createdAt: new Date("2000-01-01T00:00:00Z"),
+          seat: null,
+        })
+        .returning();
+      const coachMail = captureTransport();
+      const coaching = await createUserInvitationAs(
+        plant.actor,
+        { kind: "coach", inviteeEmail: coach.email },
+        coachMail.deps
+      );
+      await db.batch([
+        claimUserInvitationStatement(coaching.invitation.id, coach.id),
+        assignCoachOnAcceptStatement(coaching.invitation.id),
+      ]);
+      const mail = captureTransport();
+      await createUserInvitationAs(
+        target.actor,
+        { kind: "seat", inviteeEmail: coach.email, seat: "member" },
+        mail.deps
+      );
+      const token = mail.tokenFrom();
+      const original = await describeUserInvitationForRegistration(token);
+      assert.ok(original);
+      const [wrongAccount] = await db
+        .insert(users)
+        .values({
+          email: scratchEmail(),
+          name: SCRATCH_NAME,
+          passwordHash: "scratch",
+          seat: null,
+        })
+        .returning();
+      await assert.rejects(acceptSeatInvitationAs(wrongAccount, token));
+      const [wrongUnchanged] = await db
+        .select()
+        .from(users)
+        .where(eq(users.id, wrongAccount.id));
+      assert.equal(wrongUnchanged.seat, null);
+      assert.equal(wrongUnchanged.churchId, null);
+      await acceptSeatInvitationAs(coach, token);
+      const [seated] = await db
+        .select()
+        .from(users)
+        .where(eq(users.id, coach.id));
+      assert.equal(seated.seat, "member");
+      const [invitingOwner] = await db
+        .select()
+        .from(users)
+        .where(eq(users.id, target.ownerId));
+      const ownerSession = await createSession(randomUUID(), invitingOwner.id);
+      const roster = await listSeatRoster(
+        seatActorFromSession({ user: invitingOwner, session: ownerSession })
+      );
+      const [acceptedInvite] = await db
+        .select()
+        .from(userInvitations)
+        .where(eq(userInvitations.id, original.id));
+      assert.equal(
+        roster.find((row) => row.userId === coach.id)?.joinedAt.getTime(),
+        acceptedInvite.respondedAt?.getTime()
+      );
+      assert.ok(
+        (acceptedInvite.respondedAt?.getTime() ?? 0) > coach.createdAt.getTime()
+      );
+      const tenancy =
+        "churchId" in target
+          ? { type: "church" as const, id: target.churchId }
+          : target.tenancy;
+      for (const [key, value] of Object.entries(tenancyColumns(tenancy)))
+        assert.equal(seated[key as keyof typeof seated], value);
+      const assignments = await db
+        .select()
+        .from(coachAssignments)
+        .where(eq(coachAssignments.coachUserId, coach.id));
+      assert.equal(assignments.length, 1);
+      assert.equal(assignments[0].status, "active");
+      const linked = await db
+        .select()
+        .from(persons)
+        .where(eq(persons.userId, coach.id));
+      assert.equal(linked.length, tenancy.type === "church" ? 1 : 0);
+      await assert.rejects(acceptSeatInvitationAs(coach, token));
+      await assert.rejects(
+        createUserInvitationAs(
+          plant.actor,
+          { kind: "seat", inviteeEmail: coach.email, seat: "member" },
+          mail.deps
+        )
+      );
+      await db
+        .update(users)
+        .set({
+          seat: null,
+          churchId: null,
+          sendingChurchId: null,
+          sendingNetworkId: null,
+        })
+        .where(eq(users.id, coach.id));
+      const [, replay] = await db.batch(
+        acceptSeatInvitationStatements(
+          coach.id,
+          token,
+          original,
+          null,
+          coach,
+          new Date()
+        )
+      );
+      assert.equal(replay.rows.length, 0);
+      const [unseated] = await db
+        .select()
+        .from(users)
+        .where(eq(users.id, coach.id));
+      assert.equal(unseated.seat, null);
+      assert.equal(unseated.churchId, null);
+      assert.equal(unseated.sendingChurchId, null);
+      assert.equal(unseated.sendingNetworkId, null);
+    }
+  }
+);
+
+test(
+  "#568 competing invitations grant exactly one tenancy and leave the other pending",
+  { skip },
+  async () => {
+    const a = await scratchPlant();
+    const b = await scratchPlant();
+    const [coach] = await db
+      .insert(users)
+      .values({
+        email: scratchEmail(),
+        name: SCRATCH_NAME,
+        passwordHash: "scratch",
+        seat: null,
+      })
+      .returning();
+    const mails = [captureTransport(), captureTransport()];
+    const created = await Promise.all(
+      [a, b].map((p, i) =>
+        createUserInvitationAs(
+          p.actor,
+          { kind: "seat", inviteeEmail: coach.email, seat: "member" },
+          mails[i].deps
+        )
+      )
+    );
+    const described = await Promise.all(
+      mails.map((m) => describeUserInvitationForRegistration(m.tokenFrom()))
+    );
+    assert.ok(described[0]);
+    assert.ok(described[1]);
+    const outcomes = await Promise.all(
+      described.map((d, i) => {
+        assert.ok(d);
+        return db.batch(
+          acceptSeatInvitationStatements(
+            coach.id,
+            mails[i].tokenFrom(),
+            d,
+            null,
+            coach,
+            new Date()
+          )
+        );
+      })
+    );
+    assert.equal(outcomes.filter((o) => o[1].rows.length === 1).length, 1);
+    const rows = await Promise.all(
+      created.map((c) =>
+        db
+          .select()
+          .from(userInvitations)
+          .where(eq(userInvitations.id, c.invitation.id))
+      )
+    );
+    assert.deepEqual(rows.map((r) => r[0].status).sort(), [
+      "accepted",
+      "pending",
+    ]);
+    const pendingIndex = rows.findIndex((r) => r[0].status === "pending");
+    assert.ok(pendingIndex >= 0);
+    await assert.rejects(
+      acceptSeatInvitationAs(coach, mails[pendingIndex].tokenFrom())
+    );
+    const [stillPending] = await db
+      .select()
+      .from(userInvitations)
+      .where(eq(userInvitations.id, rows[pendingIndex][0].id));
+    assert.equal(stillPending.status, "pending");
+    const linked = await db
+      .select()
+      .from(persons)
+      .where(eq(persons.userId, coach.id));
+    assert.equal(linked.length, 1);
+  }
+);
+
+test(
+  "#568 corrected matched address is not adopted; revoked and expired tokens grant nothing",
+  { skip },
+  async () => {
+    const plant = await scratchPlant();
+    const mail = captureTransport();
+    const [coach] = await db
+      .insert(users)
+      .values({
+        email: scratchEmail(),
+        name: SCRATCH_NAME,
+        passwordHash: "scratch",
+        seat: null,
+      })
+      .returning();
+    const [contact] = await db
+      .insert(persons)
+      .values({
+        churchId: plant.churchId,
+        firstName: "Contact",
+        lastName: "",
+        email: coach.email,
+        createdBy: plant.ownerId,
+      })
+      .returning();
+    await createUserInvitationAs(
+      plant.actor,
+      { kind: "seat", inviteeEmail: coach.email, seat: "member" },
+      mail.deps
+    );
+    const d = await describeUserInvitationForRegistration(mail.tokenFrom());
+    assert.ok(d);
+    await db
+      .update(persons)
+      .set({ email: scratchEmail() })
+      .where(eq(persons.id, contact.id));
+    await db.batch(
+      acceptSeatInvitationStatements(
+        coach.id,
+        mail.tokenFrom(),
+        d,
+        contact.id,
+        coach,
+        new Date()
+      )
+    );
+    const [unchanged] = await db
+      .select()
+      .from(persons)
+      .where(eq(persons.id, contact.id));
+    assert.equal(unchanged.userId, null);
+    const linked = await db
+      .select()
+      .from(persons)
+      .where(eq(persons.userId, coach.id));
+    assert.equal(linked.length, 1);
+    assert.notEqual(linked[0].id, contact.id);
+    for (const status of ["revoked", "expired"] as const) {
+      const [other] = await db
+        .insert(users)
+        .values({
+          email: scratchEmail(),
+          name: SCRATCH_NAME,
+          passwordHash: "scratch",
+          seat: null,
+        })
+        .returning();
+      const m = captureTransport();
+      const c = await createUserInvitationAs(
+        plant.actor,
+        { kind: "seat", inviteeEmail: other.email, seat: "member" },
+        m.deps
+      );
+      const before = await describeUserInvitationForRegistration(m.tokenFrom());
+      assert.ok(before);
+      await db
+        .update(userInvitations)
+        .set(status === "revoked" ? { status } : { expiresAt: new Date(0) })
+        .where(eq(userInvitations.id, c.invitation.id));
+      const [, grant] = await db.batch(
+        acceptSeatInvitationStatements(
+          other.id,
+          m.tokenFrom(),
+          before,
+          null,
+          other,
+          new Date()
+        )
+      );
+      assert.equal(grant.rows.length, 0);
+      const [row] = await db.select().from(users).where(eq(users.id, other.id));
+      assert.equal(row.seat, null);
+      assert.equal(row.churchId, null);
+    }
+  }
+);
+
+test(
+  "#568 rejoining preserves the original person despite a duplicate email contact",
+  { skip },
+  async () => {
+    const plant = await scratchPlant();
+    const [owner] = await db
+      .select()
+      .from(users)
+      .where(eq(users.id, plant.ownerId));
+    const [coach] = await db
+      .insert(users)
+      .values({
+        email: scratchEmail(),
+        name: SCRATCH_NAME,
+        passwordHash: "scratch",
+        createdAt: new Date("2000-01-01T00:00:00Z"),
+        seat: null,
+      })
+      .returning();
+    const coachingMail = captureTransport();
+    const coaching = await createUserInvitationAs(
+      plant.actor,
+      { kind: "coach", inviteeEmail: coach.email },
+      coachingMail.deps
+    );
+    await db.batch([
+      claimUserInvitationStatement(coaching.invitation.id, coach.id),
+      assignCoachOnAcceptStatement(coaching.invitation.id),
+    ]);
+    const first = captureTransport();
+    await createUserInvitationAs(
+      plant.actor,
+      { kind: "seat", inviteeEmail: coach.email, seat: "member" },
+      first.deps
+    );
+    await acceptSeatInvitationAs(coach, first.tokenFrom());
+    const [original] = await db
+      .select()
+      .from(persons)
+      .where(eq(persons.userId, coach.id));
+    assert.ok(original);
+    const session = await createSession(randomUUID(), owner.id);
+    const seatActor = seatActorFromSession({ user: owner, session });
+    const beforeRemoval = await listSeatRoster(seatActor);
+    const firstJoin = beforeRemoval.find((row) => row.userId === coach.id);
+    assert.ok(firstJoin);
+    assert.ok(firstJoin.joinedAt.getTime() > coach.createdAt.getTime());
+    assert.equal(
+      beforeRemoval.find((row) => row.userId === owner.id)?.joinedAt.getTime(),
+      owner.createdAt.getTime()
+    );
+    await removeSeat(seatActor, coach.id);
+    const [removed] = await db
+      .select()
+      .from(users)
+      .where(eq(users.id, coach.id));
+    assert.equal(removed.seat, null);
+    assert.equal(removed.churchId, null);
+    const [duplicate] = await db
+      .insert(persons)
+      .values({
+        churchId: plant.churchId,
+        firstName: "Duplicate",
+        lastName: "Contact",
+        email: coach.email,
+        createdBy: owner.id,
+      })
+      .returning();
+    const second = captureTransport();
+    const reInvitation = await createUserInvitationAs(
+      plant.actor,
+      { kind: "seat", inviteeEmail: coach.email, seat: "member" },
+      second.deps
+    );
+    await acceptSeatInvitationAs(coach, second.tokenFrom());
+    const [acceptedAgain] = await db
+      .select()
+      .from(userInvitations)
+      .where(eq(userInvitations.id, reInvitation.invitation.id));
+    const afterRejoin = await listSeatRoster(seatActor);
+    assert.equal(
+      afterRejoin.find((row) => row.userId === coach.id)?.joinedAt.getTime(),
+      acceptedAgain.respondedAt?.getTime()
+    );
+    assert.ok(
+      (acceptedAgain.respondedAt?.getTime() ?? 0) > firstJoin.joinedAt.getTime()
+    );
+    const linked = await db
+      .select()
+      .from(persons)
+      .where(eq(persons.userId, coach.id));
+    assert.equal(linked.length, 1);
+    assert.equal(linked[0].id, original.id);
+    const [untouched] = await db
+      .select()
+      .from(persons)
+      .where(eq(persons.id, duplicate.id));
+    assert.equal(untouched.userId, null);
+    const [restored] = await db
+      .select()
+      .from(users)
+      .where(eq(users.id, coach.id));
+    assert.equal(restored.seat, "member");
+    assert.equal(restored.churchId, plant.churchId);
+    const assignments = await db
+      .select()
+      .from(coachAssignments)
+      .where(eq(coachAssignments.coachUserId, coach.id));
+    assert.equal(assignments.length, 1);
+    assert.equal(assignments[0].status, "active");
   }
 );

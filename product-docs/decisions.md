@@ -446,3 +446,11 @@ text.
 | 758 (6) | **Use deterministic eligibility plus small single-goal domain agents, with no separate supervisor-model call on the common path. Start with Vercel AI SDK plus a TypeScript plan runtime; add LangGraph only when concrete cyclic, branching, or cross-session graph state earns it.** | Code filters eligible domains from policy, plant tenancy, capability, active-plan state, and visible context. The working model selects or hands off only within that set. A durable queue may complement execution for high-volume or long-running work without becoming the decision-maker. |
 | 758 (7) | **Model choice is evidence-based and cost-sensitive. GPT-4o mini remains a benchmark candidate beside GPT-5.6 Luna, GPT-5.4 mini, and GPT-4o.** | The cheapest model that clears the same policy, routing, argument, recipe, latency, and cost evaluation wins. Time to first token, time to confirmation artifact, full latency, cache use, and cost per successful plan are release evidence. |
 | 758 (8) | **Model observability uses self-hosted Langfuse with a production trace contract and repeatable read-only cost reporting.** | Traces correlate policy, eligibility, handoffs, reads, planning, confirmation, execution, and reporting while redacting private content by default. The implementation adds an operator script that reports cost, token and cache use, latency, model, capability, recipe, and environment over a chosen period. |
+
+## 2026-09-09 — Coach-only accounts can accept a first seat
+
+Sebastian ruled in alpha programme task `01a0876e-ceb0-7f32-a6f8-8806b1400213` that #568 is included in alpha.
+
+| # | Decision | Consequence |
+|---|----------|-------------|
+| 568 | AS-010 permits a seat invitation when an account holds no seat and names no tenancy. Any seat or tenancy FK remains a refusal. | A coach-only account can join a plant, sending church or network without losing valid coaching assignments. Signed-in acceptance grants the first tenancy atomically, binds the token to the current account email, and refuses competing grants and tenancy moves. Discovery-tier work remains scoped to #294. |

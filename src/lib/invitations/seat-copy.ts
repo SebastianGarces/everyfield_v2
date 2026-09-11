@@ -92,8 +92,8 @@ export const INVITED_AS_COPY = {
     /** What the invitee may do, second person — the email's "what accepting means". */
     accepting:
       "you can work on the plant's people, meetings, teams, tasks and messages alongside its Owner",
-    /** The button. A seat invitation is answered by registering; a coach one may not be. */
-    cta: "Accept and create your account",
+    /** The button. The link offers sign-in or registration without exposing account existence. */
+    cta: "Review invitation",
   },
   member: {
     label: "Member",
@@ -101,7 +101,7 @@ export const INVITED_AS_COPY = {
     subjectTail: "join them on EveryField",
     accepting:
       "you can see the plant's work and take part in what is assigned to you",
-    cta: "Accept and create your account",
+    cta: "Review invitation",
   },
   // ── The same two seats, held in a sending church or a network (AS-005/AS-007,
   //    #500). The labels and the article are the seat's own; what changes is
@@ -113,7 +113,7 @@ export const INVITED_AS_COPY = {
     subjectTail: "join them on EveryField",
     accepting:
       "you can see how every church plant they oversee is doing, and invite other people onto the team",
-    cta: "Accept and create your account",
+    cta: "Review invitation",
   },
   org_member: {
     label: "Member",
@@ -125,7 +125,7 @@ export const INVITED_AS_COPY = {
     // screen will not show them.
     accepting:
       "you can see how every church plant they oversee is doing — it is a read-only seat, so nothing you do changes their work",
-    cta: "Accept and create your account",
+    cta: "Review invitation",
   },
   coach: {
     label: "Coach",

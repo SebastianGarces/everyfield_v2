@@ -300,6 +300,7 @@ const CAPABILITIES = {
    * and issued to this account's own address, and the assignment is written by an
    * `INSERT … SELECT` that reads the plant out of the invitation row.
    */
+  "seat.invitation.answer": { seats: null, tenancy: "any" },
   "coach.invitation.answer": { seats: null, tenancy: "any" },
 } as const satisfies Record<string, Authority>;
 

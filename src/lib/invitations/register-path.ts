@@ -84,3 +84,8 @@ export const COACH_INVITATION_PATH = "/coach-invitation";
 export function coachInvitationPath(token: string): string {
   return `${COACH_INVITATION_PATH}?invitation=${encodeURIComponent(token)}`;
 }
+
+/** Both new accounts and seatless coaches enter through the same emailed path. */
+export function seatInvitationPath(token: string): string {
+  return `/seat-invitation?invitation=${encodeURIComponent(token)}`;
+}

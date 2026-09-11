@@ -86,6 +86,7 @@ import {
   sessions,
   tasks,
   users,
+  userInvitations,
   type UserSeat,
 } from "@/db/schema";
 import { holdsSeatFor } from "@/lib/auth/seat-rules";
@@ -200,19 +201,7 @@ export type SeatRosterRow = {
   readonly name: string | null;
   readonly email: string;
   readonly seat: UserSeat;
-  /**
-   * `users.created_at`, which is the join date because registration grants the
-   * tenancy and the seat in the SAME write that creates the account (AS-012) —
-   * so for every account that exists today the two are one event.
-   *
-   * THE ONE CASE THAT WILL BREAK IT is a re-invite. AS-016 leaves the account
-   * row alive so a removed person can be invited back, and that reuses this row
-   * with `created_at` untouched — so the roster would report a join date
-   * predating their removal. Nothing can re-invite yet (the surface is out of
-   * #497's scope), so the column is accurate for every row that can exist.
-   * Whoever ships re-invitation owes this label a real source: the accepted
-   * `user_invitations` row for that address in this tenancy.
-   */
+  /** Latest accepted seat invitation in this tenancy; account creation for original Owners/legacy seats with no invitation history. */
   readonly joinedAt: Date;
 };
 
@@ -236,17 +225,44 @@ const SEAT_ORDER = sql`case ${users.seat} when 'owner' then 0 when 'admin' then 
 export async function listSeatRoster(
   actor: SeatManagementActor
 ): Promise<SeatRosterRow[]> {
+  const invitationTenancyColumn = {
+    church: userInvitations.churchId,
+    sending_church: userInvitations.sendingChurchId,
+    network: userInvitations.sendingNetworkId,
+  }[actor.tenancy.type];
+  const acceptedSeats = db
+    .select({
+      userId: userInvitations.respondedBy,
+      joinedAt: sql<Date | null>`max(${userInvitations.respondedAt})`
+        .mapWith(userInvitations.respondedAt)
+        .as("joined_at"),
+    })
+    .from(userInvitations)
+    .where(
+      and(
+        eq(invitationTenancyColumn, actor.tenancy.id),
+        eq(userInvitations.kind, "seat"),
+        eq(userInvitations.status, "accepted")
+      )
+    )
+    .groupBy(userInvitations.respondedBy)
+    .as("accepted_seats");
+  const joinedAt =
+    sql<Date>`coalesce(${acceptedSeats.joinedAt}, ${users.createdAt})`.mapWith(
+      users.createdAt
+    );
   const rows = await db
     .select({
       userId: users.id,
       name: users.name,
       email: users.email,
       seat: users.seat,
-      joinedAt: users.createdAt,
+      joinedAt,
     })
     .from(users)
+    .leftJoin(acceptedSeats, eq(acceptedSeats.userId, users.id))
     .where(and(inTenancy(actor.tenancy), sql`${users.seat} is not null`))
-    .orderBy(SEAT_ORDER, users.createdAt);
+    .orderBy(SEAT_ORDER, joinedAt);
 
   // The NOT NULL is in the `WHERE`; this narrows the TYPE to match, and is not
   // a second copy of the rule — `seat` is nullable on the column and the
