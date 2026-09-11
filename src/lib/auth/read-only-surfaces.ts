@@ -330,8 +330,8 @@ export const READ_ONLY_SURFACE_CHECKLIST: readonly ChecklistRow[] = [
     surface:
       "Meeting detail and its attendance, evaluation, invitations, logistics, outcomes and analytics tabs",
     mustNotRender:
-      "Edit meeting, record and finalize attendance, submit evaluation, send invitations, edit logistics, record outcomes — a Member's own RSVP is the one control that stays",
-    governedBy: ["meetings.write"],
+      "Edit meeting, submit evaluation, send invitations, edit logistics, record outcomes; attendance controls are available only for team meetings the Member leads, and own RSVP remains available",
+    governedBy: ["meetings.write", "meetings.attendance"],
     reachedBy: ["plant-member"],
     verdict: "fixed-here",
     gatedIn: [
@@ -372,12 +372,13 @@ export const READ_ONLY_SURFACE_CHECKLIST: readonly ChecklistRow[] = [
       "Ministry Teams (list, detail, meetings, responsibilities, training tabs, health, org chart)",
     mustNotRender:
       "New team, add and remove member, assign role, set leader, edit responsibilities, record training — a team leader's writes on their own team stay, derived from `MinistryTeam.leader_id`",
-    governedBy: ["teams.write"],
+    governedBy: ["teams.write", "teams.own"],
     reachedBy: ["plant-member"],
     verdict: "fixed-here",
     gatedIn: [
       "src/app/(dashboard)/teams/page.tsx",
       "src/components/ministry-teams/teams-dashboard.tsx",
+      "src/components/ministry-teams/team-write-context.tsx",
       "src/components/ministry-teams/members-roles-tab.tsx",
       "src/components/ministry-teams/responsibilities-tab.tsx",
       "src/components/ministry-teams/training-tab.tsx",
@@ -385,7 +386,7 @@ export const READ_ONLY_SURFACE_CHECKLIST: readonly ChecklistRow[] = [
     ],
     note: 'THE HEADER IS PART OF THE ROW TOO (#668). The list page carried no capability read at all — every control on it belongs to `TeamsDashboard`, which asks `useCan("teams.write")` — while its subtitle told every seat to "Organize, staff, and track your ministry teams". A Member holds the third verb and neither of the first two, on a page whose New Team button they are already not shown. The page now asks `holdsSeatFor(user, "teams.write")` for its own header, and both branches are `teamsListSubtitle` in `src/lib/ministry-teams/presentation.ts`. The Member\'s sentence keeps the verb that was theirs: tracking is reading.',
     survives:
-      "NOTHING, AND THE FRD'S THIRD EXCEPTION CANNOT SHIP YET — ruled here for #499. `ministry_teams.leader_id` references `persons.id`; a session names a `users.id`; and there is no column joining them until AS-013's registration link lands. So no rendered surface can ask 'am I this team's leader?', and writing `team.leaderId === user.id` would compare two different id spaces and be false for everyone forever. `seat-rules.ts` already records the server half of this residual — every teams write sits at `teams.write` (ADMIN_PLUS) for the same reason — so hiding all of them matches what the server does today. Retired by the account-to-person link, which restores both halves at once.",
+      "A Member linked through persons.user_id to this team's leader can manage its roles, roster, responsibilities, meetings and team-specific training. The scoped TeamWriteProvider carries the server's mayManageTeam decision; it grants no global teams.write capability. Creation, metadata, explicit leader appointment and template imports remain administrative.",
   },
   {
     surface:

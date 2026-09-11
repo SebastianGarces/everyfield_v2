@@ -4,6 +4,7 @@ import { verifySession } from "@/lib/auth/session";
 import { getMeeting, getAttendanceSummary } from "@/lib/meetings/service";
 import { listMeetingResponses } from "@/lib/meetings/response-queries";
 import { getGuestList } from "@/lib/meetings/guest-list";
+import { mayRecordMeetingAttendance } from "@/lib/meetings/attendance-authorization";
 import { AttendanceCapture } from "@/components/meetings/attendance-capture";
 import type { ResponseCardType } from "@/db/schema/meetings";
 
@@ -39,6 +40,11 @@ export default async function AttendancePage({ params }: AttendancePageProps) {
   return (
     <AttendanceCapture
       meetingId={meeting.id}
+      writableMeetingId={
+        (await mayRecordMeetingAttendance(user, meeting))
+          ? meeting.id
+          : undefined
+      }
       guests={guests}
       summary={summary}
       showResponseCards={meeting.type === "vision_meeting"}

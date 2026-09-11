@@ -245,8 +245,17 @@ const CAPABILITIES = {
   "phase.signal": { seats: ADMIN_PLUS, tenancy: "plant" },
 
   // ── Own duty: a seat, any seat; the subject is checked in the body ─────────
-  /** Completing or changing a task assigned to the caller; service checks ownership. */
+  /**
+   * Completing, reopening or restatusing a task ASSIGNED TO THE CALLER.
+   *
+   * The service checks assigned_to_id against the authenticated account.
+   * A seat alone never authorizes another person's task.
+   */
   "tasks.own": { seats: SEATED, tenancy: "plant" },
+  /** AS-006: the team leader subject is checked through persons.user_id. */
+  "teams.own": { seats: SEATED, tenancy: "plant" },
+  /** The stored meeting must belong to a team the Member leads. */
+  "meetings.attendance": { seats: SEATED, tenancy: "plant" },
   /** The live linked Person must already belong to the meeting's guest list. */
   "meetings.rsvp": { seats: SEATED, tenancy: "plant" },
   /**
@@ -300,6 +309,7 @@ const CAPABILITIES = {
    * and issued to this account's own address, and the assignment is written by an
    * `INSERT … SELECT` that reads the plant out of the invitation row.
    */
+  "seat.invitation.answer": { seats: null, tenancy: "any" },
   "coach.invitation.answer": { seats: null, tenancy: "any" },
 } as const satisfies Record<string, Authority>;
 

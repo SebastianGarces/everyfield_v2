@@ -45,7 +45,7 @@ import type {
 } from "./email";
 // The `?invitation=` contract, from the import-free leaf that owns it — never
 // hand-built, and never re-exported from here (see `./register-path`).
-import { coachInvitationPath, invitationRegisterPath } from "./register-path";
+import { coachInvitationPath, seatInvitationPath } from "./register-path";
 
 /**
  * WHICH SEND THIS IS — and a seat RESEND is identified by its ROTATION, never
@@ -144,11 +144,8 @@ export function seatInvitationEmailIdempotencyKey(
  * The absolute, token-bound URL the email links to — and THE ONE PLACE the two
  * kinds part company (#496).
  *
- * A seat invitation is register-only, so it goes to the sign-up form. A coach
- * invitation may be answered by an account that already exists, and the sender
- * must not learn whether this one does, so it goes to a page that asks the
- * reader instead of a form that assumes them. See `./register-path` for why the
- * fork is on the KIND and never on the invitee.
+ * Both paths ask the viewer to sign in or register. The link depends only on
+ * invitation kind, never on whether the invited address holds an account.
  */
 export function seatInvitationRegisterUrl(
   invitedAs: InvitedAs,
@@ -158,7 +155,7 @@ export function seatInvitationRegisterUrl(
   const path =
     invitedAs.kind === "coach"
       ? coachInvitationPath(token)
-      : invitationRegisterPath(token);
+      : seatInvitationPath(token);
   return `${baseUrl ?? appBaseUrl()}${path}`;
 }
 

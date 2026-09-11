@@ -174,6 +174,16 @@
     },
     {
       "kind": "action",
+      "identity": "action:src/app/(auth)/seat-invitation/actions.ts → acceptSeatInvitationAction",
+      "source": "src/app/(auth)/seat-invitation/actions.ts",
+      "exportName": "acceptSeatInvitationAction",
+      "applicationCapability": "seat.invitation.answer",
+      "exemption": null,
+      "parityCapability": "boundary.authentication",
+      "classification": { "state": "excluded", "reason": "authentication" }
+    },
+    {
+      "kind": "action",
       "identity": "action:src/app/(dashboard)/admin/feedback/actions.ts → updateFeedbackStatusAction",
       "source": "src/app/(dashboard)/admin/feedback/actions.ts",
       "exportName": "updateFeedbackStatusAction",
@@ -415,7 +425,7 @@
       "identity": "action:src/app/(dashboard)/meetings/actions.ts → addAttendeeAction",
       "source": "src/app/(dashboard)/meetings/actions.ts",
       "exportName": "addAttendeeAction",
-      "applicationCapability": "meetings.write",
+      "applicationCapability": "meetings.attendance",
       "exemption": null,
       "parityCapability": "meetings",
       "classification": { "state": "supported" }
@@ -445,7 +455,7 @@
       "identity": "action:src/app/(dashboard)/meetings/actions.ts → addWalkInAttendeeAction",
       "source": "src/app/(dashboard)/meetings/actions.ts",
       "exportName": "addWalkInAttendeeAction",
-      "applicationCapability": "meetings.write",
+      "applicationCapability": "meetings.attendance",
       "exemption": null,
       "parityCapability": "meetings",
       "classification": { "state": "supported" }
@@ -505,7 +515,7 @@
       "identity": "action:src/app/(dashboard)/meetings/actions.ts → finalizeAttendanceAction",
       "source": "src/app/(dashboard)/meetings/actions.ts",
       "exportName": "finalizeAttendanceAction",
-      "applicationCapability": "meetings.write",
+      "applicationCapability": "meetings.attendance",
       "exemption": null,
       "parityCapability": "meetings",
       "classification": { "state": "supported" }
@@ -545,7 +555,7 @@
       "identity": "action:src/app/(dashboard)/meetings/actions.ts → recordAttendanceBatchAction",
       "source": "src/app/(dashboard)/meetings/actions.ts",
       "exportName": "recordAttendanceBatchAction",
-      "applicationCapability": "meetings.write",
+      "applicationCapability": "meetings.attendance",
       "exemption": null,
       "parityCapability": "meetings",
       "classification": { "state": "supported" }
@@ -565,7 +575,7 @@
       "identity": "action:src/app/(dashboard)/meetings/actions.ts → removeAttendeeAction",
       "source": "src/app/(dashboard)/meetings/actions.ts",
       "exportName": "removeAttendeeAction",
-      "applicationCapability": "meetings.write",
+      "applicationCapability": "meetings.attendance",
       "exemption": null,
       "parityCapability": "meetings",
       "classification": { "state": "supported" }
@@ -595,7 +605,7 @@
       "identity": "action:src/app/(dashboard)/meetings/actions.ts → toggleAttendanceStatusAction",
       "source": "src/app/(dashboard)/meetings/actions.ts",
       "exportName": "toggleAttendanceStatusAction",
-      "applicationCapability": "meetings.write",
+      "applicationCapability": "meetings.attendance",
       "exemption": null,
       "parityCapability": "meetings",
       "classification": { "state": "supported" }
@@ -1615,7 +1625,7 @@
       "identity": "action:src/app/(dashboard)/teams/actions.ts → assignMemberAction",
       "source": "src/app/(dashboard)/teams/actions.ts",
       "exportName": "assignMemberAction",
-      "applicationCapability": "teams.write",
+      "applicationCapability": "teams.own",
       "exemption": null,
       "parityCapability": "teams",
       "classification": { "state": "supported" }
@@ -1635,7 +1645,7 @@
       "identity": "action:src/app/(dashboard)/teams/actions.ts → createMeetingAction",
       "source": "src/app/(dashboard)/teams/actions.ts",
       "exportName": "createMeetingAction",
-      "applicationCapability": "teams.write",
+      "applicationCapability": "teams.own",
       "exemption": null,
       "parityCapability": "teams",
       "classification": { "state": "supported" }
@@ -1645,7 +1655,7 @@
       "identity": "action:src/app/(dashboard)/teams/actions.ts → createResponsibilityAction",
       "source": "src/app/(dashboard)/teams/actions.ts",
       "exportName": "createResponsibilityAction",
-      "applicationCapability": "teams.write",
+      "applicationCapability": "teams.own",
       "exemption": null,
       "parityCapability": "teams",
       "classification": { "state": "supported" }
@@ -1655,7 +1665,7 @@
       "identity": "action:src/app/(dashboard)/teams/actions.ts → createRoleAction",
       "source": "src/app/(dashboard)/teams/actions.ts",
       "exportName": "createRoleAction",
-      "applicationCapability": "teams.write",
+      "applicationCapability": "teams.own",
       "exemption": null,
       "parityCapability": "teams",
       "classification": { "state": "supported" }
@@ -1675,7 +1685,7 @@
       "identity": "action:src/app/(dashboard)/teams/actions.ts → createTrainingProgramAction",
       "source": "src/app/(dashboard)/teams/actions.ts",
       "exportName": "createTrainingProgramAction",
-      "applicationCapability": "teams.write",
+      "applicationCapability": "teams.own",
       "exemption": null,
       "parityCapability": "teams",
       "classification": { "state": "supported" }
@@ -1685,7 +1695,7 @@
       "identity": "action:src/app/(dashboard)/teams/actions.ts → deleteResponsibilityAction",
       "source": "src/app/(dashboard)/teams/actions.ts",
       "exportName": "deleteResponsibilityAction",
-      "applicationCapability": "teams.write",
+      "applicationCapability": "teams.own",
       "exemption": null,
       "parityCapability": "teams",
       "classification": { "state": "supported" }
@@ -1695,7 +1705,7 @@
       "identity": "action:src/app/(dashboard)/teams/actions.ts → deleteRoleAction",
       "source": "src/app/(dashboard)/teams/actions.ts",
       "exportName": "deleteRoleAction",
-      "applicationCapability": "teams.write",
+      "applicationCapability": "teams.own",
       "exemption": null,
       "parityCapability": "teams",
       "classification": { "state": "supported" }
@@ -1745,7 +1755,7 @@
       "identity": "action:src/app/(dashboard)/teams/actions.ts → markTrainingCompleteAction",
       "source": "src/app/(dashboard)/teams/actions.ts",
       "exportName": "markTrainingCompleteAction",
-      "applicationCapability": "teams.write",
+      "applicationCapability": "teams.own",
       "exemption": null,
       "parityCapability": "teams",
       "classification": { "state": "supported" }
@@ -1755,7 +1765,7 @@
       "identity": "action:src/app/(dashboard)/teams/actions.ts → removeMemberAction",
       "source": "src/app/(dashboard)/teams/actions.ts",
       "exportName": "removeMemberAction",
-      "applicationCapability": "teams.write",
+      "applicationCapability": "teams.own",
       "exemption": null,
       "parityCapability": "teams",
       "classification": { "state": "supported" }
@@ -1775,7 +1785,7 @@
       "identity": "action:src/app/(dashboard)/teams/actions.ts → setResponsibilityCompleteAction",
       "source": "src/app/(dashboard)/teams/actions.ts",
       "exportName": "setResponsibilityCompleteAction",
-      "applicationCapability": "teams.write",
+      "applicationCapability": "teams.own",
       "exemption": null,
       "parityCapability": "teams",
       "classification": { "state": "supported" }
@@ -1785,7 +1795,7 @@
       "identity": "action:src/app/(dashboard)/teams/actions.ts → updateResponsibilityAction",
       "source": "src/app/(dashboard)/teams/actions.ts",
       "exportName": "updateResponsibilityAction",
-      "applicationCapability": "teams.write",
+      "applicationCapability": "teams.own",
       "exemption": null,
       "parityCapability": "teams",
       "classification": { "state": "supported" }
@@ -1795,7 +1805,7 @@
       "identity": "action:src/app/(dashboard)/teams/actions.ts → updateRoleAction",
       "source": "src/app/(dashboard)/teams/actions.ts",
       "exportName": "updateRoleAction",
-      "applicationCapability": "teams.write",
+      "applicationCapability": "teams.own",
       "exemption": null,
       "parityCapability": "teams",
       "classification": { "state": "supported" }
@@ -2359,6 +2369,14 @@
     },
     {
       "kind": "route",
+      "identity": "route:/seat-invitation",
+      "path": "/seat-invitation",
+      "sources": ["src/app/(auth)/seat-invitation/page.tsx"],
+      "parityCapability": "boundary.authentication",
+      "classification": { "state": "excluded", "reason": "authentication" }
+    },
+    {
+      "kind": "route",
       "identity": "route:/settings",
       "path": "/settings",
       "sources": ["src/app/(dashboard)/settings/page.tsx"],
@@ -2527,10 +2545,10 @@
     }
   ],
   "summary": {
-    "routes": 66,
-    "actions": 180,
+    "routes": 67,
+    "actions": 181,
     "supported": 179,
-    "excluded": 65,
+    "excluded": 67,
     "unreachable": 2,
     "unclassified": 0
   }

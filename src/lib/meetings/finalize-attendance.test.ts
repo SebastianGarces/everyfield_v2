@@ -375,3 +375,19 @@ test("non-vision meetings still finalize and pass their type downstream", async 
   assert.equal(result.outcome, "finalized");
   assert.equal(h.storedAttendance(), 1);
 });
+
+test("clearing the last attendee reconciles a finalized meeting count to zero", async () => {
+  const harness = makeHarness({
+    meetingType: "team_meeting",
+    actualAttendance: 1,
+    attended: [],
+  });
+  const result = await runFinalizeAttendance(harness.deps);
+  assert.equal(result.outcome, "reconciled");
+  assert.equal(result.total, 0);
+  assert.equal(harness.storedAttendance(), 0);
+  assert.deepEqual(
+    harness.calls.map((call) => call.kind),
+    ["finalized", "reconcile"]
+  );
+});

@@ -366,3 +366,64 @@ test("the outcome is announced politely, not as an error", () => {
     "the outcome is a polite status region, never an alert"
   );
 });
+
+test("scoped attendance grant exposes attendance but never Person creation or RSVP controls", () => {
+  function renderGrant(
+    writableMeetingId?: string,
+    capabilities: Parameters<
+      typeof ViewerCapabilitiesProvider
+    >[0]["capabilities"] = ["meetings.attendance"]
+  ) {
+    return renderToStaticMarkup(
+      createElement(ViewerCapabilitiesProvider, {
+        capabilities,
+        children: createElement(AttendanceCapture, {
+          meetingId: "meeting-1",
+          writableMeetingId,
+          guests: [guest({ id: "1" })],
+          summary: { total: 1, firstTime: 0, returning: 0, coreGroup: 0 },
+        }),
+      })
+    );
+  }
+  const own = renderGrant("meeting-1");
+  assert.equal(checkboxes(own).length, 1);
+  assert.match(own, /Finalize Attendance/);
+  assert.match(own, /Add Walk-in/);
+  assert.doesNotMatch(own, /Quick Add Person|Quick Add Walk-in/);
+  for (const html of [
+    renderGrant(),
+    renderGrant("meeting-2"),
+    renderGrant("meeting-1", []),
+  ]) {
+    assert.equal(checkboxes(html).length, 0);
+    assert.doesNotMatch(
+      html,
+      /Finalize Attendance|Add Walk-in|Quick Add Person/
+    );
+    assert.match(html, /Ada Lovelace/);
+  }
+  assert.match(renderGrant(undefined, ["meetings.write"]), /Quick Add Person/);
+});
+
+test("cleared attendance remains a guest but leaves the attended count", () => {
+  const html = renderCapture([
+    guest({ id: "1", attendanceStatus: "absent", responseStatus: "confirmed" }),
+  ]);
+  assert.equal(checkboxes(html)[0].attrs["aria-checked"], "false");
+  assert.match(html, /0 of 1 marked as attended/);
+  assert.match(html, /Confirmed/);
+  assert.match(html, /Uncheck Here to clear attendance/);
+});
+
+test("a finalized meeting can reconcile after its last attendee is cleared", () => {
+  const cleared = [guest({ id: "1", attendanceStatus: "absent" })];
+  for (const finalized of [false, true]) {
+    const html = renderCapture(cleared, finalized);
+    const button = [...html.matchAll(/<button\b[^]*?<\/button>/g)]
+      .map((match) => match[0])
+      .find((markup) => /(?:Update|Finalize) Attendance/.test(markup));
+    assert.ok(button);
+    assert.equal(button.includes('disabled=""'), !finalized);
+  }
+});
