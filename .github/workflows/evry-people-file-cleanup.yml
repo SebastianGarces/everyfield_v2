@@ -1,0 +1,37 @@
+# GitHub Actions owns this hourly schedule. Vercel Hobby permits only one
+# invocation per day, and vercel.json deliberately schedules nothing. The
+# route owns authentication and the retry-safe cleanup logic; this workflow
+# only supplies a bounded authenticated tick.
+name: Evry People file cleanup
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: evry-people-file-cleanup
+  # An active sweep is allowed to finish. The 90-second request budget keeps
+  # it below the hourly cadence, and every deletion is idempotent on retry.
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Remove expired unclaimed People attachments
+        env:
+          CLEANUP_URL: https://everyfield-v2.vercel.app/api/evry/people/attachments/cleanup
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CRON_SECRET:-}" ]; then
+            echo "::error::CRON_SECRET is not configured"
+            exit 1
+          fi
+          curl --fail-with-body --silent --show-error --max-time 90 \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$CLEANUP_URL"

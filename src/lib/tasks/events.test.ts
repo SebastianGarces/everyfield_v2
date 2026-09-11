@@ -119,24 +119,17 @@ test("the follow-up index is keyed on the tuple that identifies a meeting's foll
 });
 
 test("the generation INSERT is per-row idempotent, not all-or-nothing", () => {
-  // `span` resolves both anchors against the whole file, and
-  // `autoCompleteTasksByEvent` already carries a `.returning({ id: tasks.id })`
-  // higher up — so the closing anchor is the call that follows the INSERT.
+  // The shared boundary owns the physical INSERT now; this call-site option
+  // is what preserves meeting generation's two partial-index arbiters.
   const insert = sourceReader(EVENTS_SOURCE, "events.ts").span(
-    ".insert(tasks)",
+    "insertExactTenantTasks(tasksToCreate",
     "await syncTaskNotificationsFor("
   );
 
   assert.match(
     insert,
-    /\.onConflictDoNothing\(\)/,
+    /onConflictDoNothing:\s*true/,
     "#521: with both kinds of row guarded, a raced top-up must skip the row somebody else wrote and land the rest — aborting the statement drops a late-added first-timer"
-  );
-
-  assert.doesNotMatch(
-    insert,
-    /onConflictDoNothing\(\s*\{/,
-    "untargeted, deliberately: a named arbiter covers one index and re-raises 23505 on the other"
   );
 
   // Comments stripped: the docblock explains the untargeted choice by naming

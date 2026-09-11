@@ -937,7 +937,7 @@ test("group resolution refuses a batch above the plan and DOM bound", async () =
   assert.equal(audienceCalls, 0);
 });
 
-test("draft, stored, preview, and sent rich text share one sanitized source", async () => {
+test("confirmation shows one template while delivery keeps sanitized rich text", async () => {
   const stored = storedTemplateContent(
     '<p>Hello <strong>{{first_name}}</strong> <a href="https://example.com">details</a></p><script>bad()</script>'
   );
@@ -1005,12 +1005,13 @@ test("draft, stored, preview, and sent rich text share one sanitized source", as
   const delivered = await render(
     CommunicationEmail({ bodyHtml: preview, churchName: "EveryField Test" })
   );
-  for (const surface of [renderedConfirmation, delivered]) {
-    assert.match(surface, /<strong>Ada<\/strong>/);
-    assert.match(surface, /href="https:\/\/example.com"/);
-    assert.doesNotMatch(surface, /&lt;strong&gt;/);
-    assert.doesNotMatch(surface, /script|bad\(\)/i);
-  }
+  assert.match(renderedConfirmation, /Hello \{\{first_name\}\} details/);
+  assert.doesNotMatch(renderedConfirmation, /<strong>Ada<\/strong>/);
+  assert.doesNotMatch(renderedConfirmation, /script|bad\(\)/i);
+  assert.match(delivered, /<strong>Ada<\/strong>/);
+  assert.match(delivered, /href="https:\/\/example.com"/);
+  assert.doesNotMatch(delivered, /&lt;strong&gt;/);
+  assert.doesNotMatch(delivered, /script|bad\(\)/i);
 });
 
 test("effect identities are stable, purpose-separated UUIDs", () => {

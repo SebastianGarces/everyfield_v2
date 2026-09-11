@@ -44,11 +44,13 @@ test("a stale checkpoint offers rebuild and never an active confirm control", ()
   );
   assert.match(
     workspace,
-    /Rebuild this plan with current records and permissions\./
+    /messages\.find\(\(\{ author \}\) => author === "user"\)/
   );
+  assert.match(workspace, /void sendMessageText\(rebuildMessage\)/);
+  assert.match(checkpoint, /disabled=\{disabled\}/);
 });
 
-test("conversation changes are blocked while send, load, or route selection owns the workspace", () => {
+test("conversation changes are blocked while send, load, or direct selection owns the workspace", () => {
   assert.match(
     workspace,
     /const blocked =[\s\S]*isLoading \|\|[\s\S]*isSending \|\|[\s\S]*isConversationNavigationPending \|\|[\s\S]*isNewComposerResetPending/
@@ -60,7 +62,11 @@ test("conversation changes are blocked while send, load, or route selection owns
   assert.match(workspace, /canUseEvryHistoryComposer\(/);
   assert.match(
     workspace,
-    /startConversationNavigation\(\(\) => \{[\s\S]*router\.push/
+    /function selectConversation[\s\S]*setRouteConversationId\(nextConversationId\)[\s\S]*window\.history\.pushState/
+  );
+  assert.match(
+    workspace,
+    /routeConversationId === conversation\?\.id[\s\S]*void loadConversation\(routeConversationId\)/
   );
   assert.match(list, /aria-disabled=\{blocked \|\| undefined\}/);
   assert.match(list, /if \(blocked\) \{[\s\S]*event\.preventDefault\(\)/);
@@ -81,7 +87,7 @@ test("list Back and inherited composer state do not reset each other", () => {
   );
   assert.match(
     workspace,
-    /function showConversationList[\s\S]*createdConversationSyncMarkerRef\.current = null;[\s\S]*router\.push/
+    /function showConversationList[\s\S]*createdConversationSyncMarkerRef\.current = null;[\s\S]*window\.history\.pushState/
   );
   const showList = workspace.slice(
     workspace.indexOf("function showConversationList"),

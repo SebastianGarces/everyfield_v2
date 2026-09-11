@@ -37,12 +37,35 @@ test("the preview fixture completes its keyboard lifecycle with one announcement
   });
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
   const scheduled: Array<() => void> = [];
+  let scheduledWaiter: (() => void) | null = null;
   t.mock.method(globalThis, "setTimeout", ((callback: () => void) => {
     scheduled.push(callback);
+    scheduledWaiter?.();
     return scheduled.length;
   }) as typeof setTimeout);
   t.mock.method(globalThis, "clearTimeout", (() => {}) as typeof clearTimeout);
+
+  async function takeScheduled(label: string): Promise<() => void> {
+    const existing = scheduled.shift();
+    if (existing) return existing;
+
+    return new Promise<() => void>((resolve, reject) => {
+      const timeout = originalSetTimeout(() => {
+        scheduledWaiter = null;
+        reject(new Error(`Timed out waiting for ${label}`));
+      }, 5_000);
+      scheduledWaiter = () => {
+        scheduledWaiter = null;
+        originalClearTimeout(timeout);
+        const callback = scheduled.shift();
+        if (callback) resolve(callback);
+        else reject(new Error(`${label} was signalled without a callback`));
+      };
+    });
+  }
 
   let activeElement: FocusNode | null = null;
   const nodes = new Map<string, FocusNode>();
@@ -137,13 +160,13 @@ test("the preview fixture completes its keyboard lifecycle with one announcement
   assert.equal(mounted.root.findByProps({ role: "status" }), polite);
   assert.equal(mounted.root.findByProps({ role: "alert" }), assertive);
 
-  await act(() => scheduled.shift()?.());
+  await act(await takeScheduled("clarification transition"));
   assert.equal(hasText(mounted, "Which Taylor should join the meeting?"), true);
   await act(() => button(mounted, "Choose Taylor Adams").props.onClick());
   assert.equal(activeElement, nodes.get("evry-work-status"));
   assert.equal(hasText(mounted, "Building a three-step meeting plan"), true);
 
-  await act(() => scheduled.shift()?.());
+  await act(await takeScheduled("initial confirmation transition"));
   assert.equal(hasText(mounted, "Review before Evry acts"), true);
   await act(() => button(mounted, "Edit plan").props.onClick());
   assert.equal(activeElement, nodes.get("streaming-fixture-recipient"));
@@ -162,10 +185,9 @@ test("the preview fixture completes its keyboard lifecycle with one announcement
   );
   await act(async () => {
     recipientForm.props.onSubmit({ preventDefault() {} });
-    await Promise.resolve();
   });
   assert.equal(activeElement, nodes.get("evry-work-status"));
-  await act(() => scheduled.shift()?.());
+  await act(await takeScheduled("edited confirmation transition"));
 
   await act(() => button(mounted, "Create meeting and send 4").props.onClick());
   assert.equal(activeElement, nodes.get("evry-work-status"));
@@ -173,7 +195,7 @@ test("the preview fixture completes its keyboard lifecycle with one announcement
     hasText(mounted, "Creating the meeting and sending invitations"),
     true
   );
-  await act(() => scheduled.shift()?.());
+  await act(await takeScheduled("receipt transition"));
   assert.equal(
     hasText(mounted, "Meeting created; invitations need attention"),
     true

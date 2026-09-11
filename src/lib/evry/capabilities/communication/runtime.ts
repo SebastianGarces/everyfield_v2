@@ -14,20 +14,22 @@ import {
 } from "./templates";
 
 /** The closed Communication effect surface installed as one production unit. */
+export const COMMUNICATION_EVRY_EXECUTIONS = [
+  ...COMMUNICATION_MESSAGE_EXECUTIONS,
+  ...COMMUNICATION_TEMPLATE_EXECUTIONS,
+] as const;
 export const COMMUNICATION_EVRY_EXECUTION_REGISTRY =
-  createEvryExecutionCapabilityRegistry([
-    ...COMMUNICATION_MESSAGE_EXECUTIONS,
-    ...COMMUNICATION_TEMPLATE_EXECUTIONS,
-  ]);
+  createEvryExecutionCapabilityRegistry(COMMUNICATION_EVRY_EXECUTIONS);
 
 export const COMMUNICATION_EVRY_PLAN_REGISTRY =
   COMMUNICATION_EVRY_EXECUTION_REGISTRY.planRegistry;
 
+export const COMMUNICATION_EVRY_REVIEWS = [
+  ...COMMUNICATION_MESSAGE_REVIEWS,
+  ...COMMUNICATION_TEMPLATE_REVIEWS,
+] as const;
 export const COMMUNICATION_EVRY_REVIEW_REGISTRY =
-  createEvryArtifactReviewRegistry([
-    ...COMMUNICATION_MESSAGE_REVIEWS,
-    ...COMMUNICATION_TEMPLATE_REVIEWS,
-  ]);
+  createEvryArtifactReviewRegistry(COMMUNICATION_EVRY_REVIEWS);
 
 export const communicationEvryPlanTargetIsCurrent: EvryConversationPlanTargetValidator =
   async (input) => {

@@ -113,6 +113,9 @@ export function accountPersonLinkStatements(account: {
   /** Gate every effect on the caller's successful atomic grant. */
   eligible?: SQL;
 }): BatchItem<"pg">[] {
+  const duplicateMutationLock = db.execute(
+    sql`select id from churches where id = ${account.churchId}::uuid for update`
+  );
   const values = accountPersonValues(account);
   const mint = db.execute(sql`insert into ${persons}
     ("church_id", "user_id", "created_by", "email", "status", "first_name", "last_name")
@@ -122,9 +125,10 @@ export function accountPersonLinkStatements(account: {
     on conflict ("church_id","user_id") where ${persons.userId} is not null do nothing
     returning id`);
 
-  if (!account.matchedPersonId) return [mint];
+  if (!account.matchedPersonId) return [duplicateMutationLock, mint];
 
   return [
+    duplicateMutationLock,
     db
       .update(persons)
       .set({ userId: account.userId, updatedAt: new Date() })

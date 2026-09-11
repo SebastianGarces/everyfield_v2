@@ -1,4 +1,4 @@
-import { sql, and, eq } from "drizzle-orm";
+import { sql, and, asc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { wikiArticles } from "@/db/schema";
 import { notOverriddenByChurch, visibleToChurch } from "./get-articles";
@@ -64,7 +64,7 @@ export type SearchResult = {
 };
 
 /** How many results a caller gets. */
-const SEARCH_LIMIT = 10;
+export const SEARCH_LIMIT = 10;
 
 /**
  * The ranked, tenant-scoped search read, as a builder.
@@ -105,8 +105,13 @@ export function searchArticlesQuery(query: string, churchId: string | null) {
         notOverriddenByChurch(churchId)
       )
     )
-    .orderBy(sql`ts_rank(${searchVector}, ${searchQuery}) DESC`)
-    .limit(SEARCH_LIMIT);
+    .orderBy(
+      sql`ts_rank(${searchVector}, ${searchQuery}) DESC`,
+      asc(wikiArticles.slug),
+      asc(wikiArticles.id)
+    )
+    .limit(SEARCH_LIMIT)
+    .$dynamic();
 }
 
 /**
@@ -129,4 +134,21 @@ export async function searchArticles(
   if (!trimmedQuery) return [];
 
   return searchArticlesQuery(trimmedQuery, churchId);
+}
+
+/** Stable, lossless ranked page for Evry's explicit continuation contract. */
+export async function searchArticlePage(
+  query: string,
+  churchId: string,
+  page: number
+): Promise<{ items: SearchResult[]; hasNextPage: boolean }> {
+  const trimmedQuery = query.trim();
+  if (!trimmedQuery) return { items: [], hasNextPage: false };
+  const rows = await searchArticlesQuery(trimmedQuery, churchId)
+    .limit(SEARCH_LIMIT + 1)
+    .offset((page - 1) * SEARCH_LIMIT);
+  return {
+    items: rows.slice(0, SEARCH_LIMIT),
+    hasNextPage: rows.length > SEARCH_LIMIT,
+  };
 }

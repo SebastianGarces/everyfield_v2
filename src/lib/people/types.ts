@@ -326,6 +326,7 @@ export type ImportPreview = {
  */
 export type ImportSummary = {
   created: number;
+  merged: number;
   skipped: number;
   errors: number;
 };

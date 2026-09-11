@@ -2,6 +2,8 @@ import { z } from "zod";
 
 export const EVRY_CONVERSATION_STATE_VERSION = 1 as const;
 export const EVRY_CONVERSATION_MAX_MESSAGE_CHARACTERS = 8_000;
+/** Enough for the complete production Meetings detail projection, still bounded. */
+export const EVRY_READ_ITEM_MAX_FACTS = 32;
 
 const SEMANTIC_KEY_PATTERN = /^[a-z][a-z0-9_.:-]{0,127}$/;
 const PLAN_FINGERPRINT_PATTERN = /^[0-9a-f]{64}$/;
@@ -131,6 +133,11 @@ export const storedEvryArtifactFactSchema = z
     value: z.string().max(500),
   })
   .strict()
+  .readonly();
+
+export const storedEvryReadFactSchema = storedEvryArtifactFactSchema
+  .unwrap()
+  .extend({ modelOnly: z.literal(true).optional() })
   .readonly();
 
 function normalizeAlias(value: string): string {
@@ -356,6 +363,15 @@ export const evryConversationStateDocumentSchema = z
     explicitChoices: z.array(evryExplicitChoiceSchema).max(16),
     activeRecipe: evryActiveRecipeSchema.nullable(),
     pendingClarification: evryPendingClarificationSchema.nullable(),
+    pendingModelPreparation: z
+      .strictObject({
+        userRequestKey: evryConversationRequestKeySchema,
+        capabilityIdentity: z.string().min(1).max(200),
+        // Structured intent survives a crash without asking the model to recreate it.
+        preparedInputJson: z.string().max(16000).optional(),
+      })
+      .nullable()
+      .optional(),
     completedSteps: z.array(evryCompletedStepSchema).max(32),
     summary: evryConversationSummarySchema.nullable(),
   })

@@ -1,9 +1,19 @@
+import platformInventory from "@/lib/evry/capabilities/platform/inventory.generated.json";
+import { PLANT_INTELLIGENCE_EVAL_FIXTURES } from "@/lib/evry/capabilities/plant-intelligence/eval-fixtures";
 import {
   ADD_GUESTS_IDENTITY,
   CREATE_MEETING_IDENTITY,
   SEND_MESSAGE_IDENTITY,
 } from "@/lib/evry/recipes/fixtures.test-helper";
+import { MEETING_INVITATION_RECIPE_IDENTITY } from "@/lib/evry/recipes/meeting-invitation";
 import communicationInventory from "@/lib/evry/capabilities/communication/inventory.generated.json";
+import launchInventory from "@/lib/evry/capabilities/launch/inventory.generated.json";
+import { MEETINGS_CAPABILITY_EVAL_FIXTURES } from "@/lib/evry/capabilities/meetings/eval-fixtures";
+import {
+  TASK_CAPABILITY_EVAL_FIXTURES,
+  TASK_EVAL_PROOFS,
+} from "@/lib/evry/capabilities/tasks/eval-fixtures";
+import teamsInventory from "@/lib/evry/capabilities/teams/inventory.generated.json";
 
 import {
   defineEvryCapabilityEvalFixture,
@@ -14,10 +24,17 @@ import {
   type EvryEvalProof,
   type EvryRecipeEvalFixture,
 } from "./contracts";
-
-const MEETING_INVITATION_RECIPE_IDENTITY = "fixture:meeting.invitation";
+import {
+  assertPeopleCapabilityEvalRegistryComplete,
+  PEOPLE_CAPABILITY_EVAL_FIXTURES,
+} from "./people-capabilities";
+import {
+  assertDocumentsWikiCapabilityEvalRegistryComplete,
+  DOCUMENTS_WIKI_CAPABILITY_EVAL_FIXTURES,
+} from "./documents-wiki-capabilities";
 
 export const EVRY_EVAL_PROOFS: readonly EvryEvalProof[] = Object.freeze([
+  ...TASK_EVAL_PROOFS,
   {
     id: "eval-contracts",
     testFile: "src/lib/evry/evals/contracts.test.ts",
@@ -55,8 +72,122 @@ export const EVRY_EVAL_PROOFS: readonly EvryEvalProof[] = Object.freeze([
     safetyGates: [],
   },
   {
+    id: "people-capability-contract",
+    testFile: "src/lib/evry/evals/people-capabilities.test.ts",
+    lane: "deterministic",
+    safetyGates: [],
+  },
+  {
+    id: "meetings-capability-contract",
+    testFile: "src/lib/evry/capabilities/meetings/effect-contracts.test.ts",
+    lane: "deterministic",
+    safetyGates: [],
+  },
+  {
     id: "communication-effect-live",
     testFile: "src/lib/communication/evry-effect-live.test.ts",
+    lane: "live_database",
+    safetyGates: [],
+  },
+  {
+    id: "people-capability-live-outcomes",
+    testFile: "src/lib/people/evry-effect-live.test.ts",
+    lane: "live_database",
+    safetyGates: ["cross_tenant_access"],
+  },
+  {
+    id: "meetings-selection",
+    testFile: "src/lib/evry/capabilities/meetings/selection.test.ts",
+    lane: "deterministic",
+    safetyGates: [],
+  },
+  {
+    id: "launch-capability-contract",
+    testFile: "src/lib/evry/capabilities/launch/eval-fixtures.test.ts",
+    lane: "deterministic",
+    safetyGates: [],
+  },
+  {
+    id: "teams-capability-contract",
+    testFile: "src/lib/evry/capabilities/teams/eval-fixtures.test.ts",
+    lane: "deterministic",
+    safetyGates: [],
+  },
+  {
+    id: "launch-capability-live",
+    testFile: "src/lib/evry/capabilities/launch/effect-live.test.ts",
+    lane: "live_database",
+    safetyGates: [],
+  },
+  {
+    id: "meetings-read-live",
+    testFile: "src/lib/evry/capabilities/meetings/read-live.test.ts",
+    lane: "live_database",
+    safetyGates: ["cross_tenant_access"],
+  },
+  {
+    id: "meetings-effect-live",
+    testFile: "src/lib/evry/capabilities/meetings/effect-live.test.ts",
+    lane: "live_database",
+    safetyGates: ["cross_tenant_access", "unconfirmed_effect"],
+  },
+  {
+    id: "teams-effect-live",
+    testFile: "src/lib/evry/capabilities/teams/effect-live.test.ts",
+    lane: "live_database",
+    safetyGates: [],
+  },
+  {
+    id: "documents-wiki-capability-contract",
+    testFile: "src/lib/evry/capabilities/documents-wiki/runtime.test.ts",
+    lane: "deterministic",
+    safetyGates: [],
+  },
+  {
+    id: "documents-wiki-capability-live-outcomes",
+    testFile: "src/lib/evry/capabilities/documents-wiki/effect-live.test.ts",
+    lane: "live_database",
+    safetyGates: ["cross_tenant_access"],
+  },
+  {
+    id: "plant-intelligence-capability-contract",
+    testFile:
+      "src/lib/evry/capabilities/plant-intelligence/eval-fixtures.test.ts",
+    lane: "deterministic",
+    safetyGates: ["prohibited_tool_access"],
+  },
+  {
+    id: "plant-intelligence-capability-live",
+    testFile:
+      "src/lib/evry/capabilities/plant-intelligence/effect-live.test.ts",
+    lane: "live_database",
+    safetyGates: [
+      "unconfirmed_effect",
+      "plan_approval_mismatch",
+      "cross_tenant_access",
+    ],
+  },
+  {
+    id: "platform-capability-contract",
+    testFile: "src/lib/evry/capabilities/platform/eval-fixtures.test.ts",
+    lane: "deterministic",
+    safetyGates: [],
+  },
+  {
+    id: "platform-read-contract",
+    testFile: "src/lib/evry/capabilities/platform/reads.test.ts",
+    lane: "deterministic",
+    safetyGates: [],
+  },
+  {
+    id: "platform-behavior-contract",
+    testFile: "src/lib/evry/capabilities/platform/eval-behavior.test.ts",
+    lane: "deterministic",
+    safetyGates: [],
+  },
+  {
+    id: "platform-effect-live",
+    testFile: "src/lib/evry/capabilities/platform/effect-live.test.ts",
     lane: "live_database",
     safetyGates: [],
   },
@@ -118,12 +249,6 @@ export const EVRY_EVAL_PROOFS: readonly EvryEvalProof[] = Object.freeze([
     id: "recipe-end-to-end",
     testFile: "src/lib/evry/recipes/recipe-live.test.ts",
     lane: "live_database",
-    safetyGates: [],
-  },
-  {
-    id: "recipe-partial-failure",
-    testFile: "src/lib/evry/recipes/runner.test.ts",
-    lane: "deterministic",
     safetyGates: [],
   },
 ]);
@@ -207,22 +332,185 @@ function communicationCapabilityFixture(
   });
 }
 
+function launchCapabilityFixture(
+  capabilityIdentity: string,
+  operationKind: string
+): EvryCapabilityEvalFixture {
+  if (operationKind !== "read" && operationKind !== "effect") {
+    throw new Error(
+      `Launch capability ${capabilityIdentity} has an invalid operation kind`
+    );
+  }
+  const evalCase = (layer: EvryCapabilityEvalLayer) => {
+    // The opt-in PostgreSQL proof executes exact reviewed effects through the
+    // production registry. Launch read adapter DB parity is also checked there,
+    // but it is not mislabeled as an authenticated registered-read outcome.
+    const live =
+      operationKind === "effect" && COMMUNICATION_LIVE_EFFECT_LAYERS.has(layer);
+    return [
+      {
+        id: `${capabilityIdentity}:${layer}`,
+        proofId: live ? "launch-capability-live" : "launch-capability-contract",
+        testName: live
+          ? `${capabilityIdentity}:${layer}:live`
+          : `${capabilityIdentity}:${layer}`,
+      },
+    ];
+  };
+  return defineEvryCapabilityEvalFixture({
+    capabilityIdentity,
+    cases: {
+      policy: evalCase("policy"),
+      selection: evalCase("selection"),
+      arguments: evalCase("arguments"),
+      tenancy: evalCase("tenancy"),
+      permission: evalCase("permission"),
+      confirmation: evalCase("confirmation"),
+      execution: evalCase("execution"),
+      idempotency: evalCase("idempotency"),
+      errors: evalCase("errors"),
+      ui_artifact: evalCase("ui_artifact"),
+    },
+  });
+}
+
+function teamsCapabilityFixture(
+  capabilityIdentity: string,
+  operationKind: string
+): EvryCapabilityEvalFixture {
+  if (operationKind !== "read" && operationKind !== "effect") {
+    throw new Error(
+      `Teams capability ${capabilityIdentity} has an invalid operation kind`
+    );
+  }
+  const evalCase = (layer: EvryCapabilityEvalLayer) => {
+    const live =
+      operationKind === "effect" &&
+      (layer === "execution" || layer === "idempotency" || layer === "errors");
+    return [
+      {
+        id: `${capabilityIdentity}:${layer}`,
+        proofId: live ? "teams-effect-live" : "teams-capability-contract",
+        testName: live
+          ? `${capabilityIdentity}:${layer}:live`
+          : `${capabilityIdentity}:${layer}`,
+      },
+    ];
+  };
+  return defineEvryCapabilityEvalFixture({
+    capabilityIdentity,
+    cases: {
+      policy: evalCase("policy"),
+      selection: evalCase("selection"),
+      arguments: evalCase("arguments"),
+      tenancy: evalCase("tenancy"),
+      permission: evalCase("permission"),
+      confirmation: evalCase("confirmation"),
+      execution: evalCase("execution"),
+      idempotency: evalCase("idempotency"),
+      errors: evalCase("errors"),
+      ui_artifact: evalCase("ui_artifact"),
+    },
+  });
+}
+
 /**
  * Only concrete effect registrations exercised by the reference recipe enter
  * this release corpus. Each slot names its own node:test outcome; shared live
  * framework proofs remain additional release gates, not stand-ins for rows.
  */
+function platformCapabilityFixture(
+  capabilityIdentity: string,
+  operationKind: string
+): EvryCapabilityEvalFixture {
+  if (operationKind !== "read" && operationKind !== "effect") {
+    throw new Error(
+      `Platform capability ${capabilityIdentity} has an invalid operation kind`
+    );
+  }
+  const liveLayers = new Set<EvryCapabilityEvalLayer>([
+    "tenancy",
+    "permission",
+    "execution",
+    "idempotency",
+    "errors",
+  ]);
+  const evalCase = (layer: EvryCapabilityEvalLayer) => {
+    const live = operationKind === "effect" && liveLayers.has(layer);
+    const behavior =
+      layer === "policy" ||
+      layer === "selection" ||
+      layer === "arguments" ||
+      layer === "confirmation" ||
+      layer === "ui_artifact" ||
+      (operationKind === "read" &&
+        (layer === "tenancy" || layer === "permission"));
+    const readRuntime = operationKind === "read" && liveLayers.has(layer);
+    return [
+      Object.freeze({
+        id: `${capabilityIdentity}:${layer}`,
+        proofId: live
+          ? "platform-effect-live"
+          : behavior
+            ? "platform-behavior-contract"
+            : readRuntime
+              ? "platform-read-contract"
+              : "platform-capability-contract",
+        testName: live
+          ? `${capabilityIdentity}:${layer}:live`
+          : behavior
+            ? `${capabilityIdentity}:${layer}:behavior`
+            : readRuntime
+              ? `${capabilityIdentity}:${layer}:read`
+              : `${capabilityIdentity}:${layer}`,
+      }),
+    ];
+  };
+  return defineEvryCapabilityEvalFixture({
+    capabilityIdentity,
+    cases: {
+      policy: evalCase("policy"),
+      selection: evalCase("selection"),
+      arguments: evalCase("arguments"),
+      tenancy: evalCase("tenancy"),
+      permission: evalCase("permission"),
+      confirmation: evalCase("confirmation"),
+      execution: evalCase("execution"),
+      idempotency: evalCase("idempotency"),
+      errors: evalCase("errors"),
+      ui_artifact: evalCase("ui_artifact"),
+    },
+  });
+}
+
 export const EVRY_CAPABILITY_EVAL_FIXTURES = Object.freeze([
   ...[CREATE_MEETING_IDENTITY, ADD_GUESTS_IDENTITY, SEND_MESSAGE_IDENTITY]
     .filter(
       (identity) =>
         !communicationInventory.capabilities.some(
           (capability) => capability.identity === identity
+        ) &&
+        !MEETINGS_CAPABILITY_EVAL_FIXTURES.some(
+          (fixture) => fixture.capabilityIdentity === identity
         )
     )
     .map(capabilityFixture),
   ...communicationInventory.capabilities.map(({ identity, operationKind }) =>
     communicationCapabilityFixture(identity, operationKind)
+  ),
+  ...launchInventory.capabilities.map(({ identity, operationKind }) =>
+    launchCapabilityFixture(identity, operationKind)
+  ),
+  ...MEETINGS_CAPABILITY_EVAL_FIXTURES,
+  ...PEOPLE_CAPABILITY_EVAL_FIXTURES,
+  ...DOCUMENTS_WIKI_CAPABILITY_EVAL_FIXTURES,
+  ...PLANT_INTELLIGENCE_EVAL_FIXTURES,
+  ...platformInventory.capabilities.map(({ identity, operationKind }) =>
+    platformCapabilityFixture(identity, operationKind)
+  ),
+  ...TASK_CAPABILITY_EVAL_FIXTURES,
+  ...teamsInventory.capabilities.map(({ identity, operationKind }) =>
+    teamsCapabilityFixture(identity, operationKind)
   ),
 ]);
 
@@ -235,12 +523,14 @@ export const EVRY_RECIPE_EVAL_FIXTURES: readonly EvryRecipeEvalFixture[] =
           {
             id: `${MEETING_INVITATION_RECIPE_IDENTITY}:end_to_end`,
             proofId: "recipe-end-to-end",
+            testName: `${MEETING_INVITATION_RECIPE_IDENTITY}:end_to_end`,
           },
         ],
         partial_failure: [
           {
             id: `${MEETING_INVITATION_RECIPE_IDENTITY}:partial_failure`,
-            proofId: "recipe-partial-failure",
+            proofId: "recipe-end-to-end",
+            testName: `${MEETING_INVITATION_RECIPE_IDENTITY}:partial_failure`,
           },
         ],
       },
@@ -254,6 +544,8 @@ function assertUnique(values: readonly string[], subject: string): void {
 }
 
 export function assertEvryEvalRegistryComplete(): void {
+  assertPeopleCapabilityEvalRegistryComplete();
+  assertDocumentsWikiCapabilityEvalRegistryComplete();
   assertUnique(
     EVRY_EVAL_PROOFS.map(({ id }) => id),
     "proof"

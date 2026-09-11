@@ -94,6 +94,11 @@ type HarnessOptions = Readonly<{
   finalDependencies?: readonly string[];
   throwAfterCommitStep?: string;
   initiallyExpired?: boolean;
+  claimDuringAuthorizationRefusal?: boolean;
+  reconcileThrows?: boolean;
+  resumeStartedEffectForStep?: string;
+  dependencyOutputs?: boolean;
+  requireExactDependencyForStep?: string;
 }>;
 
 function createHarness(options: HarnessOptions = {}) {
@@ -113,26 +118,72 @@ function createHarness(options: HarnessOptions = {}) {
   let starts = 0;
   let finishes = 0;
   const checks: string[] = [];
+  const seenDependencyOutputs = new Map<string, readonly unknown[]>();
   let nowTick = 0;
   let clockOffsetMs = 0;
   let targetCurrent = options.stale !== "target";
+  let lastEffectKey: EvryAuditKey | null = null;
 
   const registry = createEvryExecutionCapabilityRegistry([
     defineEvryExecutionCapability({
       planCapability,
+      ...(options.dependencyOutputs
+        ? {
+            dependencyOutputSchema: z.strictObject({
+              targetId: z.string(),
+              expectedVersion: z.number().int().nonnegative(),
+            }),
+          }
+        : {}),
+      async reconcileClaimed(input) {
+        checks.push("claim");
+        lastEffectKey = input.effectKey;
+        if (options.reconcileThrows) {
+          throw new Error("claim store temporarily unavailable");
+        }
+        const claimed = effectClaims.get(input.effectKey);
+        if (claimed) return claimed;
+        const targetId = String(input.arguments.targetId);
+        return options.resumeStartedEffectForStep === targetId &&
+          (effectCalls.get(targetId) ?? 0) > 0
+          ? { status: "resume" as const }
+          : null;
+      },
       async executeIfCurrent(input) {
         const targetId = String(input.arguments.targetId);
+        seenDependencyOutputs.set(targetId, input.dependencyOutputs ?? []);
         checks.push(`target:${targetId}`);
         const existing = effectClaims.get(input.effectKey);
         if (existing) return existing;
         if (!targetCurrent) return { status: "refused", excludedCount: 1 };
         const call = (effectCalls.get(targetId) ?? 0) + 1;
         effectCalls.set(targetId, call);
-        const result = options.effectResultForStep?.(targetId, call) ?? {
+        let result = options.effectResultForStep?.(targetId, call) ?? {
           status: "completed",
           affectedCount: 1,
           excludedCount: 0,
         };
+        if (options.requireExactDependencyForStep === targetId) {
+          const [dependency] = input.dependencyOutputs ?? [];
+          const value = dependency?.value as
+            | { targetId?: unknown; expectedVersion?: unknown }
+            | undefined;
+          if (
+            dependency?.stepId !== "step-1" ||
+            dependency.capabilityIdentity !==
+              EVRY_PEOPLE_WRITE_PROBE_IDENTITY ||
+            value?.targetId !== "target-1" ||
+            value.expectedVersion !== 1
+          ) {
+            return { status: "refused", excludedCount: 1 };
+          }
+        }
+        if (result.status === "completed" && options.dependencyOutputs) {
+          result = {
+            ...result,
+            dependencyOutput: { targetId, expectedVersion: 1 },
+          };
+        }
         if (result.status === "completed") {
           effectClaims.set(input.effectKey, result);
           if (options.throwAfterCommitStep === targetId && call === 1) {
@@ -192,6 +243,15 @@ function createHarness(options: HarnessOptions = {}) {
   const boundaries: EvryExecutorBoundaries = {
     async authorizeCapability() {
       checks.push("capability");
+      if (options.claimDuringAuthorizationRefusal) {
+        assert.ok(lastEffectKey);
+        effectClaims.set(lastEffectKey, {
+          status: "completed",
+          affectedCount: 1,
+          excludedCount: 0,
+        });
+        return null;
+      }
       if (options.stale === "capability") return null;
       if (options.stale === "actor") {
         return authorization({
@@ -255,6 +315,8 @@ function createHarness(options: HarnessOptions = {}) {
         status: input.status,
         affectedCount: input.affectedCount,
         excludedCount: input.excludedCount,
+        effectKey: input.effectKey,
+        dependencyOutput: input.dependencyOutput ?? null,
       };
       durable.set(input.stepId, outcome);
       return outcome;
@@ -281,6 +343,10 @@ function createHarness(options: HarnessOptions = {}) {
     durable,
     effectCalls,
     checks,
+    seenDependencyOutputs,
+    replaceDurable(stepId: string, outcome: EvryDurableStepOutcome) {
+      durable.set(stepId, outcome);
+    },
     staleTarget() {
       targetCurrent = false;
     },
@@ -385,6 +451,60 @@ test("retryable middle work leaves its attempt open and resumes only uncompleted
   assert.equal(harness.stats().finishes, 1);
 });
 
+test("dependency outputs reach only exact direct successors", async (t) => {
+  await t.test("forwards an exact schema-checked output", async () => {
+    const harness = createHarness({
+      stepCount: 2,
+      dependencyOutputs: true,
+      requireExactDependencyForStep: "target-2",
+    });
+    const result = await harness.execute(harness.input);
+    assert.equal(result.status, "completed");
+    assert.equal(harness.seenDependencyOutputs.get("target-1")?.length, 0);
+    assert.equal(harness.seenDependencyOutputs.get("target-2")?.length, 1);
+  });
+
+  for (const corruption of ["foreign-key", "missing", "mismatched"] as const) {
+    await t.test(`refuses ${corruption} predecessor output`, async () => {
+      let retry = true;
+      const harness = createHarness({
+        stepCount: 2,
+        dependencyOutputs: true,
+        requireExactDependencyForStep: "target-2",
+        effectResultForStep(step) {
+          if (step === "target-2" && retry) {
+            retry = false;
+            return { status: "retryable" };
+          }
+          return { status: "completed", affectedCount: 1, excludedCount: 0 };
+        },
+      });
+      assert.equal((await harness.execute(harness.input)).status, "retryable");
+      const predecessor = harness.durable.get("step-1");
+      assert.ok(predecessor);
+      harness.replaceDurable("step-1", {
+        ...predecessor,
+        ...(corruption === "foreign-key"
+          ? { effectKey: "0".repeat(64) as EvryAuditKey }
+          : {}),
+        ...(corruption === "missing" ? { dependencyOutput: null } : {}),
+        ...(corruption === "mismatched"
+          ? {
+              dependencyOutput: {
+                targetId: "foreign-target",
+                expectedVersion: 1,
+              },
+            }
+          : {}),
+      });
+
+      const result = await harness.execute(harness.input);
+      assert.equal(result.status, "partially_failed");
+      assert.equal(result.steps[1]?.status, "refused");
+    });
+  }
+});
+
 test("an open attempt crossing expiry closes from per-step revalidation", async () => {
   const harness = createHarness({
     stepCount: 3,
@@ -418,6 +538,30 @@ test("an open attempt crossing expiry closes from per-step revalidation", async 
   assert.equal(harness.effectCalls.has("target-3"), false);
   assert.equal(harness.stats().finishes, 1);
   assert.equal(harness.checks.includes("expired-audit"), false);
+});
+
+test("an irreversible started effect resumes from immutable inputs after expiry", async () => {
+  const harness = createHarness({
+    resumeStartedEffectForStep: "target-1",
+    effectResultForStep(_step, call) {
+      return call === 1
+        ? { status: "retryable" }
+        : { status: "completed", affectedCount: 1, excludedCount: 0 };
+    },
+  });
+
+  assert.equal((await harness.execute(harness.input)).status, "retryable");
+  harness.advancePastExpiry();
+  const replay = await harness.execute(harness.input);
+  assert.equal(replay.status, "completed");
+  assert.equal(replay.steps[0]?.status, "completed");
+  assert.equal(harness.effectCalls.get("target-1"), 2);
+  assert.equal(
+    harness.checks.filter((check) => check === "confirmation-expiry-args")
+      .length,
+    1,
+    "recovery reuses the exact stored step instead of reopening mutable plan freshness"
+  );
 });
 
 test("a terminal middle failure durably skips its dependent and blocks follow-on work", async () => {
@@ -473,6 +617,9 @@ test("a throw after keyed commit retries and recovers one completed effect", asy
   assert.equal(interrupted.status, "retryable");
   assert.equal(harness.durable.size, 0);
   assert.equal(harness.stats().finishes, 0);
+  const authorizationsBeforeRecovery = harness.checks.filter(
+    (check) => check === "capability"
+  ).length;
 
   harness.staleTarget();
   const recovered = await harness.execute(harness.input);
@@ -480,6 +627,33 @@ test("a throw after keyed commit retries and recovers one completed effect", asy
   assert.equal(harness.effectCalls.get("target-1"), 1);
   assert.equal(harness.durable.size, 1);
   assert.equal(harness.stats().finishes, 1);
+  assert.equal(
+    harness.checks.filter((check) => check === "capability").length,
+    authorizationsBeforeRecovery,
+    "an exact domain claim must reconcile before mutable authorization"
+  );
+});
+
+test("a claim committed during authorization is rechecked before refusal", async () => {
+  const harness = createHarness({ claimDuringAuthorizationRefusal: true });
+  const result = await harness.execute(harness.input);
+  assert.equal(result.status, "completed");
+  assert.equal(result.steps[0]?.status, "completed");
+  assert.equal(harness.effectCalls.size, 0);
+  assert.equal(harness.checks.filter((check) => check === "claim").length, 2);
+});
+
+test("claim-store lookup failures remain non-durable and retryable", async () => {
+  const harness = createHarness({ reconcileThrows: true });
+  const result = await harness.execute(harness.input);
+  assert.equal(result.status, "retryable");
+  assert.deepEqual(
+    result.steps.map(({ status, durable }) => [status, durable]),
+    [["retryable", false]]
+  );
+  assert.equal(harness.effectCalls.size, 0);
+  assert.equal(harness.durable.size, 0);
+  assert.equal(harness.stats().finishes, 0);
 });
 
 test("terminal replay returns immutable plan order despite reverse commit order", async () => {

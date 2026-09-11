@@ -129,7 +129,10 @@ test("the feed filters on church_id and recipient, newest first and bounded", ()
 
   assert.match(sql, CHURCH_PREDICATE);
   assert.match(sql, RECIPIENT_PREDICATE);
-  assert.match(sql, /order by .*"created_at" desc/i);
+  assert.match(
+    sql,
+    /order by date_trunc\('milliseconds', "notifications"\."created_at"\) desc/i
+  );
   assert.match(sql, /limit/i);
   assert.ok(params.includes(CHURCH_A));
   assert.ok(params.includes(USER));
@@ -178,7 +181,10 @@ test("feed options narrow further without ever dropping either boundary", () => 
 
   assert.match(sql, CHURCH_PREDICATE);
   assert.match(sql, RECIPIENT_PREDICATE);
-  assert.match(sql, /"notifications"\."created_at" < \$\d/);
+  assert.match(
+    sql,
+    /date_trunc\('milliseconds', "notifications"\."created_at"\) < \$\d/
+  );
   assert.match(sql, /"notifications"\."category" = \$\d/);
   assert.match(sql, /"notifications"\."read_at" is null/);
   assert.ok(params.includes(CHURCH_A));
@@ -242,7 +248,7 @@ test("the unread count applies exactly the feed's visibility rules", () => {
 // Keyset pagination
 // ----------------------------------------------------------------------------
 
-test("the feed orders by (created_at, id) so a tie cannot skip rows", () => {
+test("the feed orders by canonical milliseconds and id so cursors cannot skip microseconds", () => {
   // `created_at` defaults to now(), which in Postgres is the TRANSACTION
   // timestamp, and invariants mandate db.batch([...]) for writes known up
   // front — so a fan-out enqueue produces byte-identical timestamps. Without a
@@ -251,7 +257,7 @@ test("the feed orders by (created_at, id) so a tie cannot skip rows", () => {
 
   assert.match(
     sql,
-    /order by "notifications"\."created_at" desc, "notifications"\."id" desc/
+    /order by date_trunc\('milliseconds', "notifications"\."created_at"\) desc, "notifications"\."id" desc/
   );
 });
 
@@ -259,8 +265,14 @@ test("the cursor is the pair, so the tie is resolved on the next page too", () =
   const before = { createdAt: new Date("2026-07-01T00:00:00.000Z"), id: "n-9" };
   const { sql, params } = notificationFeedQuery(SCOPE, { before }).toSQL();
 
-  assert.match(sql, /"notifications"\."created_at" < \$\d/);
-  assert.match(sql, /"notifications"\."created_at" = \$\d/);
+  assert.match(
+    sql,
+    /date_trunc\('milliseconds', "notifications"\."created_at"\) < \$\d/
+  );
+  assert.match(
+    sql,
+    /date_trunc\('milliseconds', "notifications"\."created_at"\) = \$\d/
+  );
   assert.match(sql, /"notifications"\."id" < \$\d/);
   assert.ok(boundInstant(params, before.createdAt));
   assert.ok(params.includes("n-9"));

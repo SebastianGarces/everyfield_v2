@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { mock } from "node:test";
+import type { EvryCapabilityConversationRunner } from "@/lib/evry/capabilities/conversation";
 
 const START = new Date("2026-08-20T12:00:00.000Z");
 const RETURN = new Date("2026-08-28T12:00:00.000Z");
@@ -52,6 +53,20 @@ async function response(result: Response) {
   };
 }
 
+// Preserve production replay semantics while isolating this DB proof from paid generation.
+const storageOnlyContinuation: EvryCapabilityConversationRunner = async (
+  input
+) => {
+  const { hasDurableEvryCapabilityConversationResult } =
+    await import("@/lib/evry/capabilities/conversation");
+  return hasDurableEvryCapabilityConversationResult({
+    conversation: input.conversation,
+    userRequestKey: input.userRequestKey,
+  })
+    ? input.conversation
+    : null;
+};
+
 async function createProof(): Promise<void> {
   const contract = await import("./contract");
   const artifacts = await import("./artifacts");
@@ -83,7 +98,11 @@ async function createProof(): Promise<void> {
       now: () => START,
       create: async (input) => {
         try {
-          return await service.createEvryConversation(input);
+          return await service.createEvryConversation({
+            ...input,
+            // This proof owns real persistence, not paid provider behavior.
+            continueCapabilityConversation: storageOnlyContinuation,
+          });
         } catch (error) {
           console.error("fresh-process create cause", error);
           throw error;
@@ -300,7 +319,10 @@ async function createProof(): Promise<void> {
     activePlan: { mode: "set", plan },
     now: new Date(START.valueOf() + 3_000),
   });
-  assert.equal(appended.messages.length, 4);
+  assert.equal(appended.messages.length, 5);
+  assert.equal(appended.messages[1]?.artifacts[0]?.kind, "boundary");
+  assert.equal(appended.messages[2]?.artifacts[0]?.kind, "clarification");
+  assert.equal(appended.messages[4]?.artifacts[0]?.kind, "confirmation");
   assert.equal(
     appended.state.explicitChoices[0]?.selectedEntityId,
     secondPersonId
@@ -353,7 +375,7 @@ async function resumeProof(): Promise<void> {
   assert.equal(reopened.cacheControl, "private, no-store");
   assert.equal(reopened.body.status, "available");
   assert.equal(reopened.body.conversation.messages[0].body, LITERAL);
-  assert.equal(reopened.body.conversation.messages.length, 4);
+  assert.equal(reopened.body.conversation.messages.length, 5);
   assert.equal(reopened.body.conversation.activePlan.status, "expired");
   assert.equal(reopened.body.conversation.activePlan.confirmable, false);
   assert.equal(
@@ -365,6 +387,7 @@ async function resumeProof(): Promise<void> {
     now: () => RETURN,
     continueConversation: (input) =>
       service.continueEvryConversation({
+        continueCapabilityConversation: storageOnlyContinuation,
         ...input,
         revalidatePlan,
       }),
@@ -387,8 +410,12 @@ async function resumeProof(): Promise<void> {
     entityId: secondPersonId,
   });
   assert.equal(
-    continued.body.conversation.messages.at(-1).body,
+    continued.body.conversation.messages.at(-2).body,
     "Add her to it."
+  );
+  assert.equal(
+    continued.body.conversation.messages.at(-1).artifacts[0].artifact.kind,
+    "boundary"
   );
   process.stdout.write("Evry fresh-process resume proof passed\n");
 }
@@ -409,12 +436,16 @@ async function changedStateRetryProof(): Promise<void> {
       { params: Promise.resolve({ conversationId }) }
     )
   );
-  assert.deepEqual(retried, {
-    status: 409,
-    cacheControl: "private, no-store",
-    body: { status: "stale" },
+  assert.equal(retried.status, 200);
+  assert.equal(retried.cacheControl, "private, no-store");
+  assert.equal(retried.body.status, "continued");
+  assert.deepEqual(retried.body.reference, {
+    status: "resolved",
+    entityType: "person",
+    entityId: secondPersonId,
   });
-  process.stdout.write("Evry changed-state replay proof passed\n");
+  assert.equal(retried.body.conversation.messages.length, 7);
+  process.stdout.write("Evry changed-state replay recovery proof passed\n");
 }
 
 void (

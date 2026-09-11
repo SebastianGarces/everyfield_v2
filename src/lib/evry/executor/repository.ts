@@ -15,6 +15,7 @@ import {
   finishEvryExecutionStatement,
   startEvryExecutionStatement,
 } from "./statements";
+import type { EvryJsonValue } from "@/lib/evry/plans";
 
 export type EvryDurableStepStatus =
   | "completed"
@@ -28,6 +29,8 @@ export type EvryDurableStepOutcome = Readonly<{
   status: EvryDurableStepStatus;
   affectedCount: number;
   excludedCount: number;
+  effectKey: EvryAuditKey | null;
+  dependencyOutput: EvryJsonValue | null;
 }>;
 
 export type EvryExecutionAttemptRecord = Readonly<{
@@ -95,6 +98,8 @@ export async function findEvryExecutionSnapshot(input: {
       status: evryExecutionOutcomes.status,
       affectedCount: evryExecutionOutcomes.affectedCount,
       excludedCount: evryExecutionOutcomes.excludedCount,
+      effectKey: evryExecutionOutcomes.effectKey,
+      dependencyOutput: evryExecutionOutcomes.dependencyOutput,
     })
     .from(evryExecutionOutcomes)
     .where(
@@ -134,6 +139,8 @@ export async function findEvryExecutionSnapshot(input: {
         status: outcome.status as EvryDurableStepStatus,
         affectedCount: outcome.affectedCount,
         excludedCount: outcome.excludedCount,
+        effectKey: outcome.effectKey as EvryAuditKey | null,
+        dependencyOutput: outcome.dependencyOutput as EvryJsonValue | null,
       }),
     ];
   });
@@ -239,6 +246,7 @@ export async function recordEvryStepOutcome(input: {
   effectKey: EvryAuditKey | null;
   affectedCount: number;
   excludedCount: number;
+  dependencyOutput?: EvryJsonValue;
   occurredAt: Date;
 }): Promise<EvryDurableStepOutcome> {
   await db
@@ -270,6 +278,7 @@ export async function recordEvryStepOutcome(input: {
               : "effect_failed",
       affectedCount: input.affectedCount,
       excludedCount: input.excludedCount,
+      dependencyOutput: input.dependencyOutput,
       occurredAt: input.occurredAt,
     })
     .onConflictDoNothing();

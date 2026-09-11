@@ -1,4 +1,4 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/db";
@@ -7,9 +7,13 @@ import {
   launches,
   ministryTeams,
   persons,
+  plantAssessments,
+  plantInsights,
   tasks,
 } from "@/db/schema";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
+import { eligibleEvryCapabilitiesFor } from "@/lib/evry/eligibility/capabilities";
+import { PLANT_INTELLIGENCE_READ_IDENTITIES } from "@/lib/evry/capabilities/plant-intelligence/catalog";
 import { meetingDisplayTitle } from "@/lib/meetings/labels";
 
 import {
@@ -137,6 +141,55 @@ async function scopedRecord(
         .limit(1);
       return record ? { recordId: record.id, label: "Launch Sunday" } : null;
     }
+    case "plant_intelligence": {
+      if (pageContext.recordId !== "current") return null;
+      const [record] = await db
+        .select({
+          id: plantAssessments.id,
+          generatedAt: plantAssessments.generatedAt,
+        })
+        .from(plantAssessments)
+        .where(
+          and(
+            eq(plantAssessments.churchId, actor.plantId),
+            eq(plantAssessments.status, "complete")
+          )
+        )
+        .orderBy(desc(plantAssessments.generatedAt), desc(plantAssessments.id))
+        .limit(1);
+      return record
+        ? {
+            recordId: record.id,
+            label: safeEvryPageContextLabel(
+              `Plant Intelligence · ${record.generatedAt.toISOString()}`,
+              "Plant Intelligence assessment"
+            ),
+          }
+        : null;
+    }
+    case "plant_insight": {
+      if (!parsedRecordId.success) return null;
+      const [record] = await db
+        .select({ id: plantInsights.id, title: plantInsights.title })
+        .from(plantInsights)
+        .where(
+          and(
+            eq(plantInsights.id, parsedRecordId.data),
+            eq(plantInsights.churchId, actor.plantId),
+            eq(plantInsights.audience, "planter")
+          )
+        )
+        .limit(1);
+      return record
+        ? {
+            recordId: record.id,
+            label: safeEvryPageContextLabel(
+              `Observation: ${record.title}`,
+              "Plant Intelligence observation"
+            ),
+          }
+        : null;
+    }
   }
 }
 
@@ -153,6 +206,15 @@ export async function resolveAuthorizedEvryPageContext(input: {
   pageContext: EvryPageContext | null;
 }): Promise<EvryResolvedPageContext | null> {
   if (input.pageContext === null) return null;
+  if (
+    (input.pageContext.kind === "plant_intelligence" ||
+      input.pageContext.kind === "plant_insight") &&
+    !eligibleEvryCapabilitiesFor(input.actor).some(
+      ({ identity }) =>
+        identity === PLANT_INTELLIGENCE_READ_IDENTITIES.assessments
+    )
+  )
+    return null;
   const record = await scopedRecord(input.actor, input.pageContext);
   return record === null ? null : { kind: input.pageContext.kind, ...record };
 }

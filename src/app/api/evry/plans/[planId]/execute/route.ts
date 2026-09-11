@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { isUnauthorized } from "@/lib/auth/unauthorized";
-import { PRODUCTION_EVRY_EXECUTION_REGISTRY } from "@/lib/evry/capabilities/production";
+import {
+  PRODUCTION_EVRY_EXECUTION_REGISTRY,
+  executeProductionEvryActionPlan,
+} from "@/lib/evry/capabilities/production";
 import {
   executeEvryActionPlan,
   type EvryExecutionCapabilityRegistry,
@@ -103,4 +106,5 @@ export function createEvryPlanExecutePost({
 
 export const POST = createEvryPlanExecutePost({
   registry: PRODUCTION_EVRY_EXECUTION_REGISTRY,
+  execute: executeProductionEvryActionPlan,
 });

@@ -484,6 +484,41 @@
       "when": 1787980056815,
       "tag": "0069_evry_active_runs",
       "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1788061252853,
+      "tag": "0070_evry_execution_effect_claims",
+      "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1788062098349,
+      "tag": "0071_task_recurrence_series_guard",
+      "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1788062099349,
+      "tag": "0072_task_structure_serialization",
+      "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1788109077100,
+      "tag": "0073_evry_dependency_outputs",
+      "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1788120711774,
+      "tag": "0074_evry_recipe_reuse_runs",
+      "breakpoints": true
     }
   ]
 }

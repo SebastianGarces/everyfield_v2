@@ -1,0 +1,392 @@
+{
+  "schemaVersion": 1,
+  "generatedBy": "pnpm evry:platform-inventory",
+  "authoritativeSources": {
+    "actions": "src/lib/auth/capability-map.ts",
+    "routes": "authenticated layout, /dashboard, /notifications, /feedback, and admin feedback routes",
+    "rscReads": "owning dashboard and notification service calls, including the authenticated shell badge"
+  },
+  "capabilities": [
+    {
+      "identity": "platform.feedback.submit",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/feedback/actions.ts → submitFeedbackAction"
+      ],
+      "parityCapability": "product-feedback",
+      "domain": "feedback",
+      "operationKind": "effect",
+      "applicationCapability": "self.write",
+      "confirmation": "required",
+      "mutationShape": "single_create",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "notifications.feed.list",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/notifications/actions.ts → loadMoreNotificationsAction",
+        "route:/notifications",
+        "rsc-read:src/app/(dashboard)/notifications/page.tsx → src/lib/notifications/feed.ts#loadNotificationFeedScreen"
+      ],
+      "parityCapability": "notifications",
+      "domain": "notifications",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "notifications.feed.mark-all-read",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/notifications/actions.ts → markAllNotificationsReadAction"
+      ],
+      "parityCapability": "notifications",
+      "domain": "notifications",
+      "operationKind": "effect",
+      "applicationCapability": "self.write",
+      "confirmation": "required",
+      "mutationShape": "bulk_update",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "notifications.feed.mark-one-read",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/notifications/actions.ts → markNotificationReadAction"
+      ],
+      "parityCapability": "notifications",
+      "domain": "notifications",
+      "operationKind": "effect",
+      "applicationCapability": "self.write",
+      "confirmation": "required",
+      "mutationShape": "single_update",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "dashboard.summary.get",
+      "surfaceIdentities": [
+        "route:/dashboard",
+        "rsc-read:src/app/(dashboard)/dashboard/plant-dashboard.tsx → src/lib/dashboard/service.ts#getDashboardMetrics",
+        "rsc-read:src/app/(dashboard)/dashboard/plant-dashboard.tsx → src/lib/dashboard/service.ts#getRecentActivity"
+      ],
+      "parityCapability": "dashboard",
+      "domain": "dashboard",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "notifications.badge.unread-count",
+      "surfaceIdentities": [
+        "rsc-read:src/app/(dashboard)/layout.tsx → src/app/(dashboard)/notification-badge.ts#loadUnreadBadgeCountSafely"
+      ],
+      "parityCapability": "notifications",
+      "domain": "notifications",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    }
+  ],
+  "entries": [
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/admin/feedback/actions.ts → updateFeedbackStatusAction",
+      "source": "src/app/(dashboard)/admin/feedback/actions.ts",
+      "exportName": "updateFeedbackStatusAction",
+      "capabilityIdentity": "boundary.platform-admin-only",
+      "domain": "feedback",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "mutationShape": null,
+      "classification": {
+        "state": "excluded",
+        "reason": "platform_admin_only"
+      }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/dashboard/actions.ts → completeOnboarding",
+      "source": "src/app/(dashboard)/dashboard/actions.ts",
+      "exportName": "completeOnboarding",
+      "capabilityIdentity": "boundary.pre-tenancy-onboarding",
+      "domain": "dashboard",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "mutationShape": null,
+      "classification": {
+        "state": "excluded",
+        "reason": "pre_tenancy_onboarding"
+      }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/dashboard/actions.ts → confirmLeadership",
+      "source": "src/app/(dashboard)/dashboard/actions.ts",
+      "exportName": "confirmLeadership",
+      "capabilityIdentity": "boundary.pre-tenancy-onboarding",
+      "domain": "dashboard",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "mutationShape": null,
+      "classification": {
+        "state": "excluded",
+        "reason": "pre_tenancy_onboarding"
+      }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/dashboard/actions.ts → createChurchBasics",
+      "source": "src/app/(dashboard)/dashboard/actions.ts",
+      "exportName": "createChurchBasics",
+      "capabilityIdentity": "boundary.pre-tenancy-onboarding",
+      "domain": "dashboard",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "mutationShape": null,
+      "classification": {
+        "state": "excluded",
+        "reason": "pre_tenancy_onboarding"
+      }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/dashboard/actions.ts → declareJourney",
+      "source": "src/app/(dashboard)/dashboard/actions.ts",
+      "exportName": "declareJourney",
+      "capabilityIdentity": "boundary.pre-tenancy-onboarding",
+      "domain": "dashboard",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "mutationShape": null,
+      "classification": {
+        "state": "excluded",
+        "reason": "pre_tenancy_onboarding"
+      }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/feedback/actions.ts → submitFeedbackAction",
+      "source": "src/app/(dashboard)/feedback/actions.ts",
+      "exportName": "submitFeedbackAction",
+      "capabilityIdentity": "platform.feedback.submit",
+      "domain": "feedback",
+      "operationKind": "effect",
+      "mutationShape": "single_create",
+      "applicationCapability": "self.write",
+      "confirmation": "required",
+      "classification": {
+        "state": "supported"
+      }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/notifications/actions.ts → loadMoreNotificationsAction",
+      "source": "src/app/(dashboard)/notifications/actions.ts",
+      "exportName": "loadMoreNotificationsAction",
+      "capabilityIdentity": "notifications.feed.list",
+      "domain": "notifications",
+      "operationKind": "read",
+      "mutationShape": null,
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": {
+        "state": "supported"
+      }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/notifications/actions.ts → markAllNotificationsReadAction",
+      "source": "src/app/(dashboard)/notifications/actions.ts",
+      "exportName": "markAllNotificationsReadAction",
+      "capabilityIdentity": "notifications.feed.mark-all-read",
+      "domain": "notifications",
+      "operationKind": "effect",
+      "mutationShape": "bulk_update",
+      "applicationCapability": "self.write",
+      "confirmation": "required",
+      "classification": {
+        "state": "supported"
+      }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/notifications/actions.ts → markNotificationReadAction",
+      "source": "src/app/(dashboard)/notifications/actions.ts",
+      "exportName": "markNotificationReadAction",
+      "capabilityIdentity": "notifications.feed.mark-one-read",
+      "domain": "notifications",
+      "operationKind": "effect",
+      "mutationShape": "single_update",
+      "applicationCapability": "self.write",
+      "confirmation": "required",
+      "classification": {
+        "state": "supported"
+      }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/admin/feedback",
+      "source": "src/app/(dashboard)/admin/feedback/page.tsx",
+      "exportName": null,
+      "capabilityIdentity": "boundary.platform-admin-only",
+      "domain": "feedback",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "mutationShape": null,
+      "classification": {
+        "state": "excluded",
+        "reason": "platform_admin_only"
+      }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/dashboard",
+      "source": "src/app/(dashboard)/dashboard/page.tsx",
+      "exportName": null,
+      "capabilityIdentity": "dashboard.summary.get",
+      "domain": "dashboard",
+      "operationKind": "read",
+      "mutationShape": null,
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": {
+        "state": "supported"
+      }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/notifications",
+      "source": "src/app/(dashboard)/notifications/page.tsx",
+      "exportName": null,
+      "capabilityIdentity": "notifications.feed.list",
+      "domain": "notifications",
+      "operationKind": "read",
+      "mutationShape": null,
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": {
+        "state": "supported"
+      }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/dashboard/plant-dashboard.tsx → src/lib/dashboard/service.ts#getDashboardMetrics",
+      "source": "src/app/(dashboard)/dashboard/plant-dashboard.tsx",
+      "exportName": "getDashboardMetrics",
+      "capabilityIdentity": "dashboard.summary.get",
+      "domain": "dashboard",
+      "operationKind": "read",
+      "mutationShape": null,
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": {
+        "state": "supported"
+      }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/dashboard/plant-dashboard.tsx → src/lib/dashboard/service.ts#getRecentActivity",
+      "source": "src/app/(dashboard)/dashboard/plant-dashboard.tsx",
+      "exportName": "getRecentActivity",
+      "capabilityIdentity": "dashboard.summary.get",
+      "domain": "dashboard",
+      "operationKind": "read",
+      "mutationShape": null,
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": {
+        "state": "supported"
+      }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/layout.tsx → src/app/(dashboard)/notification-badge.ts#loadUnreadBadgeCountSafely",
+      "source": "src/app/(dashboard)/layout.tsx",
+      "exportName": "loadUnreadBadgeCountSafely",
+      "capabilityIdentity": "notifications.badge.unread-count",
+      "domain": "notifications",
+      "operationKind": "read",
+      "mutationShape": null,
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": {
+        "state": "supported"
+      }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/notifications/page.tsx → src/lib/notifications/feed.ts#loadNotificationFeedScreen",
+      "source": "src/app/(dashboard)/notifications/page.tsx",
+      "exportName": "loadNotificationFeedScreen",
+      "capabilityIdentity": "notifications.feed.list",
+      "domain": "notifications",
+      "operationKind": "read",
+      "mutationShape": null,
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": {
+        "state": "supported"
+      }
+    }
+  ],
+  "summary": {
+    "actions": 9,
+    "routes": 3,
+    "rscReads": 4,
+    "readCapabilities": 3,
+    "effectCapabilities": 3,
+    "excluded": 6,
+    "unclassified": 0
+  }
+}

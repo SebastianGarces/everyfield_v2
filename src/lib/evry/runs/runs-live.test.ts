@@ -167,6 +167,67 @@ test(
       1
     );
 
+    const reuseRequestKey =
+      evryConversationRequestKeySchema.parse(randomUUID());
+    const reuseIdentity = {
+      kind: "conversation" as const,
+      operation: "reuse" as const,
+      conversationId: null,
+      planId: null,
+      planFingerprint: null,
+    };
+    const reuseFingerprint = fingerprintEvryActiveRunRequest({
+      version: 1,
+      operation: "reuse",
+      sourceConversationId: randomUUID(),
+      resultArtifactId: randomUUID(),
+      recipeIdentity: "meeting.invitation.reference",
+    });
+    const reuseClaims = await Promise.all([
+      claimEvryActiveRun({
+        actor: actor!,
+        requestKey: reuseRequestKey,
+        requestFingerprint: reuseFingerprint,
+        identity: reuseIdentity,
+        startedAt,
+      }),
+      claimEvryActiveRun({
+        actor: actor!,
+        requestKey: reuseRequestKey,
+        requestFingerprint: reuseFingerprint,
+        identity: reuseIdentity,
+        startedAt,
+      }),
+    ]);
+    assert.deepEqual(reuseClaims.map(({ ownership }) => ownership).sort(), [
+      "adopted",
+      "claimed",
+    ]);
+    await assert.rejects(
+      claimEvryActiveRun({
+        actor: actor!,
+        requestKey: reuseRequestKey,
+        requestFingerprint: fingerprintEvryActiveRunRequest({
+          version: 1,
+          operation: "reuse",
+          sourceConversationId: randomUUID(),
+          resultArtifactId: randomUUID(),
+          recipeIdentity: "meeting.invitation.reference",
+        }),
+        identity: reuseIdentity,
+        startedAt,
+      }),
+      EvryActiveRunIdentityError
+    );
+    const completedReuse = await completeEvryActiveRun({
+      actor: actor!,
+      requestKey: reuseRequestKey,
+      conversationId: conversation.id,
+      completedAt: new Date(startedAt.valueOf() + 500),
+    });
+    assert.equal(completedReuse?.operation, "reuse");
+    assert.equal(completedReuse?.conversationId, conversation.id);
+
     const expiredRequestKey =
       evryConversationRequestKeySchema.parse(randomUUID());
     const expiredStartedAt = new Date(

@@ -1,7 +1,8 @@
 "use client";
 
-import { LoaderCircle, MapPin, Send, X } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { ArrowDown, ArrowUp, LoaderCircle, MapPin, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { evryResponseContent } from "./response-content";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,13 +13,9 @@ import { EvryArtifactRenderer } from "./artifacts/artifact-renderer";
 import { EvryProductionArtifact } from "./artifacts/production-artifact";
 import { useEvryShell } from "./evry-shell";
 import type { VisibleEvryPageContext } from "./page-context";
-import { EvrySuggestionList } from "./suggestions/suggestion-list";
-import {
-  populateComposerFromSuggestion,
-  shouldOfferEvrySuggestions,
-} from "./suggestions/interaction";
 import { EvryWorkStatus } from "./streaming/work-status";
 import { shouldFollowEvryTranscript } from "./interaction-state";
+import { EvryPeopleFileWorkflow } from "./people-file-workflow";
 
 export function EvryContextChip({
   context,
@@ -55,10 +52,14 @@ export function ConversationSurface({ className }: { className?: string }) {
   const {
     activeContext,
     acknowledgement,
+    acknowledgeConversationMounted,
     canStopWatching,
     clearContext,
     conversation,
+    streamingResponse,
     draft,
+    pendingMessage,
+    discardPendingMessage,
     error,
     isComposerBlocked,
     isLoading,
@@ -66,190 +67,341 @@ export function ConversationSurface({ className }: { className?: string }) {
     isWatchingDetached,
     resumeWatching,
     sendMessage,
+    sendMessageText,
     setDraft,
     stopWatching,
-    suggestions,
     workRequestId,
     workState,
   } = useEvryShell();
-  const endRef = useRef<HTMLDivElement>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
+  const surfaceRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLFormElement>(null);
+  const followTranscriptRef = useRef(true);
+  const conversationId = conversation?.id ?? null;
+  const [scrollback, setScrollback] = useState({
+    conversationId,
+    visible: false,
+  });
+  if (scrollback.conversationId !== conversationId) {
+    setScrollback({ conversationId, visible: false });
+  }
+  const showJumpToLatest =
+    scrollback.conversationId === conversationId && scrollback.visible;
   const latestMessage = conversation?.messages.at(-1);
-  const showSuggestions =
-    !isSending &&
-    workState.phase !== "reading" &&
-    workState.phase !== "planning" &&
-    workState.phase !== "execution" &&
-    shouldOfferEvrySuggestions(conversation);
+  useEffect(() => {
+    const composer = composerRef.current;
+    if (!composer) return;
+    const observer = new ResizeObserver(() => {
+      surfaceRef.current?.style.setProperty(
+        "--evry-composer-height",
+        `${composer.offsetHeight}px`
+      );
+    });
+    observer.observe(composer);
+    return () => observer.disconnect();
+  }, []);
   const activeArtifactId =
     conversation?.messages
       .flatMap((message) => message.artifacts)
       .findLast(
         ({ artifact }) =>
-          (artifact.kind === "confirmation" ||
+          (artifact.kind === "result" &&
+            "artifactVersion" in artifact &&
+            artifact.status === "completed" &&
+            artifact.reuse !== undefined) ||
+          ((artifact.kind === "confirmation" ||
             (artifact.kind === "progress" &&
               "artifactVersion" in artifact &&
               artifact.steps.some(({ status }) => status === "safe_retry"))) &&
-          "artifactVersion" in artifact &&
-          conversation.activePlan?.identity.planId === artifact.plan.planId &&
-          conversation.activePlan.identity.fingerprint ===
-            artifact.plan.fingerprint
+            "artifactVersion" in artifact &&
+            conversation.activePlan?.identity.planId === artifact.plan.planId &&
+            conversation.activePlan.identity.fingerprint ===
+              artifact.plan.fingerprint)
       )?.id ?? null;
 
   useEffect(() => {
+    const conversationId = conversation?.id ?? null;
+    followTranscriptRef.current = true;
+    return acknowledgeConversationMounted(conversationId);
+  }, [acknowledgeConversationMounted, conversation?.id]);
+
+  useEffect(() => {
     const transcript = transcriptRef.current;
-    if (
-      transcript &&
-      shouldFollowEvryTranscript({
-        distanceFromEnd:
-          transcript.scrollHeight -
-          transcript.clientHeight -
-          transcript.scrollTop,
-        focusInComposer:
-          composerRef.current?.contains(document.activeElement) ?? false,
-      })
-    ) {
-      endRef.current?.scrollIntoView({ block: "nearest" });
+    if (transcript && followTranscriptRef.current) {
+      transcript.scrollTop = transcript.scrollHeight;
     }
-  }, [conversation?.messages.length, latestMessage]);
+  }, [
+    conversation?.messages.length,
+    latestMessage,
+    isLoading,
+    isSending,
+    pendingMessage,
+    workState,
+    streamingResponse,
+  ]);
 
   return (
-    <div className={cn("flex min-h-0 flex-1 flex-col", className)}>
+    <div
+      ref={surfaceRef}
+      className={cn(
+        "relative isolate flex min-h-0 flex-1 flex-col overflow-hidden",
+        className
+      )}
+    >
       <div
         ref={transcriptRef}
         data-slot="evry-transcript"
-        className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5 sm:px-5"
+        onScroll={(event) => {
+          const transcript = event.currentTarget;
+          // Capture the reader's position before a new reply changes its height.
+          followTranscriptRef.current = shouldFollowEvryTranscript({
+            distanceFromEnd:
+              transcript.scrollHeight -
+              transcript.clientHeight -
+              transcript.scrollTop,
+            focusInComposer: false,
+          });
+          setScrollback({
+            conversationId,
+            visible: !followTranscriptRef.current,
+          });
+        }}
+        className="relative min-h-0 flex-1 scroll-pb-[calc(var(--evry-composer-height,8rem)+2.5rem+env(safe-area-inset-bottom))] overflow-y-auto overscroll-contain px-4 pt-5 pb-[calc(var(--evry-composer-height,8rem)+2.5rem+env(safe-area-inset-bottom))] sm:px-5"
         aria-busy={isLoading}
       >
-        {isLoading ? (
-          <div className="text-muted-foreground flex min-h-32 items-center justify-center gap-2 text-sm">
-            <LoaderCircle
-              aria-hidden="true"
-              className="size-4 animate-spin motion-reduce:animate-none"
-            />
-            Opening conversation…
-          </div>
-        ) : conversation?.messages.length ? (
-          <div className="space-y-6">
-            <ol
-              role="log"
-              aria-label="Conversation messages"
-              aria-live="off"
-              aria-relevant="additions text"
-              className="space-y-4"
-            >
-              {conversation.messages.map((message) => (
-                <li
-                  key={message.id}
-                  className={cn(
-                    "flex",
-                    message.author === "user" ? "justify-end" : "justify-start"
-                  )}
-                >
-                  <div
+        <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col">
+          {isLoading ? (
+            <div className="text-muted-foreground flex min-h-32 items-center justify-center gap-2 text-sm">
+              <LoaderCircle
+                aria-hidden="true"
+                className="size-4 animate-spin motion-reduce:animate-none"
+              />
+              Opening conversation…
+            </div>
+          ) : conversation?.messages.length ? (
+            <div className="space-y-6">
+              <ol
+                role="log"
+                aria-label="Conversation messages"
+                aria-live="off"
+                aria-relevant="additions text"
+                className="space-y-4"
+              >
+                {conversation.messages.map((message) => (
+                  <li
+                    key={message.id}
                     className={cn(
-                      "max-w-[92%] space-y-3 [overflow-wrap:anywhere] sm:max-w-[88%]",
-                      message.author === "user" && "flex flex-col items-end"
+                      "flex",
+                      message.author === "user"
+                        ? "justify-end"
+                        : "justify-start"
                     )}
                   >
                     <div
                       className={cn(
-                        "rounded-xl px-3.5 py-2.5 text-sm leading-relaxed",
-                        message.author === "user"
-                          ? "bg-primary text-primary-foreground"
-                          : "bg-muted text-foreground"
+                        "max-w-[92%] space-y-3 [overflow-wrap:anywhere] sm:max-w-[88%]",
+                        message.author === "user" && "flex flex-col items-end"
                       )}
                     >
-                      <p className="whitespace-pre-wrap">
-                        <span className="sr-only">
-                          {message.author === "user" ? "You" : "Evry"}:{" "}
-                        </span>
-                        {message.body}
-                      </p>
+                      {evryResponseContent(message.body, message.artifacts).map(
+                        (part, index) =>
+                          part.kind === "text" ? (
+                            <div
+                              key={`text:${index}`}
+                              className={cn(
+                                "rounded-xl px-3.5 py-2.5 text-sm leading-relaxed",
+                                message.author === "user"
+                                  ? "bg-primary text-primary-foreground"
+                                  : "bg-muted text-foreground"
+                              )}
+                            >
+                              <p className="whitespace-pre-wrap">
+                                <span className="sr-only">
+                                  {message.author === "user" ? "You" : "Evry"}
+                                  :{" "}
+                                </span>
+                                {part.text}
+                              </p>
+                            </div>
+                          ) : (
+                            <EvryProductionArtifact
+                              key={part.entry.id}
+                              artifact={part.entry.artifact}
+                              activePlan={conversation.activePlan}
+                              artifactId={part.entry.id}
+                              conversationId={conversation.id}
+                              conversationStateVersion={
+                                conversation.stateVersion
+                              }
+                              interactive={part.entry.id === activeArtifactId}
+                              messageId={message.id}
+                              onEdit={(confirmation) => {
+                                setDraft(
+                                  "Revise this plan: " + confirmation.title
+                                );
+                                requestAnimationFrame(() =>
+                                  document
+                                    .getElementById("evry-message")
+                                    ?.focus()
+                                );
+                              }}
+                            />
+                          )
+                      )}
+
+                      {message.pageContext ? (
+                        <EvryArtifactRenderer
+                          model={{
+                            variant: "context",
+                            artifact: {
+                              sourceKind: message.pageContext.kind,
+                              recordId: message.pageContext.recordId,
+                              label: message.pageContext.label,
+                            },
+                          }}
+                        />
+                      ) : null}
                     </div>
-
-                    {message.pageContext ? (
-                      <EvryArtifactRenderer
-                        model={{
-                          variant: "context",
-                          artifact: {
-                            sourceKind: message.pageContext.kind,
-                            recordId: message.pageContext.recordId,
-                            label: message.pageContext.label,
-                          },
-                        }}
-                      />
-                    ) : null}
-
-                    {message.artifacts.map(({ id, artifact }) => (
-                      <EvryProductionArtifact
-                        key={id}
-                        artifact={artifact}
-                        activePlan={conversation.activePlan}
-                        artifactId={id}
-                        conversationId={conversation.id}
-                        conversationStateVersion={conversation.stateVersion}
-                        interactive={id === activeArtifactId}
-                        messageId={message.id}
-                        onEdit={(confirmation) => {
-                          setDraft("Revise this plan: " + confirmation.title);
-                          requestAnimationFrame(() =>
-                            document.getElementById("evry-message")?.focus()
-                          );
-                        }}
-                      />
-                    ))}
-                  </div>
-                </li>
-              ))}
-            </ol>
-            {showSuggestions ? (
-              <EvrySuggestionList
-                suggestions={suggestions}
-                onSelect={(suggestion) =>
-                  populateComposerFromSuggestion(suggestion, setDraft, () =>
-                    document.getElementById("evry-message")?.focus()
-                  )
+                  </li>
+                ))}
+              </ol>
+            </div>
+          ) : !pendingMessage && !isSending ? (
+            <div className="flex flex-1 items-center justify-center py-12 text-center">
+              <h2 className="text-2xl font-medium text-balance sm:text-3xl">
+                What can I help you with today?
+              </h2>
+            </div>
+          ) : null}
+          {pendingMessage ? (
+            <div
+              className="mt-4 flex flex-col items-end gap-2"
+              aria-label={
+                pendingMessage.status === "failed"
+                  ? "Unsent message"
+                  : "Sending message"
+              }
+            >
+              <p className="bg-primary text-primary-foreground max-w-[92%] rounded-xl px-3.5 py-2.5 text-sm leading-relaxed [overflow-wrap:anywhere] whitespace-pre-wrap sm:max-w-[88%]">
+                <span className="sr-only">You: </span>
+                {pendingMessage.body}
+              </p>
+              {pendingMessage.status === "failed" ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-muted-foreground text-sm">
+                    Not sent
+                  </span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="min-h-11 cursor-pointer"
+                    onClick={() => {
+                      document.getElementById("evry-message")?.focus();
+                      void sendMessageText(pendingMessage.body);
+                    }}
+                  >
+                    Retry
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="min-h-11 cursor-pointer"
+                    onClick={() => {
+                      document.getElementById("evry-message")?.focus();
+                      discardPendingMessage();
+                    }}
+                  >
+                    Discard
+                  </Button>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+          {streamingResponse ? (
+            <div
+              aria-label="Evry response in progress"
+              className="mt-4 max-w-[92%] space-y-3 [overflow-wrap:anywhere] sm:max-w-[88%]"
+            >
+              {evryResponseContent(
+                streamingResponse.response.body,
+                streamingResponse.response.artifacts.map((artifact) => ({
+                  artifact,
+                }))
+              ).map((part, index) =>
+                part.kind === "text" ? (
+                  <p
+                    key={`text:${index}`}
+                    className="bg-muted text-foreground rounded-xl px-3.5 py-2.5 text-sm leading-relaxed whitespace-pre-wrap"
+                  >
+                    {part.text}
+                  </p>
+                ) : (
+                  <EvryArtifactRenderer
+                    key={`result:${index}`}
+                    model={{ variant: "read", artifact: part.entry.artifact }}
+                  />
+                )
+              )}
+            </div>
+          ) : null}
+          <div className="mt-4 space-y-1">
+            <div
+              className={cn(
+                !error &&
+                  (workState.phase === "complete" ||
+                    workState.phase === "confirmation") &&
+                  "sr-only focus-within:not-sr-only"
+              )}
+            >
+              <EvryWorkStatus
+                acknowledgement={acknowledgement}
+                activeRequestId={workRequestId}
+                state={
+                  error && workState.phase !== "failed"
+                    ? { phase: "failed", message: error }
+                    : workState
                 }
               />
-            ) : null}
-          </div>
-        ) : (
-          <div className="mx-auto flex min-h-48 max-w-sm flex-col items-center justify-center text-center">
-            <div className="bg-muted mb-4 grid size-10 place-items-center rounded-full">
-              <Send
-                aria-hidden="true"
-                className="text-muted-foreground size-4"
-              />
             </div>
-            <h2 className="font-semibold">Start with an EveryField task</h2>
-            <p className="text-muted-foreground mt-1 text-sm leading-relaxed text-pretty">
-              Ask Evry to help with people, meetings, teams, tasks, or your
-              launch.
-            </p>
-            {showSuggestions ? (
-              <div className="mt-6 w-full">
-                <EvrySuggestionList
-                  suggestions={suggestions}
-                  onSelect={(suggestion) =>
-                    populateComposerFromSuggestion(suggestion, setDraft, () =>
-                      document.getElementById("evry-message")?.focus()
-                    )
-                  }
-                />
-              </div>
+            {canStopWatching || isWatchingDetached ? (
+              <Button
+                type="button"
+                variant="link"
+                size="sm"
+                className="min-h-11 px-0"
+                onClick={isWatchingDetached ? resumeWatching : stopWatching}
+              >
+                {isWatchingDetached ? "Reconnect to this run" : "Stop watching"}
+              </Button>
             ) : null}
           </div>
-        )}
-        <div ref={endRef} />
+        </div>
       </div>
 
+      {showJumpToLatest ? (
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          className="absolute bottom-[calc(var(--evry-composer-height,7rem)+1.5rem)] left-1/2 z-10 -translate-x-1/2 rounded-full shadow-sm"
+          onClick={() => {
+            followTranscriptRef.current = true;
+            setScrollback({ conversationId, visible: false });
+            const transcript = transcriptRef.current;
+            if (transcript) transcript.scrollTop = transcript.scrollHeight;
+          }}
+        >
+          <ArrowDown aria-hidden="true" className="size-4" />
+          Jump to latest
+        </Button>
+      ) : null}
       <form
         ref={composerRef}
-        className="bg-background shrink-0 space-y-3 border-t p-4 sm:p-5"
+        data-slot="evry-composer"
+        className="bg-background focus-within:ring-ring absolute inset-x-3 bottom-[calc(0.75rem+env(safe-area-inset-bottom))] z-10 mx-auto max-w-3xl space-y-2 rounded-2xl border p-2 shadow-lg focus-within:ring-2 sm:inset-x-5"
         onSubmit={(event) => {
           event.preventDefault();
+          followTranscriptRef.current = true;
           void sendMessage();
         }}
       >
@@ -258,51 +410,44 @@ export function ConversationSurface({ className }: { className?: string }) {
         ) : null}
 
         <div className="space-y-2">
-          <label htmlFor="evry-message" className="text-sm font-medium">
+          <label htmlFor="evry-message" className="sr-only">
             Message Evry
           </label>
           <Textarea
             id="evry-message"
+            autoFocus={draft.length > 0}
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
-            placeholder="Create a follow-up task for Friday"
-            rows={3}
+            placeholder="Message Evry…"
+            rows={1}
+            onKeyDown={(event) => {
+              if (
+                event.key === "Enter" &&
+                !event.shiftKey &&
+                !event.nativeEvent.isComposing
+              ) {
+                event.preventDefault();
+                if (!isSending && !isComposerBlocked && draft.trim())
+                  event.currentTarget.form?.requestSubmit();
+              }
+            }}
             required
             maxLength={8_000}
             aria-busy={isSending}
-            className="max-h-40 min-h-20 resize-y text-base sm:text-sm"
+            className="field-sizing-content max-h-40 min-h-12 resize-none border-0 bg-transparent px-3 py-3 text-base shadow-none focus-visible:ring-0 sm:text-sm dark:bg-transparent"
           />
         </div>
 
         <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0 flex-1 space-y-1">
-            <EvryWorkStatus
-              acknowledgement={acknowledgement}
-              activeRequestId={workRequestId}
-              state={
-                error && workState.phase !== "failed"
-                  ? { phase: "failed", message: error }
-                  : workState
-              }
-            />
-            {canStopWatching || isWatchingDetached ? (
-              <Button
-                type="button"
-                variant="link"
-                size="sm"
-                className="h-auto min-h-6 cursor-pointer px-0 py-0.5"
-                onClick={isWatchingDetached ? resumeWatching : stopWatching}
-              >
-                {isWatchingDetached ? "Reconnect to this run" : "Stop watching"}
-              </Button>
-            ) : null}
-          </div>
+          <EvryPeopleFileWorkflow />
           <Button
             type="submit"
             disabled={
               draft.trim().length === 0 || isSending || isComposerBlocked
             }
-            className="cursor-pointer active:scale-[0.96]"
+            aria-label="Send message"
+            size="icon"
+            className="size-11 cursor-pointer rounded-full"
           >
             {isSending ? (
               <LoaderCircle
@@ -310,9 +455,8 @@ export function ConversationSurface({ className }: { className?: string }) {
                 className="animate-spin motion-reduce:animate-none"
               />
             ) : (
-              <Send aria-hidden="true" />
+              <ArrowUp aria-hidden="true" />
             )}
-            {isSending ? "Sending…" : "Send"}
           </Button>
         </div>
       </form>

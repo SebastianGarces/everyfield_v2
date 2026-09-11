@@ -1,4 +1,7 @@
 import { z } from "zod";
+import { publicReadArtifactSchema } from "@/lib/evry/artifacts/public";
+import { validEvryResponseLayout } from "@/lib/evry/conversations/response-layout";
+import { EVRY_READ_BUDGET } from "@/lib/evry/capabilities/read-budget";
 
 import {
   publicEvryConversationSchema,
@@ -39,6 +42,22 @@ const workStreamEventSchema = z.discriminatedUnion("code", [
 
 export const evryConversationStreamEventSchema = z.union([
   workStreamEventSchema,
+  z.strictObject({
+    type: z.literal("response"),
+    ...sequencedEvent,
+    response: z
+      .strictObject({
+        body: z.string().max(8000),
+        artifacts: z
+          .array(publicReadArtifactSchema)
+          .max(EVRY_READ_BUDGET.calls),
+      })
+      .refine(
+        (response) =>
+          validEvryResponseLayout(response.body, response.artifacts),
+        "Invalid response component placement"
+      ),
+  }),
   z
     .object({
       type: z.literal("conversation"),
@@ -82,6 +101,12 @@ export type EvryConversationStreamStage = Exclude<
   EvryConversationStreamWorkCode,
   "request_accepted"
 >;
+export type EvryConversationStreamReport =
+  | EvryConversationStreamStage
+  | Omit<
+      Extract<EvryConversationStreamEvent, { type: "response" }>,
+      "sequence" | "requestId"
+    >;
 
 export class EvryConversationStreamFailure extends Error {
   readonly code: "stale" | "unavailable";
