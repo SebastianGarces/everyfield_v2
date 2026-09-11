@@ -519,6 +519,27 @@
       "when": 1788120711774,
       "tag": "0074_evry_recipe_reuse_runs",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1789045871929,
+      "tag": "0075_wiki_progress_sharing",
+      "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1789105504370,
+      "tag": "0076_team_leader_provenance",
+      "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1789106379915,
+      "tag": "0077_discovery_profiles",
+      "breakpoints": true
     }
   ]
 }

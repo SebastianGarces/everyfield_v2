@@ -79,7 +79,7 @@ export function registerDiscoveryPlantLiveTests(db: NeonHttpDatabase) {
     assert.equal(
       await count(
         "church_privacy_settings",
-        sql`church_id=${write.churchId}::uuid and share_people and share_meetings and share_activity_with_oversight`
+        sql`church_id=${write.churchId}::uuid and share_people and share_meetings and share_wiki and share_activity_with_oversight`
       ),
       1
     );

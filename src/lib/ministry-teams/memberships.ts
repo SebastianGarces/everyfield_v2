@@ -1,4 +1,6 @@
 import { db } from "@/db";
+import { lockPlantLeadership } from "./leadership-lock";
+import { canLeadTeam } from "./leader-eligibility";
 import {
   ministryTeams,
   teamRoles,
@@ -9,7 +11,7 @@ import {
   type MembershipStatus,
   type RoleStatus,
 } from "@/db/schema";
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, exists, inArray, isNull, sql } from "drizzle-orm";
 import { toCalendarDate } from "@/lib/datetime";
 import {
   emitTeamMemberAssigned,
@@ -17,7 +19,11 @@ import {
   emitTeamStaffingChanged,
 } from "./events";
 import { ExpectedError } from "./expected-error";
-import { syncLeaderOnFill, syncLeaderOnVacate } from "./leader-sync";
+import {
+  lockTeamLeadership,
+  fillLeaderStatement,
+  clearVacantRoleLeader,
+} from "./leader-sync";
 import { isSeatConflict } from "./membership-conflict";
 import {
   PERSON_ALREADY_ASSIGNED_MESSAGE,
@@ -101,74 +107,14 @@ async function seatRefusalMessage(
 }
 
 /**
- * Assign a person to a team role.
+ * Assign one active person per role. The partial unique role index arbitrates
+ * inserts; reactivation also requires status='inactive' on the written row.
+ * Both an empty RETURNING and a unique violation are expected seat refusals.
+ * Their person-specific wording comes from seatRefusalMessage after refusal.
  *
- * ONE PERSON PER ROLE, AND THE DATABASE IS WHAT SAYS SO (#409 D1, migration
- * 0038). `team_memberships_role_active_unique_idx` — partial, on `role_id`
- * where `status = 'active'` — is the guard; everything here is about which
- * sentence the planter reads.
- *
- * "IS THE SEAT FREE" IS ASKED BY ATTEMPTING THE WRITE, never by a read before
- * it. Refusal arrives in one of TWO SHAPES, and BOTH are post-write:
- *
- *   * an EMPTY `returning()` — the INSERT path, always, and the REACTIVATION
- *     path when the row this caller is reactivating is the one the winner just
- *     took. The INSERT carries
- *     `ON CONFLICT (role_id) WHERE status = 'active' DO NOTHING` against the one
- *     unique index on the table, so every conflict it can meet is the arbiter's
- *     and the statement answers `INSERT 0 0`; the reactivation UPDATE carries
- *     `status = 'inactive'` in its own `WHERE`, which Postgres re-evaluates
- *     against the winner's committed row under the row lock, so the loser
- *     matches nothing. Either way the emptiness IS the refusal;
- *   * a THROWN unique violation, recognised by `isSeatConflict` — the
- *     REACTIVATION path when ANOTHER PERSON holds the seat. That is a different
- *     row, so the `status = 'inactive'` predicate is satisfied and the write
- *     proceeds into the index; an UPDATE takes no `ON CONFLICT` at all, so it
- *     meets the index as an exception and nothing can cover it.
- *
- * SO THE REACTIVATION PATH HAS BOTH SHAPES, and neither is optional. The INSERT
- * path has only the first, and keeps it only while the table carries ONE unique
- * index — a second one is not the arbiter, so a raced INSERT raises past the
- * `DO NOTHING`. Why that index was dropped: the migration 0039 header, and
- * `memory/invariants.md` → Transactions.
- *
- * WHICH SENTENCE THE LOSER READS IS A SECOND QUESTION, IT NEEDS A SECOND READ,
- * AND THAT READ IS THE ONLY DECIDER FOR BOTH SHAPES. Neither shape can tell the
- * two-people race from the same-person double-submit — `role_id` alone is the
- * seat key, and an index does not report intent — so `seatRefusalMessage` READS
- * THE HOLDER and names it: the same person is `PERSON_ALREADY_ASSIGNED_MESSAGE`,
- * anybody else is `ROLE_ALREADY_FILLED_MESSAGE`. Both refusal branches below end
- * in that one call, deliberately — never a table mapping index names to
- * sentences, which has to predict which index a race raises on. That
- * distinction is not decoration — the seat sentence carries
- * `ROLE_ALREADY_FILLED_DESCRIPTION` ("Someone filled it while this page was
- * open"), which is a FALSE statement to a planter who filled it themselves,
- * twice.
- *
- * That read is NOT a guard and must never be turned into one. It runs AFTER the
- * write has already been refused, on a cold path, and its only output is a
- * string; the index remains the only thing that decides who gets the seat.
- *
- * THERE IS NO PRE-FLIGHT "is anybody on this seat?" SELECT, and never re-add
- * one. A SELECT-then-INSERT is not a concurrency guard (`memory/invariants.md`
- * → Transactions), so it can only ever be a third copy of a rule the index
- * already owns — and it costs a round trip on every assignment. It is also not
- * inert: it runs for BOTH paths, so it refuses a reactivation onto an occupied
- * seat before the batch and hides the thrown refusal `role-seat-race.test.ts`
- * exists to prove.
- *
- * THE REACTIVATION UPDATE'S `status = 'inactive'` PREDICATE IS NOT THAT SELECT.
- * A pre-flight SELECT is a snapshot taken before the write, in a separate
- * statement, about rows other writers are still touching. This predicate is part
- * of the write itself, and Postgres re-checks it against the winner's committed
- * row version under the row lock — a compare-and-set, which is the shape
- * `memory/invariants.md` → Transactions prescribes, not the one it forbids.
- *
- * The pre-check that STAYS is `existing.status === 'active'` below, and it is a
- * fast path, NOT a guard: it saves a batch for the ordinary "this person is
- * already on this role" case and produces the same sentence the loser branch
- * would. It is a snapshot read, so two submits can pass it together and it
- * answers neither — what answers them is the conditional UPDATE below.
+ * The team lock, membership write, derived appointment and role status share
+ * one neon-http batch. The membership RETURNING CTE gates the appointment, so
+ * a losing assignment cannot restore leadership cleared by another operation.
  */
 export async function assignMember(
   churchId: string,
@@ -233,44 +179,11 @@ export async function assignMember(
     throw new ExpectedError(PERSON_ALREADY_ASSIGNED_MESSAGE);
   }
 
-  // The membership write and the role's status flip are both known up front,
-  // so they ship as ONE db.batch — a Neon batched transaction, all-or-nothing
-  // (memory/invariants.md → Transactions). Two separate awaits could fail in
-  // between and leave a role reading Filled with no active membership. That
-  // all-or-nothing is also what makes the THROWN reactivation refusal safe: the
-  // index violation aborts the batch, so `markRoleFilled` never lands either.
-  // The two EMPTY-`returning()` refusals are the other case and roll nothing
-  // back by design — somebody holds the seat, so `filled` is what the role is.
-  const markRoleFilled = db
-    .update(teamRoles)
-    .set({ status: "filled" as RoleStatus, updatedAt: new Date() })
-    .where(and(eq(teamRoles.id, roleId), eq(teamRoles.churchId, churchId)));
-
-  let membership: TeamMembership;
-  try {
-    if (existing) {
-      // Reactivate the inactive row: fresh startDate, cleared end fields.
-      //
-      // `status = 'inactive'` IS THE GUARD ON THIS PATH, and it is the whole
-      // reason this UPDATE is conditional (#411 quality round 1). Without it
-      // the statement is keyed on `existing.id` alone, so a same-person double
-      // submit onto a seat this person USED to hold has nothing standing over
-      // it at all: both callers read the same inactive row, both pass the
-      // `existing.status === 'active'` pre-check (a snapshot, taken before
-      // either wrote), and both then UPDATE the SAME row. One row cannot
-      // collide with itself, so the seat index never raises, `isSeatConflict`
-      // is never reached, and BOTH callers are told they succeeded — which
-      // emits every assignment event twice for one seat.
-      //
-      // A conditional UPDATE is a real compare-and-set, not a re-added
-      // SELECT-then-INSERT: under a row lock Postgres re-evaluates this WHERE
-      // against the WINNER's committed row version (EvalPlanQual), and the
-      // winner has just written `status = 'active'`, so exactly one of two
-      // concurrent statements matches. The loser matches nothing, returns
-      // empty, and is refused below — the same shape, and the same refusal,
-      // the INSERT path's `INSERT 0 0` produces.
-      const [[reactivated]] = await db.batch([
-        db
+  // The parent lock precedes every child write. The RETURNING CTE gates
+  // leadership on this assignment actually succeeding, including reactivation.
+  const assigned = db.$with("assigned_membership").as(
+    existing
+      ? db
           .update(teamMemberships)
           .set({
             status: "active" as MembershipStatus,
@@ -285,21 +198,8 @@ export async function assignMember(
               eq(teamMemberships.status, "inactive")
             )
           )
-          .returning(),
-        markRoleFilled,
-      ]);
-      // Same reading as the INSERT's empty `returning()` below: not an error,
-      // the loser of a race. `markRoleFilled` still ran, and that is right —
-      // somebody holds the seat.
-      if (!reactivated) {
-        throw new ExpectedError(
-          await seatRefusalMessage(churchId, roleId, personId)
-        );
-      }
-      membership = reactivated;
-    } else {
-      const [[inserted]] = await db.batch([
-        db
+          .returning()
+      : db
           .insert(teamMemberships)
           .values({
             churchId,
@@ -312,32 +212,71 @@ export async function assignMember(
           } satisfies NewTeamMembership)
           .onConflictDoNothing({
             target: teamMemberships.roleId,
-            // The index predicate, repeated VERBATIM — inference has to prove
-            // the index covers this statement's conflicts, and copying the
-            // stored predicate is what leaves it nothing to prove. A mismatch
-            // is "there is no unique or exclusion constraint matching the ON
-            // CONFLICT specification", on every assignment.
-            //
-            // It names the SEAT index, which since migration 0039 is the ONLY
-            // unique index on this table — so every conflict this statement can
-            // meet is the arbiter's and the refusal is always `INSERT 0 0`.
             where: sql`${teamMemberships.status} = 'active'`,
           })
-          .returning(),
-        markRoleFilled,
-      ]);
-      // An empty `returning()` is not an error — it is the loser of the race
-      // (memory/invariants.md → Transactions). `markRoleFilled` still ran, and
-      // that is right rather than tolerated: somebody holds the seat, so
-      // `filled` is what the role is. The refusal below is about what this
-      // caller is told, not about repairing a write.
-      if (!inserted) {
-        throw new ExpectedError(
-          await seatRefusalMessage(churchId, roleId, personId)
-        );
-      }
-      membership = inserted;
-    }
+          .returning()
+  );
+  const filled = db.$with("filled_leader").as(
+    fillLeaderStatement(
+      churchId,
+      teamId,
+      roleId,
+      personId,
+      exists(
+        db
+          .select({ one: sql`1` })
+          .from(assigned)
+          .innerJoin(teamRoles, eq(teamRoles.id, assigned.roleId))
+          .where(
+            and(
+              eq(teamRoles.churchId, churchId),
+              eq(teamRoles.teamId, teamId),
+              eq(teamRoles.isLeadershipRole, true)
+            )
+          )
+      )
+    )
+  );
+  let membership: TeamMembership;
+  let assignedLeadershipRole = false;
+  try {
+    const [, , [written], [currentRole]] = await db.batch([
+      lockPlantLeadership(churchId),
+      lockTeamLeadership(churchId, teamId),
+      db.with(assigned, filled).select().from(assigned),
+      db
+        .update(teamRoles)
+        .set({ status: "filled" as RoleStatus, updatedAt: new Date() })
+        .where(
+          and(
+            eq(teamRoles.id, roleId),
+            eq(teamRoles.churchId, churchId),
+            exists(
+              db
+                .select({ one: sql`1` })
+                .from(teamMemberships)
+                .where(
+                  and(
+                    eq(teamMemberships.roleId, roleId),
+                    eq(teamMemberships.churchId, churchId),
+                    eq(teamMemberships.status, "active")
+                  )
+                )
+            )
+          )
+        )
+        .returning({
+          isLeadershipRole: teamRoles.isLeadershipRole,
+          canLead: canLeadTeam(churchId, personId),
+        }),
+    ]);
+    if (!written)
+      throw new ExpectedError(
+        await seatRefusalMessage(churchId, roleId, personId)
+      );
+    membership = written;
+    assignedLeadershipRole =
+      currentRole?.isLeadershipRole === true && currentRole.canLead;
   } catch (error) {
     // The OTHER refusal path — the reactivation UPDATE — and it ends in the
     // SAME read. The seat index raised, so what happened is "somebody is
@@ -356,12 +295,7 @@ export async function assignMember(
   await emitTeamMemberAssigned(teamId, personId, roleId, churchId, userId);
 
   // If this is a leadership role, also emit leader assigned event
-  if (role.isLeadershipRole) {
-    // …and make them the team's leader, if the team has none (#311 WS2). The
-    // event has always fired here and drives the person's status hop; what it
-    // never did was write `ministry_teams.leader_id`, so a plant could seat its
-    // Senior Pastor and still read "No leader assigned" in the header.
-    await syncLeaderOnFill(churchId, teamId, personId);
+  if (assignedLeadershipRole) {
     await emitTeamLeaderAssigned(teamId, personId, churchId, userId);
   }
 
@@ -377,14 +311,8 @@ export async function assignMember(
   return membership;
 }
 
-/**
- * Remove (deactivate) a team membership.
- *
- * IF THE SEAT WAS A LEADERSHIP SEAT, THE TEAM'S LEADER FOLLOWS IT OUT — but
- * only when `leader_id` points at this person (#311 WS2, `leader-sync.ts`). The
- * role's flag is read in the SAME statement as the membership, because it is
- * one question ("what did this person hold?") and a role row always exists for
- * a membership: `role_id` is NOT NULL and cascades.
+/** Deactivate membership and reconcile role status and derived leadership in
+ * one team-locked batch. A stale request cannot clear a different holder.
  */
 export async function removeMember(
   churchId: string,
@@ -394,7 +322,6 @@ export async function removeMember(
   const [held] = await db
     .select({
       membership: teamMemberships,
-      isLeadershipRole: teamRoles.isLeadershipRole,
     })
     .from(teamMemberships)
     .innerJoin(teamRoles, eq(teamRoles.id, teamMemberships.roleId))
@@ -409,13 +336,15 @@ export async function removeMember(
   // ExpectedError: user copy — surfaced to the planter verbatim (409-6C).
   if (!held) throw new ExpectedError("Membership not found");
 
-  const { membership, isLeadershipRole } = held;
+  const { membership } = held;
 
   // Deactivate the membership and reopen its role in ONE db.batch — both
   // writes are known up front, so a failure in between can no longer leave the
   // role Open while the person still reads assigned (memory/invariants.md →
   // Transactions).
   await db.batch([
+    lockPlantLeadership(churchId),
+    lockTeamLeadership(churchId, membership.teamId),
     db
       .update(teamMemberships)
       .set({
@@ -434,23 +363,21 @@ export async function removeMember(
       ),
     db
       .update(teamRoles)
-      .set({ status: "open" as RoleStatus, updatedAt: new Date() })
+      .set({
+        status: sql`case when exists (
+        select 1 from ${teamMemberships} where ${teamMemberships.roleId} = ${membership.roleId}
+        and ${teamMemberships.churchId} = ${churchId} and ${teamMemberships.status} = 'active'
+      ) then 'filled' else 'open' end`,
+        updatedAt: new Date(),
+      })
       .where(
         and(
           eq(teamRoles.id, membership.roleId),
           eq(teamRoles.churchId, churchId)
         )
       ),
+    clearVacantRoleLeader(churchId, membership.teamId, membership.roleId),
   ]);
-
-  // AFTER the removal, never before: the vacated seat is the fact and the
-  // leader is derived from it. A derived value that lags a crash reads as a
-  // leader who is no longer on the team — odd, and repaired by the next
-  // assignment. One that LED would clear a leader whose seat is still filled,
-  // which is a lie about a row that still exists.
-  if (isLeadershipRole) {
-    await syncLeaderOnVacate(churchId, membership.teamId, membership.personId);
-  }
 
   // Emit staffing changed
   const stats = await getTeamStaffingCounts(churchId, membership.teamId);

@@ -114,12 +114,9 @@ test("§3 recognising the seat refusal does NOT decide the wording — one read 
     /holder\?\.personId === personId[\s\S]{0,80}PERSON_ALREADY_ASSIGNED_MESSAGE/,
     "#411 round 1: the same-person refusal is decided by reading the seat's active holder, not by a branch over an index name"
   );
-  assert.equal(
-    memberships.match(/await seatRefusalMessage\(churchId, roleId, personId\)/g)
-      ?.length,
-    3,
-    "#411: EVERY refusal path ends in the one holder read — the INSERT's empty returning(), the conditional reactivation UPDATE's empty returning(), and the recognised conflict. A branch that composed its own sentence would be a second decider"
-  );
+  // The PostgreSQL provenance race proof exercises refused insert and
+  // reactivation through the shared RETURNING path and asserts their copy.
+  // Counting call sites would forbid those paths from sharing one decider.
 });
 
 test("§4 anything else stays false, so assignMember rethrows real faults", () => {

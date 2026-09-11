@@ -275,8 +275,8 @@ export function churchCreationStatements(
         )
         .returning({ id: users.id }),
       db.execute(sql`insert into church_privacy_settings
-        (church_id,updated_by,share_people,share_meetings,share_tasks,share_financials,share_ministry_teams,share_facilities,share_activity_with_oversight)
-        select ${write.churchId}::uuid,${users.id},${discovery.shareActivityWithOversight},${discovery.shareActivityWithOversight},${discovery.shareActivityWithOversight},${discovery.shareActivityWithOversight},${discovery.shareActivityWithOversight},${discovery.shareActivityWithOversight},${discovery.shareActivityWithOversight}
+        (church_id,updated_by,share_people,share_meetings,share_tasks,share_financials,share_ministry_teams,share_facilities,share_wiki,share_activity_with_oversight)
+        select ${write.churchId}::uuid,${users.id},${discovery.shareActivityWithOversight},${discovery.shareActivityWithOversight},${discovery.shareActivityWithOversight},${discovery.shareActivityWithOversight},${discovery.shareActivityWithOversight},${discovery.shareActivityWithOversight},${discovery.shareActivityWithOversight},${discovery.shareActivityWithOversight}
         from ${users} where ${won} on conflict (church_id) do nothing`),
       db.execute(sql`insert into persons (church_id,user_id,created_by,email,first_name,last_name,status)
         select ${write.churchId}::uuid,${users.id},${users.id},${person.email},${person.firstName},${person.lastName},${person.status}

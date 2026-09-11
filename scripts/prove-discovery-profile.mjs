@@ -173,7 +173,11 @@ try {
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
   }
-  if (!ready) throw new Error("Owned scratch Neon proxy did not become ready");
+  if (!ready) {
+    console.error(docker(["logs", proxy]));
+    console.error(docker(["inspect", "--format", "{{json .State}}", proxy]));
+    throw new Error("Owned scratch Neon proxy did not become ready");
+  }
   console.log(`Scratch proof on owned stack ${network}`);
   const result = spawnSync(
     "pnpm",
