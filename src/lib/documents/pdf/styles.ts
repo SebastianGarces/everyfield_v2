@@ -83,6 +83,7 @@ export const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.ink,
     marginRight: 7,
+    flexShrink: 0,
     marginTop: 1,
   },
   divider: {
@@ -115,6 +116,8 @@ export const styles = StyleSheet.create({
   },
   td: {
     padding: 6,
-    minHeight: 28,
+    borderRightWidth: 0.5,
+    borderRightColor: colors.line,
+    minHeight: 34,
   },
 });

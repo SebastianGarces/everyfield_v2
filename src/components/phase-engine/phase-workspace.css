@@ -1,0 +1,24 @@
+.phase-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 1.5rem;
+  min-height: 100%;
+}
+
+.phase-workspace > .phase-care {
+  min-width: 0;
+  align-self: start;
+  /* PageCanvas supplies the inset; another offset depends on panel height. */
+  top: 0;
+}
+
+@media (min-width: 72rem) {
+  .phase-workspace {
+    grid-template-columns: minmax(0, 2fr) minmax(19rem, 1fr);
+  }
+
+  .phase-workspace > .phase-care[data-fits-viewport="true"] {
+    position: sticky;
+  }
+}

@@ -4,6 +4,7 @@ import { Mail, Phone, Shield, User } from "lucide-react";
 
 import { BackgroundCheckBadge } from "@/components/people/background-check-badge";
 import { useCan } from "@/components/shared/viewer-capabilities";
+import { useCanManageTeam } from "./team-write-context";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -33,17 +34,9 @@ export function MembersRolesTab({
 }: MembersRolesTabProps) {
   const showsBackgroundChecks = teamRequiresBackgroundCheck(team.templateKey);
 
-  // THE ONE GATE FOR THIS TAB (AS-020, #499). All five controls below —
-  // template import, role create, role edit, role delete, member assign and
-  // member remove — reach the same `teams.write` verb, and each of the five
-  // components is mounted HERE and nowhere else in the app, so asking once at
-  // this level is asking at every site.
-  //
-  // SETTING THE TEAM'S LEADER IS AMONG THEM, implicitly:
-  // `assignTeamLeaderAction` has no UI caller, and a leader is named by giving
-  // somebody a role whose "leadership role" box is ticked. Both halves of that
-  // are `RoleFormDialog` and `MemberAssignDialog`, which go with the rest.
-  const canWrite = useCan("teams.write");
+  // AS-006: authority is resolved for this team, using the server's subject check.
+  const canWrite = useCanManageTeam(team.id);
+  const canImportTemplates = useCan("teams.write");
 
   return (
     <div className="space-y-4">
@@ -51,7 +44,7 @@ export function MembersRolesTab({
         <h2 className="text-lg font-semibold">Roles ({team.roles.length})</h2>
         {canWrite && (
           <div className="flex items-center gap-2">
-            {team.type === "predefined" && (
+            {canImportTemplates && team.type === "predefined" && (
               <RoleTemplateImport teamId={team.id} teamName={team.name} />
             )}
             <RoleFormDialog teamId={team.id} />
@@ -73,7 +66,7 @@ export function MembersRolesTab({
             <h3 className="mt-3 font-medium">No roles defined</h3>
             <p className="text-muted-foreground mt-1 max-w-sm text-sm">
               {canWrite
-                ? "Import role templates for this team or add custom roles to get started."
+                ? "Add roles to start staffing this team."
                 : "Your plant's admins define this team's roles."}
             </p>
           </CardContent>

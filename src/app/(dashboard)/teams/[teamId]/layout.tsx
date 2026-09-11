@@ -3,6 +3,8 @@ import { notFound, redirect } from "next/navigation";
 import { HeaderBreadcrumbs } from "@/components/header";
 import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
 import { TeamDetailHeader } from "@/components/ministry-teams/team-detail-header";
+import { TeamWriteProvider } from "@/components/ministry-teams/team-write-context";
+import { mayManageTeam } from "@/lib/ministry-teams/authorization";
 import { TeamTabs } from "@/components/ministry-teams/team-tabs";
 import { verifySession } from "@/lib/auth/session";
 import { getTeam } from "@/lib/ministry-teams/service";
@@ -29,6 +31,8 @@ export default async function TeamDetailLayout({
     notFound();
   }
 
+  const canManage = await mayManageTeam(user, teamId);
+
   const breadcrumbs = [
     { label: "Ministry Teams", href: "/teams" },
     { label: team.name },
@@ -47,7 +51,9 @@ export default async function TeamDetailLayout({
           <div className="px-4 pt-0 sm:px-6">
             <TeamTabs teamId={teamId} />
           </div>
-          <div className="p-4 sm:p-6">{children}</div>
+          <TeamWriteProvider writableTeamId={canManage ? teamId : null}>
+            <div className="p-4 sm:p-6">{children}</div>
+          </TeamWriteProvider>
         </WorkspacePanel>
       </PageCanvas>
     </>

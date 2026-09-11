@@ -170,18 +170,14 @@ test("the feature-data writes refuse a plant Member (AS-004)", () => {
 });
 
 test("a Member's own-duty writes still succeed (AS-006)", () => {
-  // THE SEAT HALF ONLY. `tasks.own`'s subject half is asked after the parse by
-  // `assertMayActOnTask`, which this cannot see; `own-duty.test.ts` drives the
-  // action for that.
-  //
-  // The other two own-duty writes AS-006 names — a Member's meeting RSVP and
-  // their own ministry team — are NOT here, and their absence is the point.
-  // `ministry_teams.leader_id` and the meeting guest list reference
-  // `persons.id`, and nothing links a person row to an account until AS-013, so
-  // a `SEATED` capability for them would be a floor with nothing above it:
-  // every Member reaching every team and every RSVP. They sit at
-  // `teams.write` / `meetings.write` until the link exists.
-  for (const capability of ["tasks.own", "launch.milestone"] as const) {
+  // Subject checks follow the seat guard: task assignment and linked team leadership.
+  for (const capability of [
+    "tasks.own",
+    "teams.own",
+    "meetings.attendance",
+    "meetings.rsvp",
+    "launch.milestone",
+  ] as const) {
     only(capability, [plantOwner, plantAdmin, plantMember]);
   }
 });
@@ -262,6 +258,8 @@ const EVERY_STATE_CHANGING_CAPABILITY = [
   "communication.send",
   "phase.signal",
   "tasks.own",
+  "teams.own",
+  "meetings.attendance",
   "launch.milestone",
   "seat.invitation.manage",
   "coach.assignment.manage",
@@ -336,9 +334,6 @@ test("the endpoints #498's review re-pointed refuse a plant Member", () => {
   // `meetings.rsvp`) or on `"read"` (`previewImportAction`, which parses an
   // uploaded file), so a Member reached all of them.
   for (const label of [
-    "src/app/(dashboard)/teams/actions.ts → assignMemberAction",
-    "src/app/(dashboard)/teams/actions.ts → removeMemberAction",
-    "src/app/(dashboard)/teams/actions.ts → markTrainingCompleteAction",
     "src/app/(dashboard)/meetings/actions.ts → updateRsvpStatusAction",
     "src/app/(dashboard)/people/import-export-actions.ts → previewImportAction",
   ]) {

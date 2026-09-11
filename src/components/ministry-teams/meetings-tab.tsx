@@ -2,7 +2,7 @@
 
 import { CalendarDays, Clock, ExternalLink, MapPin, Plus } from "lucide-react";
 
-import { useCan } from "@/components/shared/viewer-capabilities";
+import { useCanManageTeam } from "./team-write-context";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -67,11 +67,8 @@ export function MeetingsTab({ teamId, meetings }: MeetingsTabProps) {
     submit: submitMeeting,
   } = useDialogSaveLifecycle();
 
-  // `teams.write`, NOT `meetings.write` (AS-020, #499). The action this dialog
-  // posts to is the ministry-teams one — `createMeetingAction` in
-  // `@/app/(dashboard)/teams/actions` — so the control asks for the verb the
-  // server will refuse it with, not the one the noun suggests.
-  const canWrite = useCan("teams.write");
+  // AS-006: authority is resolved for this team, using the server's subject check.
+  const canWrite = useCanManageTeam(teamId);
 
   const now = new Date();
   const upcomingMeetings = meetings.filter((m) => new Date(m.datetime) >= now);

@@ -19,11 +19,8 @@ body:has([data-authenticated-shell]) * {
   overscroll-behavior-x: none;
 }
 
-body {
-  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
-}
-
 @theme inline {
+  --font-sans: var(--font-instrument-sans), Arial, Helvetica, sans-serif;
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);

@@ -370,7 +370,13 @@ test("an org seat invitation to an existing account gets the ONE message", () =>
   // invitation would MOVE an account between tenancies wherever it points, so
   // an org's is register-only on exactly the same footing as a plant's.
   assert.equal(
-    inviteeRefusalFor("seat", { id: "whoever" }),
+    inviteeRefusalFor("seat", {
+      id: "whoever",
+      seat: "member",
+      churchId: null,
+      sendingChurchId: null,
+      sendingNetworkId: "org",
+    }),
     ACCOUNT_NOT_INVITABLE_MESSAGE
   );
   assert.equal(inviteeRefusalFor("seat", null), null);

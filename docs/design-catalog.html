@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400;1,6..72,500&family=Outfit:wght@400;500;600;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;500;600;700&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=DM+Mono:wght@400;500&display=swap"
       rel="stylesheet"
     />
     <style>
@@ -19,10 +19,10 @@
 
    The system (extracted live from intercom.com, translated to
    our assets — green takes cobalt's job, ink takes black's,
-   Newsreader takes the serif role):
+   Instrument Sans takes the working-text role):
    - radius 0 everywhere; defined 1px rings; rectangles only
-   - display type light and giant: Outfit 400, −3%, line-height 1
-   - serif (Newsreader) is the marketing body voice; never in UI
+   - display type light and giant: Bricolage Grotesque 400, −3%, line-height 1
+   - Instrument Sans is working text across marketing, auth and product
    - CTAs are ink rectangles / 1px-outline ghosts; hovers invert
    - green is the SIGNAL, spent small: registration squares,
      active rules, current phase, one solid green closing panel
@@ -53,9 +53,8 @@
         --field: #0b7a3f; /* green's text voice on light · 5.2:1 */
         --danger: #b4432f;
 
-        --display: "Outfit", "DM Sans", sans-serif;
-        --serif: "Newsreader", Georgia, serif;
-        --sans: "DM Sans", -apple-system, "Segoe UI", sans-serif;
+        --display: "Bricolage Grotesque", "Instrument Sans", sans-serif;
+        --sans: "Instrument Sans", -apple-system, "Segoe UI", sans-serif;
         --mono: "DM Mono", "SF Mono", Menlo, monospace;
 
         --ease: cubic-bezier(0.2, 0, 0, 1);
@@ -123,12 +122,12 @@
         line-height: 1.25;
         letter-spacing: -0.015em;
       }
-      .serif-lead {
-        font-family: var(--serif);
+      .lead {
+        font-family: var(--sans);
         font-size: 20px;
         line-height: 1.5;
       }
-      .serif-lead em {
+      .lead em {
         font-style: italic;
       }
       .caption {
@@ -241,7 +240,7 @@
         margin: 18px 0 12px;
       }
       .section-sub {
-        font-family: var(--serif);
+        font-family: var(--sans);
         color: var(--text-2);
         font-size: 17.5px;
         max-width: 60ch;
@@ -520,7 +519,7 @@
       .pitch .h2 {
         max-width: 17ch;
       }
-      .pitch .serif-lead {
+      .pitch .lead {
         margin-top: 18px;
         max-width: 54ch;
         color: var(--text-2);
@@ -774,7 +773,7 @@
         text-align: center;
       }
       .quote p {
-        font-family: var(--serif);
+        font-family: var(--sans);
         font-style: italic;
         font-size: 28px;
         line-height: 1.35;
@@ -910,7 +909,7 @@
         color: var(--ink);
       }
       .fs-item .d {
-        font-family: var(--serif);
+        font-family: var(--sans);
         font-size: 15px;
         color: var(--text-2);
         line-height: 1.55;
@@ -964,7 +963,7 @@
         display: flex;
         align-items: center;
         gap: 7px;
-        font-family: var(--display);
+        font-family: var(--sans);
         font-weight: 600;
         font-size: 12px;
         padding: 4px 8px 12px;
@@ -1001,7 +1000,7 @@
         border-bottom: 1px solid rgba(24, 29, 25, 0.07);
       }
       .app-head .ttl {
-        font-family: var(--display);
+        font-family: var(--sans);
         font-weight: 600;
         font-size: 13px;
       }
@@ -1066,7 +1065,7 @@
         flex: none;
       }
       .appwin-top .ttl {
-        font-family: var(--display);
+        font-family: var(--sans);
         font-weight: 600;
         font-size: 12px;
       }
@@ -1179,7 +1178,7 @@
         display: block;
       }
       .astat .v {
-        font-family: var(--display);
+        font-family: var(--sans);
         font-weight: 600;
         font-size: 17px;
         letter-spacing: -0.01em;
@@ -1404,7 +1403,7 @@
       }
       .ppanel .pdesc {
         margin-top: 10px;
-        font-family: var(--serif);
+        font-family: var(--sans);
         font-size: 16px;
         color: var(--text-2);
         max-width: 52ch;
@@ -1579,7 +1578,7 @@
         text-wrap: balance;
       }
       .lp-hero-sub {
-        font-family: var(--serif);
+        font-family: var(--sans);
         font-size: 17.5px;
         line-height: 1.6;
         color: var(--text-2);
@@ -1682,7 +1681,7 @@
         text-wrap: balance;
       }
       .lp-body {
-        font-family: var(--serif);
+        font-family: var(--sans);
         font-size: 17.5px;
         line-height: 1.6;
         max-width: 56ch;
@@ -1728,7 +1727,7 @@
         background: var(--cream);
       }
       .engine-pull {
-        font-family: var(--serif);
+        font-family: var(--sans);
         font-style: italic;
         font-size: 22px;
         margin-top: 28px;
@@ -1896,11 +1895,11 @@
       <svg class="logo" role="img" aria-label="everyfield">
         <use href="#efLockup" />
       </svg>
-      <p class="hero-position serif-lead">
+      <p class="hero-position lead">
         The working reference for the everyfield marketing surface. Direction
         ruled: <em>sharp</em> — rectangles and defined edges, type that is light
-        and giant, a serif that does the storytelling, and green spent only
-        where it signals.
+        and giant, Instrument Sans for working text, and green spent only where
+        it signals.
       </p>
       <div class="hero-meta">
         <div class="cell">
@@ -2086,34 +2085,42 @@
       <section class="section" id="type">
         <div class="section-head">
           <p class="marker">02 · Type</p>
-          <h2 class="h2">Outfit speaks. Newsreader warms. The sans works.</h2>
+          <h2 class="h2">
+            Bricolage Grotesque for display. Instrument Sans for working text.
+          </h2>
           <p class="section-sub">
-            Outfit 400 owns display at −3% tracking — light and giant, scale
-            talks. Newsreader carries the serif warmth: leads, pull quotes,
-            italic emphasis words. DM Sans is body and UI; DM Mono annotates and
-            labels.
+            Bricolage Grotesque owns display text: headlines, headings, titles
+            and stat numerals. Instrument Sans is working text: leads, body
+            copy, navigation, controls, labels, captions and product UI. Outfit
+            is used only in the outlined logo. Its SVG paths stay unchanged and
+            load no runtime font. Existing monospace annotations remain in DM
+            Mono.
           </p>
         </div>
         <div class="type-rows">
           <div class="type-row">
             <div class="type-label">
-              display<span class="small">Outfit 400 · −3% · up to 80px</span>
+              display<span class="small"
+                >Bricolage Grotesque 400 · −3% · up to 80px</span
+              >
             </div>
             <div class="h-display">Understood.</div>
           </div>
           <div class="type-row">
             <div class="type-label">
-              heading<span class="small">Outfit 400 · −3% · up to 46px</span>
+              heading<span class="small"
+                >Bricolage Grotesque 400 · −3% · up to 46px</span
+              >
             </div>
             <div class="h2">One place for the whole work.</div>
           </div>
           <div class="type-row">
             <div class="type-label">
-              serif accent<span class="small"
-                >Newsreader 400 · 19–20px · leads, quotes, italics</span
+              lead<span class="small"
+                >Instrument Sans 400 · 19–20px · leads, quotes, italics</span
               >
             </div>
-            <div class="serif-lead" style="max-width: 54ch">
+            <div class="lead" style="max-width: 54ch">
               EveryField puts a proven planting methodology to work on your real
               progress — and tells you what deserves your attention
               <em>this week</em>.
@@ -2121,7 +2128,7 @@
           </div>
           <div class="type-row">
             <div class="type-label">
-              body<span class="small">DM Sans 400 · 16px · 1.6</span>
+              body<span class="small">Instrument Sans 400 · 16px · 1.6</span>
             </div>
             <div style="max-width: 56ch">
               Most planters run their plant across a CRM built for sales, a
@@ -2131,7 +2138,7 @@
           </div>
           <div class="type-row">
             <div class="type-label">
-              caption<span class="small">DM Sans 400 · 14px</span>
+              caption<span class="small">Instrument Sans 400 · 14px</span>
             </div>
             <div class="caption">
               Planters control what they share; you see health, not their
@@ -2243,7 +2250,7 @@
           <h3 class="h2" style="font-size: clamp(30px, 3.6vw, 44px)">
             Your&nbsp;church&nbsp;plant, understood.
           </h3>
-          <p class="serif-lead">
+          <p class="lead">
             EveryField puts a proven planting methodology to work on your real
             progress — the people, meetings, and momentum that get you to
             <em>launch Sunday</em> — and tells you what deserves your attention
@@ -3534,9 +3541,9 @@
                 exactly one closing panel per page, its button ink.
               </li>
               <li>
-                Display type is light and giant: Outfit 400 at −3%, line-height
-                1 — scale talks, weight doesn't. Newsreader is the marketing
-                body voice; never in UI.
+                Display type is light and giant: Bricolage Grotesque 400 at −3%,
+                line-height 1 — scale talks, weight doesn't. Instrument Sans is
+                the working text face across marketing, auth and product.
               </li>
               <li>
                 Long content earns an interactive toggle — feature switcher,

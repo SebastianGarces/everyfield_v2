@@ -1,15 +1,7 @@
 "use client";
 
 import { Search, XIcon } from "lucide-react";
-import {
-  Suspense,
-  use,
-  useEffect,
-  useId,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import { Suspense, use, useEffect, useId, useRef, useState } from "react";
 
 import { AccountSection } from "@/components/settings/sections/account-section";
 import { AssociationSection } from "@/components/settings/sections/association-section";
@@ -33,10 +25,8 @@ import {
   cachedSectionView,
   closeSettings,
   sectionRequest,
-  settingsHashServerSnapshot,
-  settingsHashSnapshot,
   showSection,
-  subscribeToSettingsHash,
+  useSettingsSection,
 } from "@/lib/settings/settings-hash";
 import type {
   SettingsSectionLoad,
@@ -46,7 +36,6 @@ import {
   DEFAULT_SETTINGS_SECTION,
   SETTINGS_SECTIONS,
   sectionMatchesQuery,
-  settingsSectionFromHash,
   settingsSectionHref,
   type SettingsSectionId,
 } from "@/lib/settings/sections";
@@ -144,25 +133,7 @@ export function SettingsModal({
   serverRenderId,
   scope,
 }: SettingsModalProps) {
-  const hash = useSyncExternalStore(
-    subscribeToSettingsHash,
-    settingsHashSnapshot,
-    settingsHashServerSnapshot
-  );
-  const activeId = settingsSectionFromHash(hash);
-
-  // THE ADDRESS BAR IS CORRECTED TO WHAT IS ON SCREEN. `#settings`,
-  // `#settings/sharing` and a typo all resolve to a real section, and without
-  // this the URL would go on naming something the modal is not showing — which
-  // is the one thing a mechanism whose whole state is the URL cannot afford. It
-  // converges in one pass: the rewrite makes the fragment canonical, so the
-  // change it triggers finds nothing left to do.
-  useEffect(() => {
-    if (activeId === null) return;
-    if (window.location.hash !== settingsSectionHref(activeId)) {
-      showSection(activeId);
-    }
-  }, [activeId, hash]);
+  const activeId = useSettingsSection();
 
   if (activeId === null) return null;
   return (
@@ -191,6 +162,7 @@ function SettingsDialog({
   scope,
 }: SettingsModalProps & { activeId: SettingsSectionId }) {
   const [query, setQuery] = useState("");
+  const [leaveMessage, setLeaveMessage] = useState("");
   // The Retry count, which is UI state and nothing else: it is part of the read
   // key, so bumping it is what makes a retry a NEW request rather than a replay
   // of the cached failure.
@@ -212,6 +184,26 @@ function SettingsDialog({
   const titleRef = useRef<HTMLHeadingElement>(null);
   const paneRef = useRef<HTMLDivElement>(null);
   const activeEntryRef = useRef<HTMLAnchorElement>(null);
+
+  // Fields own their drafts. The dialog only asks whether leaving would lose one.
+  const mayLeave = () => {
+    const uncommitted = contentRef.current?.querySelector(
+      '[data-uncommitted="true"]'
+    );
+    if (!uncommitted) {
+      setLeaveMessage("");
+      return true;
+    }
+    setLeaveMessage(
+      "Save with Enter or by moving to another field, or choose Revert edit. Wait for any save to finish."
+    );
+    return false;
+  };
+  const switchSection = (id: SettingsSectionId) => {
+    if (id !== activeId && !mayLeave()) return false;
+    showSection(id);
+    return true;
+  };
 
   const active = SETTINGS_SECTIONS.find((section) => section.id === activeId);
 
@@ -281,10 +273,16 @@ function SettingsDialog({
     <Dialog
       open
       onOpenChange={(nextOpen) => {
-        if (!nextOpen) closeSettings();
+        if (!nextOpen && mayLeave()) closeSettings();
       }}
     >
       <DialogContent
+        onEscapeKeyDown={(event) => {
+          if (!mayLeave()) event.preventDefault();
+        }}
+        onPointerDownOutside={(event) => {
+          if (!mayLeave()) event.preventDefault();
+        }}
         // NOTHING INSIDE IS FOCUSED ON OPEN (#657). Radix hands focus to the
         // first focusable, which is the search box — so the modal opened with a
         // cursor blinking in a field nobody asked for, and a screen reader
@@ -362,7 +360,7 @@ function SettingsDialog({
                   const first = matches[0];
                   if (!first) return;
                   event.preventDefault();
-                  showSection(first.id);
+                  if (!switchSection(first.id)) return;
                   // …AND FOCUS GOES WITH IT. The jump redraws the pane and used
                   // to leave the caret in the search box, so the next Tab
                   // resumed at the top of the rail and a screen reader had no
@@ -411,7 +409,7 @@ function SettingsDialog({
                       return;
                     }
                     event.preventDefault();
-                    showSection(section.id);
+                    switchSection(section.id);
                   }}
                   // THE EDGE'S COLOUR BELONGS TO A BRANCH, NEVER TO THE BASE.
                   // `before:bg-transparent` and `before:bg-ef` compile to the
@@ -477,6 +475,17 @@ function SettingsDialog({
           <div className="hidden h-15 shrink-0 items-center justify-end pr-3 md:flex">
             <SettingsClose />
           </div>
+
+          <p
+            role="status"
+            className={
+              leaveMessage
+                ? "text-muted-foreground px-5 pb-3 text-sm text-pretty md:px-6"
+                : undefined
+            }
+          >
+            {leaveMessage}
+          </p>
 
           {/* `overscroll-contain` so a flick at the end of a long section does
               not scroll the screen behind the modal.
