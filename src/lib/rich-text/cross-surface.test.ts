@@ -583,14 +583,20 @@ test("the send path really writes each shape to its own column", async () => {
   assert.match(insert, /body:\s*safeBodyText/, insert);
   assert.match(insert, /bodyHtml:\s*safeBodyHtml/, insert);
 
-  // ...and the resend reads the pair back the one way.
+  // The resend still prefers stored HTML over legacy plain text. It freezes
+  // unresolved plant fields to their original empty values before handing the
+  // preserved body to the sender; bypassing that step would use today's facts.
   assertInOrder(
     send.code,
     "send.ts",
     [
       "export async function resendToNonOpeners",
-      "body: original.bodyHtml ?? original.body",
+      "const preserved = freezeChurchMergeFields(",
+      "bodyHtml: toRichTextHtml(original.bodyHtml ?? original.body)",
+      '{ pastor_name: "", launch_date: "" }',
+      "return sendCommunication(churchId, userId, {",
+      "body: preserved.bodyHtml",
     ],
-    "the resend must read the stored body through the same expression every other reader uses"
+    "the resend must select the stored body, preserve legacy plant facts, then send that body"
   );
 });
