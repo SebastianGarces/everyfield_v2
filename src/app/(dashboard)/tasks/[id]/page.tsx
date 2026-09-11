@@ -34,6 +34,7 @@ import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { PRIORITY_CONFIG } from "@/lib/tasks/presentation";
 
 export const dynamic = "force-dynamic";
 
@@ -46,13 +47,6 @@ const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   in_progress: { label: "In Progress", color: "bg-blue-100 text-blue-700" },
   blocked: { label: "Blocked", color: "bg-red-100 text-red-700" },
   complete: { label: "Complete", color: "bg-green-100 text-green-700" },
-};
-
-const PRIORITY_CONFIG: Record<string, { label: string; color: string }> = {
-  low: { label: "Low", color: "bg-slate-100 text-slate-600" },
-  medium: { label: "Medium", color: "bg-blue-100 text-blue-600" },
-  high: { label: "High", color: "bg-orange-100 text-orange-600" },
-  urgent: { label: "Urgent", color: "bg-red-100 text-red-600" },
 };
 
 const CATEGORY_LABELS: Record<string, string> = {

@@ -68,22 +68,26 @@ export const PRIORITY_CONFIG: Record<
 > = {
   urgent: {
     label: "Urgent",
-    color: "text-red-600 bg-red-50 border-red-200",
+    color:
+      "text-red-700 bg-red-50 border-red-200 dark:text-red-300 dark:bg-red-950 dark:border-red-800",
     icon: "!",
   },
   high: {
     label: "High",
-    color: "text-orange-600 bg-orange-50 border-orange-200",
+    color:
+      "text-orange-700 bg-orange-50 border-orange-200 dark:text-orange-300 dark:bg-orange-950 dark:border-orange-800",
     icon: "!",
   },
   medium: {
     label: "Medium",
-    color: "text-blue-600 bg-blue-50 border-blue-200",
+    color:
+      "text-blue-700 bg-blue-50 border-blue-200 dark:text-blue-300 dark:bg-blue-950 dark:border-blue-800",
     icon: "",
   },
   low: {
     label: "Low",
-    color: "text-slate-500 bg-slate-50 border-slate-200",
+    color:
+      "text-slate-700 bg-slate-50 border-slate-200 dark:text-slate-300 dark:bg-slate-950 dark:border-slate-800",
     icon: "",
   },
 };
