@@ -1,8 +1,10 @@
 import { db } from "@/db";
+import { lockPlantLeadership } from "./leadership-lock";
+import { canLeadTeam } from "./leader-eligibility";
 import { ministryTeams, teamMemberships, teamRoles } from "@/db/schema";
 import { and, eq, exists, isNull, notExists, sql, type SQL } from "drizzle-orm";
 
-/** First statement in every native role/membership mutation batch. Later
+/** After the plant leadership lock, lock the team before child writes. Later
  * statements get a fresh READ COMMITTED snapshot after any lock wait.
  * Always lock the parent team before a role or membership, never in reverse.
  */
@@ -66,7 +68,8 @@ export function fillLeaderStatement(
         eq(ministryTeams.churchId, churchId),
         eq(ministryTeams.id, teamId),
         isNull(ministryTeams.leaderId),
-        eligible
+        eligible,
+        canLeadTeam(churchId, personId)
       )
     )
     .returning({ id: ministryTeams.id, personId: ministryTeams.leaderId });
@@ -137,7 +140,8 @@ export async function syncLeaderOnFill(
   personId: string,
   roleId: string
 ): Promise<boolean> {
-  const [, filled] = await db.batch([
+  const [, , filled] = await db.batch([
+    lockPlantLeadership(churchId),
     lockTeamLeadership(churchId, teamId),
     fillLeaderStatement(
       churchId,
@@ -156,7 +160,8 @@ export async function syncLeaderOnVacate(
   personId: string,
   roleId: string
 ): Promise<boolean> {
-  const [, cleared] = await db.batch([
+  const [, , cleared] = await db.batch([
+    lockPlantLeadership(churchId),
     lockTeamLeadership(churchId, teamId),
     clearVacantRoleLeader(churchId, teamId, roleId, personId),
   ]);

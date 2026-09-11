@@ -1,4 +1,6 @@
 import { db } from "@/db";
+import { lockPlantLeadership } from "./leadership-lock";
+import { canLeadTeam } from "./leader-eligibility";
 import {
   ministryTeams,
   teamRoles,
@@ -238,7 +240,8 @@ export async function assignMember(
   let membership: TeamMembership;
   let assignedLeadershipRole = false;
   try {
-    const [, [written], [currentRole]] = await db.batch([
+    const [, , [written], [currentRole]] = await db.batch([
+      lockPlantLeadership(churchId),
       lockTeamLeadership(churchId, teamId),
       db.with(assigned, filled).select().from(assigned),
       db
@@ -262,14 +265,18 @@ export async function assignMember(
             )
           )
         )
-        .returning({ isLeadershipRole: teamRoles.isLeadershipRole }),
+        .returning({
+          isLeadershipRole: teamRoles.isLeadershipRole,
+          canLead: canLeadTeam(churchId, personId),
+        }),
     ]);
     if (!written)
       throw new ExpectedError(
         await seatRefusalMessage(churchId, roleId, personId)
       );
     membership = written;
-    assignedLeadershipRole = currentRole?.isLeadershipRole === true;
+    assignedLeadershipRole =
+      currentRole?.isLeadershipRole === true && currentRole.canLead;
   } catch (error) {
     // The OTHER refusal path — the reactivation UPDATE — and it ends in the
     // SAME read. The seat index raised, so what happened is "somebody is
@@ -336,6 +343,7 @@ export async function removeMember(
   // role Open while the person still reads assigned (memory/invariants.md →
   // Transactions).
   await db.batch([
+    lockPlantLeadership(churchId),
     lockTeamLeadership(churchId, membership.teamId),
     db
       .update(teamMemberships)

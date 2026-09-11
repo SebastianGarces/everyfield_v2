@@ -71,12 +71,12 @@ test("the tenancy clear is the LAST statement in the batch", () => {
   const plantBatch = sourceReader(
     removeSeatBody,
     "removeSeat's plant batch"
-  ).span("await db.batch([", ")[3]");
+  ).span("await db.batch([", ")[4]");
 
   assertInOrder(
     plantBatch,
     "removeSeat's plant batch",
-    ["revokeSessions", "plantRemovalEffects(", "mark,"],
+    ["lockPlantLeadership(", "revokeSessions", "plantRemovalEffects(", "mark,"],
     "sessions and the plant cascade are all redo-safe; the tenancy clear is the marker and must come last, so a replayed request re-runs no-ops instead of a half-cascade"
   );
 

@@ -1,4 +1,7 @@
 import { db } from "@/db";
+import { lockPlantLeadership } from "./leadership-lock";
+import { lockTeamLeadership } from "./leader-sync";
+import { canLeadTeam } from "./leader-eligibility";
 import {
   ministryTeams,
   teamRoles,
@@ -313,20 +316,31 @@ export async function assignTeamLeader(
   // surfaces them to the planter verbatim (ruling 409-6C).
   if (!person) throw new ExpectedError("Person not found");
 
-  const [updated] = await db
-    .update(ministryTeams)
-    .set({
-      leaderId: personId,
-      leaderSource: "explicit",
-      leaderRoleId: null,
-      updatedAt: new Date(),
-    })
-    .where(
-      and(eq(ministryTeams.churchId, churchId), eq(ministryTeams.id, teamId))
-    )
-    .returning();
-
-  if (!updated) throw new ExpectedError("Team not found");
+  const [, locked, [updated]] = await db.batch([
+    lockPlantLeadership(churchId),
+    lockTeamLeadership(churchId, teamId),
+    db
+      .update(ministryTeams)
+      .set({
+        leaderId: personId,
+        leaderSource: "explicit",
+        leaderRoleId: null,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(ministryTeams.churchId, churchId),
+          eq(ministryTeams.id, teamId),
+          canLeadTeam(churchId, personId)
+        )
+      )
+      .returning(),
+  ]);
+  if (locked.length === 0) throw new ExpectedError("Team not found");
+  if (!updated)
+    throw new ExpectedError(
+      "This person can no longer be appointed as team leader."
+    );
 
   // Emit leader assigned event (F2 subscribes to auto-advance launch_team -> leader)
   await emitTeamLeaderAssigned(teamId, personId, churchId, userId);

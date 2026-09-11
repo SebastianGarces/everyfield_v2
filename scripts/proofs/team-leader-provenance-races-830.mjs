@@ -134,6 +134,7 @@ async function waitForLock(name) {
 }
 const lockQuery = (q) =>
   q.includes('from "ministry_teams"') && q.endsWith("for update");
+const orderingLock = (q) => lockQuery(q) || q.includes("pg_advisory_xact_lock");
 const dialect = new PgDialect();
 const render = (value) => dialect.sqlToQuery(sql`${value}`.inlineParams()).sql;
 const quote = (name) => `"${name.replaceAll('"', '""')}"`;
@@ -145,6 +146,8 @@ try {
     schema.ministryTeams,
     schema.teamRoles,
     schema.teamMemberships,
+    schema.sessions,
+    schema.tasks,
   ]) {
     const config = getTableConfig(table);
     const columns = config.columns.map(
@@ -244,7 +247,7 @@ try {
     const gate = pause(
       "delete-replaced",
       "before",
-      (q) => lockQuery(q) || q.startsWith('delete from "team_roles"')
+      (q) => orderingLock(q) || q.startsWith('delete from "team_roles"')
     );
     const deletion = run("delete-replaced", () =>
       deleteRole(church, f.role, actor)
@@ -396,7 +399,7 @@ try {
     // empty; it must not create leadership after an intervening explicit clear.
     for (const candidate of [personA, personB]) {
       const f = await fixture(false);
-      const gate = pause("late-assignment", "before", lockQuery);
+      const gate = pause("late-assignment", "before", orderingLock);
       const late = run("late-assignment", () =>
         assignMember(church, f.team, f.role, candidate, actor)
       );
@@ -430,7 +433,7 @@ try {
         "update team_roles set is_leadership_role=$1 where id=$2",
         [!enable, f.role]
       );
-      const gate = pause("flagged-assignment", "before", lockQuery);
+      const gate = pause("flagged-assignment", "before", orderingLock);
       const assignment = run("flagged-assignment", () =>
         assignMember(church, f.team, f.role, personA, actor)
       );
@@ -487,10 +490,176 @@ try {
       "PASS: later statement failure rolls back membership and leadership together"
     );
   }
+  if (!baseline) {
+    const { removeSeat, seatActorFromSession } =
+      await import("../../src/lib/seats/roster.ts");
+    const { assignTeamLeader } =
+      await import("../../src/lib/ministry-teams/teams.ts");
+    const { syncLeaderOnFill } =
+      await import("../../src/lib/ministry-teams/leader-sync.ts");
+    const owner = seatActorFromSession({
+      user: {
+        id: actor,
+        seat: "owner",
+        churchId: church,
+        sendingChurchId: null,
+        sendingNetworkId: null,
+      },
+    });
+    const seatBaseline = process.env.EXPECT_SEAT_RACE === "1";
+    for (const kind of seatBaseline
+      ? ["membership"]
+      : ["membership", "explicit", "enable", "sync"]) {
+      for (const removalFirst of seatBaseline ? [true] : [true, false]) {
+        const f = await fixture(kind === "enable" || kind === "sync");
+        await pool.query(
+          "update ministry_teams set leader_id=null,leader_source=null,leader_role_id=null where id=$1",
+          [f.team]
+        );
+        if (kind === "enable")
+          await pool.query(
+            "update team_roles set is_leadership_role=false where id=$1",
+            [f.role]
+          );
+        const account = randomUUID();
+        await pool.query(
+          `insert into users(id,name,email,password_hash,seat,church_id)
+          values($1,'Race account',$2,'proof-unusable','member',$3)`,
+          [account, `${account}@proof.invalid`, church]
+        );
+        await pool.query("update persons set user_id=$1 where id=$2", [
+          account,
+          personA,
+        ]);
+        const appointment = () =>
+          kind === "membership"
+            ? assignMember(church, f.team, f.role, personA, actor)
+            : kind === "explicit"
+              ? assignTeamLeader(church, f.team, personA, actor)
+              : kind === "enable"
+                ? updateRole(church, f.role, actor, { isLeadershipRole: true })
+                : syncLeaderOnFill(church, f.team, personA, f.role);
+        const previousEvents = leaderEvents.length;
+        if (removalFirst) {
+          const gate = pause("seat-removal", "before", (q) =>
+            q.startsWith('update "users"')
+          );
+          const removal = run("seat-removal", () => removeSeat(owner, account));
+          await gate.reached;
+          const attempt = run("seat-appointment", appointment).then(
+            (value) => ({ value }),
+            (error) => ({ error })
+          );
+          try {
+            if (seatBaseline) await attempt;
+            else await waitForLock("seat-appointment");
+          } finally {
+            gate.release();
+          }
+          await removal;
+          const result = await attempt;
+          if (!seatBaseline && kind === "explicit") assert.ok(result.error);
+          else assert.equal(result.error, undefined);
+          if (!seatBaseline)
+            assert.equal(
+              leaderEvents.length,
+              previousEvents,
+              "removed account must not emit a leader assignment"
+            );
+        } else {
+          const gate = pause("seat-appointment", "after", (q) =>
+            q.includes('update "ministry_teams"')
+          );
+          const attempt = run("seat-appointment", appointment);
+          await gate.reached;
+          const removal = run("seat-removal", () => removeSeat(owner, account));
+          try {
+            await waitForLock("seat-removal");
+          } finally {
+            gate.release();
+          }
+          await attempt;
+          await removal;
+        }
+        assert.deepEqual(
+          await leader(f.team),
+          seatBaseline ? derived(f) : empty
+        );
+        const accountState = (
+          await pool.query("select seat,church_id from users where id=$1", [
+            account,
+          ])
+        ).rows[0];
+        assert.deepEqual(accountState, { seat: null, church_id: null });
+        assert.equal(
+          (
+            await pool.query(
+              "select count(*)::int as n from persons where id=$1",
+              [personA]
+            )
+          ).rows[0].n,
+          1
+        );
+        assert.equal(
+          (
+            await pool.query(
+              "select count(*)::int as n from team_memberships where id=$1",
+              [f.membership]
+            )
+          ).rows[0].n,
+          1
+        );
+        console.log(
+          seatBaseline
+            ? "REPRODUCED: seat removal misses concurrent appointment into an empty team"
+            : `PASS: seat removal versus ${kind}, ${removalFirst ? "removal" : "appointment"} wins first; no leader survives and roster remains`
+        );
+      }
+    }
+    if (!seatBaseline) {
+      const f = await fixture(false);
+      const linked = (
+        await pool.query("select user_id from persons where id=$1", [personA])
+      ).rows[0].user_id;
+      const foreignPlant = randomUUID();
+      await pool.query(
+        "insert into churches(id,name) values($1,'Foreign plant')",
+        [foreignPlant]
+      );
+      await pool.query(
+        "update users set church_id=$1,seat='member' where id=$2",
+        [foreignPlant, linked]
+      );
+      const beforeEvents = leaderEvents.length;
+      await assert.rejects(assignTeamLeader(church, f.team, personA, actor));
+      await assignMember(church, f.team, f.role, personA, actor);
+      assert.deepEqual(await leader(f.team), empty);
+      assert.equal(leaderEvents.length, beforeEvents);
+      assert.equal(
+        await syncLeaderOnFill(church, f.team, personA, f.role),
+        false
+      );
+      await pool.query(
+        "update users set church_id=$1,seat='member' where id=$2",
+        [church, linked]
+      );
+      assert.equal(
+        await syncLeaderOnFill(church, f.team, personA, f.role),
+        true
+      );
+      assert.deepEqual(await leader(f.team), derived(f));
+      console.log(
+        "PASS: foreign linked seat cannot lead; regaining a seat in this plant restores eligibility"
+      );
+    }
+    await pool.query("update persons set user_id=null where id=$1", [personA]);
+  }
   console.log(
     baseline
       ? "Both original races reproduced."
-      : "Native PostgreSQL concurrency proof passed. Evry and seat-removal concurrency are outside this proof."
+      : process.env.EXPECT_SEAT_RACE === "1"
+        ? "Seat-removal race reproduced."
+        : "Native PostgreSQL concurrency proof passed, including seat removal. Hosted Neon and Evry remain outside this proof."
   );
 } finally {
   hooks.clear();

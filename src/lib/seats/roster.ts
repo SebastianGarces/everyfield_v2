@@ -49,7 +49,7 @@
 // zero rows.
 //
 // STEPS 2 AND 3 ARE THE PLANT'S ALONE (#500), so there are TWO batch shapes:
-// `[1, 2, 3, 4]` for a plant and `[1, 4]` for an org, which has neither `tasks`
+// `[plant leadership lock, 1, 2, 3, 4]` for a plant and `[1, 4]` for an org, which has neither `tasks`
 // nor `ministry_teams`. The marker is last in both, which is all the ordering
 // argument needs. `plantRemovalEffects` holds the pair so the batch literal
 // still reads as the ordered effects.
@@ -76,6 +76,7 @@
 // the team read as an open leader slot rather than silently handing it on.
 // ============================================================================
 
+import { lockPlantLeadership } from "@/lib/ministry-teams/leadership-lock";
 import { and, eq, ne, sql } from "drizzle-orm";
 
 import { db } from "@/db";
@@ -567,11 +568,12 @@ export async function removeSeat(
     actor.tenancy.type === "church"
       ? (
           await db.batch([
+            lockPlantLeadership(actor.tenancy.id),
             revokeSessions,
             ...plantRemovalEffects(actor, actor.tenancy.id, targetUserId),
             mark,
           ])
-        )[3]
+        )[4]
       : (await db.batch([revokeSessions, mark]))[1];
 
   // THE MARKER'S ROWCOUNT IS THE ANSWER, and a zero here is not an error the

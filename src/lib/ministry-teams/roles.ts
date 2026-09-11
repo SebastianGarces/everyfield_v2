@@ -1,4 +1,6 @@
 import { db } from "@/db";
+import { lockPlantLeadership } from "./leadership-lock";
+import { canLeadTeam } from "./leader-eligibility";
 import {
   teamRoles,
   teamMemberships,
@@ -7,7 +9,7 @@ import {
   type RoleStatus,
   type TimeCommitment,
 } from "@/db/schema";
-import { and, eq, asc } from "drizzle-orm";
+import { and, eq, asc, sql } from "drizzle-orm";
 import { emitTeamLeaderAssigned, emitTeamStaffingChanged } from "./events";
 import { ExpectedError } from "./expected-error";
 import {
@@ -121,7 +123,8 @@ export async function updateRole(
     updateData.desiredSkills = data.desiredSkills;
   if (data.sortOrder !== undefined) updateData.sortOrder = data.sortOrder;
 
-  const [, [current], , [updated], , holders] = await db.batch([
+  const [, , [current], , [updated], , holders] = await db.batch([
+    lockPlantLeadership(churchId),
     lockTeamLeadership(churchId, before.teamId),
     db
       .select({ isLeadershipRole: teamRoles.isLeadershipRole })
@@ -147,7 +150,8 @@ export async function updateRole(
         and(
           eq(teamMemberships.churchId, churchId),
           eq(teamMemberships.roleId, roleId),
-          eq(teamMemberships.status, "active")
+          eq(teamMemberships.status, "active"),
+          canLeadTeam(churchId, sql`${teamMemberships.personId}`)
         )
       ),
   ]);
@@ -197,7 +201,8 @@ export async function deleteRole(
   // ExpectedError: user copy — surfaced to the planter verbatim (409-6C).
   if (!role) throw new ExpectedError("Role not found");
 
-  const [, deleted] = await db.batch([
+  const [, , deleted] = await db.batch([
+    lockPlantLeadership(churchId),
     lockTeamLeadership(churchId, role.teamId),
     db
       .delete(teamRoles)
