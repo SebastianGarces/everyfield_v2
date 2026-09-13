@@ -484,7 +484,7 @@ export function createModelEvryConversation({
             continue readLoop;
           }
           return answer(
-            `${recipe.description} Answer from the fresh evidence, distinguish each cohort and explain criteria and limitations.`
+            `${recipe.description} Answer the requested question from fresh evidence. Include only relevant cohorts and briefly explain any non-obvious selection reason or limitation that affects the answer.`
           );
         }
         case "read": {

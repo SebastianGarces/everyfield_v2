@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { z } from "zod";
 import { generateEvryModelTurn, parseEvryModelTurn } from "./model-turn";
+import { EVRY_RESPONSE_VOICE } from "./response-voice";
 import {
   modelDecision,
   scriptedConversationModel,
@@ -55,6 +56,11 @@ test("help and arbitrary paraphrases reach a real model boundary with storage di
       tools: unknown;
     };
     assert.ok(JSON.stringify(call.prompt).includes(latestRequest));
+    assert.ok(
+      JSON.stringify(call.prompt).includes(
+        JSON.stringify(EVRY_RESPONSE_VOICE).slice(1, -1)
+      )
+    );
     assert.deepEqual(call.providerOptions, {
       openai: { store: false, serviceTier: "default", reasoningEffort: "none" },
     });

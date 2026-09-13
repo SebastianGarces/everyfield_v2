@@ -4,6 +4,7 @@ import { MockLanguageModelV3 } from "ai/test";
 import { generateEvryModelResponse } from "./model-response";
 import { buildEvryReadArtifact } from "@/lib/evry/artifacts/core";
 import { EVRY_READ_BUDGET } from "./read-budget";
+import { EVRY_RESPONSE_VOICE } from "./response-voice";
 
 test("provider text is presented before the model finishes, not replayed after generation", async () => {
   const firstPreview = Promise.withResolvers<string>();
@@ -11,7 +12,10 @@ test("provider text is presented before the model finishes, not replayed after g
   let providerFinished = false;
   let calls = 0;
   const model = new MockLanguageModelV3({
-    doStream: async () => {
+    doStream: async ({ prompt }) => {
+      const system = prompt.find((message) => message.role === "system");
+      assert.ok(system?.content.includes(EVRY_RESPONSE_VOICE));
+      assert.ok(!system?.content.includes("Explain the actual filters"));
       calls++;
       return {
         stream: new ReadableStream({

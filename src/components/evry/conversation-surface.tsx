@@ -3,6 +3,8 @@
 import { ArrowDown, ArrowUp, LoaderCircle, MapPin, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { evryResponseContent } from "./response-content";
+import { evryResponseMarkdown } from "./response-markdown";
+import { RichText } from "@/components/shared/rich-text";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -215,13 +217,19 @@ export function ConversationSurface({ className }: { className?: string }) {
                                   : "bg-muted text-foreground"
                               )}
                             >
-                              <p className="whitespace-pre-wrap">
-                                <span className="sr-only">
-                                  {message.author === "user" ? "You" : "Evry"}
-                                  :{" "}
-                                </span>
-                                {part.text}
-                              </p>
+                              <span className="sr-only">
+                                {message.author === "user" ? "You" : "Evry"}
+                                :{" "}
+                              </span>
+                              {message.author === "user" ? (
+                                <p className="whitespace-pre-wrap">
+                                  {part.text}
+                                </p>
+                              ) : (
+                                <RichText
+                                  body={evryResponseMarkdown(part.text)}
+                                />
+                              )}
                             </div>
                           ) : (
                             <EvryProductionArtifact
@@ -329,12 +337,12 @@ export function ConversationSurface({ className }: { className?: string }) {
                 }))
               ).map((part, index) =>
                 part.kind === "text" ? (
-                  <p
+                  <div
                     key={`text:${index}`}
-                    className="bg-muted text-foreground rounded-xl px-3.5 py-2.5 text-sm leading-relaxed whitespace-pre-wrap"
+                    className="bg-muted text-foreground rounded-xl px-3.5 py-2.5 text-sm leading-relaxed"
                   >
-                    {part.text}
-                  </p>
+                    <RichText body={evryResponseMarkdown(part.text)} />
+                  </div>
                 ) : (
                   <EvryArtifactRenderer
                     key={`result:${index}`}
