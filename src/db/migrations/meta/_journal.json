@@ -533,6 +533,20 @@
       "when": 1789105504370,
       "tag": "0076_team_leader_provenance",
       "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1789106379915,
+      "tag": "0077_discovery_profiles",
+      "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1789502632040,
+      "tag": "0078_leadership_version_guard",
+      "breakpoints": true
     }
   ]
 }

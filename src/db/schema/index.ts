@@ -23,3 +23,6 @@ export * from "./phase-engine";
 export * from "./methodology-embeddings";
 export * from "./documents";
 export * from "./evry";
+
+export * from "./discovery-profile";
+export * from "./leadership-version";

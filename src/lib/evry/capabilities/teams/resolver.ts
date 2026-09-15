@@ -5,6 +5,7 @@ import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import { APP_TIME_ZONE, toCalendarDate } from "@/lib/datetime";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
+import { canLeadTeam } from "@/lib/ministry-teams/leader-eligibility";
 import {
   TEAM_TEMPLATES,
   getRoleTemplates,
@@ -69,6 +70,31 @@ function iso(now: Date): string {
 
 function sortedIds(rows: readonly RawRow[]): string[] {
   return rows.map(({ id }) => String(id)).toSorted();
+}
+
+async function mayAppoint(actor: EvryPlantActor, personId: string) {
+  const result = await db.execute<{ eligible: boolean }>(
+    sql`select ${canLeadTeam(actor.plantId, personId)} eligible`
+  );
+  return result.rows[0]?.eligible === true;
+}
+
+function roleAppointment(personId: JsonValue, roleId: JsonValue) {
+  return { leader_id: personId, leader_source: "role", leader_role_id: roleId };
+}
+
+const vacantLeadership = {
+  leader_id: null,
+  leader_source: null,
+  leader_role_id: null,
+};
+
+function derivesFrom(team: RawRow, roleId: string, personId?: JsonValue) {
+  return (
+    team.leader_source === "role" &&
+    team.leader_role_id === roleId &&
+    (personId === undefined || team.leader_id === personId)
+  );
 }
 
 async function queryRows(query: ReturnType<typeof sql>): Promise<RawRow[]> {
@@ -255,6 +281,8 @@ function newTeam(input: {
     description: input.description,
     icon: input.icon,
     leader_id: null,
+    leader_source: null,
+    leader_role_id: null,
     responsibilities_seeded_at: null,
     reports_to_team_id: null,
     phase_introduced: "phase_2",
@@ -411,7 +439,7 @@ async function leadershipFill(input: {
   result.role = { ...input.role, status: "filled" };
   result.team =
     input.team.leader_id === null
-      ? { ...input.team, leader_id: personId }
+      ? { ...input.team, ...roleAppointment(personId, input.role.id) }
       : input.team;
   const membership = asRaw({
     id: randomUUID(),
@@ -520,8 +548,12 @@ export async function resolveTeamsEvryEffect(input: {
       teamAndFields(actor, teamId),
       rawRow("persons", actor.plantId, personId),
     ]);
-    if (!team || !person || person.deleted_at !== null) return null;
-    const teamAfter = updateRow(team, now, { leader_id: personId });
+    if (!team || !person || !(await mayAppoint(actor, personId))) return null;
+    const teamAfter = updateRow(team, now, {
+      leader_id: personId,
+      leader_source: "explicit",
+      leader_role_id: null,
+    });
     const status = statusEffects({
       actor,
       person,
@@ -767,14 +799,17 @@ export async function resolveTeamsEvryEffect(input: {
       role.is_leadership_role !== roleAfter.is_leadership_role
     ) {
       const personId = String(holderRows[0].person_id);
-      if (roleAfter.is_leadership_role === true) {
+      if (
+        roleAfter.is_leadership_role === true &&
+        (await mayAppoint(actor, personId))
+      ) {
         if (team.leader_id === null)
           mutations.push(
             mutation(
               "ministry_teams",
               teamId,
               team,
-              updateRow(team, now, { leader_id: personId })
+              updateRow(team, now, roleAppointment(personId, roleId))
             )
           );
         const person = await rawRow("persons", actor.plantId, personId);
@@ -796,13 +831,16 @@ export async function resolveTeamsEvryEffect(input: {
           }
         }
       }
-      if (roleAfter.is_leadership_role === false && team.leader_id === personId)
+      if (
+        roleAfter.is_leadership_role === false &&
+        derivesFrom(team, roleId, personId)
+      )
         mutations.push(
           mutation(
             "ministry_teams",
             teamId,
             team,
-            updateRow(team, now, { leader_id: null })
+            updateRow(team, now, vacantLeadership)
           )
         );
     }
@@ -840,18 +878,13 @@ export async function resolveTeamsEvryEffect(input: {
       ),
       mutation("team_roles", roleId, role, null),
     ];
-    const active = memberships.find(({ status }) => status === "active");
-    if (
-      role.is_leadership_role === true &&
-      active &&
-      team.leader_id === active.person_id
-    )
+    if (derivesFrom(team, roleId))
       mutations.push(
         mutation(
           "ministry_teams",
           teamId,
           team,
-          updateRow(team, now, { leader_id: null })
+          updateRow(team, now, vacantLeadership)
         )
       );
     return finish({
@@ -949,7 +982,11 @@ export async function resolveTeamsEvryEffect(input: {
               "ministry_teams",
               teamId,
               team,
-              updateRow(team, now, { leader_id: finalTeam.leader_id })
+              updateRow(
+                team,
+                now,
+                roleAppointment(finalTeam.leader_id, finalTeam.leader_role_id)
+              )
             ),
           ]
         : []),
@@ -1202,9 +1239,11 @@ export async function resolveTeamsEvryEffect(input: {
           created_at: iso(now),
           updated_at: iso(now),
         });
+    const eligibleLeader =
+      role.is_leadership_role === true && (await mayAppoint(actor, personId));
     const teamAfter =
-      role.is_leadership_role === true && team.leader_id === null
-        ? updateRow(team, now, { leader_id: personId })
+      eligibleLeader && team.leader_id === null
+        ? updateRow(team, now, roleAppointment(personId, roleId))
         : team;
     const status = statusEffects({
       actor,
@@ -1213,7 +1252,7 @@ export async function resolveTeamsEvryEffect(input: {
       teamId,
       roleId,
       member: true,
-      leader: role.is_leadership_role === true,
+      leader: eligibleLeader,
     });
     const churchAfter = updateRow(church, now, {
       last_material_event_at: iso(now),
@@ -1307,16 +1346,13 @@ export async function resolveTeamsEvryEffect(input: {
         updateRow(role, now, { status: "open" })
       ),
     ];
-    if (
-      role.is_leadership_role === true &&
-      team.leader_id === membership.person_id
-    )
+    if (derivesFrom(team, roleId, membership.person_id))
       mutations.push(
         mutation(
           "ministry_teams",
           teamId,
           team,
-          updateRow(team, now, { leader_id: null })
+          updateRow(team, now, vacantLeadership)
         )
       );
     return finish({

@@ -7,6 +7,8 @@ import {
   type EvryEffectResult,
 } from "@/lib/evry/executor";
 import { findExactEvryDatabaseEffectClaim } from "@/lib/evry/executor/database-effect";
+import { lockPlantLeadership } from "@/lib/ministry-teams/leadership-lock";
+import { canLeadTeam } from "@/lib/ministry-teams/leader-eligibility";
 import {
   MEETING_NOTIFICATION_CATEGORY,
   planMeetingNotifications,
@@ -94,6 +96,15 @@ function outcomePrelude(
         and a.plan_fingerprint = ${input.execution.fingerprint}
         and a.correlation_id = ${input.execution.correlationId}::uuid
         and s.status = 'executing'
+        and exists (select 1 from leadership_versions where church_id = a.church_id)
+        and not exists (
+          select 1 from mutation_plan m
+          where m.table_name = 'ministry_teams'
+            and m.after_state->>'leader_id' is not null
+            and (m.before_state->'leader_id', m.before_state->'leader_source', m.before_state->'leader_role_id')
+              is distinct from (m.after_state->'leader_id', m.after_state->'leader_source', m.after_state->'leader_role_id')
+            and not ${canLeadTeam(input.execution.plantId, sql`(m.after_state->>'leader_id')::uuid`)}
+        )
         and (
           actor.seat in ('owner', 'admin')
           or (
@@ -177,7 +188,7 @@ function outcomePrelude(
 function rowWrites(): SQL {
   return sql`
     inserted_teams as (insert into ministry_teams select (jsonb_populate_record(null::ministry_teams, m.after_state)).* from mutation_plan m, claimed where m.table_name='ministry_teams' and m.mode='insert' returning id),
-    updated_teams as (update ministry_teams t set name=p.name, template_key=p.template_key, type=p.type, description=p.description, icon=p.icon, leader_id=p.leader_id, responsibilities_seeded_at=p.responsibilities_seeded_at, reports_to_team_id=p.reports_to_team_id, phase_introduced=p.phase_introduced, status=p.status, sort_order=p.sort_order, updated_at=p.updated_at from mutation_plan m, claimed, lateral jsonb_populate_record(null::ministry_teams,m.after_state) p where m.table_name='ministry_teams' and m.mode='update' and t.id=m.id returning t.id),
+    updated_teams as (update ministry_teams t set name=p.name, template_key=p.template_key, type=p.type, description=p.description, icon=p.icon, leader_id=p.leader_id, leader_source=p.leader_source, leader_role_id=p.leader_role_id, responsibilities_seeded_at=p.responsibilities_seeded_at, reports_to_team_id=p.reports_to_team_id, phase_introduced=p.phase_introduced, status=p.status, sort_order=p.sort_order, updated_at=p.updated_at from mutation_plan m, claimed, lateral jsonb_populate_record(null::ministry_teams,m.after_state) p where m.table_name='ministry_teams' and m.mode='update' and t.id=m.id returning t.id),
     inserted_roles as (insert into team_roles select (jsonb_populate_record(null::team_roles, m.after_state)).* from mutation_plan m, claimed where m.table_name='team_roles' and m.mode='insert' returning id),
     updated_roles as (update team_roles t set name=p.name, description=p.description, reports_to_role_id=p.reports_to_role_id, is_leadership_role=p.is_leadership_role, time_commitment=p.time_commitment, desired_skills=p.desired_skills, sort_order=p.sort_order, status=p.status, updated_at=p.updated_at from mutation_plan m, claimed, lateral jsonb_populate_record(null::team_roles,m.after_state) p where m.table_name='team_roles' and m.mode='update' and t.id=m.id returning t.id),
     deleted_memberships as (delete from team_memberships t using mutation_plan m, claimed where m.table_name='team_memberships' and m.mode='delete' and t.id=m.id returning t.id),
@@ -206,10 +217,67 @@ async function executeStatement(
       sql`with ${outcomePrelude(input, args)}, ${rowWrites()} select affected_count, excluded_count from existing union all select affected_count, excluded_count from claimed limit 1`
     )
     .getQuery();
-  const [rows] = await db.$client.transaction(
-    (transaction) => [transaction.query(statement.sql, statement.params)],
+  const plantId = input.execution.plantId;
+  const ids = (table: TeamsEffectArguments["expected"][number]["table"]) =>
+    args.expected.filter((row) => row.table === table).map((row) => row.id);
+  const personIds = [
+    ...new Set([
+      ...ids("persons"),
+      ...args.mutations.flatMap((row) =>
+        row.table === "ministry_teams" &&
+        typeof row.after?.leader_id === "string"
+          ? [row.after.leader_id]
+          : []
+      ),
+    ]),
+  ];
+  // Serializable's snapshot may predate an advisory-lock wait. The version
+  // row is advanced by DB triggers even for inserts into previously empty sets;
+  // locking a changed version forces 40001 and the existing fresh retry.
+  const locks = [
+    lockPlantLeadership(plantId).getQuery(),
+    db
+      .execute(
+        sql`select church_id from leadership_versions where church_id=${plantId}::uuid for update`
+      )
+      .getQuery(),
+    ...(["ministry_teams", "team_roles", "team_memberships"] as const).map(
+      (table) =>
+        db
+          .execute(
+            sql`select id from ${sql.identifier(table)} where church_id=${plantId}::uuid and id=any(${ids(table)}::uuid[]) order by id for update`
+          )
+          .getQuery()
+    ),
+    db
+      .execute(
+        sql`select id from persons where church_id=${plantId}::uuid and id=any(${personIds}::uuid[]) order by id for update`
+      )
+      .getQuery(),
+    db
+      .execute(
+        sql`select id from users where id=${input.execution.actorUserId}::uuid or id in (select user_id from persons where church_id=${plantId}::uuid and id=any(${personIds}::uuid[])) order by id for update`
+      )
+      .getQuery(),
+    db
+      .execute(
+        sql`select plan_id from evry_action_plan_states where church_id=${plantId}::uuid and plan_id=${input.execution.planId}::uuid for update`
+      )
+      .getQuery(),
+    db
+      .execute(
+        sql`select id from evry_execution_attempts where church_id=${plantId}::uuid and id=${input.execution.attemptId}::uuid for update`
+      )
+      .getQuery(),
+  ];
+  const results = await db.$client.transaction(
+    (transaction) =>
+      [...locks, statement].map((query) =>
+        transaction.query(query.sql, query.params)
+      ),
     { isolationLevel: "Serializable" }
   );
+  const rows = results.at(-1)!;
   const row = rows[0] as CompletedRow | undefined;
   return row
     ? {
