@@ -5,6 +5,11 @@ import { mock } from "node:test";
 import { and, eq } from "drizzle-orm";
 
 import { db } from "@/db";
+import * as provider from "@/lib/evry/models/provider";
+import {
+  modelDecision,
+  scriptedConversationModel,
+} from "@/lib/evry/capabilities/model-test-fixtures";
 import {
   churches,
   communications,
@@ -16,6 +21,21 @@ import {
   sendingChurches,
   users,
 } from "@/db/schema";
+
+// Exercise the production conversation/recipe path against the real database,
+// with the same isolated model boundary as the other live capability proofs.
+const invitationModel = scriptedConversationModel(
+  modelDecision({
+    classification: "application_action",
+    prepareOriginalRequest: true,
+  })
+);
+mock.module("@/lib/evry/models/provider", {
+  namedExports: {
+    ...provider,
+    getEvryPolicyModel: () => invitationModel.model,
+  },
+});
 
 type SessionUser = Readonly<{
   id: string;
@@ -750,6 +770,10 @@ async function main() {
   const mode = process.argv[2] ?? "all";
   if (mode === "all" || mode === "end_to_end") {
     await proveSendOnlyRetry(modules);
+    assert.ok(
+      invitationModel.calls.length > 0,
+      "The production conversation must use the isolated model"
+    );
   }
   if (mode === "all" || mode === "partial_failure") {
     await proveDependencyRefusal(modules, "missing");

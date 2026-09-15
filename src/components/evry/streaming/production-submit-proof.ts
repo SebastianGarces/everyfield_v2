@@ -4,6 +4,8 @@ import { mock, test } from "node:test";
 import { createElement, Fragment, useEffect, type ReactNode } from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 
+import { richTextToPlainText } from "@/lib/rich-text/format";
+
 const emptySearchParams = new URLSearchParams();
 let pathname = "/dashboard";
 
@@ -35,7 +37,17 @@ type FocusNode = {
 
 function renderedText(renderer: ReactTestRenderer, value: string): boolean {
   return (
-    renderer.root.findAll((node) => node.children.includes(value)).length > 0
+    renderer.root.findAll((node) => {
+      if (node.children.includes(value)) return true;
+      // RichText renders sanitized HTML, which react-test-renderer does not
+      // expand into children. Read the host output, not the component's input.
+      const html = node.props.dangerouslySetInnerHTML?.__html;
+      return (
+        typeof node.type === "string" &&
+        typeof html === "string" &&
+        richTextToPlainText(html) === value
+      );
+    }).length > 0
   );
 }
 
