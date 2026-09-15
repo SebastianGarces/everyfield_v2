@@ -17,6 +17,7 @@
 // ============================================================================
 
 import { db } from "@/db";
+import { createDiscoveryProfileStatement } from "@/lib/discovery/profile-repository";
 import type { UserSeat } from "@/db/schema";
 import { sendingChurches, sendingNetworks } from "@/db/schema";
 import { tenancyColumns, type SeatTenancy } from "@/lib/auth/tenancy";
@@ -186,6 +187,18 @@ export function createAccountEntities(
   }
 
   switch (accountType) {
+    case "discovery":
+      return {
+        seat: null,
+        churchId: null,
+        sendingChurchId: null,
+        sendingNetworkId: null,
+        userChurchId: null,
+        statements: [],
+        linkStatements: [
+          db.execute(createDiscoveryProfileStatement({ id: userId })),
+        ],
+      };
     case "planter": {
       // An INVITED planter is the exception: the invitation exists to associate
       // a church plant, so the plant is created here and named by the planter.

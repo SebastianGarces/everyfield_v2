@@ -28,6 +28,51 @@ const USER_ID = "44444444-4444-4444-8444-444444444444";
 /** The registrant, for the `persons` row an invited planter's plant gets (#378). */
 const REGISTRANT = { name: "Ada Lovelace", email: "ada@example.test" };
 
+test("discovery creates its profile without a seat, tenancy or plant", () => {
+  const planned = createAccountEntities("discovery", null, USER_ID, REGISTRANT);
+  assert.deepEqual(
+    [
+      planned.seat,
+      planned.churchId,
+      planned.userChurchId,
+      planned.sendingChurchId,
+      planned.sendingNetworkId,
+    ],
+    [null, null, null, null, null]
+  );
+  assert.equal(planned.statements.length, 0);
+  assert.equal(planned.linkStatements.length, 1);
+});
+
+test("seat and coach tokens override a submitted discovery choice", () => {
+  for (const invitedAs of [
+    { kind: "seat", seat: "member" },
+    { kind: "coach" },
+  ] as const) {
+    const planned = createAccountEntities(
+      "discovery",
+      null,
+      USER_ID,
+      REGISTRANT,
+      false,
+      {
+        tenancy: {
+          type: "network",
+          id: "55555555-5555-4555-8555-555555555555",
+        },
+        invitedAs,
+        matchedPersonId: null,
+      }
+    );
+    assert.equal(planned.linkStatements.length, 0);
+    assert.equal(planned.seat, invitedAs.kind === "seat" ? "member" : null);
+    assert.equal(
+      planned.sendingNetworkId,
+      invitedAs.kind === "seat" ? "55555555-5555-4555-8555-555555555555" : null
+    );
+  }
+});
+
 /**
  * Every account type, the seat it grants, and the tenancy that seat is held in.
  *

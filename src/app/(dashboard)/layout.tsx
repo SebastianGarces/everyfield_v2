@@ -29,6 +29,7 @@ import {
 } from "@/lib/notifications/feed";
 import { resolveTenancyShell } from "@/lib/navigation";
 import { evryPlantStandingOf } from "@/lib/evry/eligibility/viewer";
+import { hasDiscoveryProfile } from "@/lib/discovery/profile";
 
 import { assignedPlantsSafely } from "./assigned-plants";
 import { loadUnreadBadgeCountSafely } from "./notification-badge";
@@ -162,6 +163,8 @@ export default async function DashboardLayout({
   // and it is carried from here so no screen re-derives it.
   const capabilities = heldCapabilities(user);
   const evryEnabled = evryPlantStandingOf(user).status === "eligible";
+  const isDiscovery =
+    !user.seat && !user.churchId && (await hasDiscoveryProfile(user.id));
 
   return (
     <ViewerCapabilitiesProvider capabilities={capabilities}>
@@ -198,6 +201,7 @@ export default async function DashboardLayout({
                 user={sidebarUser}
                 orgType={org?.type ?? null}
                 hasChurch={!!user.churchId}
+                isDiscovery={isDiscovery}
                 assignedPlants={assignedPlants}
                 isPlatformAdmin={userIsPlatformAdmin}
               />
@@ -237,7 +241,7 @@ export default async function DashboardLayout({
               the next account to sign in on this tab was shown the previous
               one's settings while its own read was in flight (#673). */}
                 <SettingsModal
-                  visibleIds={settingsSectionsFor(user).map(
+                  visibleIds={settingsSectionsFor(user, isDiscovery).map(
                     (section) => section.id
                   )}
                   serverRenderId={crypto.randomUUID()}

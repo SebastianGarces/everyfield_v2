@@ -53,6 +53,7 @@ type AppSidebarProps = React.ComponentProps<typeof Sidebar> & {
    */
   orgType: AssociationOrgType | null;
   hasChurch: boolean;
+  isDiscovery?: boolean;
   /**
    * The plants this account actively coaches — read server-side from
    * `coach_assignments` (AS-011, #496).
@@ -156,11 +157,19 @@ export function AppSidebar({
   user,
   orgType,
   hasChurch,
+  isDiscovery = false,
   assignedPlants,
   isPlatformAdmin = false,
   ...props
 }: AppSidebarProps) {
-  const navConfig = getNavConfig(orgType);
+  const navConfig = isDiscovery
+    ? {
+        items: mainNavItems.filter(
+          (item) => item.href === "/dashboard" || item.href === "/wiki"
+        ),
+        label: "Discovery",
+      }
+    : getNavConfig(orgType);
   const pathname = usePathname();
   const adminActive = isPathWithin(pathname, "/admin");
 

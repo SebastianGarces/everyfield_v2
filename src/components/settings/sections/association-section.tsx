@@ -88,12 +88,13 @@ import { LeaveOrgDialog } from "@/app/(dashboard)/settings/association/leave-org
 // ============================================================================
 
 export function AssociationSection({ view }: { view: AssociationSectionView }) {
-  if (view.answerer === "plant") {
+  if (view.answerer !== "sending_church") {
+    const discovery = view.answerer === "discovery";
     return (
       <div className="space-y-8">
         <PendingInvitations
           invitations={view.pending}
-          subjectNoun="your plant"
+          subjectNoun={discovery ? "you" : "your plant"}
           emptyDetail="A sending church or network invites you by email. Their invitation appears here for you to accept or decline."
           // REWRITTEN BY CS-013, because the old sentence became false. It read
           // "What else they hear about stays yours to decide, on the sharing
@@ -106,7 +107,11 @@ export function AssociationSection({ view }: { view: AssociationSectionView }) {
           // is ungated and lasts as long as the association) and false of six of
           // the seven toggles (no switch exists for them yet). Reversibility is
           // the consent copy's to state, where it is stated precisely.
-          consequence="Accepting lists your plant in their directory with its name, phase and launch date."
+          consequence={
+            discovery
+              ? "Accepting lists your name and email among their discovery associates. It gives you no seat in their organization and shares no wiki reading activity."
+              : "Accepting lists your plant in their directory with its name, phase and launch date."
+          }
           consent={view.consent}
         />
 
@@ -114,7 +119,11 @@ export function AssociationSection({ view }: { view: AssociationSectionView }) {
           <SettingsBlock>
             <SettingsHeading
               id="current-associations"
-              description="A plant can belong to a sending church and to a network. Leaving one leaves the other standing."
+              description={
+                discovery
+                  ? "You can associate with one sending church and one network. Leaving one keeps the other association."
+                  : "A plant can belong to a sending church and to a network. Leaving one leaves the other standing."
+              }
             >
               Who you belong to
             </SettingsHeading>
@@ -122,8 +131,16 @@ export function AssociationSection({ view }: { view: AssociationSectionView }) {
             {view.associations.length === 0 ? (
               <EmptySection
                 icon={Building2}
-                title="Your plant is independent"
-                detail="It belongs to no sending church or network."
+                title={
+                  discovery
+                    ? "No associations yet"
+                    : "Your plant is independent"
+                }
+                detail={
+                  discovery
+                    ? "You have not joined a sending church or network."
+                    : "It belongs to no sending church or network."
+                }
               />
             ) : (
               <ul className="divide-border divide-y">
@@ -141,6 +158,7 @@ export function AssociationSection({ view }: { view: AssociationSectionView }) {
                       }
                       action={
                         <LeaveOrgDialog
+                          discovery={discovery}
                           orgType={association.orgType}
                           orgName={association.orgName}
                         />

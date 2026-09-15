@@ -17,7 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { AssociationOrgType } from "@/db/schema";
 
-import { leaveOversightOrg } from "./actions";
+import { leaveDiscoveryOrg, leaveOversightOrg } from "./actions";
 
 // ============================================================================
 // Leaving an oversight org — the type-to-confirm dialog (#304, OV-007a).
@@ -49,9 +49,11 @@ const ORG_NOUN: Record<AssociationOrgType, string> = {
 export function LeaveOrgDialog({
   orgType,
   orgName,
+  discovery = false,
 }: {
   orgType: AssociationOrgType;
   orgName: string;
+  discovery?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [confirmation, setConfirmation] = useState("");
@@ -74,7 +76,9 @@ export function LeaveOrgDialog({
   function leave() {
     setError(null);
     startTransition(async () => {
-      const result = await leaveOversightOrg(orgType);
+      const result = discovery
+        ? await leaveDiscoveryOrg(orgType, confirmation)
+        : await leaveOversightOrg(orgType);
       if (result.success) {
         reset(false);
         return;
@@ -105,9 +109,9 @@ export function LeaveOrgDialog({
         <AlertDialogHeader>
           <AlertDialogTitle>Leave {orgName}?</AlertDialogTitle>
           <AlertDialogDescription>
-            Your plant stops appearing in their directory and they receive no
-            further updates about you. They are told that you left. Only they
-            can invite you back.
+            {discovery
+              ? "You stop appearing in their discovery associates list. Your account and wiki activity stay with you. They are told that you left. A new invitation is needed to rejoin."
+              : "Your plant stops appearing in their directory and they receive no further updates about you. They are told that you left. Only they can invite you back."}
           </AlertDialogDescription>
         </AlertDialogHeader>
 

@@ -5,6 +5,7 @@ import { test } from "node:test";
 
 import { getTableColumns } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
+import { PgRaw } from "drizzle-orm/pg-core/query-builders/raw";
 
 import { churchPrivacySettings } from "@/db/schema";
 import { createAccountEntities } from "@/app/(auth)/register/account-entities";
@@ -280,7 +281,9 @@ test("a self-started plant is created sharing nothing", () => {
   });
 
   const privacyInsert = statements
-    .map((statement) => statement.toSQL())
+    .map((statement) =>
+      statement instanceof PgRaw ? statement.getQuery() : statement.toSQL()
+    )
     .find(({ sql }) => sql.includes("church_privacy_settings"));
 
   assert.ok(privacyInsert, "church creation writes no privacy row");

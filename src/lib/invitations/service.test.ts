@@ -517,6 +517,10 @@ const CORE_REACHING_ACTION_MODULES: ReadonlyArray<readonly [string, string]> = [
     "#304/OV-007a — the PLANTER'S sever, which by ruling #274 ships with the surface that owns its authority rule rather than as a fifth lifecycle action. `leaveOversightOrgAs` takes the actor and a two-valued org KIND, never a church or org id; the FK null, its tenancy assertion and the audit row are one statement inside the logic layer. Accept and decline are re-wrapped here only to add `refresh()`",
   ],
   [
+    "src/app/(dashboard)/oversight/discovery-actions.ts",
+    "#294: Owner-only discovery sever. The action mints the actor with requireSeat(org.invitation.manage); removeDiscoveryFromOrgAs independently checks org authority, confirmation and the scoped association before audited removal.",
+  ],
+  [
     "src/app/(dashboard)/oversight/plants/[id]/actions.ts",
     "#304/OV-007b — the ORG ADMIN'S sever, the mirror of the planter's and on the same ruling (#274): each side's wrapper ships with the surface that owns its authority rule, never as a fifth lifecycle action. `removePlantFromOrgAs` takes a church id — an org has many plants, so which one is a real choice — and NOTHING else: the org, its kind and the actor all come from the session, and the FK is nulled only while it still points at that org",
   ],
@@ -651,7 +655,17 @@ const ASSOCIATION_ACTION_MODULES: ReadonlyArray<{
       "declineAssociationInvitation",
       "leaveNetwork",
       "leaveOversightOrg",
+      "leaveDiscoveryOrg",
     ],
+  },
+  {
+    label: "src/app/(dashboard)/oversight/discovery-actions.ts",
+    load: async () =>
+      (await import("@/app/(dashboard)/oversight/discovery-actions")) as unknown as Record<
+        string,
+        unknown
+      >,
+    exports: ["removeDiscoveryAssociate"],
   },
   {
     label: "src/app/(dashboard)/oversight/plants/[id]/actions.ts",
@@ -888,7 +902,7 @@ test("the session mint is the FIRST statement of every invitation-domain action"
       const end = body.search(/\n\}/);
       const scoped = end === -1 ? body : body.slice(0, end);
 
-      const mint = scoped.indexOf("requireSeat(");
+      const mint = scoped.search(/(?:requireSeat|verifySession)\(/);
       const parse = scoped.indexOf(".safeParse(");
 
       assert.ok(mint >= 0, `${rel(file)} → ${match[1]} never mints an actor`);
@@ -1659,6 +1673,7 @@ test("a sending church admin invites plants into their OWN sending church", () =
     inviteeEmail: INVITEE_EMAIL,
     targetChurchId: PLANT,
     targetSendingChurchId: null,
+    targetUserId: null,
     sendingChurchId: SENDING_CHURCH,
     sendingNetworkId: null,
   });
@@ -1824,6 +1839,7 @@ test("the expiry window is server-fixed and not a client input", () => {
     "sendingNetworkId",
     "targetChurchId",
     "targetSendingChurchId",
+    "targetUserId",
     "type",
   ]);
 
@@ -2325,6 +2341,7 @@ test("an action result carries no internal user ids", () => {
     inviteeEmail: INVITEE_EMAIL,
     targetChurchId: PLANT,
     targetSendingChurchId: null,
+    targetUserId: null,
     sendingChurchId: SENDING_CHURCH,
     sendingNetworkId: null,
     status: "accepted",
