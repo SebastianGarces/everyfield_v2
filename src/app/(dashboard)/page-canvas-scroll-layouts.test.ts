@@ -30,6 +30,12 @@ interface PageCanvasOwner {
  */
 const AUTHENTICATED_PAGE_CANVAS_OWNERS = [
   {
+    owner: "src/app/(dashboard)/dashboard/discovery-home.tsx",
+    routes: ["/dashboard (discovery)"],
+    scrollLayout: "flow",
+    compositions: ["lone-workspace"],
+  },
+  {
     owner: "src/app/(dashboard)/admin/feedback/page.tsx",
     routes: ["/admin/feedback"],
     scrollLayout: "flow",

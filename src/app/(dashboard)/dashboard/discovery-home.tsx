@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { SettingsLink } from "@/components/settings/settings-link";
 import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
 import { Button } from "@/components/ui/button";
 import { verifySession } from "@/lib/auth";
@@ -26,11 +27,13 @@ export async function DiscoveryHome() {
               <Link href="/wiki">Browse the wiki</Link>
             </Button>
             <Button asChild variant="outline">
-              <Link href="#settings/account">Account settings</Link>
+              <SettingsLink section="account">Account settings</SettingsLink>
             </Button>
           </div>
           <Button asChild variant="outline">
-            <Link href="#settings/association">Manage associations</Link>
+            <SettingsLink section="association">
+              Manage associations
+            </SettingsLink>
           </Button>
           {associations && (
             <DiscoveryPlantForm

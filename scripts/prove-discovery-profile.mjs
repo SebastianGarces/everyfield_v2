@@ -184,6 +184,8 @@ try {
     [
       "exec",
       "tsx",
+      "--import",
+      "./scripts/discovery-db-endpoint.ts",
       "--test",
       ...(process.env.DISCOVERY_PROFILE_TEST_PATTERN
         ? [`--test-name-pattern=${process.env.DISCOVERY_PROFILE_TEST_PATTERN}`]

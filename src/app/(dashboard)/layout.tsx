@@ -29,7 +29,7 @@ import {
 } from "@/lib/notifications/feed";
 import { resolveTenancyShell } from "@/lib/navigation";
 import { evryPlantStandingOf } from "@/lib/evry/eligibility/viewer";
-import { hasDiscoveryProfile } from "@/lib/discovery/profile";
+import { discoveryIdentityForShell } from "./discovery-identity";
 
 import { assignedPlantsSafely } from "./assigned-plants";
 import { loadUnreadBadgeCountSafely } from "./notification-badge";
@@ -163,8 +163,9 @@ export default async function DashboardLayout({
   // and it is carried from here so no screen re-derives it.
   const capabilities = heldCapabilities(user);
   const evryEnabled = evryPlantStandingOf(user).status === "eligible";
-  const isDiscovery =
-    !user.seat && !user.churchId && (await hasDiscoveryProfile(user.id));
+  // Only unseated, untenanted accounts need the profile lookup. Identity is
+  // required to choose navigation and settings; a failed read must not guess.
+  const isDiscovery = await discoveryIdentityForShell(user);
 
   return (
     <ViewerCapabilitiesProvider capabilities={capabilities}>

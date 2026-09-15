@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { before, describe, test } from "node:test";
 
-import { neon, neonConfig } from "@neondatabase/serverless";
+import { neon } from "@neondatabase/serverless";
 import { generateDrizzleJson, generateMigration } from "drizzle-kit/api";
 import { sql, type SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/neon-http";
@@ -48,11 +48,8 @@ describe(
     assert.equal(url.pathname, "/discovery_294_proof");
     assert.equal(new URL(endpoint).hostname, "127.0.0.1");
     assert.match(container, /^discovery-294-[a-f0-9]{8}-pg$/);
-    neonConfig.fetchEndpoint = endpoint;
-    // The real seat writer imports @/db. Give only this isolated test process
-    // the same scratch connection before dynamically importing that writer.
-    process.env.DATABASE_URL = connection;
-    process.env.RESEND_API_KEY = "re_discovery_scratch_unused";
+    // Transport and application connection are configured by the runner preload.
+    assert.equal(process.env.DATABASE_URL, connection);
     const db = drizzle(neon(connection));
     registerDiscoveryPlantLiveTests(db);
     const { registerDiscoveryAssociationLiveTests } =
