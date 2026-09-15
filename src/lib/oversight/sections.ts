@@ -65,6 +65,14 @@ export const OVERSIGHT_SECTIONS: readonly OversightSectionDefinition[] = [
     description: "How many teams exist, and how many of them have a leader.",
     subject: "its ministry teams",
   },
+  {
+    key: "wiki",
+    privacyFeature: "wiki",
+    title: "Wiki progress",
+    description:
+      "Combined reading progress of current plant members on available articles. Each article counts once per reader.",
+    subject: "its wiki progress",
+  },
 ] as const;
 
 /** Definition lookup — total over `OversightSectionKey` by construction. */

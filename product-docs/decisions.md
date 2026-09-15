@@ -466,3 +466,11 @@ Sebastian ruled in alpha programme task `01a0876e-ceb0-7f32-a6f8-8806b1400213` t
 | # | Decision | Consequence |
 |---|----------|-------------|
 | 758 / 825 (1) | **Every new chat message reaches the working model; user wording is not gated by hardcoded phrases.** Sebastian requested natural-language interpretation and model-written replies, and explicitly authorized sending the current message, relevant conversation history, and visible page context to OpenAI through the configured API account with provider storage disabled. | Help and clarification are generated responses. Policy classification still precedes domain access; reads use registered schemas and fresh tenant-bound authorization. Model output cannot confirm or execute a plan. This replaces fixed conversational boundary wording, not the application-only scope or confirmation policy. |
+
+## 2026-09-11 — Explicit ministry-team appointments survive role vacancy
+
+| # | Decision | Consequence |
+|---|----------|-------------|
+| 830 | An explicit team leader is appointed independently of role membership. Role removal, deletion or unmarking preserves that appointment, including removal of the person's last role. | Derived leadership records its source role and clears only for that source. Explicit appointment of the same person replaces provenance. Account-seat removal retains AS-016's unconditional leadership cleanup. |
+| 830 (1) | Historical provenance is unknown; a matching role does not prove a leader was derived. Preserve historical leaders as `legacy`. | Role changes do not clear a legacy appointment. A deliberate explicit replacement or account-seat removal ends it. |
+| 830 (2) | Removing a plant seat must not be undone by a concurrent or delayed team appointment for that linked account. A linked person must regain a seat in the same plant before receiving team leadership again. | Apply the rule to explicit appointments, membership-derived fills, role enabling and direct synchronization. Keep the person and roster membership. Unlinked CRM people remain eligible without a login. |
