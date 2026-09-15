@@ -38,6 +38,8 @@ export function canLeadTeam(
                   and(
                     eq(users.id, persons.userId),
                     eq(users.churchId, churchId),
+                    isNull(users.sendingChurchId),
+                    isNull(users.sendingNetworkId),
                     isNotNull(users.seat)
                   )
                 )

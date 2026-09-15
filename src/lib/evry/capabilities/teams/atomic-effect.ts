@@ -245,18 +245,18 @@ async function executeStatement(
       (table) =>
         db
           .execute(
-            sql`select id from ${sql.identifier(table)} where church_id=${plantId}::uuid and id=any(${ids(table)}::uuid[]) order by id for update`
+            sql`select id from ${sql.identifier(table)} where church_id=${plantId}::uuid and id=any(${sql.param(ids(table))}::uuid[]) order by id for update`
           )
           .getQuery()
     ),
     db
       .execute(
-        sql`select id from persons where church_id=${plantId}::uuid and id=any(${personIds}::uuid[]) order by id for update`
+        sql`select id from persons where church_id=${plantId}::uuid and id=any(${sql.param(personIds)}::uuid[]) order by id for update`
       )
       .getQuery(),
     db
       .execute(
-        sql`select id from users where id=${input.execution.actorUserId}::uuid or id in (select user_id from persons where church_id=${plantId}::uuid and id=any(${personIds}::uuid[])) order by id for update`
+        sql`select id from users where id=${input.execution.actorUserId}::uuid or id in (select user_id from persons where church_id=${plantId}::uuid and id=any(${sql.param(personIds)}::uuid[])) order by id for update`
       )
       .getQuery(),
     db

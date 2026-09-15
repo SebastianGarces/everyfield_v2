@@ -215,6 +215,22 @@
     },
     {
       "kind": "action",
+      "identity": "action:src/app/(dashboard)/dashboard/discovery-actions.ts → createDiscoveryPlant",
+      "source": "src/app/(dashboard)/dashboard/discovery-actions.ts",
+      "exportName": "createDiscoveryPlant",
+      "capabilityIdentity": "boundary.pre-tenancy-onboarding",
+      "domain": "dashboard",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "mutationShape": null,
+      "classification": {
+        "state": "excluded",
+        "reason": "pre_tenancy_onboarding"
+      }
+    },
+    {
+      "kind": "action",
       "identity": "action:src/app/(dashboard)/feedback/actions.ts → submitFeedbackAction",
       "source": "src/app/(dashboard)/feedback/actions.ts",
       "exportName": "submitFeedbackAction",
@@ -381,12 +397,12 @@
     }
   ],
   "summary": {
-    "actions": 9,
+    "actions": 10,
     "routes": 3,
     "rscReads": 4,
     "readCapabilities": 3,
     "effectCapabilities": 3,
-    "excluded": 6,
+    "excluded": 7,
     "unclassified": 0
   }
 }

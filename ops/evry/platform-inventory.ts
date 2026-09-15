@@ -92,6 +92,7 @@ const EXCLUDED_ACTIONS = {
   completeOnboarding: "pre_tenancy_onboarding",
   confirmLeadership: "pre_tenancy_onboarding",
   createChurchBasics: "pre_tenancy_onboarding",
+  createDiscoveryPlant: "pre_tenancy_onboarding",
   declareJourney: "pre_tenancy_onboarding",
   updateFeedbackStatusAction: "platform_admin_only",
 } as const;

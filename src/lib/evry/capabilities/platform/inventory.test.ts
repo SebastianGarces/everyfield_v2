@@ -25,10 +25,10 @@ test("platform inventory is generated, closed, and has zero unclassified entries
       "platform.feedback.submit",
     ]
   );
-  assert.equal(inventory.summary.actions, 9);
+  assert.equal(inventory.summary.actions, 10);
   assert.equal(inventory.summary.routes, 3);
   assert.equal(inventory.summary.rscReads, 4);
-  assert.equal(inventory.summary.excluded, 6);
+  assert.equal(inventory.summary.excluded, 7);
 });
 
 test("platform inventory discovers owning RSC calls through their symbols", () => {
