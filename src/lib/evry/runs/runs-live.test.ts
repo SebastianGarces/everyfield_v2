@@ -209,7 +209,9 @@ for (const operation of ["create", "continue"] as const)
                 planFingerprint: null,
               },
           fingerprintInput: {
+            version: 1,
             operation,
+            ...(existing ? { conversationId: existing.id } : {}),
             message: "Show my tasks",
             pageContext: null,
           },
@@ -247,6 +249,33 @@ for (const operation of ["create", "continue"] as const)
         assert.equal(
           (await findEvryActiveRun({ actor, requestKey }))?.status,
           "failed"
+        );
+        const reload = await recoverEvryActiveRun({
+          actor,
+          requestKey,
+          now: new Date(),
+        });
+        assert.equal(
+          reload.status,
+          failure === "generation" ? "interrupted" : "durable"
+        );
+        if (failure === "generation") {
+          assert.equal(reload.status, "interrupted");
+          if (reload.status !== "interrupted")
+            throw new Error("Expected interrupted saved request");
+          assert.equal(reload.retry?.operation, operation);
+          assert.equal(reload.retry?.message, "Show my tasks");
+          assert.equal(
+            reload.conversation.messages.filter(
+              ({ author }) => author === "user"
+            ).length,
+            existing ? 2 : 1
+          );
+        }
+        assert.equal(
+          modelCalls,
+          1,
+          "recovery GET does not start another provider call"
         );
         await assert.rejects(
           prepareEvryConversationActiveRun({
@@ -438,6 +467,12 @@ test(
       "stale"
     );
     assert.equal(providerCalls, 1);
+    assert.equal(
+      (await recoverEvryActiveRun({ actor, requestKey: input.requestKey, now }))
+        .status,
+      "durable",
+      "the exact saved clarification is a completed response"
+    );
     const saved = result!.resumed.conversation.messages.filter(
       (message) => message.requestKey === input.requestKey
     );

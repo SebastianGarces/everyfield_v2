@@ -13,7 +13,11 @@ import type { EvryResumedConversation } from "@/lib/evry/conversations/service";
 import { compileEvryConversationContext } from "@/lib/evry/conversations/context";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
 
-import { EVRY_ACTIVE_RUN_TTL_MS, parseEvryActiveRunRecord } from "./contract";
+import {
+  EVRY_ACTIVE_RUN_TTL_MS,
+  parseEvryActiveRunRecord,
+  fingerprintEvryActiveRunRequest,
+} from "./contract";
 import { recoverEvryActiveRun } from "./service";
 
 const PLANT_ID = "10000000-0000-4000-8000-000000000001";
@@ -57,6 +61,8 @@ function storedConversation(
         author: "user" as const,
         body: "Durable request",
         pageContext: null,
+        requestPageContext: null,
+        replayReference: { status: "not_applicable" as const },
         relevanceKeys: Object.freeze([]),
         deliveryStatus: "complete" as const,
         createdAt: START,
@@ -189,7 +195,7 @@ test("an unexpired owner remains the only active run projection", async () => {
   assert.equal(durableReads, 0);
 });
 
-test("expiry reconciles durable output once and never creates a second owner", async () => {
+test("expiry shows an unanswered saved request as interrupted without restarting its owner", async () => {
   const events: string[] = [];
   const result = await recoverEvryActiveRun({
     actor,
@@ -212,12 +218,142 @@ test("expiry reconciles durable output once and never creates a second owner", a
       },
     },
   });
-  assert.equal(result.status, "durable");
+  assert.equal(result.status, "interrupted");
+  if (result.status !== "interrupted")
+    throw new Error("Expected interrupted request");
+  assert.equal(
+    result.retry,
+    null,
+    "an expired owner cannot be restarted by a recovery read"
+  );
   assert.deepEqual(events, [
     "find-run",
     "find-durable-request",
     "resume-durable",
   ]);
+});
+
+for (const operation of ["create", "continue"] as const) {
+  test(`${operation} recovery offers the server-owned exact failed request, without starting work`, async () => {
+    const { plantId, ...row } = activeRun();
+    const run = parseEvryActiveRunRecord({
+      ...row,
+      churchId: plantId,
+      operation,
+      status: "failed",
+      completedAt: START,
+      conversationId: operation === "continue" ? CONVERSATION_ID : null,
+      requestFingerprint: fingerprintEvryActiveRunRequest({
+        version: 1,
+        operation,
+        ...(operation === "continue"
+          ? { conversationId: CONVERSATION_ID }
+          : {}),
+        message: "Durable request",
+        pageContext: null,
+      }),
+    });
+    const result = await recoverEvryActiveRun({
+      actor,
+      requestKey: REQUEST_ID,
+      now: START,
+      boundaries: {
+        runs: { find: async () => run },
+        resume: async () => resumed(),
+        findConversationByRequest: async (input) => {
+          assert.equal(input.actorUserId, USER_ID);
+          assert.equal(input.plantId, PLANT_ID);
+          assert.equal(input.requestKey, REQUEST_ID);
+          return storedConversation();
+        },
+      },
+    });
+    assert.equal(result.status, "interrupted");
+    if (result.status !== "interrupted")
+      throw new Error("Expected interrupted request");
+    assert.deepEqual(result.retry, {
+      operation,
+      message: "Durable request",
+      pageContext: null,
+      savedMessageId: storedConversation().messages[0]!.id,
+    });
+    for (const reason of [
+      "fingerprint",
+      "later_turn",
+      "legacy_context",
+    ] as const) {
+      const original = storedConversation();
+      const user = original.messages[0]!;
+      const conversation: EvryStoredConversation = {
+        ...original,
+        messages:
+          reason === "later_turn"
+            ? [
+                user,
+                {
+                  ...user,
+                  id: evryConversationMessageIdSchema.parse(
+                    "50000000-0000-4000-8000-000000000002"
+                  ),
+                  sequence: 1,
+                  requestKey: OLDER_REQUEST_ID,
+                  body: "Later request",
+                },
+              ]
+            : [
+                {
+                  ...user,
+                  ...(reason === "legacy_context"
+                    ? { requestPageContext: undefined }
+                    : {}),
+                },
+              ],
+      };
+      const blocked = await recoverEvryActiveRun({
+        actor,
+        requestKey: REQUEST_ID,
+        now: START,
+        boundaries: {
+          runs: {
+            find: async () =>
+              reason === "fingerprint"
+                ? { ...run, requestFingerprint: "f".repeat(64) }
+                : run,
+          },
+          findConversationByRequest: async () => conversation,
+          resume: async () => ({
+            conversation,
+            activePlan: null,
+            context: compileEvryConversationContext({
+              conversation,
+              activePlan: null,
+            }),
+          }),
+        },
+      });
+      assert.equal(blocked.status, "interrupted");
+      if (blocked.status !== "interrupted")
+        throw new Error("Expected interrupted request");
+      assert.equal(blocked.retry, null, reason);
+    }
+  });
+}
+
+test("missing run history shows an interrupted request without inventing retry identity", async () => {
+  const result = await recoverEvryActiveRun({
+    actor,
+    requestKey: REQUEST_ID,
+    now: START,
+    boundaries: {
+      runs: { find: async () => null },
+      resume: async () => resumed(),
+      findConversationByRequest: async () => storedConversation(),
+    },
+  });
+  assert.equal(result.status, "interrupted");
+  if (result.status !== "interrupted")
+    throw new Error("Expected interrupted request");
+  assert.equal(result.retry, null);
 });
 
 test("expired and missing runs terminate when no durable state exists", async () => {

@@ -175,13 +175,13 @@ function validateSnapshot(
   }
   if (
     isEvryRecipeReuseRecoveryMarker(marker) &&
-    snapshot.status === "active" &&
-    snapshot.operation !== "reuse"
+    (snapshot.status === "interrupted" ||
+      (snapshot.status === "active" && snapshot.operation !== "reuse"))
   ) {
     throw new Error("Evry recovery response changed reuse operation");
   }
   const conversationId =
-    snapshot.status === "durable"
+    snapshot.status === "durable" || snapshot.status === "interrupted"
       ? snapshot.conversation.id
       : snapshot.status === "active" || snapshot.status === "resumable"
         ? snapshot.conversationId

@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { publicEvryConversationSchema } from "@/lib/evry/conversations/public-contract";
+import { evryPageContextSchema } from "@/lib/evry/resolvers/contract";
 
 const sequencedRunBase = {
   requestId: z.string().uuid(),
@@ -8,6 +9,32 @@ const sequencedRunBase = {
 } as const;
 
 export const evryRunRecoveryResponseSchema = z.union([
+  z
+    .strictObject({
+      status: z.literal("interrupted"),
+      ...sequencedRunBase,
+      kind: z.literal("conversation"),
+      conversation: publicEvryConversationSchema,
+      retry: z
+        .strictObject({
+          operation: z.enum(["create", "continue"]),
+          message: z.string().min(1).max(8000),
+          pageContext: evryPageContextSchema.nullable(),
+          savedMessageId: z.string().uuid(),
+        })
+        .nullable(),
+    })
+    .refine(
+      (snapshot) =>
+        snapshot.retry === null ||
+        snapshot.conversation.messages.some(
+          (message) =>
+            message.id === snapshot.retry?.savedMessageId &&
+            message.author === "user" &&
+            message.body === snapshot.retry.message
+        ),
+      "Retry must identify the saved user message"
+    ),
   z
     .object({
       status: z.literal("active"),
