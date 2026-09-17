@@ -468,9 +468,20 @@ export function EvryShell({
     [finishWork, updateWork]
   );
 
+  const cancelActiveConversationLoads = useCallback(() => {
+    conversationLoadStateRef.current = cancelEvryConversationLoads(
+      conversationLoadStateRef.current
+    );
+    setLoading(false);
+    setRequestedConversationId(null);
+    setError(null);
+  }, []);
+
   const recoverMarker = useCallback(
     async (marker: EvryRunRecoveryMarker) => {
       if (!markerMatchesEvryLocation(marker, routeLocationRef.current)) return;
+      // Recovery owns both the transcript and request state on a cold reload.
+      cancelActiveConversationLoads();
       const controller = new AbortController();
       observeWith(marker.requestId, controller);
       beginWork(marker.requestId, recoveryState(marker, "accepted"));
@@ -604,6 +615,7 @@ export function EvryShell({
     },
     [
       beginWork,
+      cancelActiveConversationLoads,
       observeWith,
       pauseRecoveryForRoute,
       recoveryState,
@@ -647,15 +659,6 @@ export function EvryShell({
       }
     };
   }, [enabled, pauseRecoveryForRoute, recoverMarker, routeLocation]);
-
-  const cancelActiveConversationLoads = useCallback(() => {
-    conversationLoadStateRef.current = cancelEvryConversationLoads(
-      conversationLoadStateRef.current
-    );
-    setLoading(false);
-    setRequestedConversationId(null);
-    setError(null);
-  }, []);
 
   useEffect(() => {
     const previousPathname = previousPathnameRef.current;
