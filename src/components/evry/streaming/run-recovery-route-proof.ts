@@ -132,11 +132,19 @@ for (const operation of ["create", "continue"] as const) {
       ],
     };
     const posts: Array<{ url: string; body: unknown }> = [];
+    const recoveryReady = Promise.withResolvers<void>();
+    const transcriptReady = Promise.withResolvers<void>();
+    let transcriptLoads = 0;
     t.mock.method(
       globalThis,
       "fetch",
       async (url: Parameters<typeof fetch>[0], init?: RequestInit) => {
-        if (init?.method !== "POST")
+        if (String(url) === `/api/evry/conversations/${CONVERSATION_A_ID}`) {
+          transcriptLoads++;
+          return Response.json({ status: "available", conversation: saved });
+        }
+        if (init?.method !== "POST") {
+          await recoveryReady.promise;
           return Response.json({
             status: "interrupted",
             requestId: REQUEST_ID,
@@ -150,6 +158,7 @@ for (const operation of ["create", "continue"] as const) {
               savedMessageId: messageId,
             },
           });
+        }
         posts.push({ url: String(url), body: JSON.parse(String(init.body)) });
         const events = [
           {
@@ -218,6 +227,14 @@ for (const operation of ["create", "continue"] as const) {
     function Probe() {
       const current = useEvryShell();
       useEffect(() => {
+        if (operation === "continue")
+          void current
+            .loadConversation(CONVERSATION_A_ID)
+            .then(() => transcriptReady.resolve());
+        // A cold workspace starts its transcript read before the shell's recovery effect.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+      }, []);
+      useEffect(() => {
         shell = current;
       }, [current]);
       return null;
@@ -231,6 +248,10 @@ for (const operation of ["create", "continue"] as const) {
         })
       );
     });
+    assert.equal(transcriptLoads, operation === "continue" ? 1 : 0);
+    if (operation === "continue")
+      await act(async () => transcriptReady.promise);
+    await act(async () => recoveryReady.resolve());
     assert.ok(shell);
     assert.equal(posts.length, 0, "opening the chat does not start generation");
     assert.equal(shell.pendingMessage?.savedMessageId, messageId);
