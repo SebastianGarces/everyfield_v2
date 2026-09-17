@@ -49,6 +49,7 @@ export function ConversationHistoryWorkspace({
 }) {
   const {
     activeContext,
+    canSyncWorkspaceHistory,
     conversation,
     draft,
     error,
@@ -221,6 +222,7 @@ export function ConversationHistoryWorkspace({
   ]);
 
   useEffect(() => {
+    if (!canSyncWorkspaceHistory()) return;
     const decision = evryCreatedConversationSyncDecision({
       marker: createdConversationSyncMarkerRef.current,
       mountedConversationId: conversation?.id ?? null,
@@ -234,25 +236,31 @@ export function ConversationHistoryWorkspace({
     setRouteNewConversation(false);
 
     syncEvryWorkspaceConversationHistory(
-      window.history.state,
-      (state, unused, href) =>
-        window.History.prototype.replaceState.call(
-          window.history,
-          state,
-          unused,
-          href
-        ),
+      // Next skips route synchronization when passed its internal history state.
+      null,
+      (state, unused, href) => window.history.replaceState(state, unused, href),
       null,
       decision.conversationIdToSync,
       searchQuery
     );
-  }, [conversation?.id, routeConversationId, searchQuery]);
+  }, [
+    canSyncWorkspaceHistory,
+    conversation?.id,
+    routeConversationId,
+    searchQuery,
+  ]);
 
   useEffect(() => {
-    if (!historyNeedsRefreshRef.current || isSending || isWorking) return;
+    if (
+      !historyNeedsRefreshRef.current ||
+      isSending ||
+      isWorking ||
+      !canSyncWorkspaceHistory()
+    )
+      return;
     historyNeedsRefreshRef.current = false;
     startHistoryRefresh(() => router.refresh());
-  }, [conversation?.id, isSending, isWorking, router]);
+  }, [canSyncWorkspaceHistory, conversation?.id, isSending, isWorking, router]);
 
   function showConversationList(): void {
     if (blocked) return;
