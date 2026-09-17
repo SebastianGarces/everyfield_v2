@@ -10,11 +10,13 @@ import {
 } from "@/lib/evry/conversations/repository";
 import {
   resumeEvryConversation,
+  hasDurableEvryConversationResponse,
   type EvryResumedConversation,
 } from "@/lib/evry/conversations/service";
 
 import { evryActiveRunStore, type EvryActiveRunStore } from "./repository";
 import type { EvryRunRecoveryResponse } from "./wire";
+import { fingerprintEvryActiveRunRequest } from "./contract";
 
 export type EvryRunRecoveryBoundaries = Readonly<{
   runs: Pick<EvryActiveRunStore, "find">;
@@ -180,6 +182,57 @@ export async function recoverEvryActiveRun(input: {
     boundaries,
   });
   if (resumed) {
+    if (
+      (!run || (run.kind === "conversation" && run.operation !== "reuse")) &&
+      !hasDurableEvryConversationResponse({
+        conversation: resumed.conversation,
+        userRequestKey: requestKey,
+      })
+    ) {
+      const savedUser = resumed.conversation.messages.find(
+        (message) =>
+          message.requestKey === requestKey && message.author === "user"
+      );
+      let retry: Extract<
+        EvryRunRecoveryResponse,
+        { status: "interrupted" }
+      >["retry"] = null;
+      if (
+        run?.status === "failed" &&
+        (run.operation === "create" || run.operation === "continue") &&
+        savedUser &&
+        savedUser.requestPageContext !== undefined &&
+        !resumed.conversation.messages.some(
+          (message) =>
+            message.author === "user" && message.sequence > savedUser.sequence
+        )
+      ) {
+        const fingerprint = fingerprintEvryActiveRunRequest({
+          version: 1,
+          operation: run.operation,
+          ...(run.operation === "continue"
+            ? { conversationId: resumed.conversation.id }
+            : {}),
+          message: savedUser.body,
+          pageContext: savedUser.requestPageContext,
+        });
+        if (fingerprint === run.requestFingerprint)
+          retry = {
+            operation: run.operation,
+            message: savedUser.body,
+            pageContext: savedUser.requestPageContext,
+            savedMessageId: savedUser.id,
+          };
+      }
+      return {
+        status: "interrupted",
+        kind: "conversation",
+        requestId: requestKey,
+        sequence: (run?.version ?? 0) + 1,
+        conversation: publicEvryConversation(resumed),
+        retry,
+      };
+    }
     if (!run) {
       return {
         status: "durable",

@@ -321,6 +321,22 @@ function derivedClarificationRequestKey(
   );
 }
 
+/** Both model results and deterministic clarifications finish a saved turn. */
+export function hasDurableEvryConversationResponse(input: {
+  conversation: EvryStoredConversation;
+  userRequestKey: EvryConversationRequestKey;
+}): boolean {
+  if (hasDurableEvryCapabilityConversationResult(input)) return true;
+  const clarificationKey = derivedClarificationRequestKey(input.userRequestKey);
+  return input.conversation.messages.some(
+    (message) =>
+      message.requestKey === clarificationKey &&
+      message.author === "assistant" &&
+      message.deliveryStatus === "complete" &&
+      message.artifacts.some(({ kind }) => kind === "clarification")
+  );
+}
+
 export type EvryConversationContinuation =
   | Readonly<{
       status: "continued";

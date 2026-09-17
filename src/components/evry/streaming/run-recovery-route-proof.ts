@@ -3,6 +3,7 @@ import { mock, test } from "node:test";
 
 import {
   createElement,
+  useEffect,
   useMemo,
   useSyncExternalStore,
   type ReactNode,
@@ -76,6 +77,200 @@ function memoryStorage(): Storage {
     removeItem: (key) => void values.delete(key),
     setItem: (key, value) => void values.set(key, value),
   };
+}
+
+for (const operation of ["create", "continue"] as const) {
+  test(`${operation}: a reload restores the saved request and retries only after an explicit action`, async (t) => {
+    t.mock.method(console, "error", (...args: unknown[]) => {
+      if (!String(args[0]).includes("react-test-renderer is deprecated"))
+        process.stderr.write(`${args.join(" ")}\n`);
+    });
+    Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+    routeSnapshot = {
+      pathname: "/evry",
+      search:
+        operation === "create"
+          ? "?new=1"
+          : `?conversation=${CONVERSATION_A_ID}`,
+    };
+    const storage = memoryStorage();
+    const originalWindow = Object.getOwnPropertyDescriptor(
+      globalThis,
+      "window"
+    );
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { sessionStorage: storage },
+    });
+    t.after(() => {
+      routeListeners.clear();
+      if (originalWindow)
+        Object.defineProperty(globalThis, "window", originalWindow);
+      else Reflect.deleteProperty(globalThis, "window");
+    });
+    const messageId = "50000000-0000-4000-8000-000000000001";
+    const now = "2026-09-17T12:00:00.000Z";
+    const saved = {
+      id: CONVERSATION_A_ID,
+      title: "Saved request",
+      createdAt: now,
+      lastActivityAt: now,
+      activePlan: null,
+      stateVersion: 0,
+      state: {},
+      messages: [
+        {
+          id: messageId,
+          author: "user",
+          sequence: 0,
+          body: "Saved request",
+          pageContext: null,
+          deliveryStatus: "complete",
+          createdAt: now,
+          artifacts: [],
+        },
+      ],
+    };
+    const posts: Array<{ url: string; body: unknown }> = [];
+    t.mock.method(
+      globalThis,
+      "fetch",
+      async (url: Parameters<typeof fetch>[0], init?: RequestInit) => {
+        if (init?.method !== "POST")
+          return Response.json({
+            status: "interrupted",
+            requestId: REQUEST_ID,
+            sequence: 4,
+            kind: "conversation",
+            conversation: saved,
+            retry: {
+              operation,
+              message: "Saved request",
+              pageContext: null,
+              savedMessageId: messageId,
+            },
+          });
+        posts.push({ url: String(url), body: JSON.parse(String(init.body)) });
+        const events = [
+          {
+            type: "work",
+            requestId: REQUEST_ID,
+            sequence: 0,
+            phase: "reading",
+            code: "request_accepted",
+          },
+          {
+            type: "work",
+            requestId: REQUEST_ID,
+            sequence: 1,
+            phase: "planning",
+            code: "compiling_response",
+          },
+          ...(posts.length === 1
+            ? [
+                {
+                  type: "failure",
+                  requestId: REQUEST_ID,
+                  sequence: 2,
+                  code: "unavailable",
+                },
+              ]
+            : [
+                {
+                  type: "conversation",
+                  requestId: REQUEST_ID,
+                  sequence: 2,
+                  conversation: {
+                    ...saved,
+                    messages: [
+                      ...saved.messages,
+                      {
+                        ...saved.messages[0],
+                        id: "50000000-0000-4000-8000-000000000002",
+                        author: "assistant",
+                        sequence: 1,
+                        body: "Recovered answer",
+                      },
+                    ],
+                  },
+                },
+                { type: "complete", requestId: REQUEST_ID, sequence: 3 },
+              ]),
+        ];
+        return new Response(
+          events.map((event) => JSON.stringify(event)).join("\n") + "\n",
+          { headers: { "content-type": "application/x-ndjson" } }
+        );
+      }
+    );
+    const { EvryShell, useEvryShell } =
+      await import("@/components/evry/evry-shell");
+    const { writeEvryRunRecoveryMarker } = await import("./run-recovery");
+    writeEvryRunRecoveryMarker(
+      {
+        requestId: REQUEST_ID,
+        kind: "conversation",
+        conversationId: operation === "create" ? null : CONVERSATION_A_ID,
+      },
+      storage
+    );
+    let shell: ReturnType<typeof useEvryShell> | undefined;
+    function Probe() {
+      const current = useEvryShell();
+      useEffect(() => {
+        shell = current;
+      }, [current]);
+      return null;
+    }
+    let mounted: ReactTestRenderer | undefined;
+    await act(async () => {
+      mounted = create(
+        createElement(EvryShell, {
+          enabled: true,
+          children: createElement(Probe),
+        })
+      );
+    });
+    assert.ok(shell);
+    assert.equal(posts.length, 0, "opening the chat does not start generation");
+    assert.equal(shell.pendingMessage?.savedMessageId, messageId);
+    assert.equal(shell.isWorking, false);
+    assert.ok(
+      !storage.getItem("evry.active-run.v1")!.includes("Saved request"),
+      "storage contains only identity, not message text"
+    );
+    const unregister = shell.acknowledgeConversationMounted(CONVERSATION_A_ID);
+    await act(async () => {
+      await shell!.sendMessageText("Saved request");
+    });
+    assert.equal(
+      shell.pendingMessage?.savedMessageId,
+      messageId,
+      "a second interruption retains Retry without duplicating the saved message"
+    );
+    assert.equal(storage.length, 1);
+    await act(async () => {
+      await shell!.sendMessageText("Saved request");
+    });
+    assert.equal(posts.length, 2);
+    assert.deepEqual(posts[0], {
+      url:
+        operation === "create"
+          ? "/api/evry/conversations"
+          : `/api/evry/conversations/${CONVERSATION_A_ID}/messages`,
+      body: {
+        requestKey: REQUEST_ID,
+        message: "Saved request",
+        pageContext: null,
+      },
+    });
+    assert.deepEqual(posts[1], posts[0]);
+    assert.equal(shell.pendingMessage, null);
+    assert.equal(shell.conversation?.messages.length, 2);
+    assert.equal(storage.length, 0);
+    unregister();
+    await act(async () => mounted?.unmount());
+  });
 }
 
 test("navigation pauses one observation, rejects its stale completion, and reconnects on return", async (t) => {

@@ -290,10 +290,12 @@ export function ConversationSurface({ className }: { className?: string }) {
                   : "Sending message"
               }
             >
-              <p className="bg-primary text-primary-foreground max-w-[92%] rounded-xl px-3.5 py-2.5 text-sm leading-relaxed [overflow-wrap:anywhere] whitespace-pre-wrap sm:max-w-[88%]">
-                <span className="sr-only">You: </span>
-                {pendingMessage.body}
-              </p>
+              {!pendingMessage.savedMessageId ? (
+                <p className="bg-primary text-primary-foreground max-w-[92%] rounded-xl px-3.5 py-2.5 text-sm leading-relaxed [overflow-wrap:anywhere] whitespace-pre-wrap sm:max-w-[88%]">
+                  <span className="sr-only">You: </span>
+                  {pendingMessage.body}
+                </p>
+              ) : null}
               {pendingMessage.status === "failed" ? (
                 <div className="flex items-center gap-2">
                   <span className="text-muted-foreground text-sm">

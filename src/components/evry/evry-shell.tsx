@@ -53,7 +53,6 @@ import { visibleEvryInsightHandoff } from "./insight-handoff";
 import { evryWorkStateForConversation } from "./streaming/conversation-state";
 import type { EvryAcknowledgementTarget } from "./streaming/work-status";
 import {
-  EvryConversationStreamFailure,
   evryWorkStateForStreamEvent,
   readEvryConversationStream,
   type EvryConversationStreamEvent,
@@ -103,6 +102,7 @@ type EvryShellValue = Readonly<{
     body: string;
     status: "sending" | "failed";
     requestId: string;
+    savedMessageId?: string;
   }> | null;
   discardPendingMessage: () => void;
   error: string | null;
@@ -500,6 +500,57 @@ export function EvryShell({
             recovered.conversation
           );
           clearEvryRunRecoveryMarker(marker.requestId);
+          setDetachedRequestId(null);
+          return;
+        }
+        if (recovered.status === "interrupted") {
+          bindEvryRunRecoveryConversation(
+            marker.requestId,
+            recovered.conversation.id
+          );
+          const message = recovered.retry
+            ? "Evry couldn't finish this response. Try again."
+            : "Evry couldn't finish this response. You can send a new message.";
+          if (
+            !settleWork(marker.requestId, recovered.sequence, {
+              phase: "failed",
+              message,
+            })
+          )
+            return;
+          setConversation(recovered.conversation);
+          setStreamingResponse(null);
+          const retry = recovered.retry;
+          pendingSubmissionRef.current = retry
+            ? {
+                requestKey: marker.requestId,
+                message: retry.message,
+                pageContext: retry.pageContext,
+                conversationId:
+                  retry.operation === "create"
+                    ? null
+                    : recovered.conversation.id,
+                target:
+                  retry.operation === "create"
+                    ? { kind: "create" }
+                    : {
+                        kind: "continue",
+                        conversationId: recovered.conversation.id,
+                      },
+                presentedConversationId: recovered.conversation.id,
+              }
+            : null;
+          setPendingMessage(
+            retry
+              ? {
+                  body: retry.message,
+                  status: "failed",
+                  requestId: marker.requestId,
+                  savedMessageId: retry.savedMessageId,
+                }
+              : null
+          );
+          setError(message);
           setDetachedRequestId(null);
           return;
         }
@@ -1279,26 +1330,25 @@ export function EvryShell({
         throw new Error("Evry response did not complete.");
       }
       clearEvryRunRecoveryMarker(pendingSubmission.requestKey);
-    } catch (cause) {
+    } catch {
       if (
         controller.signal.aborted &&
         intentionallyDetachedRef.current.has(pendingSubmission.requestKey)
       ) {
         return;
       }
-      if (
-        cause instanceof EvryConversationStreamFailure &&
-        !cause.durableConversationSeen
-      ) {
-        clearEvryRunRecoveryMarker(pendingSubmission.requestKey);
-      }
+      // A failed stream can still have saved the request. Keep its ID for a
+      // read-only reconnect; only a completed reply or dismissal clears it.
       const failure = "Evry couldn't finish this response. Try again.";
       if (draftRef.current.length === 0) setDraft(message);
-      if (!messageSaved)
+      if (!messageSaved || pendingMessage?.savedMessageId)
         setPendingMessage({
           body: message,
           status: "failed",
           requestId: pendingSubmission.requestKey,
+          ...(pendingMessage?.savedMessageId
+            ? { savedMessageId: pendingMessage.savedMessageId }
+            : {}),
         });
       setError(failure);
       const failureSequence =
@@ -1604,7 +1654,13 @@ export function EvryShell({
       conversation,
       draft,
       pendingMessage,
-      discardPendingMessage: () => setPendingMessage(null),
+      discardPendingMessage: () => {
+        if (pendingMessage)
+          clearEvryRunRecoveryMarker(pendingMessage.requestId);
+        pendingSubmissionRef.current = null;
+        setPendingMessage(null);
+        setError(null);
+      },
       error,
       expandToWorkspace,
       finishWork,
