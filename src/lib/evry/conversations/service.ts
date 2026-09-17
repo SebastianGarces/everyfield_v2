@@ -54,6 +54,7 @@ import {
   appendEvryConversationRecord,
   createEvryConversationRecord,
   EvryConversationIdempotencyError,
+  EvryConversationStateConflictError,
   findEvryConversationRecord,
   type EvryStoredConversation,
 } from "./repository";
@@ -191,6 +192,26 @@ export async function createEvryConversation(input: {
     requestPageContext: input.requestPageContext,
     createdAt: input.now,
   });
+  if (
+    !hasDurableEvryCapabilityConversationResult({
+      conversation,
+      userRequestKey: requestKey,
+    })
+  ) {
+    const savedUser = conversation.messages.find(
+      (message) =>
+        message.author === "user" && message.requestKey === requestKey
+    );
+    if (
+      !savedUser ||
+      conversation.messages.some(
+        (message) =>
+          message.author === "user" && message.sequence > savedUser.sequence
+      ) ||
+      !sameRequestPageContext(savedUser.pageContext, input.pageContext)
+    )
+      throw new EvryConversationStateConflictError();
+  }
   await input.reportStage?.("compiling_response");
   const continued = await (
     input.continueCapabilityConversation ??
@@ -467,9 +488,32 @@ export async function continueEvryConversation(
       : null;
   }
 
+  const savedUser = current.messages.find(
+    (message) =>
+      message.requestKey === requestKey.data && message.author === "user"
+  );
+  if (savedUser) {
+    assertDurableCapabilityReplayRequest({
+      conversation: current,
+      requestKey: requestKey.data,
+      message: input.message,
+      requestPageContext: input.requestPageContext,
+    });
+    // A retry can finish the last request, not reinterpret it through later turns.
+    if (
+      current.messages.some(
+        (message) =>
+          message.author === "user" && message.sequence > savedUser.sequence
+      )
+    )
+      throw new EvryConversationStateConflictError();
+  }
+
   const pageContext = input.resolvePageContext
     ? await input.resolvePageContext()
     : (input.pageContext ?? null);
+  if (savedUser && !sameRequestPageContext(savedUser.pageContext, pageContext))
+    throw new EvryConversationStateConflictError();
 
   await input.reportStage?.("resolving_references");
   const capabilityContinuation =
@@ -487,13 +531,44 @@ export async function continueEvryConversation(
       requestPageContext: input.requestPageContext,
       now: input.now,
     });
-  const reference = matchesBeforeReferences
-    ? ({ status: "not_applicable" } as const)
-    : (input.resolveReference ?? resolveEvryConversationReference)({
-        text: input.message,
-        state: current.state,
-        now: input.now,
-      });
+  const savedReference = savedUser?.replayReference
+    ? evryConversationReplayReferenceSchema.parse(savedUser.replayReference)
+    : null;
+  const reference =
+    savedReference?.status === "resolved"
+      ? (input.resolveReference ?? resolveEvryConversationReference)({
+          text: input.message,
+          // Keep the original identity; expiry is checked again, and capability
+          // readers still authorize current records before returning any data.
+          state: {
+            ...current.state,
+            resolvedReferences: [savedReference.reference],
+            explicitChoices: [],
+          },
+          now: input.now,
+        })
+      : savedReference?.status === "not_applicable" || matchesBeforeReferences
+        ? ({ status: "not_applicable" } as const)
+        : (input.resolveReference ?? resolveEvryConversationReference)({
+            text: input.message,
+            state: current.state,
+            now: input.now,
+          });
+  if (
+    savedReference?.status === "resolved" &&
+    reference.status === "resolved"
+  ) {
+    const currentReference = (
+      input.resolveReference ?? resolveEvryConversationReference
+    )({ text: input.message, state: current.state, now: input.now });
+    if (
+      currentReference.status !== "resolved" ||
+      currentReference.reference.entityType !==
+        savedReference.reference.entityType ||
+      currentReference.reference.entityId !== savedReference.reference.entityId
+    )
+      throw new EvryConversationStateConflictError();
+  }
   const relevanceKeys =
     reference.status === "resolved" ? reference.relevanceKeys : [];
   const idempotencyContext: EvryConversationMessageIdempotencyContext =
@@ -517,27 +592,29 @@ export async function continueEvryConversation(
       : reference.status === "not_applicable"
         ? { status: "not_applicable" }
         : null;
-  let appended = await appendTrustedEvryConversationMessage({
-    messageId: evryConversationMessageIdSchema.parse(randomUUID()),
-    actor: input.actor,
-    conversationId: conversationId.data,
-    requestKey: requestKey.data,
-    expectedStateVersion: current.stateVersion,
-    state: current.state,
-    author: "user",
-    body: input.message,
-    pageContext,
-    requestPageContext: input.requestPageContext,
-    relevanceKeys,
-    deliveryStatus: "complete",
-    artifacts: [],
-    idempotencyContext,
-    replayReference,
-    activePlan: { mode: "preserve" },
-    now: input.now,
-    store,
-    knownConversation: current,
-  });
+  let appended = savedUser
+    ? current
+    : await appendTrustedEvryConversationMessage({
+        messageId: evryConversationMessageIdSchema.parse(randomUUID()),
+        actor: input.actor,
+        conversationId: conversationId.data,
+        requestKey: requestKey.data,
+        expectedStateVersion: current.stateVersion,
+        state: current.state,
+        author: "user",
+        body: input.message,
+        pageContext,
+        requestPageContext: input.requestPageContext,
+        relevanceKeys,
+        deliveryStatus: "complete",
+        artifacts: [],
+        idempotencyContext,
+        replayReference,
+        activePlan: { mode: "preserve" },
+        now: input.now,
+        store,
+        knownConversation: current,
+      });
 
   if (reference.status === "clarification") {
     appended = await appendTrustedEvryConversationMessage({

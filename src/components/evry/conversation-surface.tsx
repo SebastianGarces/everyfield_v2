@@ -286,7 +286,7 @@ export function ConversationSurface({ className }: { className?: string }) {
               className="mt-4 flex flex-col items-end gap-2"
               aria-label={
                 pendingMessage.status === "failed"
-                  ? "Unsent message"
+                  ? "Interrupted request"
                   : "Sending message"
               }
             >
@@ -297,7 +297,7 @@ export function ConversationSurface({ className }: { className?: string }) {
               {pendingMessage.status === "failed" ? (
                 <div className="flex items-center gap-2">
                   <span className="text-muted-foreground text-sm">
-                    Not sent
+                    Response interrupted
                   </span>
                   <Button
                     type="button"
@@ -319,7 +319,7 @@ export function ConversationSurface({ className }: { className?: string }) {
                       discardPendingMessage();
                     }}
                   >
-                    Discard
+                    Dismiss
                   </Button>
                 </div>
               ) : null}

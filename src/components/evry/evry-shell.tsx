@@ -1292,8 +1292,7 @@ export function EvryShell({
       ) {
         clearEvryRunRecoveryMarker(pendingSubmission.requestKey);
       }
-      const failure =
-        "Unable to save your request. Check your connection and try again.";
+      const failure = "Evry couldn't finish this response. Try again.";
       if (draftRef.current.length === 0) setDraft(message);
       if (!messageSaved)
         setPendingMessage({
