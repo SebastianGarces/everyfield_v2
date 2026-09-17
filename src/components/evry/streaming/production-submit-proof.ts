@@ -418,10 +418,7 @@ test("the real composer commits a request-keyed acknowledgement before its POST 
   assert.equal(composerIsBusy(), false);
   assert.equal(workSnapshots.at(-1), false);
   assert.equal(
-    renderedText(
-      mounted,
-      "Unable to save your request. Check your connection and try again."
-    ),
+    renderedText(mounted, "Evry couldn't finish this response. Try again."),
     true
   );
   assert.equal(textarea.props.value, "Find people to follow up");
@@ -591,7 +588,7 @@ test("the real composer commits a request-keyed acknowledgement before its POST 
   assert.equal(renderedText(mounted, "Taylor Adams"), true);
   assert.equal(
     mounted.root
-      .findByProps({ "aria-label": "Unsent message" })
+      .findByProps({ "aria-label": "Interrupted request" })
       .findAllByType("p").length,
     1
   );
@@ -636,14 +633,14 @@ test("the real composer commits a request-keyed acknowledgement before its POST 
   }
   const discard = mounted.root
     .findAllByType("button")
-    .find((node) => node.children.includes("Discard"));
+    .find((node) => node.children.includes("Dismiss"));
   assert.ok(discard);
   await act(() => {
     discard.props.onClick();
   });
   assert.equal(activeElement, textarea.instance);
   assert.equal(
-    mounted.root.findAllByProps({ "aria-label": "Unsent message" }).length,
+    mounted.root.findAllByProps({ "aria-label": "Interrupted request" }).length,
     0
   );
   assert.equal(textarea.props.value, "Show me meetings");

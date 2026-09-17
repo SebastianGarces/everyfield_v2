@@ -99,6 +99,43 @@ export async function claimEvryActiveRun(input: {
   ) {
     throw new EvryActiveRunIdentityError();
   }
+  // An explicit same-request POST may retry a failed generation. Never
+  // restart a live owner, completed response, execution, or recipe reuse.
+  // The failed version is the arbiter when two Retry presses arrive together.
+  if (
+    existing.status === "failed" &&
+    existing.kind === "conversation" &&
+    (existing.operation === "create" || existing.operation === "continue")
+  ) {
+    const [retried] = await db
+      .update(evryActiveRuns)
+      .set({
+        status: "active",
+        stage: "accepted",
+        conversationId: input.identity.conversationId,
+        startedAt: input.startedAt,
+        changedAt: input.startedAt,
+        expiresAt: new Date(input.startedAt.valueOf() + EVRY_ACTIVE_RUN_TTL_MS),
+        completedAt: null,
+        version: sql`${evryActiveRuns.version} + 1`,
+      })
+      .where(
+        and(
+          eq(evryActiveRuns.id, existing.id),
+          eq(evryActiveRuns.churchId, input.actor.plantId),
+          eq(evryActiveRuns.actorUserId, input.actor.userId),
+          eq(evryActiveRuns.requestFingerprint, input.requestFingerprint),
+          eq(evryActiveRuns.status, "failed"),
+          eq(evryActiveRuns.version, existing.version)
+        )
+      )
+      .returning();
+    if (retried)
+      return { ownership: "claimed", run: parseEvryActiveRunRecord(retried) };
+    const winner = await findEvryActiveRun(input);
+    if (!winner) throw new EvryActiveRunIdentityError();
+    return { ownership: "adopted", run: winner };
+  }
   return { ownership: "adopted", run: existing };
 }
 
