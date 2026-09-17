@@ -54,10 +54,10 @@ export function evryWorkspaceConversationHref(
   return `/evry?${params.toString()}`;
 }
 
-/** Attach a newly created conversation without dispatching an App Router transition. */
+/** Attach a created conversation through Next's patched history, without a page fetch. */
 export function syncEvryWorkspaceConversationHistory(
   historyState: unknown,
-  nativeReplaceState: (
+  replaceState: (
     data: unknown,
     unused: string,
     url?: string | URL | null
@@ -73,7 +73,7 @@ export function syncEvryWorkspaceConversationHistory(
   );
   if (href === null) return false;
 
-  nativeReplaceState(historyState, "", href);
+  replaceState(historyState, "", href);
   return true;
 }
 

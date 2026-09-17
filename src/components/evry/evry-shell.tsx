@@ -94,6 +94,7 @@ type EvryShellValue = Readonly<{
   ) => boolean;
   beginWork: (requestId: string, state: EvryWorkState) => void;
   canStopWatching: boolean;
+  canSyncWorkspaceHistory: () => boolean;
   clearContext: () => void;
   closePanel: () => void;
   conversation: PublicEvryConversation | null;
@@ -245,6 +246,7 @@ export function EvryShell({
     search: string;
   }> | null>(null);
   const navigationHrefFenceRef = useRef<(href: string) => void>(() => {});
+  const workspaceNavigationPendingRef = useRef(false);
   const mountedConversationIdRef = useRef<string | null>(null);
   const conversationMountOwnerRef = useRef<symbol | null>(null);
   const sequencedWorkRef = useRef<EvrySequencedWorkState | null>(null);
@@ -264,6 +266,15 @@ export function EvryShell({
   );
   const routeLocationRef = useRef(routeLocation);
   routeLocationRef.current = routeLocation;
+  const canSyncWorkspaceHistory = useCallback(
+    () =>
+      routeLocationRef.current.pathname === "/evry" &&
+      !workspaceNavigationPendingRef.current,
+    []
+  );
+  useEffect(() => {
+    workspaceNavigationPendingRef.current = false;
+  }, [routeLocation]);
   const draftRef = useRef(draft);
   const messageOverrideRef = useRef<string | null>(null);
   const isWorking =
@@ -713,6 +724,7 @@ export function EvryShell({
 
   const returnToPage = useCallback(() => {
     if (expandedFromPanel) {
+      workspaceNavigationPendingRef.current = true;
       cancelActiveConversationLoads();
       setExpandedFromPanel(false);
       setPanelOpen(true);
@@ -736,6 +748,9 @@ export function EvryShell({
   );
 
   const fenceRecipeReuseForNavigationIntent = useCallback(() => {
+    if (routeLocationRef.current.pathname === "/evry") {
+      workspaceNavigationPendingRef.current = true;
+    }
     const marker = pendingRecipeReuseRef.current;
     if (!marker) return;
     pendingRouteDepartureRef.current = marker.sourceLocation;
@@ -749,14 +764,14 @@ export function EvryShell({
   const fenceRecipeReuseForHref = useCallback(
     (href: string) => {
       const marker = pendingRecipeReuseRef.current;
-      if (!marker) return;
+      const sourceLocation = marker?.sourceLocation ?? routeLocationRef.current;
       const origin =
         typeof window.location?.origin === "string"
           ? window.location.origin
           : "https://everyfield.invalid";
       try {
         const source = new URL(
-          `${marker.sourceLocation.pathname}${marker.sourceLocation.search}`,
+          `${sourceLocation.pathname}${sourceLocation.search}`,
           origin
         );
         const destination = new URL(href, source);
@@ -781,8 +796,14 @@ export function EvryShell({
 
   const navigationRouter = useMemo<AppRouterInstance>(
     () => ({
-      back: router.back,
-      forward: router.forward,
+      back: () => {
+        fenceRecipeReuseForNavigationIntent();
+        router.back();
+      },
+      forward: () => {
+        fenceRecipeReuseForNavigationIntent();
+        router.forward();
+      },
       refresh: router.refresh,
       prefetch: router.prefetch,
       bfcacheId: router.bfcacheId,
@@ -801,7 +822,12 @@ export function EvryShell({
           }
         : undefined,
     }),
-    [fenceRecipeReuseForHref, replaceRoute, router]
+    [
+      fenceRecipeReuseForHref,
+      fenceRecipeReuseForNavigationIntent,
+      replaceRoute,
+      router,
+    ]
   );
 
   useEffect(() => {
@@ -1649,6 +1675,7 @@ export function EvryShell({
       canStopWatching:
         observedRequestId !== null &&
         observedRequestId === pendingWorkRequestId,
+      canSyncWorkspaceHistory,
       clearContext,
       closePanel,
       conversation,
@@ -1700,6 +1727,7 @@ export function EvryShell({
       acknowledgeConversationMounted,
       applyWorkConversation,
       beginWork,
+      canSyncWorkspaceHistory,
       clearContext,
       closePanel,
       conversation,

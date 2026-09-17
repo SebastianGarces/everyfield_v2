@@ -304,6 +304,15 @@ test("real shell state survives stale route remounts for first and repeated New 
   const listeners = new Map<string, Set<() => void>>();
   const mockHistory = {
     state: null,
+    replaceState(state: unknown, _unused: string, href?: string | URL | null) {
+      assert.equal(
+        state,
+        null,
+        "Next's history patch must receive no internal bypass flags"
+      );
+      replacedHref = href === undefined || href === null ? null : String(href);
+      location.search = new URL(String(href), "http://localhost").search;
+    },
     pushState(_state: unknown, _unused: string, href?: string | URL | null) {
       const nextHref = href === undefined || href === null ? "" : String(href);
       pushedHrefs.push(nextHref);
@@ -358,6 +367,7 @@ test("real shell state survives stale route remounts for first and repeated New 
   });
   let conversationLoads = 0;
   let conversationCreates = 0;
+  let blockedCreation: Promise<void> | null = null;
   const unavailableConversationId = "30000000-0000-4000-8000-000000000099";
   const secondLoad = Promise.withResolvers<void>();
   t.mock.method(
@@ -379,6 +389,7 @@ test("real shell state survives stale route remounts for first and repeated New 
       }
       if (url.endsWith("/api/evry/conversations") && init?.method === "POST") {
         conversationCreates += 1;
+        if (blockedCreation) await blockedCreation;
         const body = JSON.parse(String(init.body)) as { requestKey: string };
         const created =
           conversationCreates === 1
@@ -402,10 +413,12 @@ test("real shell state survives stale route remounts for first and repeated New 
     { EvryShell },
     { ConversationSurface },
     { ConversationHistoryWorkspace },
+    { AuthenticatedLink },
   ] = await Promise.all([
     import("@/components/evry/evry-shell"),
     import("@/components/evry/conversation-surface"),
     import("./conversation-history-workspace"),
+    import("@/components/authenticated-navigation"),
   ]);
   const documentTree = (
     key: string,
@@ -415,12 +428,20 @@ test("real shell state survives stale route remounts for first and repeated New 
     createElement(EvryShell, {
       key,
       enabled: true,
-      children: createElement(RemountingRoute, {
-        Surface: ConversationSurface,
-        Workspace: ConversationHistoryWorkspace,
-        initialConversationId: conversationId,
-        initialNewConversation: newConversation,
-      }),
+      children: [
+        createElement(AuthenticatedLink, {
+          key: "departure",
+          href: "/people",
+          children: "Leave for People",
+        }),
+        createElement(RemountingRoute, {
+          key: "route",
+          Surface: ConversationSurface,
+          Workspace: ConversationHistoryWorkspace,
+          initialConversationId: conversationId,
+          initialNewConversation: newConversation,
+        }),
+      ],
     });
   let renderer: ReactTestRenderer | null = null;
   await act(async () => {
@@ -648,6 +669,34 @@ test("real shell state survives stale route remounts for first and repeated New 
     false
   );
   assert.equal(renderedText(mountedRenderer, "New conversation"), true);
+
+  const releaseCreation = Promise.withResolvers<void>();
+  blockedCreation = releaseCreation.promise;
+  const replacementsBeforeDeparture = replacedHref;
+  const refreshesBeforeDeparture = route.refreshes;
+  await act(async () => {
+    composerForm(mountedRenderer).props.onSubmit({ preventDefault() {} });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+  await act(async () => {
+    const departure = mountedRenderer.root.find(
+      (node) => node.type === "a" && node.props.href === "/people"
+    );
+    departure.props.onNavigate({ preventDefault() {} });
+    // Hold the destination pending while the saved conversation arrives.
+    releaseCreation.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+  assert.equal(
+    replacedHref,
+    replacementsBeforeDeparture,
+    "late conversation cannot cancel a pending sidebar navigation with ACTION_RESTORE"
+  );
+  assert.equal(
+    route.refreshes,
+    refreshesBeforeDeparture,
+    "late conversation cannot refresh the departing route"
+  );
 
   await act(async () => mountedRenderer.unmount());
 });

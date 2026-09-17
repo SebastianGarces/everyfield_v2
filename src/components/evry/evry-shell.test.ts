@@ -144,7 +144,7 @@ test("New keeps modifier navigation and uses a shallow current-tab transition", 
 test("workspace URL sync cannot compete with App Router navigation and loads use the latest-attempt gate", () => {
   assert.match(
     historyWorkspace,
-    /syncEvryWorkspaceConversationHistory\([\s\S]*window\.history\.state,[\s\S]*window\.History\.prototype\.replaceState\.call\([\s\S]*window\.history,[\s\S]*null,[\s\S]*decision\.conversationIdToSync/
+    /if \(!canSyncWorkspaceHistory\(\)\) return;[\s\S]*syncEvryWorkspaceConversationHistory\([\s\S]*null,[\s\S]*window\.history\.replaceState\(state, unused, href\)[\s\S]*decision\.conversationIdToSync/
   );
   assert.doesNotMatch(workspace, /useRouter|router\.replace|router\.push/);
   assert.doesNotMatch(workspace, /loadConversation/);
@@ -155,7 +155,7 @@ test("workspace URL sync cannot compete with App Router navigation and loads use
   );
   assert.match(
     historyWorkspace,
-    /\}, \[conversation\?\.id, routeConversationId, searchQuery\]\);/
+    /canSyncWorkspaceHistory,[\s\S]*conversation\?\.id,[\s\S]*routeConversationId,[\s\S]*searchQuery/
   );
   assert.match(
     historyWorkspace,
@@ -217,7 +217,7 @@ test("the mounted workspace owns query sync and send preserves in-flight edits",
     interaction,
     /urlConversationId !== null \|\| mountedConversationId === null[\s\S]*params\.set\("conversation", mountedConversationId\)/
   );
-  assert.match(interaction, /nativeReplaceState\(historyState, "", href\)/);
+  assert.match(interaction, /replaceState\(historyState, "", href\)/);
   assert.match(
     interaction,
     /currentDraft === submittedDraft \? "" : currentDraft/
@@ -394,9 +394,7 @@ test("conversation writes authenticate first and continuation replay precedes co
   const resolution = conversationService.indexOf(
     "const pageContext = input.resolvePageContext"
   );
-  const persistence = conversationService.indexOf(
-    "let appended = await appendTrustedEvryConversationMessage"
-  );
+  const persistence = conversationService.indexOf("let appended = savedUser");
   assert.ok(
     replayCheck >= 0 && resolution > replayCheck && persistence > resolution
   );

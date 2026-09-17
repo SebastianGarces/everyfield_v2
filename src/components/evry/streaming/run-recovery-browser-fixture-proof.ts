@@ -114,13 +114,17 @@ test("the fixture writes the production marker, performs a full reload, and then
 
   let completed = false;
   const calls: Array<Readonly<{ url: string; body: unknown }>> = [];
+  const completedRequest = Promise.withResolvers<void>();
   t.mock.method(
     globalThis,
     "fetch",
     async (input: string | URL | Request, init?: RequestInit) => {
       const body = init?.body ? JSON.parse(String(init.body)) : null;
       calls.push({ url: String(input), body });
-      if (body?.action === "complete") completed = true;
+      if (body?.action === "complete") {
+        completed = true;
+        completedRequest.resolve();
+      }
       return response(completed);
     }
   );
@@ -162,9 +166,9 @@ test("the fixture writes the production marker, performs a full reload, and then
 
   await act(async () => {
     renderer = create(createElement(EvryRunRecoveryBrowserFixture));
-    for (let count = 0; count < 8; count++) {
-      await new Promise((resolve) => globalThis.setTimeout(resolve, 0));
-    }
+  });
+  await act(async () => {
+    await completedRequest.promise;
   });
   assert.equal(
     calls.some(({ body }) =>
