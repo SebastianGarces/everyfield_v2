@@ -8,9 +8,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { taskCategories, taskPriorities, taskStatuses } from "@/db/schema";
+import {
+  taskCategories,
+  taskPriorities,
+  taskStatuses,
+  type TaskCategory,
+  type TaskPriority,
+  type TaskStatus,
+} from "@/db/schema";
 import {
   TASK_LIST_VIEWS,
+  parseTaskListQuery,
   taskListParamsCleared,
   taskListParamsWith,
   type TaskListParamKey,
@@ -19,20 +27,20 @@ import {
 import { cn } from "@/lib/utils";
 import { X } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useCallback } from "react";
+import { useTaskFilterNavigation } from "./use-task-filter-navigation";
 
 // ============================================================================
 // Config
 // ============================================================================
 
-const STATUS_LABELS: Record<string, string> = {
+const STATUS_LABELS: Record<TaskStatus, string> = {
   not_started: "Not Started",
   in_progress: "In Progress",
   blocked: "Blocked",
   complete: "Complete",
 };
 
-const PRIORITY_LABELS: Record<string, string> = {
+const PRIORITY_LABELS: Record<TaskPriority, string> = {
   urgent: "Urgent",
   high: "High",
   medium: "Medium",
@@ -54,7 +62,7 @@ const VIEW_LABELS: Record<TaskListView, string> = {
   assignments: "Assignments",
 };
 
-const CATEGORY_LABELS: Record<string, string> = {
+const CATEGORY_LABELS: Record<TaskCategory, string> = {
   vision_meeting: "Vision Meeting",
   follow_up: "Follow-up",
   training: "Training",
@@ -71,40 +79,33 @@ const CATEGORY_LABELS: Record<string, string> = {
 // Component
 // ============================================================================
 
-interface TaskFiltersProps {
-  currentView: TaskListView;
-  showCompleted: boolean;
-}
-
-export function TaskFilters({ currentView, showCompleted }: TaskFiltersProps) {
+export function TaskFilters() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
-  // Both writers live with the parser that reads them back (#660). The key is
-  // TYPED, so a misspelling is a compile error rather than a parameter the page
-  // silently ignores. Each select below still maps its own "All" OPTION to
-  // `null`, which is where that sentinel belongs.
-  const updateParam = useCallback(
-    (key: TaskListParamKey, value: string | null) => {
-      const params = taskListParamsWith(searchParams.toString(), key, value);
-      router.push(`${pathname}?${params.toString()}`);
-    },
-    [router, pathname, searchParams]
+  const { query, navigate } = useTaskFilterNavigation(
+    searchParams.toString(),
+    (destination) => {
+      router.push(destination ? `${pathname}?${destination}` : pathname);
+    }
   );
-
-  const currentStatus = searchParams.get("status") ?? "";
-  const currentPriority = searchParams.get("priority") ?? "";
-  const currentCategory = searchParams.get("category") ?? "";
-  const hasFilters = currentStatus || currentPriority || currentCategory;
-
-  function clearFilters() {
-    // Which params are a VIEW of the list and which are a FILTER on it is one
-    // fact, and it lives with the parser — a private copy here is how the next
-    // param added would vanish on Clear with nothing failing.
-    const params = taskListParamsCleared(searchParams.toString());
-    router.push(`${pathname}?${params.toString()}`);
-  }
+  const selected = parseTaskListQuery(query);
+  const currentStatus = selected.status ?? [];
+  const currentPriority = selected.priority ?? [];
+  const currentCategory = selected.category ?? [];
+  const hasFilters =
+    currentStatus.length > 0 ||
+    currentPriority.length > 0 ||
+    currentCategory.length > 0 ||
+    selected.dueDateFrom ||
+    selected.dueDateTo ||
+    selected.search ||
+    selected.assignedToId;
+  const updateParam = (key: TaskListParamKey, value: string | null) =>
+    navigate((current) => taskListParamsWith(current, key, value).toString());
+  const clearFilters = () =>
+    navigate((current) => taskListParamsCleared(current).toString());
 
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -119,7 +120,7 @@ export function TaskFilters({ currentView, showCompleted }: TaskFiltersProps) {
             key={view}
             className={cn(
               "cursor-pointer px-3 py-1.5 text-xs font-medium transition-colors",
-              currentView === view
+              selected.view === view
                 ? "bg-primary text-primary-foreground"
                 : "hover:bg-muted"
             )}
@@ -134,11 +135,13 @@ export function TaskFilters({ currentView, showCompleted }: TaskFiltersProps) {
       <button
         className={cn(
           "cursor-pointer rounded-md border px-3 py-1.5 text-xs font-medium transition-colors",
-          showCompleted
+          selected.showCompleted
             ? "bg-primary text-primary-foreground"
             : "hover:bg-muted"
         )}
-        onClick={() => updateParam("completed", showCompleted ? null : "true")}
+        onClick={() =>
+          updateParam("completed", selected.showCompleted ? null : "true")
+        }
       >
         Show Completed
       </button>
@@ -147,7 +150,9 @@ export function TaskFilters({ currentView, showCompleted }: TaskFiltersProps) {
 
       {/* Status filter */}
       <Select
-        value={currentStatus || "all"}
+        value={
+          currentStatus.length > 1 ? "multiple" : (currentStatus[0] ?? "all")
+        }
         onValueChange={(v) => updateParam("status", v === "all" ? null : v)}
       >
         <SelectTrigger
@@ -160,19 +165,26 @@ export function TaskFilters({ currentView, showCompleted }: TaskFiltersProps) {
           <SelectItem value="all" className="cursor-pointer">
             All Statuses
           </SelectItem>
-          {taskStatuses
-            .filter((s) => s !== "complete")
-            .map((s) => (
-              <SelectItem key={s} value={s} className="cursor-pointer">
-                {STATUS_LABELS[s] ?? s}
-              </SelectItem>
-            ))}
+          {currentStatus.length > 1 && (
+            <SelectItem value="multiple" disabled>
+              {currentStatus.map((value) => STATUS_LABELS[value]).join(", ")}
+            </SelectItem>
+          )}
+          {taskStatuses.map((s) => (
+            <SelectItem key={s} value={s} className="cursor-pointer">
+              {STATUS_LABELS[s]}
+            </SelectItem>
+          ))}
         </SelectContent>
       </Select>
 
       {/* Priority filter */}
       <Select
-        value={currentPriority || "all"}
+        value={
+          currentPriority.length > 1
+            ? "multiple"
+            : (currentPriority[0] ?? "all")
+        }
         onValueChange={(v) => updateParam("priority", v === "all" ? null : v)}
       >
         <SelectTrigger
@@ -185,9 +197,16 @@ export function TaskFilters({ currentView, showCompleted }: TaskFiltersProps) {
           <SelectItem value="all" className="cursor-pointer">
             All Priorities
           </SelectItem>
+          {currentPriority.length > 1 && (
+            <SelectItem value="multiple" disabled>
+              {currentPriority
+                .map((value) => PRIORITY_LABELS[value])
+                .join(", ")}
+            </SelectItem>
+          )}
           {taskPriorities.map((p) => (
             <SelectItem key={p} value={p} className="cursor-pointer">
-              {PRIORITY_LABELS[p] ?? p}
+              {PRIORITY_LABELS[p]}
             </SelectItem>
           ))}
         </SelectContent>
@@ -195,7 +214,11 @@ export function TaskFilters({ currentView, showCompleted }: TaskFiltersProps) {
 
       {/* Category filter */}
       <Select
-        value={currentCategory || "all"}
+        value={
+          currentCategory.length > 1
+            ? "multiple"
+            : (currentCategory[0] ?? "all")
+        }
         onValueChange={(v) => updateParam("category", v === "all" ? null : v)}
       >
         <SelectTrigger
@@ -208,9 +231,16 @@ export function TaskFilters({ currentView, showCompleted }: TaskFiltersProps) {
           <SelectItem value="all" className="cursor-pointer">
             All Categories
           </SelectItem>
+          {currentCategory.length > 1 && (
+            <SelectItem value="multiple" disabled>
+              {currentCategory
+                .map((value) => CATEGORY_LABELS[value])
+                .join(", ")}
+            </SelectItem>
+          )}
           {taskCategories.map((c) => (
             <SelectItem key={c} value={c} className="cursor-pointer">
-              {CATEGORY_LABELS[c] ?? c}
+              {CATEGORY_LABELS[c]}
             </SelectItem>
           ))}
         </SelectContent>
