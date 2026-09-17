@@ -65,10 +65,23 @@ test("the dependency guard walks the committed graph before accepting an edge", 
 });
 
 test("Evry and owning Task writers acquire the lock before mutating", () => {
-  assert.equal(
-    service.match(/taskStructureLockStatement\(churchId\)/g)?.length,
-    2
-  );
+  for (const name of [
+    "updateTask",
+    "completeTask",
+    "reopenTask",
+    "deleteTask",
+    "completeMany",
+    "rescheduleMany",
+  ]) {
+    const start = service.search(new RegExp(`(?:function |async )${name}\\(`));
+    assert.ok(start >= 0, `Missing Task writer ${name}`);
+    const body = service.slice(start).split(/\nexport |\n {2}async /)[0];
+    assert.match(
+      body,
+      /await db\.batch\(\[\s*taskStructureLockStatement\(churchId\),\s*db\s*\.update\(tasks\)/,
+      `${name} must take the plant lock before any task row lock`
+    );
+  }
   assert.match(
     writeBoundary,
     /db\.batch\(\[\s*taskStructureLockStatement\(churchId\)/
