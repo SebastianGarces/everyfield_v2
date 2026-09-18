@@ -1,7 +1,7 @@
 "use client";
 
 import { ArrowDown, ArrowUp, LoaderCircle, MapPin, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { evryResponseContent } from "./response-content";
 import { evryResponseMarkdown } from "./response-markdown";
 import { RichText } from "@/components/shared/rich-text";
@@ -78,7 +78,11 @@ export function ConversationSurface({ className }: { className?: string }) {
   const transcriptRef = useRef<HTMLDivElement>(null);
   const surfaceRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLFormElement>(null);
-  const followTranscriptRef = useRef(true);
+  const responseStartRef = useRef<HTMLElement | null>(null);
+  const transcriptContentRef = useRef<HTMLDivElement>(null);
+  const positionedResponseRef = useRef<string | null>(null);
+  const positionedRequestRef = useRef<string | null>(null);
+  const readerMovedRef = useRef(false);
   const conversationId = conversation?.id ?? null;
   const [scrollback, setScrollback] = useState({
     conversationId,
@@ -90,6 +94,14 @@ export function ConversationSurface({ className }: { className?: string }) {
   const showJumpToLatest =
     scrollback.conversationId === conversationId && scrollback.visible;
   const latestMessage = conversation?.messages.at(-1);
+  const pendingRequestId = pendingMessage?.requestId ?? null;
+  const responseKey =
+    streamingResponse?.requestId ??
+    (!pendingMessage && latestMessage?.author === "assistant"
+      ? (workRequestId ?? latestMessage.id)
+      : null);
+  const responseMinHeight =
+    "min-h-[calc(var(--evry-transcript-height,0px)-var(--evry-composer-height,8rem)-2.5rem)]";
   useEffect(() => {
     const composer = composerRef.current;
     if (!composer) return;
@@ -123,24 +135,65 @@ export function ConversationSurface({ className }: { className?: string }) {
 
   useEffect(() => {
     const conversationId = conversation?.id ?? null;
-    followTranscriptRef.current = true;
     return acknowledgeConversationMounted(conversationId);
   }, [acknowledgeConversationMounted, conversation?.id]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const transcript = transcriptRef.current;
-    if (transcript && followTranscriptRef.current) {
+    if (!transcript || isLoading) return;
+    surfaceRef.current?.style.setProperty(
+      "--evry-transcript-height",
+      `${transcript.clientHeight}px`
+    );
+    if (pendingRequestId && positionedRequestRef.current !== pendingRequestId) {
+      positionedRequestRef.current = pendingRequestId;
+      readerMovedRef.current = false;
       transcript.scrollTop = transcript.scrollHeight;
     }
-  }, [
-    conversation?.messages.length,
-    latestMessage,
-    isLoading,
-    isSending,
-    pendingMessage,
-    workState,
-    streamingResponse,
-  ]);
+    const response = responseStartRef.current;
+    if (
+      responseKey &&
+      response &&
+      positionedResponseRef.current !== responseKey
+    ) {
+      positionedResponseRef.current = responseKey;
+      // Position once per response, including the streamed-to-saved handoff.
+      // A reader who moved while waiting owns their position already.
+      if (
+        !readerMovedRef.current ||
+        responseKey !== positionedRequestRef.current
+      ) {
+        transcript.scrollTop = Math.max(0, response.offsetTop - 20);
+      }
+    }
+  }, [isLoading, pendingRequestId, responseKey]);
+
+  useEffect(() => {
+    const transcript = transcriptRef.current;
+    const content = transcriptContentRef.current;
+    if (!transcript || !content) return;
+    const observer = new ResizeObserver(() => {
+      surfaceRef.current?.style.setProperty(
+        "--evry-transcript-height",
+        `${transcript.clientHeight}px`
+      );
+      const visible = !shouldFollowEvryTranscript({
+        distanceFromEnd:
+          transcript.scrollHeight -
+          transcript.clientHeight -
+          transcript.scrollTop,
+        focusInComposer: false,
+      });
+      setScrollback((current) =>
+        current.conversationId === conversationId && current.visible === visible
+          ? current
+          : { conversationId, visible }
+      );
+    });
+    observer.observe(transcript);
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [conversationId]);
 
   return (
     <div
@@ -153,10 +206,33 @@ export function ConversationSurface({ className }: { className?: string }) {
       <div
         ref={transcriptRef}
         data-slot="evry-transcript"
+        onWheel={() => {
+          readerMovedRef.current = true;
+        }}
+        onTouchMove={() => {
+          readerMovedRef.current = true;
+        }}
+        onPointerDown={() => {
+          readerMovedRef.current = true;
+        }}
+        onKeyDown={(event) => {
+          if (
+            [
+              "ArrowUp",
+              "ArrowDown",
+              "PageUp",
+              "PageDown",
+              "Home",
+              "End",
+              " ",
+            ].includes(event.key)
+          ) {
+            readerMovedRef.current = true;
+          }
+        }}
         onScroll={(event) => {
           const transcript = event.currentTarget;
-          // Capture the reader's position before a new reply changes its height.
-          followTranscriptRef.current = shouldFollowEvryTranscript({
+          const atEnd = shouldFollowEvryTranscript({
             distanceFromEnd:
               transcript.scrollHeight -
               transcript.clientHeight -
@@ -165,13 +241,16 @@ export function ConversationSurface({ className }: { className?: string }) {
           });
           setScrollback({
             conversationId,
-            visible: !followTranscriptRef.current,
+            visible: !atEnd,
           });
         }}
-        className="relative min-h-0 flex-1 scroll-pb-[calc(var(--evry-composer-height,8rem)+2.5rem+env(safe-area-inset-bottom))] overflow-y-auto overscroll-contain px-4 pt-5 pb-[calc(var(--evry-composer-height,8rem)+2.5rem+env(safe-area-inset-bottom))] sm:px-5"
+        className="relative min-h-0 flex-1 scroll-pb-[calc(var(--evry-composer-height,8rem)+2.5rem+env(safe-area-inset-bottom))] overflow-y-auto overscroll-contain px-4 pt-5 pb-[calc(var(--evry-composer-height,8rem)+2.5rem+env(safe-area-inset-bottom))] [overflow-anchor:none] sm:px-5"
         aria-busy={isLoading}
       >
-        <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col">
+        <div
+          ref={transcriptContentRef}
+          className="mx-auto flex min-h-full w-full max-w-3xl flex-col"
+        >
           {isLoading ? (
             <div className="text-muted-foreground flex min-h-32 items-center justify-center gap-2 text-sm">
               <LoaderCircle
@@ -192,8 +271,27 @@ export function ConversationSurface({ className }: { className?: string }) {
                 {conversation.messages.map((message) => (
                   <li
                     key={message.id}
+                    ref={
+                      message === latestMessage &&
+                      message.author === "assistant" &&
+                      !streamingResponse
+                        ? (node) => {
+                            responseStartRef.current = node;
+                          }
+                        : undefined
+                    }
+                    data-response-start={
+                      message === latestMessage &&
+                      message.author === "assistant"
+                        ? "saved"
+                        : undefined
+                    }
                     className={cn(
                       "flex",
+                      message === latestMessage &&
+                        message.author === "assistant" &&
+                        !pendingMessage &&
+                        responseMinHeight,
                       message.author === "user"
                         ? "justify-end"
                         : "justify-start"
@@ -329,8 +427,15 @@ export function ConversationSurface({ className }: { className?: string }) {
           ) : null}
           {streamingResponse ? (
             <div
+              ref={(node) => {
+                responseStartRef.current = node;
+              }}
+              data-response-start="streaming"
               aria-label="Evry response in progress"
-              className="mt-4 max-w-[92%] space-y-3 [overflow-wrap:anywhere] sm:max-w-[88%]"
+              className={cn(
+                "mt-4 max-w-[92%] space-y-3 [overflow-wrap:anywhere] sm:max-w-[88%]",
+                responseMinHeight
+              )}
             >
               {evryResponseContent(
                 streamingResponse.response.body,
@@ -395,7 +500,7 @@ export function ConversationSurface({ className }: { className?: string }) {
           size="sm"
           className="absolute bottom-[calc(var(--evry-composer-height,7rem)+1.5rem)] left-1/2 z-10 -translate-x-1/2 rounded-full shadow-sm"
           onClick={() => {
-            followTranscriptRef.current = true;
+            readerMovedRef.current = true;
             setScrollback({ conversationId, visible: false });
             const transcript = transcriptRef.current;
             if (transcript) transcript.scrollTop = transcript.scrollHeight;
@@ -411,7 +516,7 @@ export function ConversationSurface({ className }: { className?: string }) {
         className="bg-background focus-within:ring-ring absolute inset-x-3 bottom-[calc(0.75rem+env(safe-area-inset-bottom))] z-10 mx-auto max-w-3xl space-y-2 rounded-2xl border p-2 shadow-lg focus-within:ring-2 sm:inset-x-5"
         onSubmit={(event) => {
           event.preventDefault();
-          followTranscriptRef.current = true;
+          readerMovedRef.current = false;
           void sendMessage();
         }}
       >

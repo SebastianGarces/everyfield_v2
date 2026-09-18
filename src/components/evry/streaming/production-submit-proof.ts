@@ -33,6 +33,8 @@ type FocusNode = {
   scrollHeight: number;
   clientHeight: number;
   scrollTop: number;
+  offsetTop: number;
+  style: { setProperty(): void };
 };
 
 function renderedText(renderer: ReactTestRenderer, value: string): boolean {
@@ -182,6 +184,8 @@ test("the real composer commits a request-keyed acknowledgement before its POST 
             scrollHeight: 100,
             clientHeight: 100,
             scrollTop: 0,
+            offsetTop: 420,
+            style: { setProperty() {} },
           };
           if (id) nodes.set(id, node);
           return node;
@@ -370,6 +374,26 @@ test("the real composer commits a request-keyed acknowledgement before its POST 
     "data-slot": "evry-transcript",
   });
   const transcriptNode = nodes.get("evry-transcript")!;
+  const readingStart = transcriptNode.scrollTop;
+  assert.equal(
+    readingStart,
+    400,
+    "the response begins at the transcript's reading inset"
+  );
+  transcriptNode.scrollHeight = 1800;
+  await act(() => {
+    emitResponseEvent({
+      type: "response",
+      requestId: postedRequestId,
+      sequence: 3,
+      response: { body: "I checked the matching people.", artifacts: [] },
+    });
+  });
+  assert.equal(
+    transcriptNode.scrollTop,
+    readingStart,
+    "response growth must preserve the initial reading position without requiring a manual scroll"
+  );
   transcriptNode.scrollHeight = 2000;
   transcriptNode.scrollTop = 300;
   await act(() => {
@@ -379,7 +403,7 @@ test("the real composer commits a request-keyed acknowledgement before its POST 
     emitResponseEvent({
       type: "response",
       requestId: postedRequestId,
-      sequence: 3,
+      sequence: 4,
       response: { body: "I checked the matching people.", artifacts: [] },
     });
   });
@@ -400,7 +424,7 @@ test("the real composer commits a request-keyed acknowledgement before its POST 
     emitResponseEvent({
       type: "conversation",
       requestId: postedRequestId,
-      sequence: 4,
+      sequence: 5,
       conversation: nextConversation,
     });
     responseController.close();
@@ -493,7 +517,8 @@ test("the real composer commits a request-keyed acknowledgement before its POST 
   );
   assert.equal(
     nodes.get("evry-transcript")?.scrollTop,
-    nodes.get("evry-transcript")?.scrollHeight
+    2000,
+    "completion must not move the position the reader explicitly chose"
   );
   assert.ok(
     mounted.root.findAll(

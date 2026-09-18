@@ -23,6 +23,8 @@ type FocusNode = {
   scrollHeight: number;
   clientHeight: number;
   scrollTop: number;
+  offsetTop: number;
+  style: { setProperty(): void };
 };
 let routeSnapshot: RouteSnapshot = {
   pathname: "/evry",
@@ -550,6 +552,8 @@ test("reconnect hands focus to the stable status before its control unmounts", a
             scrollHeight: 100,
             clientHeight: 100,
             scrollTop: 0,
+            offsetTop: 0,
+            style: { setProperty() {} },
           };
           if (id) nodes.set(id, node);
           return node;

@@ -276,6 +276,7 @@ type FocusNode = {
   contains: (candidate: FocusNode | null) => boolean;
   focus: () => void;
   scrollIntoView: () => void;
+  style: { setProperty(): void };
 };
 
 test("real shell state survives stale route remounts for first and repeated New clicks", async (t) => {
@@ -470,6 +471,7 @@ test("real shell state survives stale route remounts for first and repeated New 
               activeElement = node;
             },
             scrollIntoView: () => {},
+            style: { setProperty() {} },
           };
           if (id) focusNodes.set(id, node);
           return node;
@@ -508,6 +510,7 @@ test("real shell state survives stale route remounts for first and repeated New 
       contains: () => false,
       focus: () => {},
       scrollIntoView: () => {},
+      style: { setProperty() {} },
     };
     assert.equal(activate(control), true);
   });
