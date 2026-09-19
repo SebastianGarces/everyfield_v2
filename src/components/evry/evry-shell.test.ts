@@ -78,7 +78,11 @@ test("one persistent shell owns the launcher, panel, and dedicated workspace sta
   assert.match(workspace, /conversationSurface=\{<ConversationSurface \/>\}/);
   assert.doesNotMatch(workspace, /setDraft|setConversation|fetch\(/);
   assert.match(workspace, /const \[workspace, setWorkspace\] = useState/);
-  assert.match(workspace, /key: adoptedCreation \? workspace.key : routeIdentity/);
+  assert.match(
+    workspace,
+    /key: adoptedCreation \? workspace.key : routeIdentity/
+  );
+  assert.match(workspace, /acknowledgement.requestId === workRequestId/);
 });
 
 test("the launcher is absent unless the server-derived plant standing is eligible", () => {

@@ -38,19 +38,19 @@ export function EvryWorkspace({
   showStreamingFixture?: boolean;
   showRunRecoveryFixture?: boolean;
 }) {
-  const { conversation } = useEvryShell();
+  const { acknowledgement, conversation, workRequestId } = useEvryShell();
   const routeIdentity = `${newConversation ? "new" : "history"}:${conversationId ?? ""}:${searchQuery ?? ""}`;
   const [workspace, setWorkspace] = useState({
     routeIdentity,
     key: routeIdentity,
-    newConversation,
     searchQuery,
   });
   if (workspace.routeIdentity !== routeIdentity) {
     // Saving a new chat changes its URL, not the reader's conversation.
     // Keep its mounted transcript through the authoritative history refresh.
     const adoptedCreation =
-      workspace.newConversation &&
+      acknowledgement !== null &&
+      acknowledgement.requestId === workRequestId &&
       !newConversation &&
       conversationId !== null &&
       conversation?.id === conversationId &&
@@ -58,7 +58,6 @@ export function EvryWorkspace({
     setWorkspace({
       routeIdentity,
       key: adoptedCreation ? workspace.key : routeIdentity,
-      newConversation,
       searchQuery,
     });
   }
