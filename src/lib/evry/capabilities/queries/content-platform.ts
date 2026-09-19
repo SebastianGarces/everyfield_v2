@@ -83,6 +83,8 @@ function launchSourceQuery(
 }
 export const LAUNCH_QUERY = defineEvryReadRegistration({
   id: "launch.query",
+  description:
+    "Query launch status, milestones, linked tasks or journal records with filters and aggregate counts. Status alone describes the launch record, not overall progress. Use launch-review for a cross-domain overview, or combine the relevant resources with task, team and meeting queries.",
   capabilityIdentity: "launch.read.readiness",
   inputShape: {
     query: launchQuerySchema.superRefine((v, ctx) => {

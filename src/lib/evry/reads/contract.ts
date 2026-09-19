@@ -63,17 +63,20 @@ export function defineEvryReadRegistration<Shape extends z.ZodRawShape>({
   id,
   capabilityIdentity,
   inputShape,
+  description,
   run,
 }: {
   id: string;
   capabilityIdentity: string;
   inputShape: Shape;
+  description?: string;
   run: (
     context: EvryReadExecutionContext,
     input: z.infer<z.ZodObject<Shape>>
   ) => Promise<EvryReadContinuationArtifact>;
 }): EvryReadRegistration {
-  const inputSchema = z.object(inputShape).strict();
+  const shape = z.object(inputShape).strict();
+  const inputSchema = description ? shape.describe(description) : shape;
 
   const runAuthorized = async (
     context: EvryReadExecutionContext,

@@ -101,6 +101,232 @@ test("a lookup can feed a second freshly authorized read without another user me
   assert.equal(f.appends.length, 1);
 });
 
+for (const request of [
+  "Where are we on launch?",
+  "How is our team's workload looking?",
+  "Which prospects should we interview next, and why?",
+  "Compare our volunteer guide with the wiki's onboarding guidance.",
+]) {
+  test(`overview reviews retrieved evidence before finishing: ${request}`, async () => {
+    const f = fixture();
+    let generations = 0;
+    const dispatch = createModelEvryConversation({
+      reads: [f.read],
+      continuations: [],
+      authorizeRead: async () => f.authorization,
+      generate: async (input) => {
+        generations++;
+        if (generations === 1)
+          return {
+            kind: "describe",
+            ids: [`read:${f.read.id}`],
+            reviewEvidence: true,
+          };
+        if (generations === 2)
+          return {
+            kind: "read",
+            id: f.read.id,
+            input: { section: "contacts", cursor: null },
+          };
+        assert.match(
+          JSON.stringify(input.context),
+          /"requiresEvidenceReview":true/
+        );
+        assert.match(JSON.stringify(input.context), /freshReadResults/);
+        if (generations === 3)
+          return {
+            kind: "read",
+            id: f.read.id,
+            input: { section: "unowned_contacts", cursor: null },
+          };
+        return {
+          kind: "reply",
+          body: "Here is the overview based on both findings.",
+        };
+      },
+      compose: async ({ context, results, draft }) => {
+        assert.equal(results.length, 2);
+        assert.match(JSON.stringify(context), /"requiresEvidenceReview":true/);
+        return { body: draft, artifacts: results };
+      },
+    });
+    await dispatch({ ...f.input, literalUserText: request });
+    assert.equal(
+      generations,
+      4,
+      "both reads are reviewed even without continueReading"
+    );
+    assert.equal(f.runs.length, 2);
+    assert.equal(f.appends.length, 1);
+  });
+}
+
+test("an unavailable overview reader does not hide other evidence or become a zero count", async () => {
+  const f = fixture();
+  let generations = 0;
+  const unavailable: EvryModelRead = {
+    ...f.read,
+    id: "missing.query",
+    run: async () => null,
+  };
+  const dispatch = createModelEvryConversation({
+    reads: [f.read, unavailable],
+    continuations: [],
+    authorizeRead: async () => f.authorization,
+    generate: async (input) => {
+      generations++;
+      if (generations === 1)
+        return {
+          kind: "read",
+          id: unavailable.id,
+          input: { section: "contacts", cursor: null },
+          reviewEvidence: true,
+        };
+      assert.match(
+        JSON.stringify(input.context),
+        /"unavailableReads":\[\{"readId":"missing.query","input":/
+      );
+      if (generations === 2)
+        return {
+          kind: "read",
+          id: f.read.id,
+          input: { section: "contacts", cursor: null },
+        };
+      return {
+        kind: "reply",
+        body: "Here is what I could check; part of the review is unavailable.",
+      };
+    },
+    compose: async ({ context, draft, results }) => {
+      assert.match(
+        JSON.stringify(context),
+        /"unavailableReads":\[\{"readId":"missing.query","input":/
+      );
+      assert.equal(results.length, 1);
+      return { body: draft, artifacts: results };
+    },
+  });
+  await dispatch(f.input);
+  assert.equal(generations, 3);
+  assert.equal(f.runs.length, 1);
+});
+
+test("a focused lookup needs no additional evidence-review generation", async () => {
+  const f = fixture();
+  let generations = 0;
+  const dispatch = createModelEvryConversation({
+    reads: [f.read],
+    continuations: [],
+    authorizeRead: async () => f.authorization,
+    generate: async () => {
+      generations++;
+      return {
+        kind: "read",
+        id: f.read.id,
+        input: { section: "contacts", cursor: null },
+      };
+    },
+  });
+  await dispatch(f.input);
+  assert.equal(generations, 1);
+  assert.equal(f.runs.length, 1);
+});
+
+for (const partial of [false, true]) {
+  test(`overview recipe evidence is reviewed after ${partial ? "partial" : "complete"} retrieval`, async () => {
+    const f = fixture();
+    let generations = 0;
+    const dispatch = createModelEvryConversation({
+      reads: [
+        f.read,
+        { ...f.read, id: "missing.query", run: async () => null },
+      ],
+      continuations: [],
+      authorizeRead: async () => f.authorization,
+      recipes: [
+        {
+          id: "overview",
+          description: "A multi-source review.",
+          readIds: [f.read.id, "missing.query"],
+          inputSchema: z.strictObject({}),
+          async run(query) {
+            await query(f.read.id, { section: "contacts", cursor: null });
+            if (partial)
+              await query("missing.query", {
+                section: "contacts",
+                cursor: null,
+              });
+          },
+        },
+      ],
+      generate: async (input) => {
+        generations++;
+        if (generations === 1)
+          return {
+            kind: "recipe",
+            id: "overview",
+            input: {},
+            reviewEvidence: true,
+          };
+        assert.match(
+          JSON.stringify(input.context),
+          /"requiresEvidenceReview":true/
+        );
+        assert.match(JSON.stringify(input.context), /People needing follow-up/);
+        if (partial)
+          assert.match(
+            JSON.stringify(input.context),
+            /"readId":"missing.query"/
+          );
+        return {
+          kind: "reply",
+          body: partial
+            ? "Here is what I could check; some records were unavailable."
+            : "Here is the supported overview.",
+        };
+      },
+    });
+    await dispatch(f.input);
+    assert.equal(generations, 2);
+    assert.equal(f.runs.length, 1);
+    assert.equal(f.appends.length, 1);
+  });
+}
+
+test("overview review cannot escalate a read into a write", async () => {
+  const f = fixture();
+  let generations = 0;
+  let prepared = false;
+  const dispatch = createModelEvryConversation({
+    reads: [f.read],
+    continuations: [],
+    authorizeRead: async () => f.authorization,
+    preparations: [
+      {
+        id: "meetings.create",
+        capabilityIdentities: ["meetings.create"],
+        inputSchema: z.strictObject({}),
+        run: async () => {
+          prepared = true;
+          return null;
+        },
+      },
+    ],
+    generate: async () =>
+      ++generations === 1
+        ? {
+            kind: "read",
+            id: f.read.id,
+            input: { section: "contacts", cursor: null },
+            reviewEvidence: true,
+          }
+        : { kind: "prepare_action", operation: "meetings.create", input: {} },
+  });
+  await dispatch(f.input);
+  assert.equal(prepared, false);
+  assert.equal(f.runs.length, 1);
+});
+
 test("lookup chains stop on equivalent repeated reads and legacy preparation cannot follow a read", async () => {
   for (const attemptsPreparation of [false, true]) {
     const f = fixture();

@@ -302,6 +302,8 @@ export function createModelEvryConversation({
       })),
     };
     let decision = await generate(modelInput);
+    let requiresEvidenceReview = false;
+    const unavailableReads: { readId: string; input: unknown }[] = [];
     const actionIntent =
       decision.kind === "prepare_action" ||
       decision.kind === "prepare" ||
@@ -322,6 +324,8 @@ export function createModelEvryConversation({
     }[] = [];
     const planningContext = () => ({
       ...modelInput.context,
+      requiresEvidenceReview,
+      unavailableReads,
       originalRequestCanBePrepared:
         freshReadResults.length === 0 &&
         modelInput.context.originalRequestCanBePrepared,
@@ -374,6 +378,8 @@ export function createModelEvryConversation({
           await compose({
             context: {
               ...modelInput.context,
+              requiresEvidenceReview,
+              unavailableReads,
               freshReadResults: freshReadResults.map(
                 ({ readId, input, artifact }) => ({
                   readId,
@@ -416,6 +422,8 @@ export function createModelEvryConversation({
       decisionCount <= EVRY_READ_BUDGET.calls + discoveryLimit;
       decisionCount++
     ) {
+      if ("reviewEvidence" in decision && decision.reviewEvidence)
+        requiresEvidenceReview = true;
       switch (decision.kind) {
         case "describe": {
           if (++discoveries > discoveryLimit || budget.exhausted())
@@ -467,15 +475,32 @@ export function createModelEvryConversation({
                 throw new EvryReadUnavailable(
                   "Recipe requested an undeclared read"
                 );
-              return query(id, args);
+              try {
+                return await query(id, args);
+              } catch (error) {
+                if (error instanceof EvryReadUnavailable)
+                  unavailableReads.push({ readId: id, input: args });
+                throw error;
+              }
             }, decision.input);
           } catch (error) {
             if (!(error instanceof EvryReadUnavailable)) throw error;
+            if (requiresEvidenceReview && !budget.exhausted()) {
+              decision = await generate({
+                ...modelInput,
+                preparations: actionIntent ? modelInput.preparations : [],
+                context: planningContext(),
+              });
+              continue readLoop;
+            }
             return answer(
               "The workflow could only retrieve part of its evidence. Explain the available results and the missing evidence; do not claim full coverage."
             );
           }
-          if (decision.continueReading && !budget.exhausted()) {
+          if (
+            (requiresEvidenceReview || decision.continueReading) &&
+            !budget.exhausted()
+          ) {
             decision = await generate({
               ...modelInput,
               preparations: actionIntent ? modelInput.preparations : [],
@@ -493,6 +518,18 @@ export function createModelEvryConversation({
             artifact = await query(decision.id, decision.input);
           } catch (error) {
             if (!(error instanceof EvryReadUnavailable)) throw error;
+            unavailableReads.push({
+              readId: decision.id,
+              input: decision.input,
+            });
+            if (requiresEvidenceReview && !budget.exhausted()) {
+              decision = await generate({
+                ...modelInput,
+                preparations: actionIntent ? modelInput.preparations : [],
+                context: planningContext(),
+              });
+              continue readLoop;
+            }
             if (freshReadResults.length)
               return answer(
                 "The evidence budget was reached or a requested read was unavailable or repeated. Answer from facts already retrieved and name what remains unknown."
@@ -500,7 +537,7 @@ export function createModelEvryConversation({
             break readLoop;
           }
           if (
-            decision.continueReading &&
+            (requiresEvidenceReview || decision.continueReading) &&
             artifact.kind === "read" &&
             !budget.exhausted()
           ) {
@@ -513,7 +550,7 @@ export function createModelEvryConversation({
           }
           if (artifact.kind === "read")
             return answer(
-              decision.continueReading
+              requiresEvidenceReview || decision.continueReading
                 ? "The request reached its evidence budget. Explain what the available evidence establishes and any remaining limitations."
                 : "Answer the request using the fresh results and their actual selection criteria."
             );

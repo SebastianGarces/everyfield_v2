@@ -250,6 +250,8 @@ export async function readLaunchStatusForPlant(plantId: string) {
 
 export const LAUNCH_STATUS_READ = defineEvryReadRegistration({
   id: "launch.status",
+  description:
+    "Focused lookup of the launch date, status and recorded launch-day outcomes. This is not an overall progress review; use launch-review for milestones, blocked work, staffing gaps and upcoming preparation.",
   capabilityIdentity: LAUNCH_READ_IDENTITIES.status,
   inputShape: noInput,
   run: ({ authorization }) =>

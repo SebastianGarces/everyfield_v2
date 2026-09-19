@@ -175,7 +175,7 @@ export const EVRY_READ_WORKFLOWS: readonly EvryReadWorkflow[] = [
   workflow({
     id: "launch-review",
     description:
-      "Current launch date, incomplete milestones, blocked launch tasks, staffing gaps and upcoming meetings. No historical or spiritual readiness verdict.",
+      "Operational launch progress overview: current launch date, incomplete milestones, blocked launch tasks, staffing gaps and upcoming meetings. Use for an overall progress review rather than a date-only lookup. Missing attendance or historical readiness snapshots does not prevent reporting this current operational evidence. No historical or spiritual readiness verdict.",
     readIds: ["launch.query", "tasks.query", "teams.query", "meetings.query"],
     inputSchema: z.strictObject({
       meetingsWindow: evryDateRangeSchema.default({

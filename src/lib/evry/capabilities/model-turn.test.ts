@@ -8,6 +8,36 @@ import {
   scriptedConversationModel,
 } from "./model-test-fixtures";
 
+test("overview intent survives both discovery and executable read decisions", () => {
+  for (const [readId, input] of [
+    ["tools.describe", { ids: ["read:launch.query"] }],
+    ["launch.query", { query: { resource: "status" } }],
+    ["recipes.run", { operation: "launch-review", arguments: {} }],
+  ] as const) {
+    const decision = parseEvryModelTurn(
+      modelDecision({
+        evidenceScope: "overview",
+        readId,
+        readInputJson: JSON.stringify(input),
+      })
+    );
+    assert.ok("reviewEvidence" in decision && decision.reviewEvidence);
+  }
+  const excluded = parseEvryModelTurn(
+    modelDecision({
+      classification: "mixed",
+      evidenceScope: "overview",
+      readId: "launch.query",
+      readInputJson: "{}",
+    })
+  );
+  assert.equal(
+    excluded.kind,
+    "reply",
+    "overview intent cannot bypass excluded-work policy"
+  );
+});
+
 test("the actual provider response schema requires every field for OpenAI strict output", async () => {
   const scripted = scriptedConversationModel(modelDecision());
   await generateEvryModelTurn({ context: {}, reads: [] }, () => scripted.model);
@@ -29,6 +59,25 @@ test("the actual provider response schema requires every field for OpenAI strict
     Object.keys(responseFormat.schema.properties).sort(),
     "Defaults make input fields optional, which OpenAI rejects before generation"
   );
+});
+
+test("automatic schema discovery retains overview intent", async () => {
+  const scripted = scriptedConversationModel(
+    modelDecision({
+      evidenceScope: "overview",
+      readId: "launch.query",
+      readInputJson: "{}",
+    })
+  );
+  const decision = await generateEvryModelTurn(
+    { context: {}, reads: [{ id: "launch.query" }] },
+    () => scripted.model
+  );
+  assert.deepEqual(decision, {
+    kind: "describe",
+    ids: ["read:launch.query"],
+    reviewEvidence: true,
+  });
 });
 
 test("help and arbitrary paraphrases reach a real model boundary with storage disabled", async () => {

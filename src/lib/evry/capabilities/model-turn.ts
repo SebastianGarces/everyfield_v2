@@ -25,6 +25,7 @@ export const evryModelTurnSchema = z.strictObject({
   readId: z.string().nullable(),
   readInputJson: z.string().max(16000).nullable(),
   continueReading: z.boolean(),
+  evidenceScope: z.enum(["focused", "overview"]),
   prepareOriginalRequest: z.boolean(),
   settingsSectionId: evrySettingsSectionIdSchema.nullable(),
 });
@@ -42,15 +43,22 @@ export type EvryModelTurn =
       input: unknown;
       continueReading?: true;
       actionIntent?: true;
+      reviewEvidence?: true;
     }>
   | Readonly<{ kind: "prepare_action"; operation: string; input: unknown }>
-  | Readonly<{ kind: "describe"; ids: readonly string[]; actionIntent?: true }>
+  | Readonly<{
+      kind: "describe";
+      ids: readonly string[];
+      actionIntent?: true;
+      reviewEvidence?: true;
+    }>
   | Readonly<{
       kind: "recipe";
       id: string;
       input: unknown;
       continueReading?: true;
       actionIntent?: true;
+      reviewEvidence?: true;
     }>
   | Readonly<{ kind: "prepare" }>;
 
@@ -61,6 +69,10 @@ const actionPreparationSchema = z.strictObject({
 
 export function parseEvryModelTurn(value: unknown): EvryModelTurn {
   const output = evryModelTurnSchema.parse(value);
+  const evidenceReview =
+    output.evidenceScope === "overview"
+      ? { reviewEvidence: true as const }
+      : {};
   switch (output.classification) {
     case "settings":
       if (output.settingsSectionId !== null)
@@ -97,6 +109,7 @@ export function parseEvryModelTurn(value: unknown): EvryModelTurn {
             .parse(JSON.parse(output.readInputJson));
           return {
             kind: "describe",
+            ...evidenceReview,
             ids: discovery.ids,
             ...(output.classification === "application_action"
               ? { actionIntent: true as const }
@@ -111,6 +124,7 @@ export function parseEvryModelTurn(value: unknown): EvryModelTurn {
           );
           return {
             kind: "recipe",
+            ...evidenceReview,
             id: recipe.operation,
             input: recipe.arguments,
             ...(output.continueReading
@@ -142,6 +156,7 @@ export function parseEvryModelTurn(value: unknown): EvryModelTurn {
         const input: unknown = JSON.parse(output.readInputJson);
         return {
           kind: "read",
+          ...evidenceReview,
           id: output.readId,
           input,
           ...(output.continueReading ? { continueReading: true as const } : {}),
@@ -165,6 +180,10 @@ export function parseEvryModelTurn(value: unknown): EvryModelTurn {
 const SYSTEM = `You are Evry, EveryField's conversational work assistant. Understand ordinary language, paraphrases, greetings, and follow-up questions. Never require command wording. Answer product-help questions yourself. Ask a specific question when information is missing.
 
 ${EVRY_RESPONSE_VOICE}
+
+Set evidenceScope to focused for a specific fact, count, list, or narrowing filter, and overview for a progress review, diagnosis, comparison of current records, or recommendation needing several kinds of evidence. Judge the user's intent in context, not particular words. Product help without current records is focused. An overview is not satisfied by a record whose title resembles the question. Prefer a registered workflow when its coverage fits the request; otherwise combine relevant reads. For example, a launch date needs a status lookup, while a launch progress review needs outstanding milestones, blocked work, staffing gaps and upcoming preparation as well as the date. Apply the same distinction to tasks, people, ministries, documents and wiki questions; do not fetch unrelated domains just to make an answer longer.
+
+When context.requiresEvidenceReview is true, compare the fresh evidence with the whole request before finishing. Read missing relevant evidence while budget remains, or return a reply when you can give a useful supported answer. Missing one kind of evidence does not erase other findings. context.unavailableReads records unsuccessful operations and inputs; do not repeat those inputs or imply they returned zero matches. Other inputs or operations may still provide useful evidence. Explain consequential gaps briefly, and continue with other supported evidence when useful. The server requires a post-read review for overviews even when continueReading is false. Focused lookups may finish after one successful read; set continueReading true only when additional evidence is actually needed.
 
 First classify the WHOLE latest request as application_read, application_action, settings, theology_or_spiritual_guidance, unrelated, mixed, or ambiguous. Product help and greetings are application_read with no operation. Doctrine, prayer composition, sermon generation, spiritual advice, and pastoral counsel are excluded. Copying finished user-provided text verbatim into an application field is allowed. A request combining EveryField work and excluded work is mixed: never run even its allowed fragment. For excluded or ambiguous work, explain the boundary or ask a useful question with readId, readInputJson and settingsSectionId null, prepareOriginalRequest false. Settings only receives a generated settingsSectionId, never a read or change.
 
@@ -232,6 +251,9 @@ function requireDiscoveredContract(
   return {
     kind: "describe",
     ids: [`${kind}:${id}`],
+    ...(decision.kind === "read" && decision.reviewEvidence
+      ? { reviewEvidence: true as const }
+      : {}),
     ...(decision.kind === "prepare_action" || decision.actionIntent
       ? { actionIntent: true as const }
       : {}),

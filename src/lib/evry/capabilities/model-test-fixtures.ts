@@ -7,6 +7,7 @@ export function modelDecision(overrides: Record<string, unknown> = {}) {
     readId: null,
     readInputJson: null,
     continueReading: false,
+    evidenceScope: "focused",
     prepareOriginalRequest: false,
     settingsSectionId: null,
     ...overrides,
