@@ -34,6 +34,7 @@ type FocusNode = {
   clientHeight: number;
   scrollTop: number;
   offsetTop: number;
+  getBoundingClientRect(): { top: number; bottom: number; height: number };
   style: { setProperty(): void };
 };
 
@@ -185,6 +186,18 @@ test("the real composer commits a request-keyed acknowledgement before its POST 
             clientHeight: 100,
             scrollTop: 0,
             offsetTop: 420,
+            getBoundingClientRect() {
+              if (props["data-slot"] === "evry-transcript")
+                return { top: 0, bottom: 800, height: 800 };
+              if (props["data-slot"] === "evry-composer")
+                return { top: 700, bottom: 800, height: 100 };
+              if (props["data-slot"] === "evry-content-end") {
+                const transcript = nodes.get("evry-transcript")!;
+                const bottom = transcript.scrollHeight - transcript.scrollTop;
+                return { top: bottom, bottom, height: 0 };
+              }
+              return { top: 420, bottom: 468, height: 48 };
+            },
             style: { setProperty() {} },
           };
           if (id) nodes.set(id, node);
@@ -377,8 +390,8 @@ test("the real composer commits a request-keyed acknowledgement before its POST 
   const readingStart = transcriptNode.scrollTop;
   assert.equal(
     readingStart,
-    400,
-    "the response begins at the transcript's reading inset"
+    100,
+    "an already-visible first response must not change the submitted position"
   );
   transcriptNode.scrollHeight = 1800;
   await act(() => {

@@ -24,6 +24,7 @@ type FocusNode = {
   clientHeight: number;
   scrollTop: number;
   offsetTop: number;
+  getBoundingClientRect(): { top: number; bottom: number; height: number };
   style: { setProperty(): void };
 };
 let routeSnapshot: RouteSnapshot = {
@@ -553,6 +554,7 @@ test("reconnect hands focus to the stable status before its control unmounts", a
             clientHeight: 100,
             scrollTop: 0,
             offsetTop: 0,
+            getBoundingClientRect: () => ({ top: 0, bottom: 100, height: 100 }),
             style: { setProperty() {} },
           };
           if (id) nodes.set(id, node);

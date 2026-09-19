@@ -15,7 +15,7 @@ import {
   isLatestEvryConversationLoad,
   pendingEvrySubmissionFor,
   pendingEvrySubmissionAfterConversation,
-  shouldFollowEvryTranscript,
+  evryResponseRevealOffset,
   syncEvryWorkspaceConversationHistory,
   type EvrySubmission,
 } from "./interaction-state";
@@ -304,26 +304,37 @@ test("leaving the workspace makes every in-flight load stale", () => {
   );
 });
 
-test("streamed transcript updates preserve a reader's scroll and composer focus", () => {
+test("a visible response beginning does not move, even when the response is long", () => {
+  for (const responseHeight of [24, 2000]) {
+    assert.equal(
+      evryResponseRevealOffset({
+        responseTop: 350,
+        responseHeight,
+        viewportTop: 100,
+        viewportBottom: 700,
+      }),
+      0
+    );
+  }
+});
+
+test("an obscured response beginning moves only enough to reveal its first line", () => {
   assert.equal(
-    shouldFollowEvryTranscript({
-      distanceFromEnd: 240,
-      focusInComposer: false,
+    evryResponseRevealOffset({
+      responseTop: 690,
+      responseHeight: 2000,
+      viewportTop: 100,
+      viewportBottom: 700,
     }),
-    false
+    54
   );
   assert.equal(
-    shouldFollowEvryTranscript({
-      distanceFromEnd: 80,
-      focusInComposer: false,
+    evryResponseRevealOffset({
+      responseTop: 80,
+      responseHeight: 2000,
+      viewportTop: 100,
+      viewportBottom: 700,
     }),
-    true
-  );
-  assert.equal(
-    shouldFollowEvryTranscript({
-      distanceFromEnd: 240,
-      focusInComposer: true,
-    }),
-    true
+    -40
   );
 });

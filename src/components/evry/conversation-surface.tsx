@@ -1,7 +1,13 @@
 "use client";
 
 import { ArrowDown, ArrowUp, LoaderCircle, MapPin, X } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { evryResponseContent } from "./response-content";
 import { evryResponseMarkdown } from "./response-markdown";
 import { RichText } from "@/components/shared/rich-text";
@@ -16,7 +22,7 @@ import { EvryProductionArtifact } from "./artifacts/production-artifact";
 import { useEvryShell } from "./evry-shell";
 import type { VisibleEvryPageContext } from "./page-context";
 import { EvryWorkStatus } from "./streaming/work-status";
-import { shouldFollowEvryTranscript } from "./interaction-state";
+import { evryResponseRevealOffset } from "./interaction-state";
 import { EvryPeopleFileWorkflow } from "./people-file-workflow";
 
 export function EvryContextChip({
@@ -80,6 +86,8 @@ export function ConversationSurface({ className }: { className?: string }) {
   const composerRef = useRef<HTMLFormElement>(null);
   const responseStartRef = useRef<HTMLElement | null>(null);
   const transcriptContentRef = useRef<HTMLDivElement>(null);
+  const contentEndRef = useRef<HTMLDivElement>(null);
+  const openedConversationRef = useRef<string | null | undefined>(undefined);
   const positionedResponseRef = useRef<string | null>(null);
   const positionedRequestRef = useRef<string | null>(null);
   const readerMovedRef = useRef(false);
@@ -100,8 +108,6 @@ export function ConversationSurface({ className }: { className?: string }) {
     (!pendingMessage && latestMessage?.author === "assistant"
       ? (workRequestId ?? latestMessage.id)
       : null);
-  const responseMinHeight =
-    "min-h-[calc(var(--evry-transcript-height,0px)-var(--evry-composer-height,8rem)-2.5rem)]";
   useEffect(() => {
     const composer = composerRef.current;
     if (!composer) return;
@@ -141,10 +147,18 @@ export function ConversationSurface({ className }: { className?: string }) {
   useLayoutEffect(() => {
     const transcript = transcriptRef.current;
     if (!transcript || isLoading) return;
-    surfaceRef.current?.style.setProperty(
-      "--evry-transcript-height",
-      `${transcript.clientHeight}px`
-    );
+    if (openedConversationRef.current !== conversationId) {
+      const adoptingRequest =
+        positionedRequestRef.current !== null &&
+        positionedRequestRef.current === workRequestId;
+      openedConversationRef.current = conversationId;
+      if (!adoptingRequest) {
+        transcript.scrollTop = transcript.scrollHeight;
+        positionedRequestRef.current = null;
+        positionedResponseRef.current = responseKey;
+        readerMovedRef.current = false;
+      }
+    }
     if (pendingRequestId && positionedRequestRef.current !== pendingRequestId) {
       positionedRequestRef.current = pendingRequestId;
       readerMovedRef.current = false;
@@ -157,43 +171,54 @@ export function ConversationSurface({ className }: { className?: string }) {
       positionedResponseRef.current !== responseKey
     ) {
       positionedResponseRef.current = responseKey;
-      // Position once per response, including the streamed-to-saved handoff.
-      // A reader who moved while waiting owns their position already.
-      if (
-        !readerMovedRef.current ||
-        responseKey !== positionedRequestRef.current
-      ) {
-        transcript.scrollTop = Math.max(0, response.offsetTop - 20);
+      // Reveal only an offscreen beginning, once. Streaming growth never follows.
+      if (!readerMovedRef.current) {
+        const viewport = transcript.getBoundingClientRect();
+        const beginning = response.getBoundingClientRect();
+        const offset = evryResponseRevealOffset({
+          responseTop: beginning.top,
+          responseHeight: beginning.height,
+          viewportTop: viewport.top,
+          viewportBottom: Math.min(
+            viewport.bottom,
+            composerRef.current?.getBoundingClientRect().top ?? viewport.bottom
+          ),
+        });
+        if (offset !== 0) transcript.scrollTop += offset;
       }
     }
-  }, [isLoading, pendingRequestId, responseKey]);
+  }, [conversationId, isLoading, pendingRequestId, responseKey, workRequestId]);
+
+  const updateScrollback = useCallback(() => {
+    const transcript = transcriptRef.current;
+    const end = contentEndRef.current;
+    if (!transcript || !end) return;
+    const viewport = transcript.getBoundingClientRect();
+    const visibleBottom = Math.min(
+      viewport.bottom,
+      composerRef.current?.getBoundingClientRect().top ?? viewport.bottom
+    );
+    // Ignore composer clearance and empty layout space, not actual content.
+    const visible =
+      transcript.scrollHeight > transcript.clientHeight + 1 &&
+      end.getBoundingClientRect().bottom > visibleBottom + 16;
+    setScrollback((current) =>
+      current.conversationId === conversationId && current.visible === visible
+        ? current
+        : { conversationId, visible }
+    );
+  }, [conversationId]);
 
   useEffect(() => {
     const transcript = transcriptRef.current;
     const content = transcriptContentRef.current;
     if (!transcript || !content) return;
-    const observer = new ResizeObserver(() => {
-      surfaceRef.current?.style.setProperty(
-        "--evry-transcript-height",
-        `${transcript.clientHeight}px`
-      );
-      const visible = !shouldFollowEvryTranscript({
-        distanceFromEnd:
-          transcript.scrollHeight -
-          transcript.clientHeight -
-          transcript.scrollTop,
-        focusInComposer: false,
-      });
-      setScrollback((current) =>
-        current.conversationId === conversationId && current.visible === visible
-          ? current
-          : { conversationId, visible }
-      );
-    });
+    const observer = new ResizeObserver(updateScrollback);
     observer.observe(transcript);
     observer.observe(content);
+    if (composerRef.current) observer.observe(composerRef.current);
     return () => observer.disconnect();
-  }, [conversationId]);
+  }, [updateScrollback]);
 
   return (
     <div
@@ -230,20 +255,7 @@ export function ConversationSurface({ className }: { className?: string }) {
             readerMovedRef.current = true;
           }
         }}
-        onScroll={(event) => {
-          const transcript = event.currentTarget;
-          const atEnd = shouldFollowEvryTranscript({
-            distanceFromEnd:
-              transcript.scrollHeight -
-              transcript.clientHeight -
-              transcript.scrollTop,
-            focusInComposer: false,
-          });
-          setScrollback({
-            conversationId,
-            visible: !atEnd,
-          });
-        }}
+        onScroll={updateScrollback}
         className="relative min-h-0 flex-1 scroll-pb-[calc(var(--evry-composer-height,8rem)+2.5rem+env(safe-area-inset-bottom))] overflow-y-auto overscroll-contain px-4 pt-5 pb-[calc(var(--evry-composer-height,8rem)+2.5rem+env(safe-area-inset-bottom))] [overflow-anchor:none] sm:px-5"
         aria-busy={isLoading}
       >
@@ -288,10 +300,6 @@ export function ConversationSurface({ className }: { className?: string }) {
                     }
                     className={cn(
                       "flex",
-                      message === latestMessage &&
-                        message.author === "assistant" &&
-                        !pendingMessage &&
-                        responseMinHeight,
                       message.author === "user"
                         ? "justify-end"
                         : "justify-start"
@@ -435,10 +443,7 @@ export function ConversationSurface({ className }: { className?: string }) {
               }}
               data-response-start="streaming"
               aria-label="Evry response in progress"
-              className={cn(
-                "mt-4 max-w-[92%] space-y-3 [overflow-wrap:anywhere] sm:max-w-[88%]",
-                responseMinHeight
-              )}
+              className="mt-4 max-w-[92%] space-y-3 [overflow-wrap:anywhere] sm:max-w-[88%]"
             >
               {evryResponseContent(
                 streamingResponse.response.body,
@@ -493,6 +498,11 @@ export function ConversationSurface({ className }: { className?: string }) {
               </Button>
             ) : null}
           </div>
+          <div
+            ref={contentEndRef}
+            data-slot="evry-content-end"
+            aria-hidden="true"
+          />
         </div>
       </div>
 

@@ -219,9 +219,17 @@ export function cancelEvryConversationLoads(
   return { ...state, latest: null };
 }
 
-export function shouldFollowEvryTranscript(input: {
-  distanceFromEnd: number;
-  focusInComposer: boolean;
-}): boolean {
-  return input.focusInComposer || input.distanceFromEnd <= 80;
+/** Reveal a response's first line without moving an already-visible beginning. */
+export function evryResponseRevealOffset(input: {
+  responseTop: number;
+  responseHeight: number;
+  viewportTop: number;
+  viewportBottom: number;
+}): number {
+  if (input.responseTop < input.viewportTop) {
+    return input.responseTop - input.viewportTop - 20;
+  }
+  const firstLineBottom =
+    input.responseTop + Math.min(48, input.responseHeight);
+  return Math.max(0, firstLineBottom - (input.viewportBottom - 16));
 }
