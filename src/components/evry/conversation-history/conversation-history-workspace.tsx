@@ -344,14 +344,26 @@ export function ConversationHistoryWorkspace({
           <ConversationOpeningStatus statusRef={detailStatusRef} />
         ) : isNewComposerResetPending ? (
           <ConversationStartingStatus statusRef={detailStatusRef} />
-        ) : isNewComposer ? (
+        ) : isNewComposer ||
+          (selectedConversation && canUseSelectedComposer) ? (
           <>
             <ConversationDetailHeader
               blocked={blocked}
               headingRef={detailHeadingRef}
               onBack={showConversationList}
-              title="New conversation"
+              state={selectedState}
+              title={selectedConversation?.title ?? "New conversation"}
             />
+            {checkpoint?.rebuildRequired ? (
+              <ConversationHistoryCheckpoint
+                checkpoint={checkpoint}
+                disabled={blocked || rebuildMessage === null}
+                onRebuild={() => {
+                  if (rebuildMessage === null) return;
+                  void sendMessageText(rebuildMessage);
+                }}
+              />
+            ) : null}
             {conversationSurface}
           </>
         ) : selectedConversationId === null ? (
@@ -367,27 +379,6 @@ export function ConversationHistoryWorkspace({
               Open earlier work or start a new conversation with Evry.
             </p>
           </div>
-        ) : selectedConversation && canUseSelectedComposer ? (
-          <>
-            <ConversationDetailHeader
-              blocked={blocked}
-              headingRef={detailHeadingRef}
-              onBack={showConversationList}
-              state={selectedState}
-              title={selectedConversation.title}
-            />
-            {checkpoint?.rebuildRequired ? (
-              <ConversationHistoryCheckpoint
-                checkpoint={checkpoint}
-                disabled={blocked || rebuildMessage === null}
-                onRebuild={() => {
-                  if (rebuildMessage === null) return;
-                  void sendMessageText(rebuildMessage);
-                }}
-              />
-            ) : null}
-            {conversationSurface}
-          </>
         ) : (
           <div
             ref={detailStatusRef}

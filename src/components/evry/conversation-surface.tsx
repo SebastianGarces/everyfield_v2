@@ -381,7 +381,10 @@ export function ConversationSurface({ className }: { className?: string }) {
           ) : null}
           {pendingMessage ? (
             <div
-              className="mt-4 flex flex-col items-end gap-2"
+              className={cn(
+                "flex flex-col items-end gap-2",
+                conversation?.messages.length && "mt-4"
+              )}
               aria-label={
                 pendingMessage.status === "failed"
                   ? "Interrupted request"
