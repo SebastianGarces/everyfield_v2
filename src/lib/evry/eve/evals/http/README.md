@@ -1,0 +1,46 @@
+# Native HTTP runtime evaluation
+
+`createHttpEveEvalRunner` uses the official `eve/client` against the compiled,
+cookie-authenticated HTTP runtime. It does not replace the agent with a tool
+loop, expose `/info`, or allow the client to choose an actor or tenant.
+
+`runCompiledEveFixture` starts one private child process per scenario. The child
+imports the real `.output/server/index.mjs`, uses a disposable Postgres/Neon
+proxy, and installs a process-local observer before the server starts. Only
+that isolated test host can provide the frozen clock, explicit scripted model,
+and trusted call journal. Production code has no endpoint or model tool that
+can install or change the observer. Every captured call retains its original
+authorized call ID; presentations must refer to those calls.
+
+Run with Node 24 and Docker available, after building the current agent:
+
+```sh
+pnpm exec eve build
+node --import tsx --test src/lib/evry/eve/evals/http/http.test.ts
+EVRY_EVE_HTTP_PROOF=1 node --import tsx --test src/lib/evry/eve/evals/http/compiled.test.ts
+```
+
+The compiled proof uses deterministic provider responses and **no paid calls**.
+It checks actual authentication, complete tool and skill discovery, database
+reads, result presentation, and follow-up request context. `judge: null` is
+intentional: this proves runtime wiring, not Luna's reasoning or answer quality.
+The process must run with `NODE_ENV=production`; Eve automatically substitutes
+authored models in test mode, bypassing the application provider middleware.
+
+The unit protocol tests separately prove server cancellation on abort, fixed
+session follow-ups, and reservation-before-generation. They are not a
+substitute for the compiled database proof. Native question-response
+continuations, cold-start replay, and direct preparation-to-UI projection need
+their own compiled cases before claiming coverage.
+
+Live runs require explicit spending approval, `model.mode="live"`, and supplied
+price ceilings. The host reserves an upper estimate before each provider call,
+caps output tokens, and retains the reservation when usage is unknown or a call
+fails. These are operational guardrails, **not a guaranteed provider billing
+cap**: prices are caller-supplied, and visible prompt bytes do not account for
+provider-added framing. No live model-quality run has been performed by this
+proof. A future quality judge must also use the same reservation accounting.
+
+External fetches are blocked in scripted mode. Approved live mode permits only
+the OpenAI API in addition to loopback; email, Jev and Langfuse remain blocked.
+The temporary process directory and Docker fixtures are removed on completion.

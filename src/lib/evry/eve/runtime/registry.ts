@@ -18,6 +18,7 @@ import {
   reviewFromPreparation,
 } from "./review-state";
 import { withPreparationGate } from "./preparation-gate";
+import { fixtureRun } from "./fixture-bridge";
 
 export function describeEveRuntimeTools(identity: EveAuthenticatedSession) {
   return createEveToolRegistry({
@@ -44,13 +45,23 @@ export function createBoundEveRegistry(
 ): EveToolRegistry {
   let preparations = 0;
   const turn = evryTurnInput.get();
-  const authorizeRead = (name: string) =>
-    authorizeEvryReadCapabilityForSession(name, scope.appSessionId);
+  const fixture = fixtureRun({
+    ...scope.actor,
+    appSessionId: scope.appSessionId,
+  });
+  const authorizeRead = async (name: string) => {
+    const result = await authorizeEvryReadCapabilityForSession(
+      name,
+      scope.appSessionId
+    );
+    fixture?.authorize(Boolean(result));
+    return result;
+  };
   const context = {
     actor: scope.actor,
     literalUserText: turn.text,
     pageContext: turn.pageContext,
-    now: new Date(),
+    now: fixture?.now ?? new Date(),
   };
   const registry = createEveToolRegistry({
     context,
@@ -88,6 +99,7 @@ export function createBoundEveRegistry(
         const result = await registry.invoke(name, input, invocation);
         const reference = invocation?.callId;
         if (!reference) return result;
+        fixture?.call({ id: reference, name, input, output: result });
         if (name === "actions.prepare") {
           const review = reviewFromPreparation(result, reference);
           if (review) evryReviewState.update(() => review);

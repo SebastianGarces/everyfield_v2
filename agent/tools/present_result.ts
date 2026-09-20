@@ -5,6 +5,7 @@ import {
   findResult,
 } from "../../src/lib/evry/eve/runtime/results";
 import { withEveRuntimeScope } from "../../src/lib/evry/eve/runtime/scope";
+import { fixtureRun } from "../../src/lib/evry/eve/runtime/fixture-bridge";
 
 export default defineTool({
   description:
@@ -13,6 +14,11 @@ export default defineTool({
   execute: ({ reference }, ctx) =>
     withEveRuntimeScope(ctx, async (scope) => {
       const result = findResult(evryResultState.get(), reference, scope.turnId);
+      if (result)
+        fixtureRun({
+          ...scope.actor,
+          appSessionId: scope.appSessionId,
+        })?.present(reference);
       return result
         ? { status: "presented", artifacts: result.artifacts }
         : { status: "unavailable", artifacts: [] };

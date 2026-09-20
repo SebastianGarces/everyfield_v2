@@ -6,10 +6,16 @@ import {
 } from "../../src/lib/evry/eve/runtime/registry";
 import { eveRuntimeToolSchema } from "../../src/lib/evry/eve/runtime/tool-schemas";
 import { withEveRuntimeScope } from "../../src/lib/evry/eve/runtime/scope";
+import { captureEveTurnInput } from "../../src/lib/evry/eve/runtime/turn-context";
 
 export default defineDynamic({
   events: {
-    "turn.started"(_event, ctx) {
+    async "turn.started"(_event, ctx) {
+      await captureEveTurnInput({
+        sessionId: ctx.session.id,
+        identity: authenticatedSessionOf(ctx.session.auth.current),
+        messages: ctx.messages,
+      });
       const tools: Record<string, DynamicToolSet[string]> = {};
       for (const entry of describeEveRuntimeTools(
         authenticatedSessionOf(ctx.session.auth.current)
