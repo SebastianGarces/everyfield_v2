@@ -93,7 +93,7 @@ async function loadModules() {
     import("@/lib/evry/capabilities/meetings/dependency-output"),
     import("@/lib/evry/artifacts/lifecycle"),
     import("@/lib/evry/artifacts/trusted-plan-review"),
-    import("@/lib/evry/capabilities/production"),
+    import("@/lib/evry/capabilities/execution"),
     import("@/lib/evry/conversations/service"),
     import("@/lib/evry/conversations/plan-resume"),
     import("@/lib/evry/plans/repository"),

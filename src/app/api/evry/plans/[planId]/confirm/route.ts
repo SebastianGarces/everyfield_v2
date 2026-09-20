@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { isUnauthorized } from "@/lib/auth/unauthorized";
-import { PRODUCTION_EVRY_PLAN_REGISTRY } from "@/lib/evry/capabilities/production";
+import { PRODUCTION_EVRY_PLAN_REGISTRY } from "@/lib/evry/capabilities/execution";
 import {
   EvryPlantViewerRefusalError,
   requireEvryPlantViewer,

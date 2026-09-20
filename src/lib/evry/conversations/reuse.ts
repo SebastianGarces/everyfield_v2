@@ -1,5 +1,5 @@
 import { evryDetailedReceiptArtifactDocumentSchema } from "@/lib/evry/artifacts/review";
-import { PRODUCTION_EVRY_PLAN_REGISTRY } from "@/lib/evry/capabilities/production";
+import { PRODUCTION_EVRY_PLAN_REGISTRY } from "@/lib/evry/capabilities/execution";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
 import {
   parseStoredEvryActionPlan,

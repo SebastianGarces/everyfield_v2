@@ -2,7 +2,7 @@ import { eligibleEvryCapabilitiesFor } from "@/lib/evry/eligibility/capabilities
 import {
   PRODUCTION_EVRY_PLAN_REGISTRY,
   productionEvryPlanTargetIsCurrent,
-} from "@/lib/evry/capabilities/production";
+} from "@/lib/evry/capabilities/execution";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
 import { validateStoredEvryActionPlan } from "@/lib/evry/plans/integrity";
 import {

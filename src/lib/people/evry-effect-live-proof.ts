@@ -43,10 +43,8 @@ import {
 } from "@/lib/evry/capabilities/people/attachments";
 import { withEvryPeopleLiveProofStorage } from "@/lib/evry/capabilities/people/file-storage";
 import generatedPeopleInventory from "@/lib/evry/capabilities/people/inventory.generated.json";
-import {
-  PRODUCTION_EVRY_EXECUTION_REGISTRY,
-  PRODUCTION_EVRY_READ_REGISTRATIONS,
-} from "@/lib/evry/capabilities/production";
+import { PRODUCTION_EVRY_READ_REGISTRATIONS } from "@/lib/evry/capabilities/production";
+import { PRODUCTION_EVRY_EXECUTION_REGISTRY } from "@/lib/evry/capabilities/execution";
 import {
   evryCapabilityRegistrationFor,
   type EvryEffectCapabilityAuthorization,

@@ -15,10 +15,7 @@ import {
   parseEvryActionPlanCandidate,
 } from "@/lib/evry/plans";
 import type { StoredEvryActionPlan } from "@/lib/evry/plans/repository";
-import {
-  PRODUCTION_EVRY_EXECUTION_REGISTRY,
-  PRODUCTION_EVRY_REVIEW_REGISTRY,
-} from "@/lib/evry/capabilities/production";
+import { PRODUCTION_EVRY_EXECUTION_REGISTRY, PRODUCTION_EVRY_REVIEW_REGISTRY } from "@/lib/evry/capabilities/execution";
 
 import { createLaunchEvryConversationContinuation } from "./conversation";
 import {

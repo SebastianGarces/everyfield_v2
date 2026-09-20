@@ -5,7 +5,7 @@ import { isUnauthorized } from "@/lib/auth/unauthorized";
 import {
   PRODUCTION_EVRY_EXECUTION_REGISTRY,
   executeProductionEvryActionPlan,
-} from "@/lib/evry/capabilities/production";
+} from "@/lib/evry/capabilities/execution";
 import {
   executeEvryActionPlan,
   type EvryExecutionCapabilityRegistry,

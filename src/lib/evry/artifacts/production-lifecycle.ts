@@ -4,12 +4,7 @@ import {
   type EvryArtifactLifecycleResult,
 } from "@/lib/evry/artifacts/lifecycle";
 import { trustedEvryPlanReview } from "@/lib/evry/artifacts/trusted-plan-review";
-import {
-  PRODUCTION_EVRY_EXECUTION_REGISTRY,
-  PRODUCTION_EVRY_PLAN_REGISTRY,
-  PRODUCTION_EVRY_REVIEW_REGISTRY,
-  executeProductionEvryActionPlan,
-} from "@/lib/evry/capabilities/production";
+import { PRODUCTION_EVRY_EXECUTION_REGISTRY, PRODUCTION_EVRY_PLAN_REGISTRY, PRODUCTION_EVRY_REVIEW_REGISTRY, executeProductionEvryActionPlan } from "@/lib/evry/capabilities/execution";
 import { cleanupEvryPeoplePlanAttachments } from "@/lib/evry/capabilities/people/cleanup";
 import { revalidateProductionEvryConversationPlan } from "@/lib/evry/conversations/plan-resume";
 import {

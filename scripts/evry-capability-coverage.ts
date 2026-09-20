@@ -1,11 +1,7 @@
 import { z } from "zod";
 import inventory from "@/lib/evry/capabilities/inventory.generated.json";
-import {
-  PRODUCTION_EVRY_MODEL_READS,
-  PRODUCTION_EVRY_EXECUTION_REGISTRY,
-  PRODUCTION_EVRY_ARTIFACT_REVIEWS,
-  PRODUCTION_EVRY_MODEL_PREPARATIONS,
-} from "@/lib/evry/capabilities/production";
+import { PRODUCTION_EVRY_MODEL_READS, PRODUCTION_EVRY_MODEL_PREPARATIONS } from "@/lib/evry/capabilities/production";
+import { PRODUCTION_EVRY_EXECUTION_REGISTRY, PRODUCTION_EVRY_ARTIFACT_REVIEWS } from "@/lib/evry/capabilities/execution";
 import { EVRY_READ_WORKFLOWS } from "@/lib/evry/recipes/read-workflows";
 import { evryCapabilityRegistrationFor } from "@/lib/evry/eligibility/capabilities";
 import { PEOPLE_QUERY_READS } from "@/lib/evry/capabilities/queries/people";

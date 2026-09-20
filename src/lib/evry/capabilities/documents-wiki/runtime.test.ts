@@ -4,10 +4,8 @@ import { test } from "node:test";
 import { evryDetailedConfirmationArtifactDocumentSchema } from "@/lib/evry/artifacts/review";
 import { trustedReviewForEvryPlanDocument } from "@/lib/evry/artifacts/trusted-plan-review";
 import { evryConversationPlanIdentitySchema } from "@/lib/evry/conversations/contract";
-import {
-  PRODUCTION_EVRY_EXECUTION_REGISTRY,
-  PRODUCTION_EVRY_READ_REGISTRATIONS,
-} from "@/lib/evry/capabilities/production";
+import { PRODUCTION_EVRY_READ_REGISTRATIONS } from "@/lib/evry/capabilities/production";
+import { PRODUCTION_EVRY_EXECUTION_REGISTRY } from "@/lib/evry/capabilities/execution";
 import { evryCapabilityRegistrationFor } from "@/lib/evry/eligibility/capabilities";
 import {
   fingerprintEvryActionPlanIntent,

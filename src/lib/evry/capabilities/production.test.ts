@@ -9,16 +9,8 @@ import communicationInventory from "./communication/inventory.generated.json";
 import launchInventory from "./launch/inventory.generated.json";
 import meetingsInventory from "./meetings/inventory.generated.json";
 import peopleInventory from "./people/inventory.generated.json";
-import {
-  createProductionEvryActionPlanDispatcher,
-  createProductionEvryPlanTargetValidator,
-  PRODUCTION_EVRY_ARTIFACT_REVIEWS,
-  PRODUCTION_EVRY_CAPABILITY_CONTINUATIONS,
-  PRODUCTION_EVRY_EXECUTION_REGISTRY,
-  PRODUCTION_EVRY_PLAN_REGISTRY,
-  PRODUCTION_EVRY_MODEL_READS,
-  PRODUCTION_EVRY_REVIEW_REGISTRY,
-} from "./production";
+import { PRODUCTION_EVRY_CAPABILITY_CONTINUATIONS, PRODUCTION_EVRY_MODEL_READS } from "./production";
+import { createProductionEvryActionPlanDispatcher, createProductionEvryPlanTargetValidator, PRODUCTION_EVRY_ARTIFACT_REVIEWS, PRODUCTION_EVRY_EXECUTION_REGISTRY, PRODUCTION_EVRY_PLAN_REGISTRY, PRODUCTION_EVRY_REVIEW_REGISTRY } from "./execution";
 import { continueTaskEvryConversation } from "./tasks/conversation";
 import { TASK_ACTION_CONTRACTS } from "./tasks/contracts";
 import type { TaskEffectExport } from "./tasks/effect-contracts";

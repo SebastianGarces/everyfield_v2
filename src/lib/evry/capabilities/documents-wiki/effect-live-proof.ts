@@ -15,10 +15,8 @@ import {
 } from "@/db/schema";
 import { getGeneratedDocument } from "@/lib/documents/service";
 import { trustedEvryPlanReview } from "@/lib/evry/artifacts/trusted-plan-review";
-import {
-  PRODUCTION_EVRY_EXECUTION_REGISTRY,
-  PRODUCTION_EVRY_READ_REGISTRATIONS,
-} from "@/lib/evry/capabilities/production";
+import { PRODUCTION_EVRY_READ_REGISTRATIONS } from "@/lib/evry/capabilities/production";
+import { PRODUCTION_EVRY_EXECUTION_REGISTRY } from "@/lib/evry/capabilities/execution";
 import {
   evryCapabilityRegistrationFor,
   type EvryEffectCapabilityAuthorization,

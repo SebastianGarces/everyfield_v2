@@ -137,7 +137,7 @@ async function main() {
     await import("@/app/api/evry/plans/[planId]/confirm/route");
   const executeRoute =
     await import("@/app/api/evry/plans/[planId]/execute/route");
-  const production = await import("../production");
+  const production = await import("../execution");
   const command =
     'plant intelligence set-attestation {"signalKey":"systems_tested","value":"Production route lifecycle"}';
   const created = await json(

@@ -10,13 +10,8 @@ import generated from "@/lib/evry/capabilities/people/inventory.generated.json";
 import { MILESTONE_REVIEWS } from "@/lib/evry/capabilities/people/milestones";
 import { PEOPLE_EVRY_REVIEWS } from "@/lib/evry/capabilities/people/runtime";
 import { TAXONOMY_REVIEWS } from "@/lib/evry/capabilities/people/taxonomies";
-import {
-  PRODUCTION_EVRY_EXECUTION_REGISTRY,
-  PRODUCTION_EVRY_PLAN_REGISTRY,
-  PRODUCTION_EVRY_READ_REGISTRATIONS,
-  PRODUCTION_EVRY_REVIEW_REGISTRY,
-  productionEvryPlanTargetIsCurrent,
-} from "@/lib/evry/capabilities/production";
+import { PRODUCTION_EVRY_READ_REGISTRATIONS } from "@/lib/evry/capabilities/production";
+import { PRODUCTION_EVRY_EXECUTION_REGISTRY, PRODUCTION_EVRY_PLAN_REGISTRY, PRODUCTION_EVRY_REVIEW_REGISTRY, productionEvryPlanTargetIsCurrent } from "@/lib/evry/capabilities/execution";
 import { trustedReviewForEvryPlanDocument } from "@/lib/evry/artifacts/trusted-plan-review";
 import { evryCapabilityRegistrationFor } from "@/lib/evry/eligibility/capabilities";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
