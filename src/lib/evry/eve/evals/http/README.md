@@ -18,6 +18,7 @@ Run with Node 24 and Docker available, after building the current agent:
 pnpm exec eve build
 node --import tsx --test src/lib/evry/eve/evals/http/http.test.ts
 EVRY_EVE_HTTP_PROOF=1 node --import tsx --test src/lib/evry/eve/evals/http/compiled.test.ts
+EVRY_EVE_HTTP_PROOF=1 node --import tsx --test scripts/evry-eve-compiled-preparation.test.ts
 ```
 
 The compiled proof uses deterministic provider responses and **no paid calls**.
@@ -32,11 +33,22 @@ resume, Eve re-runs the turn resolver with the original user request; the answer
 appears as an answered tool result in the next model input. The proof checks
 both, the resulting database query, and the native UI reducer's answered part.
 
+The two-turn case attaches a fresh official client and reads the saved session
+twice. It compares the restored transcript and checks that generation counts,
+tool-invocation counts and the authorized-result journal did not change. This
+is a fresh-client replay in the same server process, not a process-restart or
+Vercel cold-start proof.
+
+The separate compiled preparation proof checks the actual native transcript
+through `projectEveMessage`: one confirmation card matches the database plan's
+fingerprint, the plan awaits confirmation, and no unconfirmed effects or email
+sends occur.
+
 The unit protocol tests separately prove server cancellation on abort, fixed
 session follow-ups, and reservation-before-generation. They are not a
-substitute for the compiled database proof. Cold-start replay and direct
-preparation-to-UI projection still need their own compiled cases before claiming
-coverage. `outcome.messages` contains typed messages from Eve's native reducer
+substitute for the compiled database proof. Process-restart and Vercel cold-start
+replay still need their own cases before claiming coverage. `outcome.messages`
+contains typed messages from Eve's native reducer
 over the actual events, with transport/authorization metadata omitted.
 
 Live runs require explicit spending approval, `model.mode="live"`, and supplied

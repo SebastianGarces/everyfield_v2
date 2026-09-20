@@ -148,6 +148,8 @@ export function installIsolatedFixtureHost(config: {
       };
       let stopped = false;
       let pending = 0;
+      let generations = 0;
+      let invocations = 0;
       const ceiling =
         (prices.maxInputBytes * prices.inputUsdPerMillion +
           prices.maxOutputTokens * prices.outputUsdPerMillion) /
@@ -164,6 +166,7 @@ export function installIsolatedFixtureHost(config: {
           else capture.refusedAuthorizations++;
         },
         call(call) {
+          invocations++;
           if (!capture.calls.some((entry) => entry.id === call.id))
             capture.calls.push(structuredClone(call));
         },
@@ -188,6 +191,7 @@ export function installIsolatedFixtureHost(config: {
           if (capture.costUsd + ceiling > input.maxCostUsd + Number.EPSILON)
             throw new Error("Evaluation budget exhausted before generation");
           capture.costUsd += ceiling;
+          generations++;
           pending++;
           capture.costBasis = "reserved_upper_bound";
           let settled = false;
@@ -234,6 +238,7 @@ export function installIsolatedFixtureHost(config: {
       return {
         identity,
         maxOutputTokens: prices.maxOutputTokens,
+        activity: () => ({ generations, invocations }),
         snapshot: () => structuredClone({ ...capture, outboundMessages }),
         stop() {
           stopped = true;

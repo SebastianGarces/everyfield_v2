@@ -13,6 +13,7 @@ import {
   type installIsolatedFixtureHost,
 } from "./host";
 import { fixtureTranscript } from "./transcript";
+import { isDeepStrictEqual } from "node:util";
 
 type FixtureHost = ReturnType<typeof installIsolatedFixtureHost>;
 export type HttpEvalOutcome = {
@@ -28,6 +29,17 @@ export type HttpEvalOutcome = {
   hostCapture: HostCapture;
   eveSessionId: string;
   messages: ReturnType<typeof fixtureTranscript>;
+  replay?: {
+    matchingTranscript: boolean;
+    stableActivity: boolean;
+    stableCapture: boolean;
+    snapshots: number;
+    eventCount: number;
+    generationsBefore: number;
+    generationsAfter: number;
+    invocationsBefore: number;
+    invocationsAfter: number;
+  };
 };
 
 /** Uses the production cookie-authenticated protocol, never /info or a replacement tool loop. */
@@ -37,6 +49,7 @@ export function createHttpEveEvalRunner(config: {
   host: FixtureHost;
   prices: EvalPriceCeiling;
   timeoutMs?: number;
+  verifyReplay?: boolean;
   onEvent?: (event: MessageStreamEvent) => void;
 }) {
   assertIsolatedFixtureTarget(config.origin, config.databaseUrl);
@@ -59,15 +72,16 @@ export function createHttpEveEvalRunner(config: {
       maxCostUsd: input.maxCostUsd,
       prices: config.prices,
     });
-    const client = new Client({
+    const clientOptions = {
       host: origin,
-      redirect: "error",
+      redirect: "error" as const,
       headers: {
         cookie: `session=${encodeURIComponent(input.sessionToken)}`,
         origin,
         "sec-fetch-site": "same-origin",
       },
-    });
+    };
+    const client = new Client(clientOptions);
     const signal = AbortSignal.any([
       input.signal,
       AbortSignal.timeout(config.timeoutMs ?? 120_000),
@@ -164,13 +178,47 @@ export function createHttpEveEvalRunner(config: {
       const hostCapture = fixture.snapshot();
       if (hostCapture.costUsd > input.maxCostUsd)
         throw new Error("Evaluation exceeded its reserved budget");
+      const transcript = fixtureTranscript(
+        new EveAgentStore({
+          reducer: defaultMessageReducer(),
+          initialEvents: events,
+        }).snapshot.data.messages
+      );
+      let replay: HttpEvalOutcome["replay"];
+      if (config.verifyReplay) {
+        const before = fixture.activity();
+        const fresh = new Client(clientOptions).sessions.attach(
+          session.state.sessionId
+        );
+        let matchingTranscript = true;
+        let eventCount = 0;
+        for (let index = 0; index < 2; index++) {
+          const snapshot = await fresh.snapshot({ signal });
+          const restored = fixtureTranscript(
+            new EveAgentStore({
+              reducer: defaultMessageReducer(),
+              initialEvents: snapshot.events,
+            }).snapshot.data.messages
+          );
+          matchingTranscript &&= isDeepStrictEqual(restored, transcript);
+          eventCount = snapshot.events.length;
+        }
+        const after = fixture.activity();
+        replay = {
+          matchingTranscript,
+          stableActivity: isDeepStrictEqual(before, after),
+          stableCapture: isDeepStrictEqual(hostCapture, fixture.snapshot()),
+          snapshots: 2,
+          eventCount,
+          generationsBefore: before.generations,
+          generationsAfter: after.generations,
+          invocationsBefore: before.invocations,
+          invocationsAfter: after.invocations,
+        };
+      }
       return {
-        messages: fixtureTranscript(
-          new EveAgentStore({
-            reducer: defaultMessageReducer(),
-            initialEvents: events,
-          }).snapshot.data.messages
-        ),
+        messages: transcript,
+        ...(replay ? { replay } : {}),
         answer: messages.join("\n\n"),
         latency: {
           acknowledgementMs,

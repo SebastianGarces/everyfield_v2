@@ -135,6 +135,7 @@ process.on("message", async (message) => {
       host,
       prices: request.prices,
       timeoutMs: request.timeoutMs,
+      verifyReplay: request.verifyReplay,
       onEvent(event) {
         eventTypes.push(event.type);
         if (event.type === "action.result" && event.data.status !== "completed")

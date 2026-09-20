@@ -22,6 +22,7 @@ test(
     const manifest = createFixtureManifest("compiled-http-today", 0);
     try {
       store.seed(manifest);
+      const auditStart = store.auditStart();
       const outcome = await runCompiledEveFixture(
         {
           compiledEntry: resolve(".output/server/index.mjs"),
@@ -35,6 +36,7 @@ test(
           ],
           now: FIXTURE_NOW.toISOString(),
           maxCostUsd: 1,
+          verifyReplay: true,
           prices: {
             inputUsdPerMillion: 1,
             outputUsdPerMillion: 2,
@@ -131,6 +133,29 @@ test(
         "fixture-tasks",
         "fixture-high",
       ]);
+      assert.ok(
+        outcome.replay?.matchingTranscript,
+        "A fresh official client restores the complete native transcript"
+      );
+      assert.ok(
+        outcome.replay.stableActivity,
+        "Reading saved events must not repeat model generations or tool executions"
+      );
+      assert.ok(
+        outcome.replay.stableCapture,
+        "Replaying the transcript must not change authorized results or send anything"
+      );
+      assert.equal(outcome.replay.snapshots, 2);
+      assert.ok(outcome.replay.eventCount > 0);
+      assert.equal(outcome.replay.generationsBefore, 6);
+      assert.equal(outcome.replay.generationsAfter, 6);
+      assert.equal(outcome.replay.invocationsBefore, 2);
+      assert.equal(outcome.replay.invocationsAfter, 2);
+      assert.deepEqual(
+        store.writesSince(auditStart, manifest),
+        [],
+        "Read turns and fresh-client replay produce no domain writes"
+      );
       const high = z
         .object({
           kind: z.literal("read"),

@@ -24,6 +24,7 @@ export const compiledFixtureRequest = z.strictObject({
     maxOutputTokens: z.number().int().positive(),
   }),
   timeoutMs: z.number().int().positive().max(600_000).default(120_000),
+  verifyReplay: z.boolean().optional(),
   model: z.discriminatedUnion("mode", [
     z.strictObject({
       mode: z.literal("scripted"),
@@ -52,6 +53,19 @@ export const compiledFixtureRequest = z.strictObject({
 });
 export type CompiledFixtureRequest = z.input<typeof compiledFixtureRequest>;
 export const httpEvalOutcomeSchema = z.object({
+  replay: z
+    .object({
+      matchingTranscript: z.boolean(),
+      stableActivity: z.boolean(),
+      stableCapture: z.boolean(),
+      snapshots: z.number().int(),
+      eventCount: z.number().int(),
+      generationsBefore: z.number().int(),
+      generationsAfter: z.number().int(),
+      invocationsBefore: z.number().int(),
+      invocationsAfter: z.number().int(),
+    })
+    .optional(),
   messages: z.array(fixtureMessageSchema),
   runtimeProof: z
     .object({
