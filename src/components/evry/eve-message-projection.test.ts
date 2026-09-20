@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { z } from "zod";
 import type { EveMessage } from "eve/client";
 import { projectEveMessage } from "./eve-message-projection";
 import { EVRY_CONFIRMATION_FIXTURES } from "@/lib/evry/artifacts/fixtures";
@@ -12,7 +13,7 @@ test("nested preparation reviews are presented only through authorized reference
     turnId: "turn",
     capability: "code_mode",
   };
-  const payload = { artifacts: [review] };
+  const payload = z.json().parse({ artifacts: [review] });
   assert.deepEqual(collectResult([], entry, payload), []);
   const records = collectResult(
     [],

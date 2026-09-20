@@ -2,10 +2,10 @@ import { redirect } from "next/navigation";
 
 import { EvryWorkspace } from "@/components/evry/evry-workspace";
 import { verifySession } from "@/lib/auth/session";
-import {
-  evryConversationHistorySearchSchema,
-  listEvryConversationHistory,
-} from "@/lib/evry/conversations/history";
+import { evryConversationHistorySearchSchema } from "@/lib/evry/conversations/history";
+import { listEveSessions } from "@/lib/evry/eve/runtime/session-store";
+import { formatDateTime, formatRelativeTimestamp } from "@/lib/datetime";
+import { readEvryPlantTimeZone } from "@/lib/evry/reads/plant-time-zone";
 import { evryConversationIdSchema } from "@/lib/evry/conversations/contract";
 import {
   evryPlantStandingOf,
@@ -48,11 +48,22 @@ export default async function EvryPage({
       : typeof params.new === "string" && params.new === "1";
   if (params.new !== undefined && !newConversation) redirect("/evry");
   const now = new Date();
-  const conversations = await listEvryConversationHistory({
-    actor,
-    search: search.data,
-    now,
-  });
+  const [sessions, timeZone] = await Promise.all([
+    listEveSessions(actor, search.data),
+    readEvryPlantTimeZone(actor.plantId),
+  ]);
+  const conversations = sessions.map((session) => ({
+    id: session.conversationId,
+    title: session.title,
+    lastActivityAt: session.updatedAt.toISOString(),
+    lastActivityLabel: formatRelativeTimestamp(
+      session.updatedAt,
+      now,
+      timeZone
+    ),
+    lastActivityTitle: formatDateTime(session.updatedAt, "short", timeZone),
+    actionableState: "ready" as const,
+  }));
 
   return (
     <EvryWorkspace
@@ -71,11 +82,6 @@ export default async function EvryPage({
         process.env.VERCEL_ENV === "preview" &&
         typeof params.artifactFixture === "string" &&
         params.artifactFixture === "streaming-states"
-      }
-      showRunRecoveryFixture={
-        process.env.VERCEL_ENV === "preview" &&
-        typeof params.artifactFixture === "string" &&
-        params.artifactFixture === "stream-reconnect"
       }
     />
   );

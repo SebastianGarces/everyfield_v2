@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, ilike, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { evryEveSessions } from "@/db/schema/evry-eve";
 
@@ -44,12 +44,16 @@ export const eveSessionStore: EveSessionStore = {
   },
 };
 
-export async function listEveSessions(owner: EveSessionOwner) {
+export async function listEveSessions(
+  owner: EveSessionOwner,
+  search: string | null = null
+) {
   return db
     .select({
       id: evryEveSessions.id,
       conversationId: evryEveSessions.conversationId,
       title: evryEveSessions.title,
+      createdAt: evryEveSessions.createdAt,
       updatedAt: evryEveSessions.updatedAt,
     })
     .from(evryEveSessions)
@@ -57,7 +61,13 @@ export async function listEveSessions(owner: EveSessionOwner) {
       and(
         eq(evryEveSessions.churchId, owner.plantId),
         eq(evryEveSessions.userId, owner.userId),
-        isNull(evryEveSessions.archivedAt)
+        isNull(evryEveSessions.archivedAt),
+        search
+          ? ilike(
+              evryEveSessions.title,
+              `%${search.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_")}%`
+            )
+          : undefined
       )
     )
     .orderBy(desc(evryEveSessions.updatedAt))

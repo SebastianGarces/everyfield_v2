@@ -51,12 +51,11 @@ test("saved and streaming assistant text use the same renderer while user input 
     new URL("./conversation-surface.tsx", import.meta.url),
     "utf8"
   );
-  assert.equal(
-    source.match(/body=\{evryResponseMarkdown\(part.text\)\}/g)?.length,
-    2
-  );
+  // Native Eve exposes saved and streaming messages through one projection.
+  assert.equal(source.match(/body=\{evryResponseMarkdown\(/g)?.length, 1);
+  assert.match(source, /projectEveMessage\(message\)/);
   assert.match(
     source,
-    /message.author === "user" \? \(\s*<p className="whitespace-pre-wrap">/
+    /message.role === "user" \? \(\s*<p className="whitespace-pre-wrap">/
   );
 });

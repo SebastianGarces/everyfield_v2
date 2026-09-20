@@ -42,7 +42,8 @@ export async function runEvalSuite(input: {
     !Number.isInteger(repetitions) ||
     repetitions < 1 ||
     repetitions > 10 ||
-    !Number.isInteger(timeoutMs) || timeoutMs <= 0
+    !Number.isInteger(timeoutMs) ||
+    timeoutMs <= 0
   ) {
     throw new Error(
       "An explicit positive total/per-case budget and 1–10 repetitions are required"
@@ -56,7 +57,11 @@ export async function runEvalSuite(input: {
     for (const scenario of input.scenarios) {
       let result: CaseResult;
       if (fixtureFailure) {
-        result = { id: scenario.id, status: "not_run", failures: [fixtureFailure] };
+        result = {
+          id: scenario.id,
+          status: "not_run",
+          failures: [fixtureFailure],
+        };
       } else if (remaining + Number.EPSILON < input.maxCaseCostUsd) {
         result = {
           id: scenario.id,
@@ -114,7 +119,11 @@ export async function runEvalSuite(input: {
             await fixture.cleanup();
           } catch {
             fixtureFailure = "fixture_cleanup_failed";
-            result = { ...result, status: "failed", failures: [...result.failures, fixtureFailure] };
+            result = {
+              ...result,
+              status: "failed",
+              failures: [...result.failures, fixtureFailure],
+            };
           }
         }
       }
