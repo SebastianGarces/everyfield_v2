@@ -5,7 +5,7 @@ import { trustedEvryPlanReview } from "@/lib/evry/artifacts/trusted-plan-review"
 import {
   progressFromRetryableEvryExecution,
   receiptFromEvryExecution,
-} from "@/lib/evry/artifacts/lifecycle";
+} from "@/lib/evry/artifacts/execution-result";
 import { findEvryExecutionSnapshot } from "@/lib/evry/executor/repository";
 import {
   PRODUCTION_EVRY_PLAN_REGISTRY,

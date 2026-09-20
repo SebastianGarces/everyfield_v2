@@ -13,12 +13,18 @@ import {
   type EvryConversationPlanIdentity,
 } from "@/lib/evry/conversations/contract";
 
-import type { EvryTrustedPlanReview } from "./lifecycle";
 import {
   deepFreezeEvryArtifact,
   evryDetailedConfirmationArtifactDocumentSchema,
   type EvryDetailedConfirmationArtifactDocument,
 } from "./review";
+
+export type EvryTrustedPlanReview = Readonly<{
+  confirmation: EvryDetailedConfirmationArtifactDocument;
+  source:
+    | Readonly<{ kind: "generic" }>
+    | Readonly<{ kind: "recipe"; identity: string }>;
+}>;
 
 const EVRY_ARTIFACT_REVIEW_REGISTRATION: unique symbol = Symbol(
   "EvryArtifactReviewRegistration"
