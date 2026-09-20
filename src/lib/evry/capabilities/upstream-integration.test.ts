@@ -7,10 +7,8 @@ import communication from "./communication/inventory.generated.json";
 import parity from "./inventory.generated.json";
 import meetings from "./meetings/inventory.generated.json";
 import teams from "./teams/inventory.generated.json";
-import {
-  PRODUCTION_EVRY_MODEL_PREPARATIONS,
-  PRODUCTION_EVRY_MODEL_READS,
-} from "./production";
+import { evePreparations } from "@/lib/evry/eve/preparation";
+import { EVE_CHURCH_MERGE_READ } from "@/lib/evry/eve/capabilities/merge-context";
 
 test("scoped app permissions stay visible without widening Evry execution", () => {
   for (const [inventory, sourceCapability, executionCapability, expected] of [
@@ -43,20 +41,18 @@ test("scoped app permissions stay visible without widening Evry execution", () =
   }
 });
 
-test("upstream merge-data and human acceptance do not become model tools", () => {
+test("church merge facts are readable while human acceptance stays outside model execution", () => {
   const gap = communication.entries.find(
     (entry) =>
       entry.capabilityIdentity === "communication.compose.get-church-merge-data"
   );
   assert.deepEqual(gap?.classification, {
-    state: "excluded",
-    reason: "evry_capability_gap",
+    state: "supported",
   });
   assert.equal(
-    evryCapabilityRegistrationFor(
-      "communication.compose.get-church-merge-data"
-    ),
-    null
+    evryCapabilityRegistrationFor("communication.compose.get-church-merge-data")
+      ?.operationKind,
+    "read"
   );
   for (const identity of [
     "route:/seat-invitation",
@@ -68,8 +64,19 @@ test("upstream merge-data and human acceptance do not become model tools", () =>
       { state: "excluded", reason: "authentication" }
     );
   }
-  assert.equal(PRODUCTION_EVRY_MODEL_READS.length, 100);
-  assert.equal(PRODUCTION_EVRY_MODEL_PREPARATIONS.length, 113);
+  assert.equal(
+    EVE_CHURCH_MERGE_READ.capabilityIdentity,
+    gap?.capabilityIdentity
+  );
+  assert.ok(
+    evePreparations.some((entry) => entry.id === "recipe.meeting-invite")
+  );
+  assert.equal(
+    evePreparations.some((entry) =>
+      /acceptSeatInvitation|church-merge-data/.test(entry.id)
+    ),
+    false
+  );
 });
 
 test("new own-RSVP context is recorded as a gap, not claimed as an Evry read", () => {

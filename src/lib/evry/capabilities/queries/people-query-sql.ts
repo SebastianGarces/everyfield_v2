@@ -64,6 +64,14 @@ const peopleCondition = z.strictObject({
       any: ids.optional(),
       all: ids.optional(),
       none: ids.optional(),
+      names: z
+        .array(z.string().trim().min(1).max(100))
+        .min(1)
+        .max(50)
+        .optional()
+        .describe(
+          "Match any of these exact tag names, case-insensitively, within this plant."
+        ),
     })
     .optional(),
   created: dateRange.optional(),
@@ -134,9 +142,17 @@ export const peopleGetManySchema = z.strictObject({
   ids,
   fields: z
     .array(
-      z.enum(["contact", "stage", "household", "background_check", "notes"])
+      z.enum([
+        "contact",
+        "stage",
+        "household",
+        "background_check",
+        "notes",
+        "tags",
+        "skills",
+      ])
     )
-    .max(5)
+    .max(7)
     .default(["contact", "stage", "household"]),
 });
 
@@ -303,6 +319,13 @@ function conditionSql(
       clauses.push(sql`not exists (${tagExists(condition.tags.none)})`);
     for (const id of new Set(condition.tags.all))
       clauses.push(sql`exists (${tagExists([id])})`);
+    if (condition.tags.names)
+      clauses.push(
+        sql`exists (select 1 from person_tags pt join tags tag on tag.id = pt.tag_id and tag.church_id = ${plantId}::uuid where pt.church_id = ${plantId}::uuid and pt.person_id = persons.id and ${inValues(
+          sql`lower(tag.name)`,
+          condition.tags.names.map((name) => name.toLowerCase())
+        )})`
+      );
   }
   if (condition.skill) {
     clauses.push(
@@ -451,7 +474,9 @@ export function buildPeopleGetManyQuery(
     ${fields.has("stage") ? sql`persons.status` : sql`null::text`} as stage,
     ${fields.has("household") ? sql`h.name` : sql`null::text`} as household,
     ${fields.has("background_check") ? sql`persons.background_check_status` : sql`null::text`} as background_check,
-    ${fields.has("notes") ? sql`left(persons.notes, 2000)` : sql`null::text`} as notes
+    ${fields.has("notes") ? sql`left(persons.notes, 2000)` : sql`null::text`} as notes,
+    ${fields.has("tags") ? sql`coalesce((select string_agg(tag.name, ', ' order by tag.name) from person_tags pt join tags tag on tag.id = pt.tag_id and tag.church_id = ${plantId}::uuid where pt.church_id = ${plantId}::uuid and pt.person_id = persons.id), 'None recorded')` : sql`null::text`} as tags,
+    ${fields.has("skills") ? sql`coalesce((select string_agg(concat_ws(' · ', s.skill_name, s.skill_category, s.proficiency, s.notes), E'\n' order by s.skill_category, s.skill_name, s.id) from skills_inventory s where s.church_id = ${plantId}::uuid and s.person_id = persons.id), 'None recorded')` : sql`null::text`} as skills
     from persons left join households h on h.id = persons.household_id and h.church_id = ${plantId}::uuid
     where ${peopleCohortSql(plantId, { all: { personIds: input.ids } })} order by persons.id`;
 }

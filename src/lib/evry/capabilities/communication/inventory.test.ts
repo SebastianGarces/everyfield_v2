@@ -65,7 +65,7 @@ test("generated Communication inventory is current and fully classified", async 
   }
 });
 
-test("plant merge facts remain a visible Evry gap without granting compose access", () => {
+test("plant merge facts have an exact read-only capability without widening other callers", () => {
   const inventory = generateCommunicationCapabilityInventory(repoRoot);
   const read = {
     caller: "src/app/(dashboard)/communication/compose/page.tsx",
@@ -78,20 +78,22 @@ test("plant merge facts remain a visible Evry gap without granting compose acces
     gap
   );
   assert.equal(gap.kind, "rsc_read");
-  assert.equal(evryCapabilityRegistrationFor(gap.capabilityIdentity), null);
+  assert.equal(
+    evryCapabilityRegistrationFor(gap.capabilityIdentity)?.operationKind,
+    "read"
+  );
   assert.deepEqual(gap.classification, {
-    state: "excluded",
-    reason: "evry_capability_gap",
+    state: "supported",
   });
-  assert.equal(gap.applicationCapability, null);
-  assert.equal(gap.operationKind, "excluded");
+  assert.equal(gap.applicationCapability, "read");
+  assert.equal(gap.operationKind, "read");
   assert.equal(
     inventory.capabilities.some(
       ({ identity, surfaceIdentities }) =>
         identity === gap.capabilityIdentity ||
         surfaceIdentities.includes(gap.identity)
     ),
-    false
+    true
   );
   const compose = inventory.capabilities.find(
     ({ identity }) => identity === "communication.compose.get-context"

@@ -11,6 +11,11 @@ import { OPERATIONS_QUERY_READS } from "@/lib/evry/capabilities/queries/operatio
 import { CONTENT_QUERY_READS } from "@/lib/evry/capabilities/queries/content";
 import { EVE_CAPABILITY_CATALOG } from "./catalog";
 import {
+  extendedEveReadSchema,
+  extendedEveReadIdentities,
+  resolveEveReadInvocation,
+} from "./extended-reads";
+import {
   createEveHelperTools,
   productionEveHelperDependencies,
   type EveHelperDependencies,
@@ -32,6 +37,7 @@ export type EveToolDescription = Readonly<{
   description: string;
   inputSchema: z.ZodType;
   effect: "read" | "prepare";
+  capabilityIdentities?: readonly string[];
 }>;
 export type EveToolContext = Readonly<{
   actor: Pick<EvryPlantActor, "userId" | "plantId">;
@@ -89,14 +95,16 @@ export function createEveToolRegistry(options: {
       name: read.id,
       description:
         descriptions.get(read.id) ?? read.inputSchema.description ?? read.id,
-      inputSchema: read.inputSchema,
+      inputSchema: extendedEveReadSchema(read),
       effect: "read" as const,
+      capabilityIdentities: extendedEveReadIdentities(read),
     })),
     ...helpers.map((helper) => ({
       name: helper.name,
       description: helper.description,
       inputSchema: helper.inputSchema,
       effect: "read" as const,
+      capabilityIdentities: [helper.capabilityIdentity],
     })),
     ...(options.preparation
       ? [
@@ -138,7 +146,20 @@ export function createEveToolRegistry(options: {
           signal: invocation.signal,
         });
       } else {
-        const read = readMap.get(name);
+        const parsed = contract.inputSchema.safeParse(input);
+        if (!parsed.success)
+          return {
+            status: "invalid_input",
+            issues: parsed.error.issues.map(({ path, message }) => ({
+              path: path.map(String).join("."),
+              message,
+            })),
+          };
+        const baseline = readMap.get(name);
+        const resolved = baseline
+          ? resolveEveReadInvocation(baseline, parsed.data)
+          : undefined;
+        const read = resolved?.read;
         const helper = helperMap.get(name);
         const identity = read?.capabilityIdentity ?? helper?.capabilityIdentity;
         if (!identity) return { status: "unavailable", reason: "unknown_tool" };
@@ -151,15 +172,6 @@ export function createEveToolRegistry(options: {
         )
           return { status: "unavailable", reason: "not_authorized" };
         invocation.signal?.throwIfAborted();
-        const parsed = contract.inputSchema.safeParse(input);
-        if (!parsed.success)
-          return {
-            status: "invalid_input",
-            issues: parsed.error.issues.map(({ path, message }) => ({
-              path: path.map(String).join("."),
-              message,
-            })),
-          };
         result = read
           ? await executeAuthorizedEvryRead(
               read,
@@ -169,7 +181,7 @@ export function createEveToolRegistry(options: {
                 pageContext: context.pageContext,
                 now: context.now,
               },
-              parsed.data
+              resolved?.input
             )
           : await helper!.run(authorization, parsed.data);
       }

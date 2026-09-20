@@ -9,6 +9,18 @@
   },
   "capabilities": [
     {
+      "identity": "communication.compose.get-church-merge-data",
+      "surfaceIdentities": [
+        "rsc-read:src/app/(dashboard)/communication/compose/page.tsx → @/lib/communication/church-merge#getChurchMergeData"
+      ],
+      "parityCapability": "communication",
+      "domain": "compose",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null
+    },
+    {
       "identity": "communication.compose.get-context",
       "surfaceIdentities": ["route:/communication/compose"],
       "parityCapability": "communication",
@@ -535,11 +547,11 @@
       "exportName": "getChurchMergeData",
       "capabilityIdentity": "communication.compose.get-church-merge-data",
       "domain": "compose",
-      "operationKind": "excluded",
-      "applicationCapability": null,
-      "confirmation": "excluded",
+      "operationKind": "read",
       "mutationShape": null,
-      "classification": { "state": "excluded", "reason": "evry_capability_gap" }
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
     },
     {
       "kind": "rsc_read",
@@ -756,7 +768,7 @@
     "rscReads": 20,
     "externalExclusions": 2,
     "productGaps": 0,
-    "readCapabilities": 14,
+    "readCapabilities": 15,
     "effectCapabilities": 6,
     "unclassified": 0
   }

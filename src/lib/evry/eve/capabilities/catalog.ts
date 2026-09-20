@@ -2,12 +2,12 @@
 export const EVE_CAPABILITY_CATALOG = [
   [
     "people.query",
-    "Find, count or group people using stage, tags, skills and recorded interview, follow-up and attendance relationships.",
+    "Find, count or group people using stage, tags (IDs or exact case-insensitive names), skills and recorded interview, follow-up and attendance relationships.",
     ["people", "interviews", "assessments", "commitments", "notes"],
   ],
   [
     "people.get_many",
-    "Read one or many people or households by ID. Use bulk reads for collections.",
+    "Read one or many people or households by ID. Request tags or skills fields for named tags and recorded skill category/proficiency/notes. Use bulk reads for collections.",
     ["people"],
   ],
   [
@@ -17,7 +17,7 @@ export const EVE_CAPABILITY_CATALOG = [
   ],
   [
     "tasks.query",
-    "Find, count or group tasks by assignment, dates, priority, status and related records. My tasks means the authenticated account; today excludes overdue.",
+    "Find, count or group tasks by assignment, dates, priority, status and related records. My tasks means the authenticated account; today excludes overdue. Use resource templates for available checklist template keys, or phase_prompt for the current transition and suggested templates, without task filters.",
     ["tasks"],
   ],
   [
@@ -62,7 +62,7 @@ export const EVE_CAPABILITY_CATALOG = [
   ],
   [
     "communication.query",
-    "Find message templates, messages, recipients and delivery history. Use communication.get_many for complete message content.",
+    "Find message templates, messages, recipients and delivery history. Use query resource merge_context for current church, pastor and launch-date placeholder values. Use communication.get_many for complete message content.",
     ["communication"],
   ],
   [
@@ -97,7 +97,7 @@ export const EVE_CAPABILITY_CATALOG = [
   ],
   [
     "intelligence.query",
-    "Read stored Plant Intelligence assessments, signals, attestations, check-ins and feedback. Distinguish recorded claims from measured evidence.",
+    "Read Plant Intelligence assessments, insights, attestations, transitions, checkins, feedback or signals. Signals include current operational trends, milestone timeline and phase readiness; they are not a historical assessment. Feedback/signals accept the unchanged continuation cursor returned by the reader. Distinguish recorded claims from measured evidence.",
     ["intelligence"],
   ],
   [

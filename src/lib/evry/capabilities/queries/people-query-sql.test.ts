@@ -28,6 +28,37 @@ const plant = "10000000-0000-4000-8000-000000000001";
 const id = "20000000-0000-4000-8000-000000000001";
 const dialect = new PgDialect();
 
+test("named tags remain exact parameterized plant-scoped matches and bulk details include skills", () => {
+  const query = dialect.sqlToQuery(
+    buildPeopleQuery(
+      plant,
+      peopleQuerySchema.parse({
+        cohort: { all: { tags: { names: ["Worship", "x' OR true --"] } } },
+        result: { mode: "list" },
+      })
+    )
+  );
+  assert.ok(query.params.includes("worship"));
+  assert.ok(query.params.includes("x' or true --"));
+  assert.doesNotMatch(query.sql, /OR true --/);
+  assert.match(query.sql, /tag.church_id/);
+  assert.match(query.sql, /pt.church_id/);
+  const details = dialect.sqlToQuery(
+    buildPeopleGetManyQuery(
+      plant,
+      peopleGetManySchema.parse({
+        resource: "person",
+        ids: [id, plant],
+        fields: ["tags", "skills"],
+      })
+    )
+  );
+  assert.match(details.sql, /string_agg\(tag.name/);
+  assert.match(details.sql, /skills_inventory s where s.church_id/);
+  assert.ok(details.params.includes(plant));
+  assert.ok(details.params.includes(id));
+});
+
 test("every persisted People and attendance enum has a human-facing label", () => {
   for (const [field, values] of [
     ["stage", personStatuses],

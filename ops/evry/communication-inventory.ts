@@ -525,23 +525,22 @@ export function classifyCommunicationRscRead(
     source: read.caller,
     exportName: read.exportName,
   };
-  // The UI resolves plant merge facts, but Evry's compose adapter only reads
-  // templates and recipient teams. Keep this gap visible without granting access.
+  // Keep the exact caller/module binding; similarly named helpers grant nothing.
   if (
     read.caller === "src/app/(dashboard)/communication/compose/page.tsx" &&
     read.modulePath === "@/lib/communication/church-merge" &&
     read.exportName === "getChurchMergeData"
   ) {
-    return {
-      ...surface,
-      capabilityIdentity: "communication.compose.get-church-merge-data",
-      domain: "compose",
-      operationKind: "excluded",
-      applicationCapability: null,
-      confirmation: "excluded",
-      mutationShape: null,
-      classification: { state: "excluded", reason: "evry_capability_gap" },
-    };
+    return supportedSurface(
+      surface,
+      {
+        capabilityIdentity: "communication.compose.get-church-merge-data",
+        domain: "compose",
+        operationKind: "read",
+        mutationShape: null,
+      },
+      "read"
+    );
   }
   const contract =
     RSC_READ_CONTRACTS[read.exportName as keyof typeof RSC_READ_CONTRACTS];
