@@ -20,6 +20,8 @@ import {
   type EvryCapabilityEvalLayer,
 } from "@/lib/evry/evals/contracts";
 import { parseEvryActionPlanCandidate } from "@/lib/evry/plans";
+import { EVE_CHURCH_MERGE_READ } from "@/lib/evry/eve/capabilities/merge-context";
+import { eveRuntimeToolSchema } from "@/lib/evry/eve/runtime/tool-schemas";
 
 import {
   COMMUNICATION_MESSAGE_SEND_IDENTITY,
@@ -175,9 +177,30 @@ function readOutcomes(): Readonly<Record<string, ReadOutcome>> {
     proof.stdout
   )?.[1];
   assert.ok(encoded, "Communication read proof returned no outcomes");
-  cachedReadOutcomes = JSON.parse(encoded) as Readonly<
-    Record<string, ReadOutcome>
-  >;
+  const eveProof = spawnSync(
+    process.execPath,
+    [
+      "--no-warnings",
+      "--experimental-test-module-mocks",
+      "--import",
+      "tsx",
+      "scripts/evry-eve-merge-read-proof.ts",
+    ],
+    { cwd: process.cwd(), encoding: "utf8", env: process.env, timeout: 60_000 }
+  );
+  assert.equal(
+    eveProof.status,
+    0,
+    `Eve merge reader proof failed\n${eveProof.stdout}\n${eveProof.stderr}`
+  );
+  const eveEncoded = /^EVRY_COMMUNICATION_READ_OUTCOMES=(.+)$/m.exec(
+    eveProof.stdout
+  )?.[1];
+  assert.ok(eveEncoded, "Eve reader proof returned no outcomes");
+  cachedReadOutcomes = {
+    ...JSON.parse(encoded),
+    ...JSON.parse(eveEncoded),
+  } as Readonly<Record<string, ReadOutcome>>;
   return cachedReadOutcomes;
 }
 
@@ -246,6 +269,13 @@ function effectDocument(identity: string) {
 }
 
 function selectionFor(identity: string) {
+  if (identity === EVE_CHURCH_MERGE_READ.capabilityIdentity)
+    return {
+      tool: "communication.query",
+      input: eveRuntimeToolSchema("communication.query").parse({
+        query: { resource: "merge_context" },
+      }),
+    };
   const text = readSelections[identity] ?? effectSelections[identity];
   assert.ok(text, `missing selection text for ${identity}`);
   return readSelections[identity]

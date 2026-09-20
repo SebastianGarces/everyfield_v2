@@ -7,6 +7,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { EvryArtifactRenderer } from "@/components/evry/artifacts/artifact-renderer";
 import communicationInventory from "./inventory.generated.json";
+import { EVE_CHURCH_MERGE_READ } from "@/lib/evry/eve/capabilities/merge-context";
 import {
   isEvryEffectCapabilityIdentity,
   isEvryReadCapabilityIdentity,
@@ -119,14 +120,17 @@ test("all generated Communication identities are installed with the authoritativ
   }
 });
 
-test("all fourteen generated Communication reads have one concrete adapter", () => {
+test("generated Communication reads have a domain adapter or an Eve-native reader", () => {
   const expected = communicationInventory.capabilities
     .filter(({ operationKind }) => operationKind === "read")
     .map(({ identity }) => identity)
     .sort();
-  const actual = COMMUNICATION_EVRY_READ_REGISTRATIONS.map(
-    ({ capabilityIdentity }) => capabilityIdentity
-  ).sort();
+  const actual = [
+    ...COMMUNICATION_EVRY_READ_REGISTRATIONS,
+    EVE_CHURCH_MERGE_READ,
+  ]
+    .map(({ capabilityIdentity }) => capabilityIdentity)
+    .sort();
   assert.deepEqual(actual, expected);
   assert.equal(new Set(actual).size, actual.length);
 });

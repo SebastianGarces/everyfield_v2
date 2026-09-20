@@ -9,8 +9,18 @@ import communicationInventory from "./communication/inventory.generated.json";
 import launchInventory from "./launch/inventory.generated.json";
 import meetingsInventory from "./meetings/inventory.generated.json";
 import peopleInventory from "./people/inventory.generated.json";
-import { PRODUCTION_EVRY_CAPABILITY_CONTINUATIONS, PRODUCTION_EVRY_MODEL_READS } from "./production";
-import { createProductionEvryActionPlanDispatcher, createProductionEvryPlanTargetValidator, PRODUCTION_EVRY_ARTIFACT_REVIEWS, PRODUCTION_EVRY_EXECUTION_REGISTRY, PRODUCTION_EVRY_PLAN_REGISTRY, PRODUCTION_EVRY_REVIEW_REGISTRY } from "./execution";
+import {
+  PRODUCTION_EVRY_CAPABILITY_CONTINUATIONS,
+  PRODUCTION_EVRY_MODEL_READS,
+} from "./production";
+import {
+  createProductionEvryActionPlanDispatcher,
+  createProductionEvryPlanTargetValidator,
+  PRODUCTION_EVRY_ARTIFACT_REVIEWS,
+  PRODUCTION_EVRY_EXECUTION_REGISTRY,
+  PRODUCTION_EVRY_PLAN_REGISTRY,
+  PRODUCTION_EVRY_REVIEW_REGISTRY,
+} from "./execution";
 import { continueTaskEvryConversation } from "./tasks/conversation";
 import { TASK_ACTION_CONTRACTS } from "./tasks/contracts";
 import type { TaskEffectExport } from "./tasks/effect-contracts";
@@ -19,6 +29,7 @@ import teamsInventory from "./teams/inventory.generated.json";
 import platformInventory from "./platform/inventory.generated.json";
 import plantIntelligenceInventory from "./plant-intelligence/inventory.generated.json";
 import documentsWikiInventory from "./documents-wiki/inventory.generated.json";
+import { createEveToolRegistry } from "@/lib/evry/eve/capabilities/registry";
 import {
   TASK_EFFECT_SELECTION_FIXTURES,
   taskEffectPlanFixture,
@@ -54,13 +65,25 @@ test("boundary examples still have one internal adapter", () => {
   }
 });
 
-test("production exposes every installed pack read to the model", () => {
+test("supported reads have an existing domain adapter or a declared Eve read path, without claiming model parity", () => {
   const expected = PRODUCTION_CAPABILITIES.filter(
     ({ operationKind }) => operationKind === "read"
   ).map(({ identity }) => identity);
-  const actual = PRODUCTION_EVRY_MODEL_READS.map(
-    ({ capabilityIdentity }) => capabilityIdentity
-  );
+  const eve = createEveToolRegistry({
+    context: {
+      actor: { userId: "audit", plantId: "audit" },
+      literalUserText: "",
+      pageContext: null,
+      now: new Date(0),
+    },
+    authorizeRead: async () => null,
+  }).describe();
+  const actual = [
+    ...PRODUCTION_EVRY_MODEL_READS.map(
+      ({ capabilityIdentity }) => capabilityIdentity
+    ),
+    ...eve.flatMap((entry) => entry.capabilityIdentities ?? []),
+  ];
   assert.deepEqual(
     [...new Set(actual)].toSorted(),
     [...new Set(expected)].toSorted()
