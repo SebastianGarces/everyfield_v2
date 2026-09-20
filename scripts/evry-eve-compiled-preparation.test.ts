@@ -32,6 +32,7 @@ test(
           ],
           now: FIXTURE_NOW.toISOString(),
           maxCostUsd: 1,
+          verifyReplay: true,
           prices: {
             inputUsdPerMillion: 1,
             outputUsdPerMillion: 2,
@@ -109,6 +110,11 @@ test(
       assert.equal(store.writesSince(before, manifest).length, 0);
       assert.equal(outcome.hostCapture.outboundMessages, 0);
       assert.equal(outcome.costUsd, 0);
+      assert.ok(outcome.replay);
+      assert.equal(outcome.replay.matchingTranscript, true);
+      assert.equal(outcome.replay.stableActivity, true);
+      assert.equal(outcome.replay.stableCapture, true);
+      assert.equal(outcome.replay.snapshots, 2);
       assert.equal(
         outcome.judge,
         null,
