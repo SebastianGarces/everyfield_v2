@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { neonConfig } from "@neondatabase/serverless";
 import { z } from "zod";
 import { startFixtureStack } from "./stack";
@@ -112,7 +112,12 @@ test(
           manifest.sessionId,
           () =>
             preparation.prepare(
-              { ...request, arguments: { ...request.arguments, subject } },
+              {
+                request: {
+                  ...request,
+                  arguments: { ...request.arguments, subject },
+                },
+              },
               { callId }
             )
         );
@@ -169,6 +174,66 @@ test(
         )
       );
       assert.equal(get.status, 200);
+      const invalid = await withAuthenticatedSessionId(manifest.sessionId, () =>
+        routes.POST(
+          new Request(
+            `http://eve-fixture.test/api/evry/eve/plans/${initial.planId}`,
+            {
+              method: "POST",
+              headers: {
+                origin: "http://eve-fixture.test",
+                "content-type": "application/json",
+              },
+              body: JSON.stringify({
+                fingerprint: "not-a-fingerprint",
+                action: "confirm",
+              }),
+            }
+          ),
+          { params: Promise.resolve({ planId: initial.planId }) }
+        )
+      );
+      assert.equal(invalid.status, 400);
+      assert.deepEqual(await invalid.json(), { status: "invalid" });
+      const crossOrigin = await withAuthenticatedSessionId(
+        manifest.sessionId,
+        () =>
+          routes.POST(
+            new Request(
+              `http://eve-fixture.test/api/evry/eve/plans/${initial.planId}`,
+              {
+                method: "POST",
+                headers: {
+                  origin: "https://attacker.example",
+                  "content-type": "application/json",
+                },
+                body: JSON.stringify({
+                  fingerprint: initial.fingerprint,
+                  action: "confirm",
+                }),
+              }
+            ),
+            { params: Promise.resolve({ planId: initial.planId }) }
+          )
+      );
+      assert.equal(crossOrigin.status, 403);
+      assert.deepEqual(await crossOrigin.json(), { status: "unavailable" });
+      const foreignSession = randomBytes(32).toString("hex");
+      store.sql(
+        `insert into sessions(id,user_id,expires_at) values('${foreignSession}','${manifest.ids["foreign-actor"]}',now()+interval '60 days')`
+      );
+      const foreignReview = await withAuthenticatedSessionId(
+        foreignSession,
+        () =>
+          routes.GET(
+            new Request(
+              `http://eve-fixture.test/api/evry/eve/plans/${initial.planId}?fingerprint=${initial.fingerprint}`
+            ),
+            { params: Promise.resolve({ planId: initial.planId }) }
+          )
+      );
+      assert.equal(foreignReview.status, 404);
+      assert.deepEqual(await foreignReview.json(), { status: "unavailable" });
       assert.equal(
         store.writesSince(before, manifest).length,
         0,
