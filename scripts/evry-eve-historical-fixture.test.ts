@@ -24,6 +24,7 @@ test(
       const { createProductionEveEvalAdapter } =
         await import("@/lib/evry/eve/evals/fixtures/adapter");
       let omitOwnership = false;
+      let wrongPeopleCriterion = false;
       const adapter = createProductionEveEvalAdapter({
         store: createFixtureStore(stack.container),
         buildSha: "0".repeat(40),
@@ -44,6 +45,52 @@ test(
             if (present) onPresentResult(callId);
             return output;
           };
+          if (scenario.id === "interviews-01")
+            await invoke("people.query", {
+              cohort: {
+                all: {
+                  stages: ["prospect"],
+                  interview: "not_recorded",
+                  ...(wrongPeopleCriterion ? {} : { followUp: "recorded" }),
+                },
+              },
+              result: { mode: "list" },
+            });
+          if (scenario.id === "interviews-02")
+            await invoke("people.query", {
+              cohort: {
+                all: {
+                  stages: ["prospect"],
+                  followUp: "not_recorded",
+                  ...(wrongPeopleCriterion
+                    ? { interview: "not_recorded" }
+                    : {}),
+                },
+              },
+              result: { mode: "list" },
+            });
+          if (scenario.id === "interviews-03")
+            await invoke("people.query", {
+              cohort: {
+                all: {
+                  interview: "not_recorded",
+                  attendance: { minimumMeetings: wrongPeopleCriterion ? 1 : 2 },
+                },
+              },
+              result: { mode: "list" },
+            });
+          if (scenario.id === "assessments-02")
+            await invoke("people.query", {
+              cohort: {
+                all: {
+                  interview: "recorded",
+                  ...(wrongPeopleCriterion
+                    ? {}
+                    : { assessment: "not_recorded" }),
+                },
+              },
+              result: { mode: "list" },
+            });
           if (scenario.id === "tasks-08") {
             await invoke("tasks.query", {
               where: {
@@ -202,6 +249,19 @@ test(
                 JSON.stringify(wrong)
               );
               omitOwnership = false;
+            }
+            if (id.startsWith("interviews-") || id === "assessments-02") {
+              wrongPeopleCriterion = true;
+              const wrong = gradeObservation(
+                id,
+                fixture.expectations,
+                await run()
+              );
+              assert.ok(
+                wrong.failures.some((failure) => failure.includes("personIds")),
+                JSON.stringify(wrong)
+              );
+              wrongPeopleCriterion = false;
             }
           } finally {
             await fixture.cleanup();

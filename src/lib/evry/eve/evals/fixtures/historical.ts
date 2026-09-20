@@ -3,6 +3,7 @@ import { z } from "zod";
 import { DOCUMENT_TEMPLATES } from "@/lib/documents/templates";
 import type { Expectations } from "../contract";
 import type { FixtureManifest } from "./manifest";
+import { fixtureId } from "./manifest";
 import type { FixtureStore } from "./store";
 import { capturedReadArtifactSchema, type CapturedCall } from "./host-capture";
 
@@ -12,6 +13,10 @@ export const historicalFixtureIds = [
   "launch-01",
   "wiki-03",
   "documents-01",
+  "interviews-01",
+  "interviews-02",
+  "interviews-03",
+  "assessments-02",
 ] as const;
 export const wikiFixtureContent = {
   vision:
@@ -32,6 +37,29 @@ export function cleanupHistoricalFixture(
 }
 export function seedHistoricalFixture(m: FixtureManifest, store: FixtureStore) {
   const i = m.ids;
+  if (m.caseId.startsWith("interviews-") || m.caseId === "assessments-02") {
+    // Keep independent distractors: interviewed without follow-up, follow-up
+    // without prospect stage, RSVP without attendance, and a foreign interview.
+    store.sql(`
+      update persons set status='prospect' where id='${i["core-alex"]}' and church_id='${i.plant}';
+      insert into interviews(church_id,person_id,interviewed_by,interview_date,maturity_status,gifted_status,chemistry_status,right_reasons_status,season_status,overall_result) values
+      ('${i.plant}','${i["core-alex"]}','${i.actor}','2026-09-12','pass','pass','pass','pass','pass','qualified'),
+      ('${i["foreign-plant"]}','${i["person-foreign"]}','${i["foreign-actor"]}','2026-09-12','pass','pass','pass','pass','pass','qualified');
+      insert into tasks(church_id,title,category,status,related_type,related_id,created_by_id) values
+      ('${i.plant}','Completed core follow-up','follow_up','complete','person','${i["core-jordan"]}','${i.actor}'),
+      ('${i.plant}','Planned prospect follow-up','follow_up','not_started','person','${i["prospect-new"]}','${i.actor}'),
+      ('${i.plant}','Completed unrelated task','administrative','complete','person','${i["prospect-new"]}','${i.actor}');
+      insert into meeting_attendance(church_id,meeting_id,person_id,status,response_status) values
+      ('${i.plant}','${i["meeting-one"]}','${i["prospect-interviewed"]}','attended','confirmed'),
+      ('${i.plant}','${i["meeting-two"]}','${i["prospect-interviewed"]}','attended','confirmed'),
+      ('${i.plant}','${i["meeting-one"]}','${i["prospect-new"]}','attended','confirmed');
+    `);
+  }
+  if (m.caseId === "assessments-02") {
+    store.sql(`insert into assessments(id,church_id,person_id,assessed_by,committed_score,compelled_score,contagious_score,courageous_score,total_score,assessment_date) values
+      ('${fixtureId(m.digest, "assessment-alex")}','${i.plant}','${i["core-alex"]}','${i.actor}',4,4,4,4,16,'2026-09-13'),
+      ('${fixtureId(m.digest, "assessment-jordan")}','${i.plant}','${i["core-jordan"]}','${i.actor}',4,4,4,4,16,'2026-09-13');`);
+  }
   if (m.caseId === "tasks-08")
     store.sql(
       `insert into tasks(id,church_id,title,status,priority,due_date,assigned_to_id,created_by_id) values ('${i["task-today-medium"]}','${i.plant}','Today medium priority','not_started','medium','2026-09-20','${i.actor}','${i.actor}');`
@@ -70,6 +98,35 @@ export function historicalExpectations(
       .query(sql)
       .map((r) => z.string().parse(r.id))
       .sort();
+  if (m.caseId.startsWith("interviews-") || m.caseId === "assessments-02") {
+    const interview =
+      "exists(select 1 from interviews v where v.church_id=p.church_id and v.person_id=p.id)";
+    const followup =
+      "exists(select 1 from tasks t where t.church_id=p.church_id and t.related_type='person' and t.related_id=p.id and t.category='follow_up' and t.status='complete' and t.parent_task_id is null and t.deleted_at is null)";
+    const criterion =
+      m.caseId === "interviews-01"
+        ? `p.status='prospect' and ${followup} and not ${interview}`
+        : m.caseId === "interviews-02"
+          ? `p.status='prospect' and not ${followup}`
+          : m.caseId === "interviews-03"
+            ? `not ${interview} and (select count(distinct a.meeting_id) from meeting_attendance a where a.church_id=p.church_id and a.person_id=p.id and a.status='attended') >= 2`
+            : `${interview} and not exists(select 1 from assessments a where a.church_id=p.church_id and a.person_id=p.id)`;
+    facts.personIds = ids(
+      `select p.id from persons p where p.church_id='${i.plant}' and p.deleted_at is null and ${criterion}`
+    );
+    facts.count = facts.personIds.length;
+    const expected =
+      m.caseId === "interviews-01"
+        ? [i["prospect-followed"]]
+        : m.caseId === "interviews-02"
+          ? [i["prospect-new"], i["core-alex"]]
+          : m.caseId === "interviews-03"
+            ? [i["prospect-attended"]]
+            : [i["prospect-interviewed"]];
+    assert.deepEqual(facts.personIds, expected.sort());
+    absent.push(i["person-foreign"]);
+    evidence.push(m.caseId);
+  }
   if (m.caseId === "tasks-08") {
     const base = `from tasks where church_id='${i.plant}' and assigned_to_id='${i.actor}' and deleted_at is null`;
     facts.initialIds = ids(`select id ${base} and due_date='2026-09-20'`);
@@ -171,6 +228,56 @@ export function observedHistoricalFacts(
       .sort();
   const facts: Expectations["facts"] = {};
   const evidence: string[] = [];
+  if (id.startsWith("interviews-") || id === "assessments-02") {
+    const read = selected.filter((c) => c.name === "people.query").at(-1);
+    if (read) {
+      facts.personIds = itemIds(read);
+      facts.count = capturedReadArtifactSchema.parse(
+        read.output
+      ).counts.matched;
+      // Observe only criterion fields from the captured, already validated tool
+      // call. Keep fixture module imports independent of the application's DB.
+      const query = z
+        .object({
+          cohort: z
+            .object({
+              all: z
+                .object({
+                  stages: z.array(z.string()).optional(),
+                  interview: z.string().optional(),
+                  followUp: z.string().optional(),
+                  assessment: z.string().optional(),
+                  attendance: z
+                    .object({ minimumMeetings: z.number().optional() })
+                    .optional(),
+                })
+                .optional(),
+            })
+            .optional(),
+        })
+        .safeParse(read.input);
+      const filter = query.success ? query.data.cohort?.all : undefined;
+      const isProspect =
+        filter?.stages?.length === 1 && filter.stages[0] === "prospect";
+      if (
+        (id === "interviews-01" &&
+          isProspect &&
+          filter?.followUp === "recorded" &&
+          filter.interview === "not_recorded") ||
+        (id === "interviews-02" &&
+          isProspect &&
+          filter?.followUp === "not_recorded" &&
+          filter.interview === undefined) ||
+        (id === "interviews-03" &&
+          filter?.attendance?.minimumMeetings === 2 &&
+          filter.interview === "not_recorded") ||
+        (id === "assessments-02" &&
+          filter?.interview === "recorded" &&
+          filter.assessment === "not_recorded")
+      )
+        evidence.push(id);
+    }
+  }
   if (id === "tasks-08") {
     const reads = selected.filter((c) => c.name === "tasks.query");
     if (reads[0]) facts.initialIds = itemIds(reads[0]);
