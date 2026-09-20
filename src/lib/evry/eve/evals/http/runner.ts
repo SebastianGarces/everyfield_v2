@@ -50,6 +50,8 @@ export function createHttpEveEvalRunner(config: {
   prices: EvalPriceCeiling;
   timeoutMs?: number;
   verifyReplay?: boolean;
+  /** Fixture-only restart path: attach and read, never create or submit. */
+  replaySessionId?: string;
   onEvent?: (event: MessageStreamEvent) => void;
 }) {
   assertIsolatedFixtureTarget(config.origin, config.databaseUrl);
@@ -105,8 +107,17 @@ export function createHttpEveEvalRunner(config: {
     let pendingQuestions: readonly InputRequest[] = [];
     try {
       // Allocate the stable identity before any model work so cancellation never loses the target.
-      ({ session } = await client.sessions.create({ signal }));
-      for (const [index, turn] of input.scenario.turns.entries()) {
+      if (config.replaySessionId) {
+        session = client.sessions.attach(config.replaySessionId);
+        const restored = await session.snapshot({ signal });
+        events.push(...restored.events);
+      } else {
+        ({ session } = await client.sessions.create({ signal }));
+      }
+      for (const [index, turn] of (config.replaySessionId
+        ? []
+        : input.scenario.turns
+      ).entries()) {
         signal.throwIfAborted();
         if (typeof turn !== "string" && pendingQuestions.length !== 1)
           throw new Error(
@@ -185,7 +196,7 @@ export function createHttpEveEvalRunner(config: {
         }).snapshot.data.messages
       );
       let replay: HttpEvalOutcome["replay"];
-      if (config.verifyReplay) {
+      if (config.verifyReplay || config.replaySessionId) {
         const before = fixture.activity();
         const fresh = new Client(clientOptions).sessions.attach(
           session.state.sessionId

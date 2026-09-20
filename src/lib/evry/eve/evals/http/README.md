@@ -4,7 +4,7 @@
 cookie-authenticated HTTP runtime. It does not replace the agent with a tool
 loop, expose `/info`, or allow the client to choose an actor or tenant.
 
-`runCompiledEveFixture` starts one private child process per scenario. The child
+`runCompiledEveFixture` starts a private child process per scenario. The child
 imports the real `.output/server/index.mjs`, uses a disposable Postgres/Neon
 proxy, and installs a process-local observer before the server starts. Only
 that isolated test host can provide the frozen clock, explicit scripted model,
@@ -19,6 +19,7 @@ pnpm exec eve build
 node --import tsx --test src/lib/evry/eve/evals/http/http.test.ts
 EVRY_EVE_HTTP_PROOF=1 node --import tsx --test src/lib/evry/eve/evals/http/compiled.test.ts
 EVRY_EVE_HTTP_PROOF=1 node --import tsx --test scripts/evry-eve-compiled-preparation.test.ts
+EVRY_EVE_HTTP_PROOF=1 node --import tsx --test scripts/evry-eve-compiled-restart.test.ts
 ```
 
 The compiled proof uses deterministic provider responses and **no paid calls**.
@@ -36,8 +37,21 @@ both, the resulting database query, and the native UI reducer's answered part.
 The two-turn case attaches a fresh official client and reads the saved session
 twice. It compares the restored transcript and checks that generation counts,
 tool-invocation counts and the authorized-result journal did not change. This
-is a fresh-client replay in the same server process, not a process-restart or
-Vercel cold-start proof.
+is a fresh-client replay in the same server process.
+
+Restart verification rejects live providers at the request boundary. The restart
+case prepares a real orientation review, stops and awaits the first
+server process, then starts a replacement process against the same private
+`WORKFLOW_LOCAL_DATA_DIR`. A fresh official client reads the original session
+without submitting a turn. The proof records distinct process IDs and compares
+the exact native transcript, including the pending confirmation. Its original
+plan fingerprint still awaits confirmation in Postgres, with zero repeated
+model calls, tool invocations, outbound messages or domain writes. The directory
+is deleted only after both processes have exited.
+
+This checks a settled session using Eve's local disk-backed Workflow world. It
+does not prove Vercel cold-start behavior, replacement of the storage volume, or
+recovery during an unfinished generation or effect execution.
 
 The separate compiled preparation proof checks the actual native transcript
 through `projectEveMessage`: one confirmation card matches the database plan's
@@ -46,8 +60,8 @@ sends occur.
 
 The unit protocol tests separately prove server cancellation on abort, fixed
 session follow-ups, and reservation-before-generation. They are not a
-substitute for the compiled database proof. Process-restart and Vercel cold-start
-replay still need their own cases before claiming coverage. `outcome.messages`
+substitute for the compiled database proof. Vercel cold-start replay still needs
+its own case before claiming coverage. `outcome.messages`
 contains typed messages from Eve's native reducer
 over the actual events, with transport/authorization metadata omitted.
 

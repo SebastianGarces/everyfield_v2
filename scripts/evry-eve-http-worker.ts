@@ -33,8 +33,12 @@ process.on("message", async (message) => {
   let phase = "configuration";
   let host: ReturnType<typeof installIsolatedFixtureHost> | undefined;
   try {
-    const { request } = z
-      .object({ type: z.literal("run"), request: compiledFixtureRequest })
+    const { request, replaySessionId } = z
+      .object({
+        type: z.literal("run"),
+        request: compiledFixtureRequest,
+        replaySessionId: z.string().optional(),
+      })
       .parse(message);
     phase = "compiled entry lookup";
     await access(request.compiledEntry);
@@ -136,6 +140,7 @@ process.on("message", async (message) => {
       prices: request.prices,
       timeoutMs: request.timeoutMs,
       verifyReplay: request.verifyReplay,
+      replaySessionId,
       onEvent(event) {
         eventTypes.push(event.type);
         if (event.type === "action.result" && event.data.status !== "completed")

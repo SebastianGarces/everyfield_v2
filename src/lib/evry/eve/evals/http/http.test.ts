@@ -6,6 +6,7 @@ import {
   assertIsolatedFixtureTarget,
 } from "./host";
 import { createHttpEveEvalRunner } from "./runner";
+import { compiledFixtureRequest } from "./process-contract";
 
 const origin = "http://127.0.0.1:4109";
 const databaseUrl = "postgres://fixture:fixture@localhost:5499/eve_fixture";
@@ -22,6 +23,35 @@ const identity = {
   ...actor,
   appSessionId: createHash("sha256").update(sessionToken).digest("hex"),
 };
+
+test("restart proof refuses a live model before spawning either server", () => {
+  const request = {
+    compiledEntry: "/private/tmp/compiled/index.mjs",
+    databaseUrl,
+    proxyUrl: origin,
+    sessionToken,
+    actor,
+    turns: ["Show tasks"],
+    now: now.toISOString(),
+    maxCostUsd: 1,
+    prices,
+    verifyRestart: true,
+  };
+  assert.equal(
+    compiledFixtureRequest.safeParse({
+      ...request,
+      model: { mode: "scripted", responses: [{ text: "Fixture" }] },
+    }).success,
+    true
+  );
+  const live = compiledFixtureRequest.safeParse({
+    ...request,
+    model: { mode: "live", spendingApproved: true },
+  });
+  assert.equal(live.success, false);
+  if (!live.success)
+    assert.deepEqual(live.error.issues[0]?.path, ["verifyRestart"]);
+});
 
 test("isolated host rejects remote targets, ordinary databases, and cross-actor bindings", () => {
   assert.throws(() =>
