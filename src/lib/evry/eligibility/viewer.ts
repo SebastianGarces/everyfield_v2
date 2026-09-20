@@ -1,5 +1,7 @@
 import type { User, UserSeat } from "@/db/schema";
 import { verifyFreshSession, verifySession } from "@/lib/auth/session";
+import { validateSessionId } from "@/lib/auth/session-token";
+import { UnauthorizedError } from "@/lib/auth/unauthorized";
 import { tenancyOf, type SeatFields } from "@/lib/auth/tenancy";
 
 const EVRY_PLANT_ACTOR: unique symbol = Symbol("EvryPlantActor");
@@ -93,5 +95,14 @@ function plantActorFromSessionUser(user: EvrySessionUser): EvryPlantActor {
  */
 export async function requireFreshEvryPlantViewer(): Promise<EvryPlantActor> {
   const { user } = await verifyFreshSession();
+  return plantActorFromSessionUser(user);
+}
+
+/** Trusted transports pass only the session identity they already authenticated. */
+export async function requireEvryPlantViewerForSession(
+  sessionId: string
+): Promise<EvryPlantActor> {
+  const { user } = await validateSessionId(sessionId);
+  if (!user) throw new UnauthorizedError();
   return plantActorFromSessionUser(user);
 }

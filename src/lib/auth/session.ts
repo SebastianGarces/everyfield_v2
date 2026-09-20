@@ -3,25 +3,26 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { getSessionToken } from "./cookies";
 import { UnauthorizedError } from "./unauthorized";
+import { authenticatedSessionId } from "./session-scope";
 import {
-  sessions,
-  users,
-  churches,
-  type Session,
-  type User,
-  type Church,
-} from "@/db/schema";
+  hashToken,
+  validateSessionToken,
+  validateSessionId,
+  type SessionValidationResult,
+  type SessionValidationFailure,
+} from "./session-token";
+export {
+  hashToken,
+  validateSessionToken,
+  type SessionValidationResult,
+  type SessionValidationFailure,
+} from "./session-token";
+import { sessions, churches, type Session, type Church } from "@/db/schema";
 
 // Constants
 const SESSION_EXPIRY_DAYS = 30;
-const SESSION_REFRESH_THRESHOLD_DAYS = 15;
 
 // Encoding helpers
-const encodeHexLowerCase = (bytes: Uint8Array): string => {
-  return Array.from(bytes)
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-};
 
 const encodeBase32LowerCaseNoPadding = (bytes: Uint8Array): string => {
   const alphabet = "abcdefghijklmnopqrstuvwxyz234567";
@@ -53,17 +54,6 @@ export function generateSessionToken(): string {
   const bytes = new Uint8Array(20);
   crypto.getRandomValues(bytes);
   return encodeBase32LowerCaseNoPadding(bytes);
-}
-
-/**
- * Hash a token using SHA-256
- * Returns lowercase hex string (64 chars)
- */
-export async function hashToken(token: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(token);
-  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
-  return encodeHexLowerCase(new Uint8Array(hashBuffer));
 }
 
 export interface SessionMetadata {
@@ -109,86 +99,6 @@ export async function createSession(
   return session;
 }
 
-export interface SessionValidationResult {
-  session: Session;
-  user: User;
-}
-
-export interface SessionValidationFailure {
-  session: null;
-  user: null;
-}
-
-/**
- * Validate a session token
- * Implements sliding window expiration - extends if within threshold of expiry
- * @param token - The unhashed session token from the cookie
- * @returns Session and user if valid, null values if invalid
- */
-export async function validateSessionToken(
-  token: string
-): Promise<SessionValidationResult | SessionValidationFailure> {
-  const sessionId = await hashToken(token);
-
-  return validateSessionId(sessionId);
-}
-
-/**
- * Reload one already-authenticated session identity and its current user row.
- *
- * This deliberately is not React-cached. Sensitive multi-step operations use
- * it after the request's cached session has established which exact session is
- * speaking, so a seat, tenancy, revocation, or expiry change becomes visible
- * before the next lasting effect.
- */
-async function validateSessionId(
-  sessionId: string
-): Promise<SessionValidationResult | SessionValidationFailure> {
-  const result = await db
-    .select({
-      session: sessions,
-      user: users,
-    })
-    .from(sessions)
-    .innerJoin(users, eq(sessions.userId, users.id))
-    .where(eq(sessions.id, sessionId))
-    .limit(1);
-
-  if (result.length === 0) {
-    return { session: null, user: null };
-  }
-
-  const { session, user } = result[0];
-
-  // Check if session has expired
-  if (Date.now() >= session.expiresAt.getTime()) {
-    await db.delete(sessions).where(eq(sessions.id, sessionId));
-    return { session: null, user: null };
-  }
-
-  // Sliding window: extend expiration if within threshold
-  const refreshThreshold =
-    Date.now() + SESSION_REFRESH_THRESHOLD_DAYS * 24 * 60 * 60 * 1000;
-
-  if (session.expiresAt.getTime() < refreshThreshold) {
-    const newExpiresAt = new Date(
-      Date.now() + SESSION_EXPIRY_DAYS * 24 * 60 * 60 * 1000
-    );
-
-    await db
-      .update(sessions)
-      .set({ expiresAt: newExpiresAt })
-      .where(eq(sessions.id, sessionId));
-
-    return {
-      session: { ...session, expiresAt: newExpiresAt },
-      user,
-    };
-  }
-
-  return { session, user };
-}
-
 /**
  * Invalidate a single session
  * @param sessionId - The hashed session ID from the database
@@ -226,7 +136,11 @@ export const getCurrentSession = cache(
  * @throws UnauthorizedError if no valid session exists
  */
 export async function verifySession(): Promise<SessionValidationResult> {
-  const result = await getCurrentSession();
+  // Durable agent tools have no Next request. Never cache their current authority.
+  const scopedSessionId = authenticatedSessionId();
+  const result = scopedSessionId
+    ? await validateSessionId(scopedSessionId)
+    : await getCurrentSession();
 
   if (!result.session || !result.user) {
     throw new UnauthorizedError();

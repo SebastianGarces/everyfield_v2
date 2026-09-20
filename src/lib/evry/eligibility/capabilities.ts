@@ -29,6 +29,7 @@ import {
   EvryPlantViewerRefusalError,
   requireEvryPlantViewer,
   requireFreshEvryPlantViewer,
+  requireEvryPlantViewerForSession,
   type EvryPlantActor,
 } from "./viewer";
 import {
@@ -491,6 +492,22 @@ export async function authorizeEvryReadCapability(
     }
     throw error;
   }
+  return authorizeReadForActor(identity, actor);
+}
+
+/** Eve's durable runtime has no Next request context. It revalidates its authenticated session. */
+export async function authorizeEvryReadCapabilityForSession(
+  identity: string,
+  sessionId: string
+): Promise<EvryReadCapabilityAuthorization | null> {
+  const actor = await requireEvryPlantViewerForSession(sessionId);
+  return authorizeReadForActor(identity, actor);
+}
+
+function authorizeReadForActor(
+  identity: string,
+  actor: EvryPlantActor
+): EvryReadCapabilityAuthorization | null {
   const registration = REGISTRY.registrationFor(identity);
 
   if (
