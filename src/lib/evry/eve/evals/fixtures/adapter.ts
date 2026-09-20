@@ -50,6 +50,11 @@ import {
   securityFixtureIds,
   seedSecurityFixture,
 } from "./security";
+import { createEvePreparation } from "../../preparation";
+import {
+  orientationTemplateExpectations,
+  readPreparedOrientationFacts,
+} from "./prepared-facts";
 
 type Scenario = EvalQuestion | Regression;
 type ProductionOutcome = Pick<
@@ -299,7 +304,7 @@ export function createProductionEveEvalAdapter(options: {
     actor: EvryPlantActor;
     manifest: FixtureManifest;
   }): EvePreparation;
-  /** Reads the persisted server plan, not a model draft or tool arguments. Missing binding fails the orientation facts. */
+  /** Override for additional persisted-plan fixtures; orientation has a scoped default reader. */
   readPreparedFacts?(manifest: FixtureManifest): Promise<Expectations["facts"]>;
 }): EvalAdapter {
   let repetition = 0;
@@ -311,12 +316,6 @@ export function createProductionEveEvalAdapter(options: {
         !historical &&
         !security &&
         (!("fixture" in scenario) || !boundCases.has(scenario.id))
-      )
-        return null;
-      if (
-        scenario.id === "regression-orientation" &&
-        ((!options.preparation && options.captureMode !== "isolated_http") ||
-          !options.readPreparedFacts)
       )
         return null;
       const manifest = createFixtureManifest(scenario.id, repetition++);
@@ -340,6 +339,11 @@ export function createProductionEveEvalAdapter(options: {
           expectations,
           "Fixture must declare independently checked expectations"
         );
+        if (scenario.id === "regression-orientation")
+          Object.assign(
+            expectations.facts,
+            orientationTemplateExpectations(manifest, options.store)
+          );
         const actor = await requireEvryPlantViewerForSession(
           manifest.sessionId
         );
@@ -367,7 +371,23 @@ export function createProductionEveEvalAdapter(options: {
                 else refusedAuthorizations++;
                 return auth;
               },
-              preparation: options.preparation?.({ actor, manifest }),
+              preparation:
+                options.preparation?.({ actor, manifest }) ??
+                (scenario.id === "regression-orientation"
+                  ? createEvePreparation({
+                      actor,
+                      conversationId: randomUUID(),
+                      userRequestKey: randomUUID(),
+                      literalUserText: scenario.turns.join("\n"),
+                      pageContext: null,
+                      now: FIXTURE_NOW,
+                      authorizeRead: (identity) =>
+                        authorizeEvryReadCapabilityForSession(
+                          identity,
+                          manifest.sessionId
+                        ),
+                    })
+                  : undefined),
             });
             const observed: EveToolRegistry = {
               describe: registry.describe,
@@ -416,7 +436,19 @@ export function createProductionEveEvalAdapter(options: {
                         !calls.some(
                           (call) =>
                             call.id === id &&
-                            artifact.safeParse(call.output).success
+                            (artifact.safeParse(call.output).success ||
+                              (call.name === "actions.prepare" &&
+                                z
+                                  .object({
+                                    artifacts: z
+                                      .array(
+                                        z.object({
+                                          kind: z.literal("confirmation"),
+                                        })
+                                      )
+                                      .min(1),
+                                  })
+                                  .safeParse(call.output).success))
                         )
                       )
                         throw new Error("Untrusted present_result reference");
@@ -447,7 +479,16 @@ export function createProductionEveEvalAdapter(options: {
                 scenario.id,
                 calls,
                 presented,
-                await options.readPreparedFacts?.(manifest)
+                options.readPreparedFacts
+                  ? await options.readPreparedFacts(manifest)
+                  : scenario.id === "regression-orientation"
+                    ? await readPreparedOrientationFacts({
+                        manifest,
+                        store: options.store,
+                        calls,
+                        presented,
+                      })
+                    : undefined
               );
               const foreignIds = [
                 manifest.ids["person-foreign"],
