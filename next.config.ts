@@ -1,5 +1,6 @@
 import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs";
+import { withEve } from "eve/next";
 
 const nextConfig: NextConfig = {
   /* config options here */
@@ -37,21 +38,23 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default withSentryConfig(nextConfig, {
-  // Org/project are read from env so the project slug isn't hardcoded
-  // (e.g. renaming the Sentry project only changes SENTRY_PROJECT).
-  org: process.env.SENTRY_ORG,
-  project: process.env.SENTRY_PROJECT,
+export default withEve(
+  withSentryConfig(nextConfig, {
+    // Org/project are read from env so the project slug isn't hardcoded
+    // (e.g. renaming the Sentry project only changes SENTRY_PROJECT).
+    org: process.env.SENTRY_ORG,
+    project: process.env.SENTRY_PROJECT,
 
-  // Only upload source maps when an auth token is present (CI/prod).
-  // Without a token, the upload step is skipped so local/CI builds don't break.
-  authToken: process.env.SENTRY_AUTH_TOKEN,
+    // Only upload source maps when an auth token is present (CI/prod).
+    // Without a token, the upload step is skipped so local/CI builds don't break.
+    authToken: process.env.SENTRY_AUTH_TOKEN,
 
-  // Suppress SDK logs except in CI.
-  silent: !process.env.CI,
+    // Suppress SDK logs except in CI.
+    silent: !process.env.CI,
 
-  widenClientFileUpload: true,
+    widenClientFileUpload: true,
 
-  // Route Sentry requests through the app to avoid ad-blockers.
-  tunnelRoute: "/monitoring",
-});
+    // Route Sentry requests through the app to avoid ad-blockers.
+    tunnelRoute: "/monitoring",
+  })
+);

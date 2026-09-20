@@ -12,6 +12,7 @@ import {
 } from "./auth-policy";
 import { applyTaskPatch, emptyTaskState, taskPatchSchema } from "./task-state";
 import { collectResult, findResult } from "./results";
+import { EVE_APP_ROUTES, validateEveMessageRequest } from "./transport-policy";
 
 const alice = {
   appSessionId: "a".repeat(64),
@@ -201,7 +202,9 @@ test("presentation uses only current-turn registry results, not model draft fact
   };
   const artifact = { kind: "read", title: "People", items: [] };
   const records = collectResult([], entry, artifact);
-  assert.deepEqual(findResult(records, "call-1", "turn-1")?.artifact, artifact);
+  assert.deepEqual(findResult(records, "call-1", "turn-1")?.artifacts, [
+    artifact,
+  ]);
   assert.equal(findResult(records, "call-1", "turn-2"), undefined);
   assert.equal(findResult(records, "invented", "turn-1"), undefined);
   assert.deepEqual(
@@ -217,4 +220,51 @@ test("presentation uses only current-turn registry results, not model draft fact
     ).length,
     1
   );
+});
+
+test("native transport cannot add callbacks, delegate, upload or override output schemas", async () => {
+  const post = (body: unknown) =>
+    new Request("https://preview.example/eve/v1/session", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  assert.equal(
+    await validateEveMessageRequest(
+      post({
+        message: "Hello",
+        operationId: "request-1",
+        mode: "conversation",
+        capabilities: { requestInput: true },
+      })
+    ),
+    true
+  );
+  for (const field of [
+    "callback",
+    "activityObserver",
+    "outputSchema",
+    "auth",
+    "actor",
+    "sessionId",
+  ])
+    assert.equal(
+      await validateEveMessageRequest(
+        post({ message: "Hello", [field]: "untrusted" })
+      ),
+      false,
+      field
+    );
+  assert.equal(
+    await validateEveMessageRequest(
+      post({ message: [{ type: "file", data: "https://example.com/secret" }] })
+    ),
+    false
+  );
+  for (const route of [
+    "GET /eve/v1/info",
+    "GET /eve/v1/activity/:token",
+    "POST /eve/v1/callback/:token",
+    "GET /eve/v1/session/:parentSessionId/subagents/:callId/:childSessionId/stream",
+  ])
+    assert.equal(EVE_APP_ROUTES.has(route), false);
 });

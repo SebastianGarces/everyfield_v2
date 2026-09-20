@@ -1,5 +1,5 @@
 import { and, eq, isNull, sql, type SQL } from "drizzle-orm";
-import { revalidatePath } from "next/cache";
+import { revalidatePath } from "next/cache.js";
 import { z } from "zod";
 
 import { db } from "@/db";

@@ -76,6 +76,8 @@ working-feature
 # Sentry Config File
 .env.sentry-build-plugin
 .neon
+.eve/
+.output/
 
 # impeccable live-mode runtime state (config.json stays tracked)
 .impeccable/live/server.json

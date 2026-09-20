@@ -1,4 +1,4 @@
-import { ForbiddenError, type AuthFn } from "eve/channels/auth";
+import { ForbiddenError } from "eve/channels/auth";
 import type { SessionAuthContext } from "eve/context";
 import type { EveSessionOwner, EveSessionStore } from "./session-store";
 
@@ -68,7 +68,7 @@ export function authenticatedSessionOf(
 export function createEveAuthPolicy(deps: {
   authenticate(token: string): Promise<EveAuthenticatedSession | null>;
   store: Pick<EveSessionStore, "owns">;
-}): AuthFn<Request> {
+}): (request: Request) => Promise<SessionAuthContext | null> {
   return async (request) => {
     const token = readSessionCookie(request);
     if (!token) return null;

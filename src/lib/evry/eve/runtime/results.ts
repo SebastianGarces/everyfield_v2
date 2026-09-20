@@ -5,7 +5,7 @@ type ResultRecord = {
   reference: string;
   turnId: string;
   capability: string;
-  artifact: EveJsonValue;
+  artifacts: EveJsonValue[];
 };
 export const evryResultState = defineState<ResultRecord[]>(
   "evry.authorized-results",
@@ -15,22 +15,25 @@ export const evryResultState = defineState<ResultRecord[]>(
 /** Only the authenticated registry wrapper writes this state; model task notes cannot. */
 export function collectResult(
   records: ResultRecord[],
-  entry: Omit<ResultRecord, "artifact">,
+  entry: Omit<ResultRecord, "artifacts">,
   result: EveJsonValue
 ): ResultRecord[] {
-  if (
-    !result ||
-    typeof result !== "object" ||
-    Array.isArray(result) ||
-    (result.kind !== "read" && result.kind !== "clarification")
-  )
+  if (!result || typeof result !== "object" || Array.isArray(result))
     return records;
+  const artifacts =
+    result.kind === "read" || result.kind === "clarification"
+      ? [result]
+      : entry.capability === "actions.prepare" &&
+          Array.isArray(result.artifacts)
+        ? result.artifacts
+        : [];
+  if (artifacts.length === 0) return records;
   const next = [
     ...records.filter(
       (item) =>
         item.turnId === entry.turnId && item.reference !== entry.reference
     ),
-    { ...entry, artifact: result },
+    { ...entry, artifacts },
   ].slice(-24);
   while (JSON.stringify(next).length > 1_000_000) next.shift();
   return next;

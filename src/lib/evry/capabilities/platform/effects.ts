@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { and, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
-import { after } from "next/server";
+import { after } from "next/server.js";
 import { z } from "zod";
 
 import { db } from "@/db";
