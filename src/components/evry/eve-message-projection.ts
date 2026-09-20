@@ -11,7 +11,8 @@ export type EveVisiblePart =
   | { kind: "question"; requestId: string; prompt: string; key: string };
 
 const presentation = z.object({ artifacts: z.array(evryPublicArtifactSchema) });
-const PREPARATION_TOOL = "capability__actions_prepare";
+// Eve preserves the dynamic tool map key; the resolver filename is not a prefix.
+const PREPARATION_TOOL = "actions_prepare";
 const PRESENTATION_TOOL = "present_result";
 
 /** Render the agent's selected presentation, never arbitrary tool/debug output. */

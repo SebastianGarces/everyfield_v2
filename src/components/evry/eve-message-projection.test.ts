@@ -6,6 +6,29 @@ import { projectEveMessage } from "./eve-message-projection";
 import { EVRY_CONFIRMATION_FIXTURES } from "@/lib/evry/artifacts/fixtures";
 import { collectResult, findResult } from "@/lib/evry/eve/runtime/results";
 
+test("native Eve action preparation exposes its exact review without a presentation call", () => {
+  const review = EVRY_CONFIRMATION_FIXTURES.meeting;
+  const message: EveMessage = {
+    id: "prepared-reply",
+    role: "assistant",
+    parts: [
+      {
+        type: "dynamic-tool",
+        toolCallId: "prepare",
+        toolName: "actions_prepare",
+        state: "output-available",
+        input: {},
+        output: z.json().parse({ artifacts: [review] }),
+      },
+    ],
+  };
+  const visible = projectEveMessage(message);
+  assert.equal(visible.length, 1);
+  assert.equal(visible[0]?.kind, "artifact");
+  if (visible[0]?.kind === "artifact")
+    assert.deepEqual(visible[0].artifact, review);
+});
+
 test("nested preparation reviews are presented only through authorized references and are not duplicated", () => {
   const review = EVRY_CONFIRMATION_FIXTURES.meeting;
   const entry = {
@@ -71,7 +94,7 @@ test("reasoning, code output and ordinary retrievals never leak debug data into 
       {
         type: "dynamic-tool",
         toolCallId: "read",
-        toolName: "capability__people_query",
+        toolName: "people_query",
         state: "output-available",
         input: {},
         output: { internalField: "not UI" },
