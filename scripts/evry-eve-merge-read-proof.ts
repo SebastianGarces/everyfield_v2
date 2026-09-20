@@ -91,13 +91,11 @@ async function main() {
   assert.equal(reads.length, 2);
   const before = authorizations;
   assert.equal(
-    z
-      .object({ status: z.string() })
-      .parse(
-        await registry.invoke(tool.name, {
-          query: { resource: "merge_context", plantId: foreignPlant },
-        })
-      ).status,
+    z.object({ status: z.string() }).parse(
+      await registry.invoke(tool.name, {
+        query: { resource: "merge_context", plantId: foreignPlant },
+      })
+    ).status,
     "invalid_input"
   );
   assert.equal(authorizations, before);
