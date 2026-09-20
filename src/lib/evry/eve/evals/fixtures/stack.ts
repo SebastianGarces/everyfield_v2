@@ -5,7 +5,10 @@ import { setTimeout } from "node:timers/promises";
 import { join } from "node:path";
 
 /** One migrated, ephemeral DB for a suite. Random names never target an existing container. */
-export async function startFixtureStack(repository: string) {
+export async function startFixtureStack(
+  repository: string,
+  options: { migrate?: boolean } = {}
+) {
   const name = `evry-eve-fixture-${randomBytes(6).toString("hex")}`;
   const pg = `${name}-pg`;
   const proxy = `${name}-proxy`;
@@ -78,7 +81,10 @@ export async function startFixtureStack(repository: string) {
       "main",
       "create schema neon_control_plane; create table neon_control_plane.endpoints(endpoint_id varchar(255) primary key,allowed_ips varchar(255)); create database eve_fixture;"
     );
-    for (const file of readdirSync(join(repository, "src/db/migrations"))
+    for (const file of (options.migrate === false
+      ? []
+      : readdirSync(join(repository, "src/db/migrations"))
+    )
       .filter((file) => file.endsWith(".sql"))
       .sort())
       psql(
