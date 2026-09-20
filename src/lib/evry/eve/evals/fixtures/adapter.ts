@@ -33,6 +33,12 @@ import {
   cleanupHistoricalFixture,
 } from "./historical";
 import {
+  relationalFixtureIds,
+  seedRelationalFixture,
+  relationalExpectations,
+  observedRelationalFacts,
+} from "./relational";
+import {
   capturedReadArtifactSchema as artifact,
   parseFixtureHostCapture,
   type CapturedCall,
@@ -238,6 +244,9 @@ export function observedFixtureFacts(
   const historical = observedHistoricalFacts(caseId, calls, presented);
   Object.assign(facts, historical.facts);
   for (const item of historical.evidence) evidence.add(item);
+  const relational = observedRelationalFacts(caseId, calls, presented);
+  Object.assign(facts, relational.facts);
+  for (const item of relational.evidence) evidence.add(item);
   return {
     facts,
     evidence: [...evidence],
@@ -312,9 +321,11 @@ export function createProductionEveEvalAdapter(options: {
     async prepare(scenario) {
       const historical = historicalFixtureIds.some((id) => id === scenario.id);
       const security = securityFixtureIds.some((id) => id === scenario.id);
+      const relational = relationalFixtureIds.some((id) => id === scenario.id);
       if (
         !historical &&
         !security &&
+        !relational &&
         (!("fixture" in scenario) || !boundCases.has(scenario.id))
       )
         return null;
@@ -322,6 +333,7 @@ export function createProductionEveEvalAdapter(options: {
       options.store.seed(manifest);
       try {
         seedHistoricalFixture(manifest, options.store);
+        seedRelationalFixture(manifest, options.store);
         const securityFixture = seedSecurityFixture(manifest, options.store);
         const boundScenario =
           securityFixture && "fixture" in scenario
@@ -332,6 +344,7 @@ export function createProductionEveEvalAdapter(options: {
             ? securityExpectations(scenario, securityFixture)
             : null) ??
           historicalExpectations(manifest, options.store) ??
+          relationalExpectations(manifest, options.store) ??
           ("fixture" in scenario
             ? expectationsFor(scenario, manifest, options.store.truth(manifest))
             : null);
