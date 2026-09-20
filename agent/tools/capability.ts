@@ -4,6 +4,7 @@ import {
   createBoundEveRegistry,
   describeEveRuntimeTools,
 } from "../../src/lib/evry/eve/runtime/registry";
+import { eveRuntimeToolSchema } from "../../src/lib/evry/eve/runtime/tool-schemas";
 import { withEveRuntimeScope } from "../../src/lib/evry/eve/runtime/scope";
 
 export default defineDynamic({
@@ -13,14 +14,15 @@ export default defineDynamic({
       for (const entry of describeEveRuntimeTools(
         authenticatedSessionOf(ctx.session.auth.current)
       )) {
-        const key = entry.name.replaceAll(".", "_");
+        const name = entry.name;
+        const key = name.replaceAll(".", "_");
         if (tools[key]) throw new Error("Duplicate provider tool name");
         tools[key] = defineTool({
           description: `${entry.description} Canonical code-mode name: ${entry.name}.`,
-          inputSchema: entry.inputSchema,
+          inputSchema: eveRuntimeToolSchema(name),
           execute: (input, toolContext) =>
             withEveRuntimeScope(toolContext, (scope) =>
-              createBoundEveRegistry(scope).invoke(entry.name, input, {
+              createBoundEveRegistry(scope).invoke(name, input, {
                 signal: toolContext.abortSignal,
                 callId: toolContext.callId,
               })
