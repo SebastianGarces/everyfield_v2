@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { fixtureMessageSchema } from "./transcript";
 
 export const compiledFixtureRequest = z.strictObject({
   compiledEntry: z.string().min(1),
@@ -6,7 +7,14 @@ export const compiledFixtureRequest = z.strictObject({
   proxyUrl: z.string().url(),
   sessionToken: z.string().min(1),
   actor: z.strictObject({ userId: z.string(), plantId: z.string() }),
-  turns: z.array(z.string().min(1)).min(1),
+  turns: z
+    .array(
+      z.union([
+        z.string().min(1),
+        z.strictObject({ respond: z.string().min(1) }),
+      ])
+    )
+    .min(1),
   now: z.string().datetime(),
   maxCostUsd: z.number().positive(),
   prices: z.strictObject({
@@ -44,11 +52,13 @@ export const compiledFixtureRequest = z.strictObject({
 });
 export type CompiledFixtureRequest = z.input<typeof compiledFixtureRequest>;
 export const httpEvalOutcomeSchema = z.object({
+  messages: z.array(fixtureMessageSchema),
   runtimeProof: z
     .object({
       availableTools: z.array(z.string()),
       availableSkills: z.array(z.string()),
       turnInputs: z.array(z.string()),
+      questionAnswers: z.array(z.string()),
       modelCalls: z.number(),
       failures: z.array(z.string()),
       eventTypes: z.array(z.string()),

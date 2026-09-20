@@ -27,11 +27,17 @@ intentional: this proves runtime wiring, not Luna's reasoning or answer quality.
 The process must run with `NODE_ENV=production`; Eve automatically substitutes
 authored models in test mode, bypassing the application provider middleware.
 
+The compiled question case also uses native `ask_question` and `respond()`. On
+resume, Eve re-runs the turn resolver with the original user request; the answer
+appears as an answered tool result in the next model input. The proof checks
+both, the resulting database query, and the native UI reducer's answered part.
+
 The unit protocol tests separately prove server cancellation on abort, fixed
 session follow-ups, and reservation-before-generation. They are not a
-substitute for the compiled database proof. Native question-response
-continuations, cold-start replay, and direct preparation-to-UI projection need
-their own compiled cases before claiming coverage.
+substitute for the compiled database proof. Cold-start replay and direct
+preparation-to-UI projection still need their own compiled cases before claiming
+coverage. `outcome.messages` contains typed messages from Eve's native reducer
+over the actual events, with transport/authorization metadata omitted.
 
 Live runs require explicit spending approval, `model.mode="live"`, and supplied
 price ceilings. The host reserves an upper estimate before each provider call,

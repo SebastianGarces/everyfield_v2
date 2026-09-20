@@ -2,6 +2,9 @@ import {
   Client,
   type ClientSession,
   type MessageStreamEvent,
+  type InputRequest,
+  defaultMessageReducer,
+  EveAgentStore,
 } from "eve/client";
 import {
   assertIsolatedFixtureTarget,
@@ -9,6 +12,7 @@ import {
   type HostCapture,
   type installIsolatedFixtureHost,
 } from "./host";
+import { fixtureTranscript } from "./transcript";
 
 type FixtureHost = ReturnType<typeof installIsolatedFixtureHost>;
 export type HttpEvalOutcome = {
@@ -23,6 +27,7 @@ export type HttpEvalOutcome = {
   costUsd: number;
   hostCapture: HostCapture;
   eveSessionId: string;
+  messages: ReturnType<typeof fixtureTranscript>;
 };
 
 /** Uses the production cookie-authenticated protocol, never /info or a replacement tool loop. */
@@ -37,7 +42,7 @@ export function createHttpEveEvalRunner(config: {
   assertIsolatedFixtureTarget(config.origin, config.databaseUrl);
   const origin = new URL(config.origin).origin;
   return async (input: {
-    scenario: { turns: readonly string[] };
+    scenario: { turns: readonly (string | { respond: string })[] };
     actor: { userId: string; plantId: string };
     sessionToken: string;
     now: Date;
@@ -82,18 +87,37 @@ export function createHttpEveEvalRunner(config: {
     let firstTextMs: number | null = null;
     let clarificationCount = 0;
     const messages: string[] = [];
+    const events: MessageStreamEvent[] = [];
+    let pendingQuestions: readonly InputRequest[] = [];
     try {
       // Allocate the stable identity before any model work so cancellation never loses the target.
       ({ session } = await client.sessions.create({ signal }));
-      for (const [index, text] of input.scenario.turns.entries()) {
+      for (const [index, turn] of input.scenario.turns.entries()) {
         signal.throwIfAborted();
-        const response = await session.send(text, {
+        if (typeof turn !== "string" && pendingQuestions.length !== 1)
+          throw new Error(
+            "Fixture response needs exactly one pending question"
+          );
+        const options = {
           signal,
-          streamReconnectPolicy: { reconnect: false },
-        });
+          streamReconnectPolicy: { reconnect: false as const },
+        };
+        const response =
+          typeof turn === "string"
+            ? await session.send(turn, options)
+            : await session.respond(
+                [
+                  {
+                    requestId: pendingQuestions[0]!.requestId,
+                    text: turn.respond,
+                  },
+                ],
+                options
+              );
         if (index === 0) acknowledgementMs = performance.now() - started;
         let ended = false;
         for await (const event of response) {
+          events.push(event);
           config.onEvent?.(event);
           if (
             event.type === "message.appended" &&
@@ -105,7 +129,20 @@ export function createHttpEveEvalRunner(config: {
             if (firstTextMs === null) firstTextMs = performance.now() - started;
             messages.push(event.data.message);
           }
-          if (event.type === "input.requested") clarificationCount++;
+          if (event.type === "input.requested") {
+            clarificationCount++;
+            pendingQuestions = event.data.requests.filter(
+              (request) => request.kind === "question"
+            );
+          }
+          if (event.type === "input.resolved") {
+            const resolved = new Set(
+              event.data.resolutions.map((resolution) => resolution.requestId)
+            );
+            pendingQuestions = pendingQuestions.filter(
+              (request) => !resolved.has(request.requestId)
+            );
+          }
           if (
             event.type === "turn.failed" ||
             event.type === "session.failed" ||
@@ -128,6 +165,12 @@ export function createHttpEveEvalRunner(config: {
       if (hostCapture.costUsd > input.maxCostUsd)
         throw new Error("Evaluation exceeded its reserved budget");
       return {
+        messages: fixtureTranscript(
+          new EveAgentStore({
+            reducer: defaultMessageReducer(),
+            initialEvents: events,
+          }).snapshot.data.messages
+        ),
         answer: messages.join("\n\n"),
         latency: {
           acknowledgementMs,

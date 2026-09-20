@@ -187,3 +187,130 @@ test(
     }
   }
 );
+
+test(
+  "compiled Eve resumes an answered native question in the original task",
+  { skip: process.env.EVRY_EVE_HTTP_PROOF !== "1", timeout: 180_000 },
+  async () => {
+    const stack = await startFixtureStack(
+      process.env.EVRY_FIXTURE_MIGRATIONS_ROOT ?? process.cwd()
+    );
+    const store = createFixtureStore(stack.container);
+    const manifest = createFixtureManifest("compiled-http-question", 0);
+    try {
+      store.seed(manifest);
+      const request =
+        "Show my pending tasks due today. Ask whether to use high priority.";
+      const outcome = await runCompiledEveFixture(
+        {
+          compiledEntry: resolve(".output/server/index.mjs"),
+          databaseUrl: stack.databaseUrl,
+          proxyUrl: stack.proxyUrl,
+          sessionToken: manifest.sessionToken,
+          actor: { userId: manifest.ids.actor, plantId: manifest.ids.plant },
+          turns: [request, { respond: "Yes, only high priority" }],
+          now: FIXTURE_NOW.toISOString(),
+          maxCostUsd: 1,
+          prices: {
+            inputUsdPerMillion: 1,
+            outputUsdPerMillion: 2,
+            maxInputBytes: 500_000,
+            maxOutputTokens: 1_000,
+          },
+          model: {
+            mode: "scripted",
+            responses: [
+              {
+                toolCalls: [
+                  {
+                    id: "fixture-question",
+                    name: "ask_question",
+                    input: {
+                      prompt: "Only high priority?",
+                      allowFreeform: true,
+                    },
+                  },
+                ],
+              },
+              {
+                toolCalls: [
+                  {
+                    id: "fixture-after-question",
+                    name: "tasks_query",
+                    input: {
+                      where: {
+                        all: [
+                          {
+                            assignment: { kind: "mine" },
+                            due: { kind: "relative", period: "today" },
+                            priority: ["high"],
+                            status: ["not_started", "in_progress", "blocked"],
+                          },
+                        ],
+                      },
+                      query: { mode: "list" },
+                    },
+                  },
+                ],
+              },
+              {
+                toolCalls: [
+                  {
+                    id: "fixture-after-question-present",
+                    name: "present_result",
+                    input: { reference: "fixture-after-question" },
+                  },
+                ],
+              },
+              { text: "Here is your high-priority task due today." },
+            ],
+          },
+        },
+        AbortSignal.timeout(120_000)
+      );
+      assert.equal(outcome.clarificationCount, 1);
+      assert.deepEqual(outcome.runtimeProof?.questionAnswers, [
+        "Yes, only high priority",
+      ]);
+      assert.ok(outcome.runtimeProof?.eventTypes.includes("input.resolved"));
+      // Eve re-resolves turn capabilities when resuming a parked question.
+      // The reply is an answered tool result, not a replacement user request.
+      assert.deepEqual(outcome.runtimeProof?.turnInputs, [request, request]);
+      const result = z
+        .object({
+          kind: z.literal("read"),
+          items: z.array(z.object({ id: z.string() })),
+        })
+        .parse(
+          outcome.hostCapture.calls.find(
+            (call) => call.id === "fixture-after-question"
+          )?.output
+        );
+      assert.deepEqual(
+        result.items.map((item) => item.id).sort(),
+        store.truth(manifest).highPriorityTaskIds
+      );
+      assert.deepEqual(outcome.hostCapture.presented, [
+        "fixture-after-question",
+      ]);
+      const answered = outcome.messages
+        .flatMap((message) => message.parts)
+        .find(
+          (part) =>
+            part.type === "dynamic-tool" &&
+            part.toolName === "ask_question" &&
+            part.state === "approval-responded" &&
+            part.toolMetadata?.eve?.inputResponse?.text ===
+              "Yes, only high priority"
+        );
+      assert.ok(
+        answered,
+        "Native reducer marks the question answered, not still awaiting approval"
+      );
+      assert.equal(outcome.costUsd, 0);
+      assert.equal(outcome.hostCapture.refusedAuthorizations, 0);
+    } finally {
+      await stack.cleanup();
+    }
+  }
+);

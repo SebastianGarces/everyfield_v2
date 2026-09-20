@@ -63,6 +63,7 @@ process.on("message", async (message) => {
     const availableTools = new Set<string>();
     const availableSkills = new Set<string>();
     const turnInputs: string[] = [];
+    const questionAnswers = new Set<string>();
     const failures: string[] = [];
     const eventTypes: string[] = [];
     const model =
@@ -72,6 +73,13 @@ process.on("message", async (message) => {
             respond: (modelRequest) => {
               for (const tool of modelRequest.tools)
                 availableTools.add(tool.name);
+              for (const result of modelRequest.toolResults) {
+                if (result.name !== "ask_question" || result.isError) continue;
+                const answer = z
+                  .object({ status: z.literal("answered"), text: z.string() })
+                  .safeParse(result.output);
+                if (answer.success) questionAnswers.add(answer.data.text);
+              }
               const systemText = modelRequest.messages
                 .filter((message) => message.role === "system")
                 .map((message) => message.text)
@@ -151,6 +159,7 @@ process.on("message", async (message) => {
           availableTools: [...availableTools],
           availableSkills: [...availableSkills],
           turnInputs,
+          questionAnswers: [...questionAnswers],
           modelCalls: responseIndex,
           failures,
           eventTypes,
