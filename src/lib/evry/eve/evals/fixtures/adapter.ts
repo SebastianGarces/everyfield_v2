@@ -26,6 +26,13 @@ import {
 } from "./manifest";
 import type { FixtureStore } from "./store";
 import {
+  historicalFixtureIds,
+  seedHistoricalFixture,
+  historicalExpectations,
+  observedHistoricalFacts,
+  cleanupHistoricalFixture,
+} from "./historical";
+import {
   capturedReadArtifactSchema as artifact,
   parseFixtureHostCapture,
   type CapturedCall,
@@ -200,6 +207,9 @@ export function observedFixtureFacts(
     }
   }
   if (caseId === "regression-orientation") Object.assign(facts, prepared);
+  const historical = observedHistoricalFacts(caseId, calls, presented);
+  Object.assign(facts, historical.facts);
+  for (const item of historical.evidence) evidence.add(item);
   return {
     facts,
     evidence: [...evidence],
@@ -272,7 +282,12 @@ export function createProductionEveEvalAdapter(options: {
   let repetition = 0;
   return {
     async prepare(scenario) {
-      if (!("fixture" in scenario) || !boundCases.has(scenario.id)) return null;
+      const historical = historicalFixtureIds.some((id) => id === scenario.id);
+      if (
+        !historical &&
+        (!("fixture" in scenario) || !boundCases.has(scenario.id))
+      )
+        return null;
       if (
         scenario.id === "regression-orientation" &&
         ((!options.preparation && options.captureMode !== "isolated_http") ||
@@ -282,10 +297,15 @@ export function createProductionEveEvalAdapter(options: {
       const manifest = createFixtureManifest(scenario.id, repetition++);
       options.store.seed(manifest);
       try {
-        const expectations = expectationsFor(
-          scenario,
-          manifest,
-          options.store.truth(manifest)
+        seedHistoricalFixture(manifest, options.store);
+        const expectations =
+          historicalExpectations(manifest, options.store) ??
+          ("fixture" in scenario
+            ? expectationsFor(scenario, manifest, options.store.truth(manifest))
+            : null);
+        assert.ok(
+          expectations,
+          "Fixture must declare independently checked expectations"
         );
         const actor = await requireEvryPlantViewerForSession(
           manifest.sessionId
@@ -399,10 +419,18 @@ export function createProductionEveEvalAdapter(options: {
               const foreignIds = [
                 manifest.ids["person-foreign"],
                 manifest.ids["task-foreign"],
+                manifest.ids["wiki-foreign"],
               ];
               const leaked = calls
                 .flatMap((call) => resultIds(call.output))
-                .some((id) => foreignIds.includes(id));
+                .some((id) =>
+                  foreignIds.some(
+                    (foreign) =>
+                      id === foreign ||
+                      id.startsWith(`${foreign}:`) ||
+                      id.endsWith(`:${foreign}`)
+                  )
+                );
               const readCount = calls.filter(
                 (call) =>
                   registry.describe().find((tool) => tool.name === call.name)
@@ -449,10 +477,12 @@ export function createProductionEveEvalAdapter(options: {
             }
           },
           async cleanup() {
+            cleanupHistoricalFixture(manifest, options.store);
             options.store.revoke(manifest);
           },
         };
       } catch (error) {
+        cleanupHistoricalFixture(manifest, options.store);
         options.store.revoke(manifest);
         throw error;
       }

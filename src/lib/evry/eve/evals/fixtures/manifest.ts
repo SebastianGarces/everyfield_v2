@@ -34,6 +34,16 @@ export const fixtureSymbols = [
   "milestone-complete",
   "ministry",
   "open-role",
+  "second-ministry",
+  "second-open-role",
+  "occupied-role",
+  "inactive-assignment",
+  "active-assignment",
+  "wiki-vision",
+  "wiki-orientation",
+  "wiki-global",
+  "wiki-foreign",
+  "wiki-draft",
 ] as const;
 export type FixtureSymbol = (typeof fixtureSymbols)[number];
 export function fixtureId(caseId: string, symbol: string): string {
