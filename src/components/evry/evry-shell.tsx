@@ -49,6 +49,7 @@ type PendingTurn = {
     | { pageContext: VisibleEvryPageContext["wire"] | null };
   inputResponses?: { requestId: string; text?: string; optionId?: string }[];
   eventStartIndex: number;
+  retry: "replay" | "resubmit";
 };
 
 export type EvryPeopleFileSubmission =
@@ -461,7 +462,7 @@ export function EvryShell({
             );
           if (!received) {
             if (bindingRef.current.key === request.bindingKey) {
-              pendingTurn.current = null;
+              request.retry = "resubmit";
               setFailedTurn(null);
               setDraft((value) => value || request.text);
               setError(
@@ -513,7 +514,20 @@ export function EvryShell({
       )
         return false;
       const retained = pendingTurn.current;
-      if (retained) {
+      if (retained?.retry === "resubmit") {
+        if (!attachment) {
+          if (retained.text !== text) {
+            retained.text = text;
+            retained.inputResponses = retained.inputResponses?.map(
+              ({ requestId }) => ({ requestId, text })
+            );
+          }
+          retained.retry = "replay";
+          retained.eventStartIndex = current.events.length;
+          return deliver(retained);
+        }
+        pendingTurn.current = null;
+      } else if (retained) {
         if (retained.text !== text || attachment) {
           setError(
             "Reconnect to check your last message before sending a different one."
@@ -544,6 +558,7 @@ export function EvryShell({
             ? [{ requestId: question.requestId, text }]
             : undefined,
         eventStartIndex: current.events.length,
+        retry: "replay",
       };
       pendingTurn.current = request;
       return deliver(request);
@@ -575,6 +590,7 @@ export function EvryShell({
           },
         ],
         eventStartIndex: clientRef.current.events.length,
+        retry: "replay",
       };
       pendingTurn.current = request;
       await deliver(request);
@@ -768,6 +784,7 @@ export function EvryShell({
       setError(null);
       setDismissedFailure(true);
       setDraft((value) => value || pendingMessage?.body || "");
+      if (pendingTurn.current?.retry === "resubmit") pendingTurn.current = null;
     },
     canStopWatching: isSending || client?.status === "streaming",
     isWatchingDetached: client?.status === "error",

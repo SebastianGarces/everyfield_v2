@@ -181,9 +181,12 @@ for (const accepted of [true, false]) {
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
     t.mock.method(console, "error", () => {});
     let posts = 0;
+    const bodies: Record<string, unknown>[] = [];
     let streams = 0;
     let eventIndex = 0;
-    const text = "Which tasks are due today?";
+    const text = accepted
+      ? "Which tasks are due today?"
+      : "Review importing people from people.csv.";
     const metadata = {
       id: "existing-session",
       conversationId: "10000000-0000-4000-8000-000000000003",
@@ -199,6 +202,7 @@ for (const accepted of [true, false]) {
           return Response.json({ session: metadata });
         if (init?.method === "POST") {
           posts++;
+          bodies.push(JSON.parse(String(init.body)));
           throw new TypeError("Accepted response lost");
         }
         streams++;
@@ -284,7 +288,18 @@ for (const accepted of [true, false]) {
       await new Promise((resolve) => setTimeout(resolve, 10));
     });
     await act(async () => {
-      await shell.sendMessageText(text);
+      if (accepted) await shell.sendMessageText(text);
+      else
+        await shell.submitPeopleFile({
+          kind: "people_csv",
+          file: new File(["name\nAlex"], "people.csv", { type: "text/csv" }),
+          prepared: {
+            reference: "known-session-staged-reference",
+            digest: "digest",
+            duplicateRows: [],
+          },
+          duplicateResolutions: {},
+        });
     });
     assert.equal(posts, 1);
     assert.equal(shell.draft, text);
@@ -304,6 +319,19 @@ for (const accepted of [true, false]) {
       assert.equal(
         shell.messages.filter((message) => message.role === "user").length,
         0
+      );
+      await act(async () => {
+        await shell.sendMessageText(text);
+      });
+      assert.equal(
+        posts,
+        2,
+        "only an explicit Send may submit the unconfirmed draft again"
+      );
+      assert.deepEqual(bodies[1], bodies[0]);
+      assert.equal(
+        JSON.parse(String(bodies[1]!.clientContext)).attachment.reference,
+        "known-session-staged-reference"
       );
       return;
     }
