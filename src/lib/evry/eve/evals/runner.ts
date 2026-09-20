@@ -32,6 +32,7 @@ export async function runEvalSuite(input: {
   onResult?: (result: CaseResult) => void | Promise<void>;
 }) {
   const repetitions = input.repetitions ?? 1;
+  const timeoutMs = input.caseTimeoutMs ?? 60_000;
   if (
     !Number.isFinite(input.budgetUsd) ||
     input.budgetUsd <= 0 ||
@@ -40,7 +41,8 @@ export async function runEvalSuite(input: {
     input.maxCaseCostUsd > input.budgetUsd ||
     !Number.isInteger(repetitions) ||
     repetitions < 1 ||
-    repetitions > 10
+    repetitions > 10 ||
+    !Number.isInteger(timeoutMs) || timeoutMs <= 0
   ) {
     throw new Error(
       "An explicit positive total/per-case budget and 1–10 repetitions are required"
@@ -49,26 +51,36 @@ export async function runEvalSuite(input: {
   const results: CaseResult[] = [];
   // Reserve the maximum BEFORE dispatch; never assume an interrupted provider call was free.
   let remaining = input.budgetUsd;
+  let fixtureFailure: string | null = null;
   for (let repeat = 0; repeat < repetitions; repeat++) {
     for (const scenario of input.scenarios) {
       let result: CaseResult;
-      if (remaining + Number.EPSILON < input.maxCaseCostUsd) {
+      if (fixtureFailure) {
+        result = { id: scenario.id, status: "not_run", failures: [fixtureFailure] };
+      } else if (remaining + Number.EPSILON < input.maxCaseCostUsd) {
         result = {
           id: scenario.id,
           status: "not_run",
           failures: ["budget_exhausted"],
         };
       } else {
-        const fixture = await input.adapter.prepare(scenario);
+        let fixture: FixtureSession | null = null;
+        try {
+          fixture = await input.adapter.prepare(scenario);
+        } catch {
+          // A partially created fixture may no longer be isolated. Do not run
+          // another case against that database or lose the report to a throw.
+          fixtureFailure = "fixture_setup_failed";
+        }
         if (!fixture) {
           result = {
             id: scenario.id,
             status: "blocked",
-            failures: ["fixture_not_bound"],
+            failures: [fixtureFailure ?? "fixture_not_bound"],
           };
         } else {
           remaining -= input.maxCaseCostUsd;
-          const signal = AbortSignal.timeout(input.caseTimeoutMs ?? 60_000);
+          const signal = AbortSignal.timeout(timeoutMs);
           try {
             const observation = await fixture.run({
               scenario,
@@ -97,8 +109,12 @@ export async function runEvalSuite(input: {
               status: "failed",
               failures: [signal.aborted ? "timeout" : "execution_error"],
             };
-          } finally {
+          }
+          try {
             await fixture.cleanup();
+          } catch {
+            fixtureFailure = "fixture_cleanup_failed";
+            result = { ...result, status: "failed", failures: [...result.failures, fixtureFailure] };
           }
         }
       }
