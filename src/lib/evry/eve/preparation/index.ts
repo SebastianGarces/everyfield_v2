@@ -53,14 +53,16 @@ if (byOperation.size !== evePreparations.length)
   throw new Error("Duplicate Eve preparation operation");
 
 /** Derived from domain contracts, never a second hand-maintained argument catalog. */
-export const evePreparationInputSchema = z.union(
-  evePreparations.map((entry) =>
-    z.strictObject({
-      operation: z.literal(entry.id),
-      arguments: entry.inputSchema,
-    })
-  )
-);
+export const evePreparationInputSchema = z.strictObject({
+  request: z.union(
+    evePreparations.map((entry) =>
+      z.strictObject({
+        operation: z.literal(entry.id),
+        arguments: entry.inputSchema,
+      })
+    )
+  ),
+});
 
 export function createEvePreparation(options: {
   actor: EvryPlantActor;
@@ -96,7 +98,7 @@ export function createEvePreparation(options: {
         actor.plantId !== options.actor.plantId
       )
         return { status: "unavailable", reason: "not_authorized" };
-      const operation = byOperation.get(parsed.data.operation)!;
+      const operation = byOperation.get(parsed.data.request.operation)!;
       const pageContext = await resolveAuthorizedEvryPageContext({
         actor,
         pageContext: options.pageContext,
@@ -115,7 +117,7 @@ export function createEvePreparation(options: {
           requestPageContext: options.pageContext,
           now: options.now,
         },
-        parsed.data.arguments
+        parsed.data.request.arguments
       );
       invocation.signal?.throwIfAborted();
       return result ?? { status: "unavailable" };

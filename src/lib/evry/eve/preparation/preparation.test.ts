@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { zodSchema } from "ai";
 import {
   createEvePreparation,
   evePreparationInputSchema,
@@ -21,13 +22,25 @@ const orientation = {
   },
 };
 
+test("the actual AI SDK provider schema has an object root and preserves every operation contract", async () => {
+  const schema = await zodSchema(evePreparationInputSchema).jsonSchema;
+  assert.equal(schema.type, "object");
+  assert.equal(schema.anyOf, undefined);
+  assert.equal(schema.additionalProperties, false);
+  assert.deepEqual(schema.required, ["request"]);
+  const request = schema.properties?.request;
+  assert(request && typeof request === "object");
+  assert.equal(request.anyOf?.length, evePreparations.length);
+  assert.equal(evePreparationInputSchema.safeParse(orientation).success, false);
+});
+
 test("Eve derives preparation contracts from trusted domains and requires explicit compound intent", () => {
   assert.equal(
     new Set(evePreparations.map((entry) => entry.id)).size,
     evePreparations.length
   );
   assert(evePreparations.length > 100);
-  assert(evePreparationInputSchema.safeParse(orientation).success);
+  assert(evePreparationInputSchema.safeParse({ request: orientation }).success);
   for (const key of [
     "meetingType",
     "dateTime",
@@ -37,8 +50,9 @@ test("Eve derives preparation contracts from trusted domains and requires explic
     const args: Record<string, unknown> = { ...orientation.arguments };
     delete args[key];
     assert.equal(
-      evePreparationInputSchema.safeParse({ ...orientation, arguments: args })
-        .success,
+      evePreparationInputSchema.safeParse({
+        request: { ...orientation, arguments: args },
+      }).success,
       false,
       key
     );
@@ -51,8 +65,10 @@ test("Eve derives preparation contracts from trusted domains and requires explic
   ]) {
     assert.equal(
       evePreparationInputSchema.safeParse({
-        ...orientation,
-        arguments: { ...orientation.arguments, ...extra },
+        request: {
+          ...orientation,
+          arguments: { ...orientation.arguments, ...extra },
+        },
       }).success,
       false
     );
@@ -78,10 +94,13 @@ test("missing call identity, malformed input and cancellation fail before author
       throw new Error("Must not authorize invalid input");
     },
   });
-  assert.deepEqual(await preparer.prepare(orientation, { callId: "" }), {
-    status: "unavailable",
-    reason: "missing_call_identity",
-  });
+  assert.deepEqual(
+    await preparer.prepare({ request: orientation }, { callId: "" }),
+    {
+      status: "unavailable",
+      reason: "missing_call_identity",
+    }
+  );
   const invalid = await preparer.prepare(
     { operation: "actions.commit" },
     { callId: "call" }
@@ -89,10 +108,13 @@ test("missing call identity, malformed input and cancellation fail before author
   assert("status" in invalid);
   assert.equal(invalid.status, "invalid_input");
   await assert.rejects(
-    preparer.prepare(orientation, {
-      callId: "call",
-      signal: AbortSignal.abort(),
-    })
+    preparer.prepare(
+      { request: orientation },
+      {
+        callId: "call",
+        signal: AbortSignal.abort(),
+      }
+    )
   );
 });
 
