@@ -1,0 +1,21 @@
+# Production-bound evaluation fixtures
+
+Run the unpaid tool-path proof from the repository root:
+
+```sh
+EVRY_EVE_FIXTURE_PROOF=1 node --import tsx --test src/lib/evry/eve/evals/fixtures/production.test.ts
+```
+
+Node 24 and Docker are required. The test creates a randomly named, loopback-only Postgres container and Neon HTTP proxy, applies the repository SQL migrations, and removes both containers, their temporary storage, and their network in `finally`. It never uses the developer's configured database. No model requests or actual emails are sent.
+
+The proof runs the production typed registry, production domain queries, actual Neon HTTP driver, fresh database-backed session authorization, saved-location and full-template helpers. Each case receives a separate plant and deterministic record IDs. Independent SQL checks the seeded ground truth before the agent runs. Duplicate interview rows, foreign records, another assignee, completed/overdue/undated tasks, and RSVP-only attendance are distractors.
+
+`createProductionEveEvalAdapter` accepts a `runProduction` callback to the real Eve runtime. Pass its instrumented registry to both direct tools and code mode. Forward `onPresentResult(callId)` only from the host's successful authorized `present_result` resolution. Never call it from model prose, draft state, or a model-supplied list of IDs. The callback returns prose, measured timing, actual total generation-plus-judge cost, clarification count, and an independent quality judgment. It cannot supply result facts or safety verdicts.
+
+The adapter derives displayed IDs and totals from captured tool artifacts. Launch coverage requires successful filtered reads across launch date, open milestones, vacant roles, and upcoming meetings. Read authorization counts come from the real session authorizer. Test-only Postgres triggers count domain inserts, updates, and deletes, including changes later reversed. A fetch interceptor blocks and counts Resend attempts. These are scoped fixture checks, not a claim that all security properties have been proven.
+
+For orientation, provide the real `preparation` callback and `readPreparedFacts`, which must project the persisted, server-built immutable plan. The latter returns meeting type, local date/time, timezone, duration, recipient IDs, and saved location ID. It must not project model arguments or draft state. Without both bindings the orientation evaluation is **blocked**. The unpaid test separately proves its date, saved-location, saved-template, tenant isolation, and revoked-session helpers.
+
+Seven read regressions are bound. The eighth orientation case requires those production preparation bindings. Historical questions and all other regression fixtures remain blocked rather than gaining invented passing observations. The scripted driver deliberately supplies `judge: null`, so its observations fail `quality_not_reviewed`; the passing test proves data/tool instrumentation, not Luna's behavior. Run a real Eve driver and an independent judge before reporting agent quality.
+
+`cleanup()` revokes the case's session. Domain fixture rows remain only in the disposable suite database until stack cleanup; this respects append-only Evry plan/receipt records. Use one adapter and serial runs per suite process because the outbound interceptor is process-wide. Always restore the global fetch hook and dispose the stack in `finally`, including failures and budget exhaustion.

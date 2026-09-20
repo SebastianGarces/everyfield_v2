@@ -685,7 +685,7 @@
   {
     "id": "regression-readable-copy",
     "domain": "tasks",
-    "turns": ["Show my tasks due today."],
+    "turns": ["Show my pending tasks due today."],
     "fixture": "tasks-calendar",
     "tags": ["quality"],
     "expected": "Brief human summary without cursor, attribute or query narration; useful detail remains in compact cards.",
