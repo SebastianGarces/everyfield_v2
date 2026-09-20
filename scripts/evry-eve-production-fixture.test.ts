@@ -2,12 +2,15 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { neonConfig } from "@neondatabase/serverless";
 import { z } from "zod";
-import { createFixtureManifest, FIXTURE_NOW } from "./manifest";
-import { createFixtureStore } from "./store";
-import { startFixtureStack } from "./stack";
-import { regressions, questions } from "../catalog";
-import { gradeObservation } from "../grade";
-import { observationSchema } from "../contract";
+import {
+  createFixtureManifest,
+  FIXTURE_NOW,
+} from "@/lib/evry/eve/evals/fixtures/manifest";
+import { createFixtureStore } from "@/lib/evry/eve/evals/fixtures/store";
+import { startFixtureStack } from "@/lib/evry/eve/evals/fixtures/stack";
+import { regressions, questions } from "@/lib/evry/eve/evals/catalog";
+import { gradeObservation } from "@/lib/evry/eve/evals/grade";
+import { observationSchema } from "@/lib/evry/eve/evals/contract";
 
 test("manifest identities and digests are deterministic and tenant-separated", () => {
   assert.deepEqual(
@@ -30,9 +33,10 @@ test(
       process.env.DATABASE_URL = stack.databaseUrl;
       process.env.RESEND_API_KEY = "re_eve_fixture_never_sent";
       neonConfig.fetchEndpoint = stack.proxyUrl;
-      const { createProductionEveEvalAdapter } = await import("./adapter");
+      const { createProductionEveEvalAdapter } =
+        await import("@/lib/evry/eve/evals/fixtures/adapter");
       const { createEveToolRegistry } =
-        await import("../../capabilities/registry");
+        await import("@/lib/evry/eve/capabilities/registry");
       const { requireEvryPlantViewerForSession } =
         await import("@/lib/evry/eligibility/viewer");
       const { authorizeEvryReadCapabilityForSession } =
@@ -350,7 +354,8 @@ test(
           await helperTest.test(
             "unpresented or wrong records cannot become correct facts from answer prose",
             async () => {
-              const { observedFixtureFacts } = await import("./adapter");
+              const { observedFixtureFacts } =
+                await import("@/lib/evry/eve/evals/fixtures/adapter");
               const calls = [
                 {
                   id: "tool-1",

@@ -6,9 +6,9 @@ import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { neonConfig } from "@neondatabase/serverless";
 import { z } from "zod";
-import { startFixtureStack } from "./stack";
-import { createFixtureStore } from "./store";
-import { createFixtureManifest } from "./manifest";
+import { startFixtureStack } from "@/lib/evry/eve/evals/fixtures/stack";
+import { createFixtureStore } from "@/lib/evry/eve/evals/fixtures/store";
+import { createFixtureManifest } from "@/lib/evry/eve/evals/fixtures/manifest";
 
 test(
   "actual Eve preparation and exact plan routes preserve approval, edit, cancellation and retry semantics",
@@ -74,10 +74,12 @@ test(
         await import("@/lib/evry/eligibility/viewer");
       const { authorizeEvryReadCapabilityForSession } =
         await import("@/lib/evry/eligibility/capabilities");
-      const { createEvePreparation } = await import("../../preparation");
+      const { createEvePreparation } =
+        await import("@/lib/evry/eve/preparation");
       const { evryConversationPlanIdentitySchema } =
         await import("@/lib/evry/conversations/contract");
-      const { readEvePlanReview } = await import("../../runtime/plan-review");
+      const { readEvePlanReview } =
+        await import("@/lib/evry/eve/runtime/plan-review");
       const routes = await import("@/app/api/evry/eve/plans/[planId]/route");
       const store = createFixtureStore(stack.container);
       const manifest = createFixtureManifest("orientation-plan-api", 0);
@@ -167,9 +169,12 @@ test(
         pathToFileURL(join(dirname(contextEntry), "../../context/container.js"))
           .href
       );
-      const { createBoundEveRegistry } = await import("../../runtime/registry");
-      const { evryTurnInput } = await import("../../runtime/task-state");
-      const { evryReviewState } = await import("../../runtime/review-state");
+      const { createBoundEveRegistry } =
+        await import("@/lib/evry/eve/runtime/registry");
+      const { evryTurnInput } =
+        await import("@/lib/evry/eve/runtime/task-state");
+      const { evryReviewState } =
+        await import("@/lib/evry/eve/runtime/review-state");
       await contextStorage.run(new ContextContainer(), async () => {
         await withAuthenticatedSessionId(manifest.sessionId, async () => {
           evryTurnInput.update(() => ({
