@@ -11,7 +11,7 @@ import { readEvryPlantTimeZone } from "@/lib/evry/reads/plant-time-zone";
 import { instantsAtZonedTime } from "@/lib/datetime";
 import { resolveOperationDatetime } from "../preparations/operations-dates";
 
-import type { EvryCapabilityConversationContinuation } from "../conversation";
+import type { EvryCapabilityPreparationContinuation } from "../conversation";
 
 import { meetingsReadInputForSelection } from "./read-input";
 import { executeMeetingsRead } from "./reads";
@@ -83,7 +83,7 @@ export function createMeetingsEvryConversationContinuation(
   readDependencies: MeetingsReadConversationDependencies = productionReadDependencies,
   selectedEffect?: MeetingsEvryEffectSelection,
   targetMeetingId?: string
-): EvryCapabilityConversationContinuation {
+): EvryCapabilityPreparationContinuation {
   return {
     identity: "meetings",
     matches(input) {

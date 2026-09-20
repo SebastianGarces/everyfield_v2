@@ -3,7 +3,7 @@ import {
   storedEvryClarificationArtifactDocument,
   storedEvryReadArtifactDocument,
 } from "@/lib/evry/conversations/artifacts";
-import type { EvryCapabilityConversationContinuation } from "@/lib/evry/capabilities/conversation";
+import type { EvryCapabilityPreparationContinuation } from "@/lib/evry/capabilities/conversation";
 import { authorizeEvryReadCapability } from "@/lib/evry/eligibility/capabilities";
 import { deriveEvryPlanRequestKey } from "@/lib/evry/plans";
 
@@ -41,7 +41,7 @@ const unavailable = {
 /** Closed production continuation for immediate Teams reads and confirmed effects. */
 export function createTeamsEvryConversationContinuation(
   selectedEffect?: TeamsEvryEffectSelection
-): EvryCapabilityConversationContinuation {
+): EvryCapabilityPreparationContinuation {
   return {
     identity: "teams",
     matches(input) {

@@ -2,6 +2,7 @@ import { and, eq, inArray, isNull } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/db";
+import { meetingTypes, type MeetingType } from "@/db/schema/meetings";
 import {
   churches,
   churchMeetings,
@@ -89,6 +90,11 @@ const CORE_TEAM_STATUSES = new Set(["core_group", "launch_team", "leader"]);
 
 export type MeetingInvitationReferenceRequest = Readonly<{
   sourceText: string;
+  meetingType?: MeetingType;
+  title?: string;
+  teamId?: string;
+  dateTime?: Readonly<{ date: string; time: string }>;
+  audience?: "core_team" | "prospects" | "core_team_and_new_prospects";
   durationMinutes?: number;
   locationId?: string;
   locationQuery?: string;
@@ -146,7 +152,9 @@ export type MeetingInvitationExclusion = Readonly<{
 
 export type ResolvedMeetingInvitationReference = Readonly<{
   kind: "resolved";
-  meetingType: "vision_meeting";
+  meetingType: MeetingType;
+  title?: string;
+  teamId?: string;
   dateTime: EvryResolvedPlantDateTime;
   durationMinutes: number;
   location: MeetingInvitationLocation;
@@ -172,6 +180,18 @@ export type MeetingInvitationPlanSnapshot = Readonly<
 
 export const meetingInvitationRequestSchema = z.strictObject({
   sourceText: z.string().trim().min(1).max(4_000),
+  meetingType: z.enum(meetingTypes).optional(),
+  title: z.string().trim().min(1).max(200).optional(),
+  teamId: z.string().uuid().optional(),
+  dateTime: z
+    .strictObject({
+      date: z.string().date(),
+      time: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/),
+    })
+    .optional(),
+  audience: z
+    .enum(["core_team", "prospects", "core_team_and_new_prospects"])
+    .optional(),
   durationMinutes: z.number().int().min(1).max(1_440).optional(),
   locationId: z.string().uuid().optional(),
   locationQuery: z.string().trim().min(1).max(500).optional(),
@@ -233,14 +253,14 @@ export function createMeetingInvitationPlanResolver(
         kind: "effect",
         exportName: "createMeetingAction",
         values: {
-          type: "vision_meeting",
+          type: input.resolved.meetingType,
           datetime: pinnedMeetingDateTime(input.resolved.dateTime),
           timezone: input.resolved.dateTime.timeZone,
-          title: null,
+          title: input.resolved.title ?? null,
           locationId: location.id,
           locationName: location.id ? null : location.name,
           locationAddress: location.id ? null : location.address,
-          teamId: null,
+          teamId: input.resolved.teamId ?? null,
           meetingSubtype: null,
           estimatedAttendance: input.resolved.guests.length,
           durationMinutes: input.resolved.durationMinutes,
@@ -394,7 +414,7 @@ export function meetingInvitationRecipeDefinition() {
       MEETING_INVITATION_SEND_IDENTITY,
     ],
     confirmation: {
-      title: "Create Vision Meeting and send invitations",
+      title: "Create meeting and send invitations",
       actionLabel: "Create meeting and send invitations",
     },
     steps: [
@@ -407,7 +427,7 @@ export function meetingInvitationRecipeDefinition() {
           title: "Create the meeting",
           items: disclosureItems(meetingKeys),
           consequences: [
-            "Creates one Vision Meeting in the plant calendar and schedules its reminders.",
+            "Creates the meeting in the church calendar and schedules its reminders.",
           ],
         },
         failurePolicy: { retry: "same_plan" },
@@ -898,14 +918,20 @@ function locationChoice(location: MeetingInvitationLocation, index: number) {
 
 function resolveAudience(
   facts: MeetingInvitationReferenceFacts,
-  guestPersonIds?: readonly string[]
+  guestPersonIds?: readonly string[],
+  audience: MeetingInvitationReferenceRequest["audience"] = "core_team_and_new_prospects"
 ) {
   const explicitGuests = guestPersonIds ? new Set(guestPersonIds) : null;
   const eligible = facts.people
     .filter((person) =>
       explicitGuests
         ? explicitGuests.has(person.id)
-        : CORE_TEAM_STATUSES.has(person.status) || person.status === "prospect"
+        : audience === "core_team"
+          ? CORE_TEAM_STATUSES.has(person.status)
+          : audience === "prospects"
+            ? person.status === "prospect"
+            : CORE_TEAM_STATUSES.has(person.status) ||
+              person.status === "prospect"
     )
     .toSorted((left, right) => left.id.localeCompare(right.id));
   const guests: MeetingInvitationGuest[] = [];
@@ -916,6 +942,7 @@ function resolveAudience(
     const label = personLabel(person);
     if (
       !explicitGuests &&
+      audience === "core_team_and_new_prospects" &&
       person.status === "prospect" &&
       person.attendedVisionMeeting
     ) {
@@ -967,6 +994,11 @@ function resolveAudience(
   });
 }
 
+function explicitDateTimeSource(value: { date: string; time: string }): string {
+  const hour = Number(value.time.slice(0, 2));
+  return `${value.date} at ${hour % 12 || 12}:${value.time.slice(3)} ${hour >= 12 ? "pm" : "am"}`;
+}
+
 export function createMeetingInvitationReferenceResolver(
   dependencies: MeetingInvitationReferenceResolverDependencies
 ) {
@@ -977,7 +1009,7 @@ export function createMeetingInvitationReferenceResolver(
     if (!input.request.durationMinutes) {
       return missing(
         "meeting_duration",
-        "How many minutes should the Vision Meeting last?"
+        "How many minutes should the meeting last?"
       );
     }
     if (
@@ -989,7 +1021,9 @@ export function createMeetingInvitationReferenceResolver(
     }
     const dateTime = await dependencies.resolveDateTime({
       capabilityIdentity: MEETING_INVITATION_CAPABILITY_IDENTITY,
-      sourceText: input.request.sourceText,
+      sourceText: input.request.dateTime
+        ? explicitDateTimeSource(input.request.dateTime)
+        : input.request.sourceText,
     });
     if (dateTime.status === "clarification") {
       return missing("meeting_datetime", dateTime.prompt);
@@ -1012,12 +1046,20 @@ export function createMeetingInvitationReferenceResolver(
       )
     )
       return { kind: "unavailable" };
-    const audience = resolveAudience(facts, input.request.guestPersonIds);
+    if (input.request.guestPersonIds && input.request.audience)
+      return { kind: "unavailable" };
+    const audience = resolveAudience(
+      facts,
+      input.request.guestPersonIds,
+      input.request.audience
+    );
     if (audience.guests.length === 0) return { kind: "unavailable" };
 
     return Object.freeze({
       kind: "resolved" as const,
-      meetingType: "vision_meeting" as const,
+      meetingType: input.request.meetingType ?? "vision_meeting",
+      title: input.request.title,
+      teamId: input.request.teamId,
       dateTime: dateTime.dateTime,
       durationMinutes: input.request.durationMinutes,
       location,

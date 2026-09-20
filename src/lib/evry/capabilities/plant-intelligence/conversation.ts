@@ -18,7 +18,7 @@ import {
   trustedEvryApplicationSourceLink,
 } from "@/lib/evry/artifacts/core";
 
-import type { EvryCapabilityConversationContinuation } from "../conversation";
+import type { EvryCapabilityPreparationContinuation } from "../conversation";
 import {
   plantIntelligenceEffectIdentityFor,
   proposePlantIntelligenceEvryEffect,
@@ -107,7 +107,7 @@ function refusalArtifact() {
 export function createPlantIntelligenceEvryConversationContinuation(
   dependencies: Dependencies = productionDependencies,
   preparedSelection?: PlantIntelligenceEffectSelection
-): EvryCapabilityConversationContinuation {
+): EvryCapabilityPreparationContinuation {
   return {
     identity: "plant-intelligence",
     matches(input) {

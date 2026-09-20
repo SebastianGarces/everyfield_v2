@@ -347,6 +347,75 @@ test("the canonical audience combines core team with unvisited prospects and dis
   assert.equal(result.dateTime.timeZone, "America/New_York");
 });
 
+test("structured orientation resolves core-team guests and church location without the Vision default", async () => {
+  const requests: unknown[] = [];
+  const resolve = createMeetingInvitationReferenceResolver({
+    async resolveDateTime(request) {
+      requests.push(request);
+      return {
+        status: "resolved",
+        dateTime: DATE_TIME,
+      } as EvryDateTimeResolution;
+    },
+    async loadFacts() {
+      return facts();
+    },
+  });
+  const result = await resolve({
+    actor: ACTOR,
+    request: {
+      ...BASE_REQUEST,
+      sourceText: "Next Sunday at ten; core team; orientation",
+      meetingType: "orientation",
+      dateTime: { date: "2026-09-27", time: "10:00" },
+      audience: "core_team",
+      durationMinutes: 120,
+      title: "Core team orientation",
+    },
+  });
+  assert.equal(result.kind, "resolved");
+  if (result.kind !== "resolved") return;
+  assert.equal(result.meetingType, "orientation");
+  assert.equal(result.durationMinutes, 120);
+  assert.equal(result.title, "Core team orientation");
+  assert.deepEqual(
+    result.guests.map((guest) => guest.label),
+    ["Alex Person", "Beth Person"]
+  );
+  assert.equal(result.location.address, "144 Oak Street, Albany, NY, USA");
+  assert.deepEqual(requests, [
+    {
+      capabilityIdentity: "meetings.create",
+      sourceText: "2026-09-27 at 10:00 am",
+    },
+  ]);
+});
+
+test("structured audience rejects conflicting selectors and does not exclude prior-attending prospects", async () => {
+  const resolve = resolver({}).resolve;
+  const conflict = await resolve({
+    actor: ACTOR,
+    request: {
+      ...BASE_REQUEST,
+      audience: "core_team",
+      guestPersonIds: [PEOPLE[0]!.id],
+    },
+  });
+  assert.equal(conflict.kind, "unavailable");
+  const prospects = await resolve({
+    actor: ACTOR,
+    request: {
+      ...BASE_REQUEST,
+      audience: "prospects",
+      meetingType: "orientation",
+    },
+  });
+  assert.equal(prospects.kind, "resolved");
+  if (prospects.kind !== "resolved") return;
+  assert(prospects.guests.some((guest) => guest.label === "Eli Person"));
+  assert(!prospects.guests.some((guest) => guest.label === "Alex Person"));
+});
+
 test("explicit meeting guests include an attendee and a prospect with prior attendance", async () => {
   const result = await resolver({}).resolve({
     actor: ACTOR,
@@ -483,7 +552,7 @@ test("missing year and duration return focused clarifications before any fact re
       kind: "clarification",
       mode: "missing",
       entityType: "meeting_duration",
-      prompt: "How many minutes should the Vision Meeting last?",
+      prompt: "How many minutes should the meeting last?",
     },
   });
   assert.equal(duration.factReads(), 0);

@@ -3,7 +3,10 @@ import {
   storedEvryClarificationArtifactDocument,
 } from "@/lib/evry/conversations/artifacts";
 import { evryConversationPlanIdentitySchema } from "@/lib/evry/conversations/contract";
-import type { EvryCapabilityConversationContinuation } from "@/lib/evry/capabilities/conversation";
+import type {
+  EvryCapabilityConversationContinuation,
+  EvryPreparationContext,
+} from "@/lib/evry/capabilities/conversation";
 import {
   authorizeEvryReadCapability,
   eligibleEvryCapabilitiesFor,
@@ -30,6 +33,7 @@ import {
   MEETING_INVITATION_RECIPE_REGISTRY,
   MEETING_INVITATION_REVIEW_REGISTRY,
   resolveAuthorizedMeetingInvitationRequest,
+  type MeetingInvitationReferenceRequest,
 } from "./meeting-invitation";
 import { selectMeetingInvitationReferenceRequest } from "./meeting-invitation-selection";
 
@@ -200,77 +204,82 @@ export function createMeetingInvitationConversationContinuation(
     async continue(input) {
       const request = requestFor(input);
       if (!request) return null;
-      const requestKey = deriveEvryPlanRequestKey("meeting-invitation", [
-        input.actor.userId,
-        input.actor.plantId,
-        input.conversation.id,
-        input.userRequestKey,
-      ]);
-      const recovered = await dependencies.findPlan({
-        actorUserId: input.actor.userId,
-        plantId: input.actor.plantId,
-        requestKey,
-      });
-      if (recovered) return proposalFromStored(recovered);
-
-      const authorization = await dependencies.authorizeRead(
-        EVRY_PEOPLE_READ_PROBE_IDENTITY
-      );
-      if (
-        !authorization ||
-        authorization.actor.userId !== input.actor.userId ||
-        authorization.actor.plantId !== input.actor.plantId
-      ) {
-        return null;
-      }
-      const resolution = await dependencies.resolveAuthorized({
-        authorization,
-        request,
-        requestKey,
-        now: input.now,
-      });
-      if (resolution.kind === "clarification") {
-        return {
-          body: resolution.artifact.prompt,
-          artifacts: [
-            storedEvryClarificationArtifactDocument(resolution.artifact),
-          ],
-        };
-      }
-      if (resolution.kind !== "planned") return null;
-
-      const rawResolverInput =
-        MEETING_INVITATION_PLAN_RESOLVER_INPUT_SCHEMA.parse({
-          request,
-          requestKey,
-          now: input.now.toISOString(),
-        });
-      let stored: StoredEvryActionPlan;
-      try {
-        stored = await dependencies.createPlan({
-          actor: input.actor,
-          policy: {
-            classification: "application_action",
-            continuation: {
-              kind: "application_action",
-              literalUserText: input.literalUserText,
-            },
-          },
-          recipeIdentity: MEETING_INVITATION_RECIPE_IDENTITY,
-          inputValues: { plan: rawResolverInput },
-          requestKey,
-          registry: MEETING_INVITATION_RECIPE_REGISTRY,
-          reviewRegistry: MEETING_INVITATION_REVIEW_REGISTRY,
-          eligibleCapabilities: eligibleEvryCapabilitiesFor(input.actor),
-        });
-      } catch (error) {
-        if (error instanceof EvryRecipeCompilationError) return null;
-        throw error;
-      }
-      return proposalFromStored(stored);
+      return prepareMeetingInvitation(input, request, dependencies);
     },
   };
 }
 
 export const continueMeetingInvitationConversation =
   createMeetingInvitationConversationContinuation();
+
+export async function prepareMeetingInvitation(
+  input: EvryPreparationContext,
+  request: MeetingInvitationReferenceRequest,
+  dependencies: Dependencies = productionDependencies
+) {
+  const requestKey = deriveEvryPlanRequestKey("meeting-invitation", [
+    input.actor.userId,
+    input.actor.plantId,
+    input.conversation.id,
+    input.userRequestKey,
+  ]);
+  const recovered = await dependencies.findPlan({
+    actorUserId: input.actor.userId,
+    plantId: input.actor.plantId,
+    requestKey,
+  });
+  if (recovered) return proposalFromStored(recovered);
+
+  const authorization = await dependencies.authorizeRead(
+    EVRY_PEOPLE_READ_PROBE_IDENTITY
+  );
+  if (
+    !authorization ||
+    authorization.actor.userId !== input.actor.userId ||
+    authorization.actor.plantId !== input.actor.plantId
+  ) {
+    return null;
+  }
+  const resolution = await dependencies.resolveAuthorized({
+    authorization,
+    request,
+    requestKey,
+    now: input.now,
+  });
+  if (resolution.kind === "clarification") {
+    return {
+      body: resolution.artifact.prompt,
+      artifacts: [storedEvryClarificationArtifactDocument(resolution.artifact)],
+    };
+  }
+  if (resolution.kind !== "planned") return null;
+
+  const rawResolverInput = MEETING_INVITATION_PLAN_RESOLVER_INPUT_SCHEMA.parse({
+    request,
+    requestKey,
+    now: input.now.toISOString(),
+  });
+  let stored: StoredEvryActionPlan;
+  try {
+    stored = await dependencies.createPlan({
+      actor: input.actor,
+      policy: {
+        classification: "application_action",
+        continuation: {
+          kind: "application_action",
+          literalUserText: input.literalUserText,
+        },
+      },
+      recipeIdentity: MEETING_INVITATION_RECIPE_IDENTITY,
+      inputValues: { plan: rawResolverInput },
+      requestKey,
+      registry: MEETING_INVITATION_RECIPE_REGISTRY,
+      reviewRegistry: MEETING_INVITATION_REVIEW_REGISTRY,
+      eligibleCapabilities: eligibleEvryCapabilitiesFor(input.actor),
+    });
+  } catch (error) {
+    if (error instanceof EvryRecipeCompilationError) return null;
+    throw error;
+  }
+  return proposalFromStored(stored);
+}

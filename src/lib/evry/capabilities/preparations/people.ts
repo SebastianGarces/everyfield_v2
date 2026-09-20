@@ -30,7 +30,7 @@ import {
 import { resolveAuthorizedEvryPageContext } from "@/lib/evry/resolvers/page-context";
 import type { EvryResolvedPageContext } from "@/lib/evry/resolvers/contract";
 import type {
-  EvryCapabilityConversationSelectionInput,
+  EvryPreparationContext,
   EvryCapabilityConversationResult,
 } from "../conversation";
 import {
@@ -147,7 +147,7 @@ const notes = {
 };
 type Proposal = Awaited<ReturnType<typeof proposePeopleCoreEffect>>;
 type PreparationContext = {
-  input: EvryCapabilityConversationSelectionInput;
+  input: EvryPreparationContext;
   pageContext: EvryResolvedPageContext | null;
   requestKey: EvryPlanRequestKey;
 };

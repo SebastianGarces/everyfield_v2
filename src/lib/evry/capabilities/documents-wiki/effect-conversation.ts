@@ -11,7 +11,7 @@ import {
   type StoredEvryActionPlan,
 } from "@/lib/evry/plans/repository";
 
-import type { EvryCapabilityConversationContinuation } from "../conversation";
+import type { EvryCapabilityPreparationContinuation } from "../conversation";
 import {
   DOCUMENTS_WIKI_EFFECT_IDENTITIES,
   DOCUMENTS_WIKI_PLAN_REGISTRY,
@@ -76,7 +76,7 @@ function recoveredResult(input: {
 export function createDocumentsWikiEffectConversationContinuation(
   dependencies: DocumentsWikiConversationDependencies = productionDependencies,
   preparedSelection?: DocumentsWikiEffectSelection
-): EvryCapabilityConversationContinuation {
+): EvryCapabilityPreparationContinuation {
   return {
     identity: "documents-wiki-effects",
     matches(input) {

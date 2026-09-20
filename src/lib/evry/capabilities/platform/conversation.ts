@@ -30,7 +30,7 @@ import {
   type StoredEvryActionPlan,
 } from "@/lib/evry/plans/repository";
 
-import type { EvryCapabilityConversationContinuation } from "../conversation";
+import type { EvryCapabilityPreparationContinuation } from "../conversation";
 
 import {
   MARK_ALL_NOTIFICATIONS_IDENTITY,
@@ -253,7 +253,7 @@ export function createPlatformEvryConversationContinuation(
     PlatformEvrySelection,
     { kind: "mark_one" | "mark_all" | "feedback" }
   >
-): EvryCapabilityConversationContinuation {
+): EvryCapabilityPreparationContinuation {
   return {
     identity: "platform",
     matches(input) {

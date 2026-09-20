@@ -43,6 +43,23 @@ export type EvryCapabilityConversationSelectionInput = Readonly<{
   reportResponse?: (response: EvryResponsePreview) => void | Promise<void>;
 }>;
 
+/** Trusted preparation needs identity, not a fabricated legacy transcript. */
+export type EvryPreparationContext = Omit<
+  EvryCapabilityConversationSelectionInput,
+  "conversation"
+> &
+  Readonly<{ conversation: Pick<EvryStoredConversation, "id"> }>;
+
+export type EvryCapabilityPreparationContinuation = Omit<
+  EvryCapabilityConversationContinuation,
+  "continue"
+> &
+  Readonly<{
+    continue(
+      input: EvryPreparationContext
+    ): Promise<EvryCapabilityConversationResult | null>;
+  }>;
+
 export type EvryCapabilityConversationResultIdentity = Readonly<{
   messageId: EvryConversationMessageId;
   requestKey: EvryConversationRequestKey;

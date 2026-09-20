@@ -15,7 +15,7 @@ import {
   type StoredEvryActionPlan,
 } from "@/lib/evry/plans/repository";
 
-import type { EvryCapabilityConversationContinuation } from "../conversation";
+import type { EvryCapabilityPreparationContinuation } from "../conversation";
 
 import {
   COMMUNICATION_MESSAGE_SEND_IDENTITY,
@@ -125,7 +125,7 @@ export function createCommunicationEvryConversationContinuation(
   preparedSelection?:
     | CommunicationEvryMessageSelection
     | CommunicationEvryTemplateSelection
-): EvryCapabilityConversationContinuation {
+): EvryCapabilityPreparationContinuation {
   return {
     identity: "communication",
     matches(input) {

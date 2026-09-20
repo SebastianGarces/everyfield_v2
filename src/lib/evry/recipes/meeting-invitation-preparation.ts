@@ -1,5 +1,5 @@
 import { defineEvryModelPreparation } from "@/lib/evry/capabilities/model-preparation";
-import { createMeetingInvitationConversationContinuation } from "./meeting-invitation-conversation";
+import { prepareMeetingInvitation } from "./meeting-invitation-conversation";
 import {
   meetingInvitationRequestSchema,
   MEETING_INVITATION_CAPABILITY_IDENTITY,
@@ -19,9 +19,6 @@ export const MEETING_INVITATION_MODEL_PREPARATION = defineEvryModelPreparation({
     "Prepare one Vision Meeting, add guests and send one invitation template after exact confirmation. sourceText is the user's date/time wording, resolved in the plant timezone. Specify guestPersonIds for an explicit audience; omitted means core team plus prospects without prior Vision Meeting attendance. A broad request without audience intent needs clarification."
   ),
   run(selection, request) {
-    return createMeetingInvitationConversationContinuation(
-      undefined,
-      () => request
-    ).continue(selection);
+    return prepareMeetingInvitation(selection, request);
   },
 });

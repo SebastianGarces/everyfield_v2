@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type {
   EvryCapabilityConversationResult,
-  EvryCapabilityConversationSelectionInput,
+  EvryPreparationContext,
 } from "./conversation";
 
 /** Preparation only. Executing a plan is deliberately absent from this contract. */
@@ -10,7 +10,7 @@ export type EvryModelPreparation = Readonly<{
   capabilityIdentities: readonly string[];
   inputSchema: z.ZodType;
   run(
-    selection: EvryCapabilityConversationSelectionInput,
+    selection: EvryPreparationContext,
     argumentsValue: unknown
   ): Promise<EvryCapabilityConversationResult | null>;
 }>;
@@ -20,7 +20,7 @@ export function defineEvryModelPreparation<S extends z.ZodType>(entry: {
   capabilityIdentities: readonly string[];
   inputSchema: S;
   run(
-    selection: EvryCapabilityConversationSelectionInput,
+    selection: EvryPreparationContext,
     argumentsValue: z.output<S>
   ): Promise<EvryCapabilityConversationResult | null>;
 }): EvryModelPreparation {

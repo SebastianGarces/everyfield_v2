@@ -16,7 +16,7 @@ import {
 } from "@/lib/evry/plans/repository";
 import { trustedReviewForEvryPlanDocument } from "@/lib/evry/artifacts/trusted-plan-review";
 
-import type { EvryCapabilityConversationContinuation } from "../conversation";
+import type { EvryCapabilityPreparationContinuation } from "../conversation";
 
 import { TASK_ACTION_CONTRACTS } from "./contracts";
 import { continueTaskEvryRead, selectTaskEvryRead } from "./reads";
@@ -99,7 +99,7 @@ function recoveredPlanResult(input: {
 export function createTaskEvryConversationContinuation(
   dependencies: TaskEvryConversationDependencies = productionDependencies,
   selectedEffect?: TaskEvryEffectSelection
-): EvryCapabilityConversationContinuation {
+): EvryCapabilityPreparationContinuation {
   return {
     identity: "tasks",
     matches(input) {

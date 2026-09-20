@@ -19,7 +19,7 @@ import {
   trustedEvryApplicationSourceLink,
 } from "@/lib/evry/artifacts/core";
 
-import type { EvryCapabilityConversationContinuation } from "../conversation";
+import type { EvryCapabilityPreparationContinuation } from "../conversation";
 import {
   LAUNCH_EFFECT_IDENTITIES,
   proposeLaunchEvryEffect,
@@ -115,7 +115,7 @@ function refusal() {
 export function createLaunchEvryConversationContinuation(
   dependencies: Dependencies = productionDependencies,
   selectedEffect?: LaunchEvryEffectSelection
-): EvryCapabilityConversationContinuation {
+): EvryCapabilityPreparationContinuation {
   return {
     identity: "launch",
     matches(input) {
