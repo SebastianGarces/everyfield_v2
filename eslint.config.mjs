@@ -24,6 +24,8 @@ export default tseslint.config(
       ".cursor/**",
       ".lavish/**",
       ".next/**",
+      ".eve/**",
+      ".output/**",
       "out/**",
       "dist/**",
       "product-docs/**",

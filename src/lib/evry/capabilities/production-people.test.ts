@@ -8,8 +8,14 @@ import { HOUSEHOLD_REVIEWS } from "./people/households";
 import { MILESTONE_REVIEWS } from "./people/milestones";
 import { PEOPLE_EVRY_REVIEWS } from "./people/runtime";
 import { TAXONOMY_REVIEWS } from "./people/taxonomies";
-import { PRODUCTION_EVRY_PEOPLE_CAPABILITY_IDENTITIES, PRODUCTION_EVRY_READ_REGISTRATIONS } from "./production";
-import { PRODUCTION_EVRY_EXECUTION_REGISTRY, PRODUCTION_EVRY_PLAN_REGISTRY } from "./execution";
+import {
+  PRODUCTION_EVRY_PEOPLE_CAPABILITY_IDENTITIES,
+  PRODUCTION_EVRY_READ_REGISTRATIONS,
+} from "./production";
+import {
+  PRODUCTION_EVRY_EXECUTION_REGISTRY,
+  PRODUCTION_EVRY_PLAN_REGISTRY,
+} from "./execution";
 
 test("production composes every generated People effect exactly once", () => {
   const effects = generated.capabilities

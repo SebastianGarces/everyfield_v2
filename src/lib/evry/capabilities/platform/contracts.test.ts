@@ -7,7 +7,10 @@ import { evryConversationPlanIdentitySchema } from "@/lib/evry/conversations/con
 import { eligibleEvryCapabilitiesFor } from "@/lib/evry/eligibility/capabilities";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
 import { parseEvryActionPlanCandidate } from "@/lib/evry/plans";
-import { PRODUCTION_EVRY_EXECUTION_REGISTRY, PRODUCTION_EVRY_REVIEW_REGISTRY } from "@/lib/evry/capabilities/execution";
+import {
+  PRODUCTION_EVRY_EXECUTION_REGISTRY,
+  PRODUCTION_EVRY_REVIEW_REGISTRY,
+} from "@/lib/evry/capabilities/execution";
 
 import {
   MARK_ALL_NOTIFICATIONS_PLAN,

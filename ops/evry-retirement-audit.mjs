@@ -1,6 +1,8 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import console from "node:console";
+import process from "node:process";
 
 // Read-only inventory. Deleting a legacy entrypoint is gated by migrating its
 // importers and preserving live assertions, not by this report alone.
