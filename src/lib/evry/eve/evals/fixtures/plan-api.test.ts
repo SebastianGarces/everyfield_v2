@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { randomBytes, randomUUID } from "node:crypto";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { neonConfig } from "@neondatabase/serverless";
 import { z } from "zod";
 import { startFixtureStack } from "./stack";
@@ -154,6 +157,101 @@ test(
           )
         );
       const before = store.auditStart();
+      // Eve 0.63 exposes no authored-state test harness. This pinned internal
+      // container exercises its real defineState implementation, not Workflow
+      // persistence or replay. Production authorization and repositories stay real.
+      const contextEntry = createRequire(
+        join(process.cwd(), "package.json")
+      ).resolve("eve/context");
+      const { ContextContainer, contextStorage } = await import(
+        pathToFileURL(join(dirname(contextEntry), "../../context/container.js"))
+          .href
+      );
+      const { createBoundEveRegistry } = await import("../../runtime/registry");
+      const { evryTurnInput } = await import("../../runtime/task-state");
+      const { evryReviewState } = await import("../../runtime/review-state");
+      await contextStorage.run(new ContextContainer(), async () => {
+        await withAuthenticatedSessionId(manifest.sessionId, async () => {
+          evryTurnInput.update(() => ({
+            text: "Prepare a core-team orientation and its invitation.",
+            receivedAt: new Date().toISOString(),
+            pageContext: null,
+          }));
+          const registry = createBoundEveRegistry({
+            actor,
+            appSessionId: manifest.sessionId,
+            eveSessionId: randomUUID(),
+            conversationId: randomUUID(),
+            turnId: randomUUID(),
+          });
+          const firstResult = await registry.invoke(
+            "actions.prepare",
+            { request },
+            { callId: "auto-review-first" }
+          );
+          const first = evryReviewState.get();
+          assert.ok(first, JSON.stringify(firstResult));
+          await registry.invoke(
+            "actions.prepare",
+            { request },
+            { callId: "auto-review-first" }
+          );
+          assert.deepEqual(
+            evryReviewState.get(),
+            first,
+            "same-call replay retains its own review"
+          );
+          assert.equal(
+            z
+              .object({ status: z.string() })
+              .parse(
+                await registry.invoke(
+                  "actions.prepare",
+                  { request: {} },
+                  { callId: "auto-review-invalid" }
+                )
+              ).status,
+            "invalid_input"
+          );
+          assert.deepEqual(
+            evryReviewState.get(),
+            first,
+            "invalid preparation cannot retire a review"
+          );
+          const competing = await Promise.all([
+            registry.invoke(
+              "actions.prepare",
+              { request },
+              { callId: "auto-review-next" }
+            ),
+            registry.invoke(
+              "actions.prepare",
+              { request },
+              { callId: "auto-review-competing" }
+            ),
+          ]);
+          assert.deepEqual(competing[1], {
+            status: "unavailable",
+            reason: "preparation_in_progress",
+          });
+          const replacement = evryReviewState.get();
+          assert.ok(replacement, JSON.stringify(competing[0]));
+          assert.equal(replacement.callId, "auto-review-next");
+          assert.notEqual(replacement.plan.planId, first.plan.planId);
+          assert.equal(
+            (await post(first.plan, "confirm")).status,
+            409,
+            "automatic replacement invalidates the old fingerprint through the real route"
+          );
+          const currentReview = await readEvePlanReview(
+            actor,
+            replacement.plan
+          );
+          assert.equal(currentReview?.artifact.kind, "confirmation");
+          assert.equal((await post(replacement.plan, "cancel")).status, 200);
+        });
+      });
+      assert.equal(deliveries.length, 0, "automatic replacement does not send");
       const initial = await prepare("orientation-prepare-1");
       assert.deepEqual(
         await prepare("orientation-prepare-1"),
