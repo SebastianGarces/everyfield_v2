@@ -1,6 +1,9 @@
 import type { EveMessage } from "eve/client";
 import { z } from "zod";
-import { evryPublicArtifactSchema, type EvryPublicArtifact } from "@/lib/evry/artifacts/public";
+import {
+  evryPublicArtifactSchema,
+  type EvryPublicArtifact,
+} from "@/lib/evry/artifacts/public";
 
 export type EveVisiblePart =
   | { kind: "text"; text: string; key: string }
@@ -12,8 +15,11 @@ const PREPARATION_TOOL = "capability__actions_prepare";
 const PRESENTATION_TOOL = "present_result";
 
 /** Render the agent's selected presentation, never arbitrary tool/debug output. */
-export function projectEveMessage(message: EveMessage): readonly EveVisiblePart[] {
+export function projectEveMessage(
+  message: EveMessage
+): readonly EveVisiblePart[] {
   const visible: EveVisiblePart[] = [];
+  const shownPlans = new Set<string>();
   for (const [index, part] of message.parts.entries()) {
     const key = `${message.id}:${index}`;
     if (part.type === "text" && part.text.length) {
@@ -25,15 +31,30 @@ export function projectEveMessage(message: EveMessage): readonly EveVisiblePart[
     if (part.type !== "dynamic-tool") continue;
     const question = part.toolMetadata?.eve?.inputRequest;
     if (part.state === "approval-requested" && question?.kind === "question") {
-      visible.push({ kind: "question", requestId: question.requestId, prompt: question.prompt, key });
+      visible.push({
+        kind: "question",
+        requestId: question.requestId,
+        prompt: question.prompt,
+        key,
+      });
     }
     if (part.state !== "output-available" || part.partial) continue;
-    if (part.toolName !== PRESENTATION_TOOL && part.toolName !== PREPARATION_TOOL) continue;
+    if (
+      part.toolName !== PRESENTATION_TOOL &&
+      part.toolName !== PREPARATION_TOOL
+    )
+      continue;
     const parsed = presentation.safeParse(part.output);
     if (!parsed.success) continue;
     for (const [ordinal, artifact] of parsed.data.artifacts.entries()) {
-      // Only the trusted preparation operation can introduce confirmation UI.
-      if (artifact.kind === "confirmation" && part.toolName !== PREPARATION_TOOL) continue;
+      // Both allowlisted tools return server-owned artifacts. present_result
+      // accepts only an authorized current-turn reference, never model JSON.
+      // A nested code-mode preparation can therefore use the same exact review.
+      if (artifact.kind === "confirmation") {
+        const identity = `${artifact.plan.planId}:${artifact.plan.fingerprint}`;
+        if (shownPlans.has(identity)) continue;
+        shownPlans.add(identity);
+      }
       visible.push({ kind: "artifact", artifact, key: `${key}:${ordinal}` });
     }
   }
