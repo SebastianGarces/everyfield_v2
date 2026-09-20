@@ -3,8 +3,13 @@ import {
   evryTaskState,
   evryTurnInput,
 } from "../../src/lib/evry/eve/runtime/task-state";
-import { eveSessionStore } from "../../src/lib/evry/eve/runtime/session-store";
+import {
+  eveSessionStore,
+  titleEveSessionIfNew,
+} from "../../src/lib/evry/eve/runtime/session-store";
 import { authenticatedSessionOf } from "../../src/lib/evry/eve/runtime/auth-policy";
+import { pageHintFromMessages } from "../../src/lib/evry/eve/runtime/client-context";
+import { scrubJevRoutingPayload } from "../../src/lib/evry/eve/runtime/routing-privacy";
 import {
   EVE_CAPABILITY_CATALOG,
   EVE_WORKFLOW_COVERAGE,
@@ -40,8 +45,14 @@ export default defineDynamic({
       evryTurnInput.update(() => ({
         text,
         receivedAt: new Date().toISOString(),
+        pageContext: pageHintFromMessages(ctx.messages),
       }));
       const taskState = evryTaskState.get();
+      await titleEveSessionIfNew(
+        ctx.session.id,
+        authenticatedSessionOf(ctx.session.auth.current),
+        text
+      );
       // Sebastian explicitly approved requests + saved task facts for TypeSafe routing.
       // Never include session/authentication metadata or tool transport context here.
       const discovery = await suggestCapabilities({
@@ -49,7 +60,10 @@ export default defineDynamic({
           apiKey: process.env.TYPESAFE_API_KEY,
           timeoutMs: 800,
         }),
-        context: { request: text, taskState },
+        context: {
+          request: String(scrubJevRoutingPayload(text)),
+          taskState: scrubJevRoutingPayload(taskState),
+        },
         candidates: [
           ...EVE_CAPABILITY_CATALOG.map(([name, description]) => ({
             name,

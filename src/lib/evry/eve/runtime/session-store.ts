@@ -124,3 +124,26 @@ export async function touchEveSession(
       )
     );
 }
+
+export async function titleEveSessionIfNew(
+  sessionId: string,
+  owner: EveSessionOwner,
+  text: string
+) {
+  const title = text
+    .replace(/[\p{Cc}\p{Cf}]+/gu, " ")
+    .trim()
+    .slice(0, 120);
+  if (!title) return;
+  await db
+    .update(evryEveSessions)
+    .set({ title })
+    .where(
+      and(
+        eq(evryEveSessions.id, sessionId),
+        eq(evryEveSessions.churchId, owner.plantId),
+        eq(evryEveSessions.userId, owner.userId),
+        eq(evryEveSessions.title, "New conversation")
+      )
+    );
+}

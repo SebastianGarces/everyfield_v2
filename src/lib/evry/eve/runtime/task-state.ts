@@ -1,5 +1,6 @@
 import { defineState } from "eve/context";
 import { z } from "zod";
+import type { EvryPageContext } from "@/lib/evry/resolvers/contract";
 
 const factSchema = z
   .object({
@@ -72,7 +73,12 @@ export const evryTaskState = defineState<EvryTaskState>(
   "evry.task",
   emptyTaskState
 );
-export const evryTurnInput = defineState("evry.turn-input", () => ({
+export const evryTurnInput = defineState<{
+  text: string;
+  receivedAt: string;
+  pageContext: EvryPageContext | null;
+}>("evry.turn-input", () => ({
   text: "",
   receivedAt: "",
+  pageContext: null,
 }));

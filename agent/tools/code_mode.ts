@@ -31,7 +31,7 @@ export default defineTool({
       };
       return runEvryComposition({
         js,
-        registry: createBoundEveRegistry(scope),
+        registry: createBoundEveRegistry(scope, { singlePreparation: true }),
         callId: ctx.callId,
         budget,
         signal: ctx.abortSignal,

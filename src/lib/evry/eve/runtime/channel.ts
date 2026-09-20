@@ -3,7 +3,12 @@ import { z } from "zod";
 import { eveAppAuth } from "./auth";
 import { authenticatedSessionOf } from "./auth-policy";
 import { eveSessionStore, touchEveSession } from "./session-store";
-import { EVE_APP_ROUTES, validateEveMessageRequest } from "./transport-policy";
+import {
+  EVE_APP_ROUTES,
+  validateEveMessageRequest,
+  scopeEveCreationRequest,
+} from "./transport-policy";
+import { evePageHintMessage } from "./client-context";
 
 const acceptedSession = z.object({
   ok: z.literal(true),
@@ -16,6 +21,11 @@ const channel = eveChannel({
   audience: "private",
   turnPolicy: "queue",
   uploadPolicy: "disabled",
+  onMessage: (ctx, message) => ({
+    auth: ctx.eve.caller,
+    context: [evePageHintMessage(ctx.eve.request)],
+    title: typeof message === "string" ? message.slice(0, 120) : undefined,
+  }),
   events: {
     async "message.completed"(_event, _channel, ctx) {
       await touchEveSession(
@@ -54,7 +64,14 @@ export const evryEveChannel = {
               { ok: false, error: "Invalid message request." },
               { status: 400 }
             );
-          const response = await route.handler(request, args);
+          const boundRequest =
+            route.path === "/eve/v1/session"
+              ? await scopeEveCreationRequest(
+                  request,
+                  authenticatedSessionOf(principal)
+                )
+              : request;
+          const response = await route.handler(boundRequest, args);
           if (response.ok && route.path === "/eve/v1/session") {
             const body = acceptedSession.parse(await response.clone().json());
             await eveSessionStore.register(

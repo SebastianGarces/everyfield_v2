@@ -13,6 +13,15 @@ import {
 import { applyTaskPatch, emptyTaskState, taskPatchSchema } from "./task-state";
 import { collectResult, findResult } from "./results";
 import { EVE_APP_ROUTES, validateEveMessageRequest } from "./transport-policy";
+import { mayClaimPreparation } from "./preparation-gate";
+import { scrubJevRoutingPayload } from "./routing-privacy";
+import { scopeEveCreationRequest } from "./transport-policy";
+import { eveTraceMetadataSchema } from "./trace-policy";
+import {
+  evePageHintMessage,
+  pageHintFromMessages,
+  rememberEvePageHint,
+} from "./client-context";
 
 const alice = {
   appSessionId: "a".repeat(64),
@@ -267,4 +276,140 @@ test("native transport cannot add callbacks, delegate, upload or override output
     "GET /eve/v1/session/:parentSessionId/subagents/:callId/:childSessionId/stream",
   ])
     assert.equal(EVE_APP_ROUTES.has(route), false);
+});
+
+test("only trusted preparation results can be presented as confirmation cards", () => {
+  const entry = {
+    reference: "prepare-1",
+    turnId: "turn-1",
+    capability: "actions.prepare",
+  };
+  const confirmation = { kind: "confirmation", title: "Review orientation" };
+  const records = collectResult([], entry, {
+    body: "Review before sending",
+    artifacts: [confirmation],
+  });
+  assert.deepEqual(findResult(records, "prepare-1", "turn-1")?.artifacts, [
+    confirmation,
+  ]);
+  assert.deepEqual(
+    collectResult(
+      [],
+      { ...entry, capability: "people.query" },
+      { artifacts: [confirmation] }
+    ),
+    []
+  );
+});
+
+test("preparation claim blocks parallel alternatives but permits durable replay and next turns", () => {
+  const current = { turnId: "turn-1", callId: "prepare-1" };
+  assert.equal(mayClaimPreparation(null, current), true);
+  assert.equal(mayClaimPreparation(current, current), true);
+  assert.equal(
+    mayClaimPreparation(current, { ...current, callId: "parallel-2" }),
+    false
+  );
+  assert.equal(
+    mayClaimPreparation(current, { turnId: "turn-2", callId: "next" }),
+    true
+  );
+});
+
+test("telemetry accepts only approved metadata and refuses raw content or auth", () => {
+  const safe = {
+    operation: "model",
+    name: "gpt-5.6-luna",
+    status: "completed",
+    durationMs: 25,
+    inputTokens: 100,
+  };
+  assert.equal(eveTraceMetadataSchema.safeParse(safe).success, true);
+  for (const key of [
+    "message",
+    "input",
+    "output",
+    "userId",
+    "sessionId",
+    "appSessionId",
+    "error",
+    "stack",
+    "authorization",
+    "secretKey",
+  ])
+    assert.equal(
+      eveTraceMetadataSchema.safeParse({ ...safe, [key]: "private" }).success,
+      false,
+      key
+    );
+});
+
+test("page context is a record hint, isolated by request and cleared when leaving a detail page", () => {
+  const first = request("session", "POST");
+  const second = request("session", "POST");
+  const hint = { kind: "person", recordId: "person-1" } as const;
+  rememberEvePageHint(first, { pageContext: hint });
+  assert.deepEqual(
+    pageHintFromMessages([
+      { role: "user", content: evePageHintMessage(first) },
+    ]),
+    hint
+  );
+  assert.equal(
+    pageHintFromMessages([
+      { role: "user", content: evePageHintMessage(first) },
+      { role: "user", content: evePageHintMessage(second) },
+    ]),
+    null
+  );
+  rememberEvePageHint(first, { pageContext: { ...hint, plantId: "attacker" } });
+  assert.equal(
+    pageHintFromMessages([
+      { role: "user", content: evePageHintMessage(first) },
+    ]),
+    null
+  );
+});
+
+test("creation retry identities cannot collide across accounts or churches", async () => {
+  const make = () =>
+    new Request("https://preview.example/eve/v1/session", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        message: "Hello",
+        operationId: "same-client-key",
+      }),
+    });
+  const first = await (await scopeEveCreationRequest(make(), alice)).json();
+  const retry = await (await scopeEveCreationRequest(make(), alice)).json();
+  const other = await (await scopeEveCreationRequest(make(), bob)).json();
+  assert.equal(first.operationId, retry.operationId);
+  assert.notEqual(first.operationId, other.operationId);
+  assert.equal(first.message, "Hello");
+});
+
+test("Jev routing scrubs known credential strings and nested secret facts without altering main task state", () => {
+  const original = {
+    request:
+      "Use Bearer abcd.secret.123 and sk-proj-abcDEF1234567890 and password=hunter2",
+    taskState: {
+      facts: [
+        { key: "apiKey", value: "arbitrarysecret" },
+        { key: "date", value: "2026-09-27" },
+      ],
+      nested: { sessionId: "privatesession", authorization: "secret" },
+    },
+  };
+  const safe = JSON.stringify(scrubJevRoutingPayload(original));
+  for (const value of [
+    "abcd.secret.123",
+    "sk-proj-abcDEF1234567890",
+    "hunter2",
+    "arbitrarysecret",
+    "privatesession",
+  ])
+    assert.equal(safe.includes(value), false);
+  assert.equal(safe.includes("2026-09-27"), true);
+  assert.equal(original.taskState.facts[0].value, "arbitrarysecret");
 });

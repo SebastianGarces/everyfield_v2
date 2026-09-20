@@ -1,8 +1,8 @@
 import { defineAgent } from "eve";
-import { openai } from "eve/models/openai";
+import { evryLunaModel } from "../src/lib/evry/eve/runtime/model";
 
 export default defineAgent({
-  model: openai("gpt-5.6-luna"),
+  model: evryLunaModel,
   reasoning: "medium",
   defaultTools: false,
   tool: false,

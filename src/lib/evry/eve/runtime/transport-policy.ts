@@ -1,4 +1,7 @@
 import { z } from "zod";
+import { createHash } from "node:crypto";
+import { rememberEvePageHint } from "./client-context";
+import type { EveSessionOwner } from "./session-store";
 
 export const EVE_APP_ROUTES = new Set([
   "POST /eve/v1/session",
@@ -38,8 +41,31 @@ export async function validateEveMessageRequest(
   const text = await request.clone().text();
   if (text.length > 64_000) return false;
   try {
-    return messageBody.safeParse(text.trim() ? JSON.parse(text) : {}).success;
+    const parsed = messageBody.safeParse(text.trim() ? JSON.parse(text) : {});
+    if (parsed.success) rememberEvePageHint(request, parsed.data.clientContext);
+    return parsed.success;
   } catch {
     return false;
   }
+}
+
+/** Client retries are stable only inside the authenticated account/church boundary. */
+export async function scopeEveCreationRequest(
+  request: Request,
+  owner: EveSessionOwner
+): Promise<Request> {
+  const raw = await request.clone().text();
+  const parsed = messageBody.parse(raw.trim() ? JSON.parse(raw) : {});
+  if (!parsed.operationId) return request;
+  const operationId = createHash("sha256")
+    .update(JSON.stringify([owner.userId, owner.plantId, parsed.operationId]))
+    .digest("hex");
+  const headers = new Headers(request.headers);
+  headers.delete("content-length");
+  const scoped = new Request(request, {
+    headers,
+    body: JSON.stringify({ ...parsed, operationId }),
+  });
+  rememberEvePageHint(scoped, parsed.clientContext);
+  return scoped;
 }

@@ -17,6 +17,7 @@ import {
   retirePreviousReview,
   reviewFromPreparation,
 } from "./review-state";
+import { withPreparationGate } from "./preparation-gate";
 
 export function describeEveRuntimeTools(identity: EveAuthenticatedSession) {
   return createEveToolRegistry({
@@ -38,15 +39,17 @@ export function describeEveRuntimeTools(identity: EveAuthenticatedSession) {
 }
 
 export function createBoundEveRegistry(
-  scope: EveRuntimeScope
+  scope: EveRuntimeScope,
+  options: { singlePreparation?: true } = {}
 ): EveToolRegistry {
+  let preparations = 0;
   const turn = evryTurnInput.get();
   const authorizeRead = (name: string) =>
     authorizeEvryReadCapabilityForSession(name, scope.appSessionId);
   const context = {
     actor: scope.actor,
     literalUserText: turn.text,
-    pageContext: null,
+    pageContext: turn.pageContext,
     now: new Date(),
   };
   const registry = createEveToolRegistry({
@@ -64,42 +67,56 @@ export function createBoundEveRegistry(
   return {
     describe: registry.describe,
     async invoke(name, input, invocation) {
-      if (
+      const validPreparation =
         name === "actions.prepare" &&
-        invocation?.callId &&
-        !(await retirePreviousReview(scope, invocation.callId))
-      ) {
-        return {
-          status: "unavailable",
-          reason: "previous_review_busy",
-          message:
-            "The previous action is still running. Wait for its result before changing it.",
-        };
-      }
-      const result = await registry.invoke(name, input, invocation);
-      const reference = invocation?.callId;
-      if (!reference) return result;
-      if (name === "actions.prepare") {
-        const review = reviewFromPreparation(result, reference);
-        if (review) evryReviewState.update(() => review);
-      }
-      evryResultState.update((records) =>
-        collectResult(
-          records,
-          { reference, turnId: scope.turnId, capability: name },
-          result
+        evePreparationInputSchema.safeParse(input).success;
+      if (validPreparation && options.singlePreparation && preparations++ > 0)
+        return { status: "unavailable", reason: "one_review_per_program" };
+      const perform = async () => {
+        if (
+          validPreparation &&
+          invocation?.callId &&
+          !(await retirePreviousReview(scope, invocation.callId))
+        ) {
+          return {
+            status: "unavailable",
+            reason: "previous_review_busy",
+            message:
+              "The previous action is still running. Wait for its result before changing it.",
+          };
+        }
+        const result = await registry.invoke(name, input, invocation);
+        const reference = invocation?.callId;
+        if (!reference) return result;
+        if (name === "actions.prepare") {
+          const review = reviewFromPreparation(result, reference);
+          if (review) evryReviewState.update(() => review);
+        }
+        evryResultState.update((records) =>
+          collectResult(
+            records,
+            { reference, turnId: scope.turnId, capability: name },
+            result
+          )
+        );
+        if (
+          result &&
+          typeof result === "object" &&
+          !Array.isArray(result) &&
+          (result.kind === "read" ||
+            result.kind === "clarification" ||
+            (name === "actions.prepare" && Array.isArray(result.artifacts)))
         )
-      );
-      if (
-        result &&
-        typeof result === "object" &&
-        !Array.isArray(result) &&
-        (result.kind === "read" ||
-          result.kind === "clarification" ||
-          (name === "actions.prepare" && Array.isArray(result.artifacts)))
-      )
-        return { ...result, resultReference: reference };
-      return result;
+          return { ...result, resultReference: reference };
+        return result;
+      };
+      if (validPreparation && invocation?.callId) {
+        return withPreparationGate(
+          { turnId: scope.turnId, callId: invocation.callId },
+          perform
+        );
+      }
+      return perform();
     },
   };
 }
