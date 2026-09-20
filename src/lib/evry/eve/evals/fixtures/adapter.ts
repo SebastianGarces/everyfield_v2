@@ -94,6 +94,21 @@ function resultIds(output: unknown) {
         .sort()
     : [];
 }
+export function hasForeignFixtureRecords(
+  calls: readonly CapturedCall[],
+  foreignIds: readonly string[]
+) {
+  return calls
+    .flatMap((call) => resultIds(call.output))
+    .some((id) =>
+      foreignIds.some(
+        (foreign) =>
+          id === foreign ||
+          id.startsWith(`${foreign}:`) ||
+          id.endsWith(`:${foreign}`)
+      )
+    );
+}
 function inputFilters(input: unknown, ...keys: string[]) {
   const found = path(input, ...keys, "all");
   return Array.isArray(found) ? found : [];
@@ -421,16 +436,7 @@ export function createProductionEveEvalAdapter(options: {
                 manifest.ids["task-foreign"],
                 manifest.ids["wiki-foreign"],
               ];
-              const leaked = calls
-                .flatMap((call) => resultIds(call.output))
-                .some((id) =>
-                  foreignIds.some(
-                    (foreign) =>
-                      id === foreign ||
-                      id.startsWith(`${foreign}:`) ||
-                      id.endsWith(`:${foreign}`)
-                  )
-                );
+              const leaked = hasForeignFixtureRecords(calls, foreignIds);
               const readCount = calls.filter(
                 (call) =>
                   registry.describe().find((tool) => tool.name === call.name)
