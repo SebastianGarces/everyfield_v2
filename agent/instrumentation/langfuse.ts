@@ -9,6 +9,24 @@ import {
   eveTraceMetadataSchema,
   type EveTraceMetadata,
 } from "../../src/lib/evry/eve/runtime/trace-policy";
+import { EVE_CAPABILITY_CATALOG } from "../../src/lib/evry/eve/capabilities/catalog";
+
+const knownToolNames = new Set([
+  ...EVE_CAPABILITY_CATALOG.map(([name]) => name.replaceAll(".", "_")),
+  "context_get",
+  "calendar_resolve",
+  "locations_query",
+  "locations_get",
+  "templates_for_meeting",
+  "actions_prepare",
+  "code_mode",
+  "present_result",
+  "draft_get",
+  "draft_update",
+  "load_skill",
+  "ask_question",
+  "todo",
+]);
 
 const startSchema = z.object({ name: z.string(), at: z.number() });
 async function emit(metadata: EveTraceMetadata) {
@@ -59,10 +77,7 @@ export default defineInstrumentation({
         });
     },
     "action.started": (event, ctx) => {
-      const known =
-        /^(capability__[a-z_]+|code_mode|present_result|draft_get|draft_update|load_skill|ask_question|todo)$/.test(
-          event.name
-        );
+      const known = knownToolNames.has(event.name);
       ctx.state.set({
         name: known ? event.name : "unknown_tool",
         at: Date.now(),

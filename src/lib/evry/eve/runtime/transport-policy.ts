@@ -3,6 +3,12 @@ import { createHash } from "node:crypto";
 import { rememberEvePageHint } from "./client-context";
 import type { EveSessionOwner } from "./session-store";
 
+const operationHeaderSchema = z
+  .string()
+  .min(16)
+  .max(160)
+  .regex(/^[a-zA-Z0-9_-]+$/);
+
 export const EVE_APP_ROUTES = new Set([
   "POST /eve/v1/session",
   "GET /eve/v1/session/:sessionId",
@@ -42,6 +48,15 @@ export async function validateEveMessageRequest(
   if (text.length > 64_000) return false;
   try {
     const parsed = messageBody.safeParse(text.trim() ? JSON.parse(text) : {});
+    const header = request.headers.get("x-evry-operation-id");
+    if (
+      header &&
+      (!operationHeaderSchema.safeParse(header).success ||
+        (parsed.success &&
+          parsed.data.operationId &&
+          parsed.data.operationId !== header))
+    )
+      return false;
     if (parsed.success) rememberEvePageHint(request, parsed.data.clientContext);
     return parsed.success;
   } catch {
@@ -56,9 +71,12 @@ export async function scopeEveCreationRequest(
 ): Promise<Request> {
   const raw = await request.clone().text();
   const parsed = messageBody.parse(raw.trim() ? JSON.parse(raw) : {});
-  if (!parsed.operationId) return request;
+  const header = request.headers.get("x-evry-operation-id");
+  if (header) operationHeaderSchema.parse(header);
+  const incomingOperationId = header ?? parsed.operationId;
+  if (!incomingOperationId) return request;
   const operationId = createHash("sha256")
-    .update(JSON.stringify([owner.userId, owner.plantId, parsed.operationId]))
+    .update(JSON.stringify([owner.userId, owner.plantId, incomingOperationId]))
     .digest("hex");
   const headers = new Headers(request.headers);
   headers.delete("content-length");

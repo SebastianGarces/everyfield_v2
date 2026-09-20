@@ -389,6 +389,39 @@ test("creation retry identities cannot collide across accounts or churches", asy
   assert.equal(first.message, "Hello");
 });
 
+test("native client operation header is validated and converted into tenant-scoped creation identity", async () => {
+  const { scopeEveCreationRequest, validateEveMessageRequest } =
+    await import("./transport-policy");
+  const make = (key: string) =>
+    new Request("https://app.test/eve/v1/session", {
+      method: "POST",
+      headers: { "x-evry-operation-id": key },
+      body: JSON.stringify({ message: "Hello" }),
+    });
+  const key = "a3d89218-33b8-4425-8c31-ff333fbb44dd";
+  const request = make(key);
+  assert.equal(await validateEveMessageRequest(request), true);
+  const first = await (
+    await scopeEveCreationRequest(request, { userId: "one", plantId: "plant" })
+  ).json();
+  const retry = await (
+    await scopeEveCreationRequest(make(key), {
+      userId: "one",
+      plantId: "plant",
+    })
+  ).json();
+  const other = await (
+    await scopeEveCreationRequest(make(key), {
+      userId: "two",
+      plantId: "plant",
+    })
+  ).json();
+  assert.equal(first.operationId, retry.operationId);
+  assert.notEqual(first.operationId, other.operationId);
+  assert.notEqual(first.operationId, key);
+  assert.equal(await validateEveMessageRequest(make("bad")), false);
+});
+
 test("Jev routing scrubs known credential strings and nested secret facts without altering main task state", () => {
   const original = {
     request:
