@@ -1,6 +1,6 @@
 "use client";
 
-import { useLayoutEffect } from "react";
+import { memo, useLayoutEffect } from "react";
 import { useEveAgent, type UseEveAgentHelpers } from "eve/react";
 import type {
   ClientSessionState,
@@ -41,7 +41,7 @@ export async function readEveSession(
 }
 
 /** The native store owns optimistic messages, durable replay, and reconnection. */
-export function EveSessionBridge({
+export const EveSessionBridge = memo(function EveSessionBridge({
   binding,
   onChange,
   onSession,
@@ -64,4 +64,4 @@ export function EveSessionBridge({
   });
   useLayoutEffect(() => onChange(client), [client, onChange]);
   return null;
-}
+});

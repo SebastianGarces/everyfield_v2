@@ -169,32 +169,35 @@ const HISTORY_A: EvryConversationHistoryItem = {
   actionableState: "ready",
 };
 
-function jsonConversation(
-  status: "available" | "created",
-  value: PublicEvryConversation
-): Response {
-  return Response.json({ status, conversation: value });
+function sessionMetadata(value: PublicEvryConversation) {
+  return {
+    id: `eve-${value.id}`,
+    conversationId: value.id,
+    title: value.title,
+    createdAt: value.createdAt,
+    updatedAt: value.lastActivityAt,
+  };
 }
 
-function streamedConversation(
-  requestId: string,
-  value: PublicEvryConversation
-): Response {
+function streamedConversation(value: PublicEvryConversation): Response {
   const events = [
+    { type: "session.started", data: {} },
+    { type: "turn.started", data: { sequence: 1, turnId: value.id } },
     {
-      type: "work",
-      requestId,
-      sequence: 0,
-      phase: "reading",
-      code: "request_accepted",
+      type: "message.received",
+      data: { sequence: 1, turnId: value.id, message: value.messages[0]!.body },
     },
-    { type: "conversation", requestId, sequence: 1, conversation: value },
-    { type: "complete", requestId, sequence: 2 },
+    { type: "turn.completed", data: { sequence: 1, turnId: value.id } },
+    { type: "session.waiting", data: { inputRequests: [] } },
   ];
   return new Response(
-    `${events.map((event) => JSON.stringify(event)).join("\n")}\n`,
+    `${events.map((event, index) => JSON.stringify({ ...event, meta: { id: `${value.id}-${index}` } })).join("\n")}\n`,
     {
-      headers: { "content-type": "application/x-ndjson" },
+      headers: {
+        "content-type": "application/x-ndjson",
+        "x-eve-stream-version": "25",
+        "x-eve-stream-tail-index": "-1",
+      },
     }
   );
 }
@@ -371,28 +374,25 @@ test("real shell state survives stale route remounts for first and repeated New 
   let conversationCreates = 0;
   let blockedCreation: Promise<void> | null = null;
   const unavailableConversationId = "30000000-0000-4000-8000-000000000099";
-  const secondLoad = Promise.withResolvers<void>();
+  const sessions = new Map([[CONVERSATION_A_ID, CONVERSATION_A]]);
   t.mock.method(
     globalThis,
     "fetch",
     async (input: string | URL | Request, init?: RequestInit) => {
-      const url = String(input);
-      if (
-        url.endsWith(`/api/evry/conversations/${unavailableConversationId}`)
-      ) {
-        return Response.json({ status: "unavailable" }, { status: 404 });
+      const url = new URL(String(input), "http://localhost");
+      if (url.pathname === "/api/evry/eve/sessions") {
+        const id =
+          url.searchParams.get("conversationId") ??
+          url.searchParams.get("sessionId")?.replace(/^eve-/, "");
+        if (url.searchParams.has("conversationId")) conversationLoads += 1;
+        const found = id ? sessions.get(id) : undefined;
+        return found
+          ? Response.json({ session: sessionMetadata(found) })
+          : Response.json({ status: "unavailable" }, { status: 404 });
       }
-      if (url.endsWith(`/api/evry/conversations/${CONVERSATION_A_ID}`)) {
-        conversationLoads += 1;
-        if (conversationLoads === 2) {
-          await secondLoad.promise;
-        }
-        return jsonConversation("available", CONVERSATION_A);
-      }
-      if (url.endsWith("/api/evry/conversations") && init?.method === "POST") {
+      if (url.pathname === "/eve/v1/session" && init?.method === "POST") {
         conversationCreates += 1;
         if (blockedCreation) await blockedCreation;
-        const body = JSON.parse(String(init.body)) as { requestKey: string };
         const created =
           conversationCreates === 1
             ? CONVERSATION_B
@@ -405,8 +405,13 @@ test("real shell state survives stale route remounts for first and repeated New 
           { ...HISTORY_A, id: created.id, title: created.title },
           ...route.serverHistory,
         ];
-        return streamedConversation(body.requestKey, created);
+        sessions.set(created.id, created);
+        return Response.json({ sessionId: sessionMetadata(created).id });
       }
+      const stream = url.pathname.match(
+        /^\/eve\/v1\/session\/eve-(.+)\/stream$/
+      );
+      if (stream) return streamedConversation(sessions.get(stream[1]!)!);
       throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${url}`);
     }
   );
