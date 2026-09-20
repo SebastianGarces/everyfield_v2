@@ -2,6 +2,7 @@
   "name": "everyfield",
   "version": "0.1.0",
   "private": true,
+  "engines": { "node": "24.x" },
   "scripts": {
     "preinstall": "node -e \"const fs=require('fs');if(fs.existsSync('node_modules')&&fs.lstatSync('node_modules').isSymbolicLink()){console.error('node_modules is a symlink — install refused. pnpm has ALREADY rewired the checkout the symlink points into (lifecycle scripts run after linking): repair it there with CI=true pnpm install. Then remove this symlink and run a real pnpm install here. See AGENTS.md hard conventions.');process.exit(1)}\"",
     "dev": "next dev --turbopack",
@@ -54,7 +55,8 @@
     "g3:feedback": "tsx --env-file-if-exists=.env.local scripts/g3-feedback-bridge.ts"
   },
   "dependencies": {
-    "@ai-sdk/openai": "^3.0.74",
+    "@ai-sdk/openai": "4.0.60",
+    "@ai-sdk/code-mode": "1.0.62",
     "@atlaskit/pragmatic-drag-and-drop": "^1.7.7",
     "@atlaskit/pragmatic-drag-and-drop-hitbox": "^1.1.0",
     "@aws-sdk/client-s3": "^3.982.0",
@@ -86,7 +88,8 @@
     "@react-pdf/renderer": "^4.5.1",
     "@sentry/nextjs": "^10.57.0",
     "@tailwindcss/postcss": "^4.1.18",
-    "ai": "^6.0.208",
+    "ai": "7.0.105",
+    "eve": "0.63.0",
     "canvas-confetti": "^1.9.4",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
