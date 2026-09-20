@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   createContext,
   useCallback,
@@ -14,6 +14,7 @@ import {
 } from "react";
 import type { EveMessage } from "eve/client";
 import { useHeader } from "@/components/header/header-context";
+import { AuthenticatedNavigationIntentProvider } from "@/components/authenticated-navigation";
 import type { PublicEvryConversation } from "./client-contract";
 import {
   visibleEvryPageContextFor,
@@ -128,6 +129,8 @@ export function EvryShell({
   enabled: boolean;
 }) {
   const pathname = usePathname();
+  const locationSearch = useSearchParams().toString();
+  const navigationPending = useRef(false);
   const router = useRouter();
   const { breadcrumbs } = useHeader();
   const visibleContext = useMemo(
@@ -327,6 +330,9 @@ export function EvryShell({
     setBinding({ key: crypto.randomUUID() });
   }, []);
   useEffect(() => () => lookup.current?.abort(), []);
+  useEffect(() => {
+    navigationPending.current = false;
+  }, [pathname, locationSearch]);
   useEffect(() => {
     if (
       previousPath.current === "/evry" &&
@@ -530,6 +536,7 @@ export function EvryShell({
     else document.getElementById("evry-launcher")?.focus();
   }, []);
   const expandToWorkspace = useCallback(() => {
+    navigationPending.current = true;
     setExpandedFromPanel(true);
     setPanelOpen(false);
     router.push(
@@ -537,6 +544,7 @@ export function EvryShell({
     );
   }, [metadata, router]);
   const returnToPage = useCallback(() => {
+    navigationPending.current = true;
     if (expandedFromPanel) {
       setExpandedFromPanel(false);
       setPanelOpen(true);
@@ -544,9 +552,12 @@ export function EvryShell({
     } else router.push("/dashboard");
   }, [expandedFromPanel, router]);
   const canSyncWorkspaceHistory = useCallback(
-    () => pathname === "/evry",
+    () => pathname === "/evry" && !navigationPending.current,
     [pathname]
   );
+  const recordNavigationIntent = useCallback(() => {
+    navigationPending.current = true;
+  }, []);
 
   const value: EvryShellValue = {
     activeContext,
@@ -602,8 +613,10 @@ export function EvryShell({
           onFinish={onFinish}
         />
       ) : null}
-      {children}
-      {enabled && hasOpenedPanel ? <EvryPanel /> : null}
+      <AuthenticatedNavigationIntentProvider value={recordNavigationIntent}>
+        {children}
+        {enabled && hasOpenedPanel ? <EvryPanel /> : null}
+      </AuthenticatedNavigationIntentProvider>
     </EvryShellContext.Provider>
   );
 }

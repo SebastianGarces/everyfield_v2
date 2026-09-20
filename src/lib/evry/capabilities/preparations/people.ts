@@ -72,10 +72,12 @@ import {
 } from "../people/runtime";
 import {
   proposePeopleImport,
+  proposePeoplePhotoUpload,
   PEOPLE_FILE_IDENTITIES,
   PEOPLE_FILE_PLAN_REGISTRY,
   PEOPLE_FILE_REVIEW_REGISTRY,
 } from "../people/files";
+import { openEvryPeopleAttachmentReference } from "../people/attachments";
 import { EVRY_PEOPLE_ATTACHMENT_TRANSPORT_REFERENCE_MAX_LENGTH } from "../people/attachment-contract";
 
 const personId = z
@@ -247,6 +249,73 @@ function preparation<S extends z.ZodType>(config: {
 }
 
 export const PEOPLE_MODEL_PREPARATIONS: readonly EvryModelPreparation[] = [
+  preparation({
+    id: "people.upload_photo",
+    identity: PEOPLE_FILE_IDENTITIES.photo,
+    planRegistry: PEOPLE_FILE_PLAN_REGISTRY,
+    reviewRegistry: PEOPLE_FILE_REVIEW_REGISTRY,
+    inputSchema: z.strictObject({
+      reference: z
+        .string()
+        .min(1)
+        .max(EVRY_PEOPLE_ATTACHMENT_TRANSPORT_REFERENCE_MAX_LENGTH)
+        .describe(
+          "Server-issued person_photo attachment reference supplied by the upload workflow. It binds the person, uploader, church, digest and file. Never invent a reference or use an external URL."
+        ),
+    }),
+    propose: ({ input, requestKey }, args) =>
+      proposePeoplePhotoUpload({
+        actor: input.actor,
+        reference: args.reference,
+        requestKey,
+      }),
+  }),
+  preparation({
+    id: "people.attach_commitment",
+    identity: MILESTONE_IDENTITIES.commitment,
+    planRegistry: MILESTONE_PLAN_REGISTRY,
+    reviewRegistry: MILESTONE_REVIEW_REGISTRY,
+    inputSchema: z.strictObject({
+      reference: z
+        .string()
+        .min(1)
+        .max(EVRY_PEOPLE_ATTACHMENT_TRANSPORT_REFERENCE_MAX_LENGTH)
+        .describe(
+          "Server-issued commitment_document reference from the upload workflow; the signed reference determines the person, not model-supplied identity."
+        ),
+      commitmentType: z.enum(["core_group", "launch_team"]),
+      signedDate: z.string().date(),
+      witness: z.string().uuid().nullable().default(null),
+      notes: z.string().max(4_000).nullable().default(null),
+    }),
+    async propose({ input, requestKey }, args) {
+      const attachment = openEvryPeopleAttachmentReference({
+        reference: args.reference,
+        actor: input.actor,
+        expectedKind: "commitment_document",
+      });
+      if (!attachment?.personId) return null;
+      return proposeMilestoneEffect({
+        actor: input.actor,
+        pageContext: {
+          kind: "person",
+          recordId: attachment.personId,
+          label: "Person record",
+        },
+        selection: {
+          kind: "commitment",
+          values: {
+            date: args.signedDate,
+            type: args.commitmentType,
+            ...(args.witness ? { witness: args.witness } : {}),
+            ...(args.notes ? { notes: args.notes } : {}),
+          },
+        },
+        attachmentReference: args.reference,
+        requestKey,
+      });
+    },
+  }),
   preparation({
     id: "people.import_file",
     identity: PEOPLE_FILE_IDENTITIES.import,

@@ -87,12 +87,43 @@ function operation(id: string) {
   assert.ok(entry, `${id} is registered`);
   return entry;
 }
+test("staged photo and commitment preparation accept signed-reference intent, never replacement identities or file bytes", () => {
+  const photo = operation("people.upload_photo").inputSchema;
+  const commitment = operation("people.attach_commitment").inputSchema;
+  assert(photo.safeParse({ reference: "server-issued-reference" }).success);
+  const document = {
+    reference: "server-issued-reference",
+    commitmentType: "core_group",
+    signedDate: "2026-09-20",
+  };
+  assert(commitment.safeParse(document).success);
+  for (const forged of [
+    { personId },
+    { plantId: personId },
+    { bytes: "payload" },
+    { url: "https://example.test/file" },
+    { attachmentDigest: "a".repeat(64) },
+  ]) {
+    assert.equal(
+      photo.safeParse({ reference: "reference", ...forged }).success,
+      false
+    );
+    assert.equal(
+      commitment.safeParse({ ...document, ...forged }).success,
+      false
+    );
+  }
+  assert.equal(
+    commitment.safeParse({ ...document, signedDate: "2026-02-30" }).success,
+    false
+  );
+});
 test("People operations expose serializable intent schemas, not frozen execution snapshots", () => {
   assert.equal(
     new Set(PEOPLE_MODEL_PREPARATIONS.map((entry) => entry.id)).size,
     PEOPLE_MODEL_PREPARATIONS.length
   );
-  assert.equal(PEOPLE_MODEL_PREPARATIONS.length, 28);
+  assert.equal(PEOPLE_MODEL_PREPARATIONS.length, 30);
   for (const entry of PEOPLE_MODEL_PREPARATIONS) {
     const schema = JSON.stringify(z.toJSONSchema(entry.inputSchema));
     assert.doesNotMatch(

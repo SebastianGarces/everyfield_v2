@@ -7,6 +7,7 @@ let pathname = "/dashboard";
 mock.module("next/navigation", {
   namedExports: {
     usePathname: () => pathname,
+    useSearchParams: () => new URLSearchParams(),
     useRouter: () => ({ push() {}, back() {}, refresh() {} }),
   },
 });
