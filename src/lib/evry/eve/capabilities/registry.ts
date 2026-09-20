@@ -62,11 +62,11 @@ export type EveToolRegistry = Readonly<{
   ): Promise<EveJsonValue>;
 }>;
 
-const baselineReads = [
+export const EVE_READ_REGISTRATIONS = Object.freeze([
   ...PEOPLE_QUERY_READS,
   ...OPERATIONS_QUERY_READS,
   ...CONTENT_QUERY_READS,
-];
+]);
 const descriptions = new Map<string, string>(
   EVE_CAPABILITY_CATALOG.map(([name, description]) => [name, description])
 );
@@ -83,7 +83,7 @@ export function createEveToolRegistry(options: {
   reads?: readonly EvryReadRegistration[];
 }): EveToolRegistry {
   const { context } = options;
-  const reads = options.reads ?? baselineReads;
+  const reads = options.reads ?? EVE_READ_REGISTRATIONS;
   const helpers = createEveHelperTools(
     options.helperDependencies ?? productionEveHelperDependencies,
     new Date(context.now)

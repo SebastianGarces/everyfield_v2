@@ -12,3 +12,5 @@ Use `tasks.query`, `meetings.query` and `notifications.query` for the parts of t
 Use count mode for totals and list mode for the records to display. Explain the result naturally, for example "You have one high-priority task due today." Do not recite query fields, timezone internals or pagination when they do not affect the answer. A larger work overview can explain priorities and blockers with evidence, rather than only naming counts.
 
 Changing a task is separate from finding it. Prepare requested changes through `actions.prepare`; reporting an overdue task does not authorize rescheduling it.
+
+For checklist setup, use `tasks.query` with `resource: "templates"` to discover template keys, or `resource: "phase_prompt"` to read the pending transition and suggested templates. Do not invent a template key or transition ID. These catalog reads take no task filters.

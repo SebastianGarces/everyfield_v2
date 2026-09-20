@@ -1,6 +1,5 @@
-import { PEOPLE_QUERY_READS } from "@/lib/evry/capabilities/queries/people";
-import { OPERATIONS_QUERY_READS } from "@/lib/evry/capabilities/queries/operations";
-import { CONTENT_QUERY_READS } from "@/lib/evry/capabilities/queries/content";
+import { EVE_READ_REGISTRATIONS } from "../capabilities/registry";
+import { extendedEveReadSchema } from "../capabilities/extended-reads";
 import {
   createEveHelperTools,
   productionEveHelperDependencies,
@@ -10,12 +9,8 @@ import { evePreparationInputSchema } from "../preparation";
 /** Eve replays this schema factory from a canonical name, never a captured Zod object or identity. */
 export function eveRuntimeToolSchema(name: string) {
   if (name === "actions.prepare") return evePreparationInputSchema;
-  const read = [
-    ...PEOPLE_QUERY_READS,
-    ...OPERATIONS_QUERY_READS,
-    ...CONTENT_QUERY_READS,
-  ].find((entry) => entry.id === name);
-  if (read) return read.inputSchema;
+  const read = EVE_READ_REGISTRATIONS.find((entry) => entry.id === name);
+  if (read) return extendedEveReadSchema(read);
   const helper = createEveHelperTools(
     productionEveHelperDependencies,
     new Date(0)

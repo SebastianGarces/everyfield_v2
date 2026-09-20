@@ -11,4 +11,6 @@ An open role is not necessarily an empty team. An active membership, role assign
 
 Ground candidate suggestions in recorded skills, commitments, assessments and training as relevant. Missing training completion is unknown or incomplete, not evidence the person is incapable. Background-check requirements belong to the team.
 
+Use `people.query` to filter by recorded skills or exact case-insensitive tag names. Request `tags` and `skills` fields from `people.get_many` for the whole candidate batch to inspect names, proficiency and notes before explaining a recommendation.
+
 Prepare requested assignments, role changes, responsibilities or training updates through `actions.prepare`. The execution service owns eligibility and leadership concurrency checks. Never claim an assignment succeeded from a candidate recommendation or prepared review.
