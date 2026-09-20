@@ -1,413 +1,156 @@
 "use client";
 
-import { AlertCircle, LoaderCircle } from "lucide-react";
-import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-
-import type { PublicEvryConversation } from "@/components/evry/client-contract";
-import { useEvryShell } from "@/components/evry/evry-shell";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { useRouter } from "next/navigation";
+import { z } from "zod";
+import { useEvryShell } from "../evry-shell";
 import {
-  buildEvryProgressArtifact,
-  EVRY_UNEXPECTED_ERROR_COPY,
-  type EvryArtifactError,
-  type EvryDetailedConfirmationArtifactDocument,
-  type EvryDetailedProgressArtifactDocument,
-  type EvryDetailedReceiptArtifactDocument,
-} from "@/lib/evry/artifacts/review";
-import type { EvryPublicArtifact } from "@/lib/evry/artifacts/public";
-
+  evryPublicArtifactSchema,
+  type EvryPublicArtifact,
+} from "@/lib/evry/artifacts/public";
+import { publicEvryActivePlanSchema } from "@/lib/evry/conversations/public-contract";
+import type { EvryDetailedConfirmationArtifactDocument } from "@/lib/evry/artifacts/review";
 import {
   EvryArtifactRenderer,
   renderableEvryArtifact,
 } from "./artifact-renderer";
-import {
-  coordinateEvryProductionArtifactRequest,
-  type EvryProductionArtifactAction,
-} from "./production-request";
-import {
-  clearEvryRunRecoveryMarker,
-  writeEvryRunRecoveryMarker,
-} from "../streaming/run-recovery";
 
-type ActivePlan = NonNullable<PublicEvryConversation["activePlan"]>;
-type Action = EvryProductionArtifactAction;
-type LocalError = EvryArtifactError | Readonly<{ kind: "uncertain" }>;
+const envelope = z.object({
+  status: z.literal("available"),
+  plan: publicEvryActivePlanSchema,
+  artifact: evryPublicArtifactSchema,
+});
 
-type LocalState =
-  | Readonly<{ status: "idle" }>
-  | Readonly<{
-      status: "submitting";
-      action: "cancel" | "edit" | "retry" | "reuse";
-    }>
-  | Readonly<{
-      status: "progress";
-      progress: EvryDetailedProgressArtifactDocument;
-    }>
-  | Readonly<{ status: "complete"; action: Action | "reuse" }>
-  | Readonly<{ status: "error"; error: LocalError }>;
-
-function detailedConfirmation(
-  artifact: EvryPublicArtifact
-): EvryDetailedConfirmationArtifactDocument | null {
-  return artifact.kind === "confirmation" && "artifactVersion" in artifact
-    ? artifact
-    : null;
-}
-
-function detailedProgress(
-  artifact: EvryPublicArtifact
-): EvryDetailedProgressArtifactDocument | null {
-  return artifact.kind === "progress" && "artifactVersion" in artifact
-    ? artifact
-    : null;
-}
-
-function detailedReceipt(
-  artifact: EvryPublicArtifact
-): EvryDetailedReceiptArtifactDocument | null {
-  return artifact.kind === "result" && "artifactVersion" in artifact
-    ? artifact
-    : null;
-}
-
-function pendingProgress(
-  confirmation: EvryDetailedConfirmationArtifactDocument
-): EvryDetailedProgressArtifactDocument {
-  return buildEvryProgressArtifact({
-    kind: "progress",
-    artifactVersion: 1,
-    plan: confirmation.plan,
-    title: "Running: " + confirmation.title,
-    error: null,
-    steps: confirmation.steps.map((step, index) => ({
-      stepId: step.stepId,
-      label: step.title,
-      status: index === 0 ? "active" : "pending",
-      affectedCount: 0,
-      excludedCount: 0,
-    })),
-  });
-}
-
-function sameActivePlan(
-  confirmation: EvryDetailedConfirmationArtifactDocument,
-  activePlan: ActivePlan | null
-): boolean {
-  return (
-    activePlan?.confirmable === true &&
-    activePlan.status === "awaiting_confirmation" &&
-    activePlan.identity.planId === confirmation.plan.planId &&
-    activePlan.identity.fingerprint === confirmation.plan.fingerprint
-  );
-}
-
-function sameActiveProgress(
-  progress: EvryDetailedProgressArtifactDocument,
-  activePlan: ActivePlan | null
-): boolean {
-  return (
-    (activePlan?.status === "approved" || activePlan?.status === "executing") &&
-    activePlan.identity.planId === progress.plan.planId &&
-    activePlan.identity.fingerprint === progress.plan.fingerprint &&
-    progress.steps.some(({ status }) => status === "safe_retry")
-  );
-}
-
-function ActionNotice({ state }: { state: LocalState }) {
-  if (state.status === "submitting") {
-    return (
-      <Alert role="group">
-        <LoaderCircle aria-hidden="true" className="motion-safe:animate-spin" />
-        <AlertTitle>
-          {state.action === "reuse"
-            ? "Refreshing this recipe…"
-            : state.action === "retry"
-              ? "Retrying this exact plan…"
-              : state.action === "edit"
-                ? "Invalidating this confirmation…"
-                : "Cancelling this plan…"}
-        </AlertTitle>
-        <AlertDescription>
-          No execution control is available while this request is being saved.
-        </AlertDescription>
-      </Alert>
-    );
-  }
-  if (state.status === "complete") {
-    if (
-      state.action === "execute" ||
-      state.action === "retry" ||
-      state.action === "reuse"
-    )
-      return null;
-    return (
-      <Alert role="group">
-        <AlertCircle aria-hidden="true" />
-        <AlertTitle>
-          {state.action === "edit"
-            ? "Confirmation invalidated"
-            : "Plan cancelled"}
-        </AlertTitle>
-        <AlertDescription>
-          {state.action === "edit"
-            ? "Update the request below. Evry must show a fresh confirmation before it can act."
-            : "No disclosed effect was started."}
-        </AlertDescription>
-      </Alert>
-    );
-  }
-  if (state.status === "error") {
-    return (
-      <Alert role="group" variant="destructive">
-        <AlertCircle aria-hidden="true" />
-        <AlertTitle>
-          {state.error.kind === "expected"
-            ? "This plan needs attention"
-            : "Evry couldn't complete this request"}
-        </AlertTitle>
-        <AlertDescription>
-          <p>
-            {state.error.kind === "expected"
-              ? state.error.message
-              : state.error.kind === "unexpected"
-                ? EVRY_UNEXPECTED_ERROR_COPY
-                : "Evry couldn't confirm the outcome. Reopen this conversation before trying anything else."}
-          </p>
-          {state.error.kind === "unexpected" ? (
-            <p>
-              Support reference:{" "}
-              <span className="font-mono">{state.error.correlationId}</span>
-            </p>
-          ) : null}
-        </AlertDescription>
-      </Alert>
-    );
-  }
-  return null;
-}
-
+/** Approval travels through the app-owned exact-plan endpoint, never an LLM tool. */
 export function EvryProductionArtifact({
   artifact,
-  activePlan,
-  artifactId,
-  conversationId,
-  conversationStateVersion,
   interactive,
-  messageId,
   onEdit,
 }: {
   artifact: EvryPublicArtifact;
-  activePlan: ActivePlan | null;
-  artifactId: string;
-  conversationId: string;
-  conversationStateVersion: number;
   interactive: boolean;
-  messageId: string;
   onEdit(confirmation: EvryDetailedConfirmationArtifactDocument): void;
 }) {
-  const confirmation = detailedConfirmation(artifact);
-  const progress = detailedProgress(artifact);
-  const receipt = detailedReceipt(artifact);
+  const { isWorking, updatePlan, setExecuting, sendMessageText } =
+    useEvryShell();
   const router = useRouter();
-  const {
-    applyWorkConversation,
-    beginWork,
-    finishWork,
-    isWorking,
-    observeWork,
-    startRecipeReuse,
-    updateWork,
-  } = useEvryShell();
-  const [state, setState] = useState<LocalState>({ status: "idle" });
-  const actionStarted = useRef<Readonly<{
-    action: Action;
-    stateVersion: number;
-  }> | null>(null);
+  const [current, setCurrent] = useState<z.infer<typeof envelope> | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const submitting = useRef(false);
+  const plan = "plan" in artifact ? artifact.plan : null;
+  const planId = plan?.planId;
+  const fingerprint = plan?.fingerprint;
   useEffect(() => {
-    const started = actionStarted.current;
-    if (!started || conversationStateVersion <= started.stateVersion) return;
-    actionStarted.current = null;
-    setState({ status: "complete", action: started.action });
-  }, [conversationStateVersion]);
-  const canControl =
-    !isWorking &&
-    interactive &&
-    state.status === "idle" &&
-    ((confirmation !== null && sameActivePlan(confirmation, activePlan)) ||
-      (progress !== null && sameActiveProgress(progress, activePlan)));
-  const canReuse =
-    !isWorking &&
-    interactive &&
-    state.status === "idle" &&
-    receipt?.status === "completed" &&
-    receipt.reuse !== undefined;
-
-  async function reuseRecipe() {
-    if (!canReuse || !receipt?.reuse) return;
-    setState({ status: "submitting", action: "reuse" });
-    requestAnimationFrame(() =>
-      document.getElementById("evry-work-status")?.focus()
-    );
-    try {
-      const result = await startRecipeReuse({
-        sourceConversationId: conversationId,
-        resultArtifactId: artifactId,
-        recipeIdentity: receipt.reuse.recipeIdentity,
-      });
-      if (result === "unavailable") throw new Error("reuse unavailable");
-      setState({ status: "complete", action: "reuse" });
-    } catch {
-      setState({
-        status: "error",
-        error: {
-          kind: "expected",
-          message:
-            "Unable to reuse this recipe. Reopen the receipt and try again.",
-        },
-      });
-    }
-  }
-
-  async function run(action: Action) {
-    const plan = confirmation?.plan ?? progress?.plan;
-    if (
-      !plan ||
-      actionStarted.current !== null ||
-      !canControl ||
-      (action === "retry" ? !progress : !confirmation)
-    ) {
-      return;
-    }
-    actionStarted.current = {
-      action,
-      stateVersion: conversationStateVersion,
-    };
-    const requestKey = crypto.randomUUID();
-    const recoverable = action === "execute" || action === "retry";
+    if (!planId || !fingerprint) return;
     const controller = new AbortController();
-    if (recoverable) {
-      writeEvryRunRecoveryMarker({
-        requestId: requestKey,
-        kind: "execution",
-        conversationId,
+    void fetch(
+      `/api/evry/eve/plans/${planId}?fingerprint=${encodeURIComponent(fingerprint)}`,
+      { cache: "no-store", signal: controller.signal }
+    )
+      .then(async (response) => {
+        if (!response.ok) throw new Error("review unavailable");
+        const next = envelope.parse(await response.json());
+        if (controller.signal.aborted) return;
+        setCurrent(next);
+        if (interactive) updatePlan(next.plan);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted)
+          setError(
+            "Unable to load this review. Reopen the conversation to try again."
+          );
       });
-      observeWork(requestKey, controller);
-    }
-    if (action === "execute" && confirmation) {
-      beginWork(requestKey, {
-        phase: "execution",
-        message: confirmation.steps[0]?.title ?? "Starting the confirmed plan",
-      });
-      setState({ status: "progress", progress: pendingProgress(confirmation) });
-    } else if (action !== "execute") {
-      beginWork(requestKey, {
-        phase: action === "retry" ? "execution" : "reading",
-        message:
-          action === "retry"
-            ? "Retrying this exact plan"
-            : action === "edit"
-              ? "Invalidating this confirmation"
-              : "Cancelling this plan",
-      });
-      setState({ status: "submitting", action });
-    }
-    requestAnimationFrame(() =>
-      document.getElementById("evry-work-status")?.focus()
-    );
+    return () => controller.abort();
+  }, [planId, fingerprint, interactive, updatePlan]);
 
-    const result = await coordinateEvryProductionArtifactRequest({
-      conversationId,
-      action,
-      requestKey,
-      plan,
-      baseline: {
-        stateVersion: conversationStateVersion,
-        messageId,
-        artifactId,
-      },
-      signal: recoverable ? controller.signal : undefined,
-    });
-    if (controller.signal.aborted) return;
-    if (result.status === "conversation") {
-      if (recoverable) clearEvryRunRecoveryMarker(requestKey);
-      if (!applyWorkConversation(requestKey, 1, result.conversation)) return;
-      if (action === "cancel" || action === "edit") {
-        updateWork(requestKey, 2, {
-          phase: "complete",
-          message:
-            action === "edit"
-              ? "Confirmation invalidated. Update the request for a fresh review."
-              : "Plan cancelled. Nothing was executed.",
-        });
-        finishWork(requestKey, 3);
-      } else {
-        finishWork(requestKey, 2);
-      }
-      if (action === "execute" || action === "retry") {
-        // Evry stays on the current application page. Re-read that page and its
-        // shared layouts after an effect so domain content and shell counters
-        // reconcile exactly as their owning staying actions do.
-        router.refresh();
-      }
-      setState({ status: "complete", action });
+  const shown = current?.artifact ?? artifact;
+  const confirmation =
+    shown.kind === "confirmation" && "artifactVersion" in shown ? shown : null;
+  const progress =
+    shown.kind === "progress" && "artifactVersion" in shown ? shown : null;
+  const receipt =
+    shown.kind === "result" && "artifactVersion" in shown ? shown : null;
+  const canControl =
+    interactive && !busy && !isWorking && current?.plan.confirmable;
+
+  async function act(action: "confirm" | "retry" | "cancel" | "edit") {
+    if (!planId || !fingerprint || submitting.current) return;
+    submitting.current = true;
+    setBusy(true);
+    setError(null);
+    setExecuting(true);
+    try {
+      const response = await fetch(`/api/evry/eve/plans/${planId}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ fingerprint, action }),
+      });
+      if (!response.ok) throw new Error("review changed");
+      const next = envelope.parse(await response.json());
+      setCurrent(next);
+      updatePlan(next.plan);
       if (action === "edit" && confirmation) onEdit(confirmation);
-      return;
+      if (action === "confirm" || action === "retry") router.refresh();
+    } catch {
+      setError(
+        "Unable to confirm the outcome. Reopen this conversation to check the plan before trying again."
+      );
+    } finally {
+      submitting.current = false;
+      setBusy(false);
+      setExecuting(false);
     }
-    updateWork(requestKey, 1, {
-      phase: result.error.kind === "expected" ? "blocked" : "failed",
-      message:
-        result.error.kind === "expected"
-          ? result.error.message
-          : result.error.kind === "unexpected"
-            ? EVRY_UNEXPECTED_ERROR_COPY
-            : "Evry could not confirm the outcome. Reopen this conversation before trying anything else.",
-    });
-    finishWork(requestKey, 2);
-    if (recoverable && result.error.kind !== "uncertain") {
-      clearEvryRunRecoveryMarker(requestKey);
-    }
-    setState({ status: "error", error: result.error });
-  }
-
-  if (state.status === "progress") {
-    return (
-      <EvryArtifactRenderer
-        model={{ variant: "progress", artifact: state.progress }}
-      />
-    );
   }
   return (
     <div className="space-y-2">
       <EvryArtifactRenderer
-        model={renderableEvryArtifact(artifact)}
+        model={renderableEvryArtifact(shown)}
         options={
           canControl && confirmation
             ? {
                 confirmationControls: {
-                  onCancel: () => void run("cancel"),
-                  onEdit: () => void run("edit"),
-                  onExecute: () => void run("execute"),
+                  onCancel: () => void act("cancel"),
+                  onEdit: () => void act("edit"),
+                  onExecute: () => void act("confirm"),
                 },
               }
-            : canControl && progress
+            : interactive &&
+                !busy &&
+                !isWorking &&
+                progress?.steps.some((step) => step.status === "safe_retry")
               ? {
-                  progressControls: {
-                    onSafeRetry: () => void run("retry"),
-                  },
+                  progressControls: { onSafeRetry: () => void act("retry") },
                 }
               : receipt?.reuse && interactive
                 ? {
                     receiptControls: {
-                      disabled: !canReuse,
+                      disabled: busy || isWorking,
                       label: receipt.reuse.label,
-                      onReuse: () => void reuseRecipe(),
+                      onReuse: () =>
+                        void sendMessageText(
+                          `Prepare this workflow again: ${receipt.title}. Refresh the current information and show me a new review before making changes.`
+                        ),
                     },
                   }
                 : undefined
         }
       />
-      <ActionNotice state={state} />
+      {busy ? (
+        <p role="status" className="text-muted-foreground text-sm">
+          Updating this plan…
+        </p>
+      ) : null}
+      {current?.plan.status === "cancelled" ? (
+        <p className="text-muted-foreground text-sm">
+          This plan was cancelled. Nothing will be sent from this review.
+        </p>
+      ) : null}
+      {error ? (
+        <p role="alert" className="text-destructive text-sm">
+          {error}
+        </p>
+      ) : null}
     </div>
   );
 }

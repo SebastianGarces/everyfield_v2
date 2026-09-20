@@ -8,7 +8,8 @@ import {
   useRef,
   useState,
 } from "react";
-import { evryResponseContent } from "./response-content";
+import { projectEveMessage } from "./eve-message-projection";
+import { EveQuestionOptions } from "./eve-client/question-options";
 import { evryResponseMarkdown } from "./response-markdown";
 import { RichText } from "@/components/shared/rich-text";
 
@@ -17,7 +18,6 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
-import { EvryArtifactRenderer } from "./artifacts/artifact-renderer";
 import { EvryProductionArtifact } from "./artifacts/production-artifact";
 import { useEvryShell } from "./evry-shell";
 import type { VisibleEvryPageContext } from "./page-context";
@@ -60,11 +60,10 @@ export function ConversationSurface({ className }: { className?: string }) {
   const {
     activeContext,
     acknowledgement,
-    acknowledgeConversationMounted,
     canStopWatching,
     clearContext,
     conversation,
-    streamingResponse,
+    messages,
     draft,
     pendingMessage,
     discardPendingMessage,
@@ -75,7 +74,6 @@ export function ConversationSurface({ className }: { className?: string }) {
     isWatchingDetached,
     resumeWatching,
     sendMessage,
-    sendMessageText,
     setDraft,
     stopWatching,
     workRequestId,
@@ -101,13 +99,12 @@ export function ConversationSurface({ className }: { className?: string }) {
   }
   const showJumpToLatest =
     scrollback.conversationId === conversationId && scrollback.visible;
-  const latestMessage = conversation?.messages.at(-1);
-  const pendingRequestId = pendingMessage?.requestId ?? null;
+  const latestMessage = messages.at(-1);
+  const pendingRequestId = messages.length ? workRequestId : null;
   const responseKey =
-    streamingResponse?.requestId ??
-    (!pendingMessage && latestMessage?.author === "assistant"
-      ? (workRequestId ?? latestMessage.id)
-      : null);
+    latestMessage?.role === "assistant"
+      ? (latestMessage.metadata?.turnId ?? latestMessage.id)
+      : null;
   useEffect(() => {
     const composer = composerRef.current;
     if (!composer) return;
@@ -121,28 +118,10 @@ export function ConversationSurface({ className }: { className?: string }) {
     return () => observer.disconnect();
   }, []);
   const activeArtifactId =
-    conversation?.messages
-      .flatMap((message) => message.artifacts)
-      .findLast(
-        ({ artifact }) =>
-          (artifact.kind === "result" &&
-            "artifactVersion" in artifact &&
-            artifact.status === "completed" &&
-            artifact.reuse !== undefined) ||
-          ((artifact.kind === "confirmation" ||
-            (artifact.kind === "progress" &&
-              "artifactVersion" in artifact &&
-              artifact.steps.some(({ status }) => status === "safe_retry"))) &&
-            "artifactVersion" in artifact &&
-            conversation.activePlan?.identity.planId === artifact.plan.planId &&
-            conversation.activePlan.identity.fingerprint ===
-              artifact.plan.fingerprint)
-      )?.id ?? null;
-
-  useEffect(() => {
-    const conversationId = conversation?.id ?? null;
-    return acknowledgeConversationMounted(conversationId);
-  }, [acknowledgeConversationMounted, conversation?.id]);
+    messages
+      .flatMap(projectEveMessage)
+      .findLast((part) => part.kind === "artifact" && "plan" in part.artifact)
+      ?.key ?? null;
 
   useLayoutEffect(() => {
     const transcript = transcriptRef.current;
@@ -271,7 +250,7 @@ export function ConversationSurface({ className }: { className?: string }) {
               />
               Opening conversation…
             </div>
-          ) : conversation?.messages.length ? (
+          ) : messages.length ? (
             <div className="space-y-6">
               <ol
                 role="log"
@@ -280,101 +259,81 @@ export function ConversationSurface({ className }: { className?: string }) {
                 aria-relevant="additions text"
                 className="space-y-4"
               >
-                {conversation.messages.map((message) => (
+                {messages.map((message) => (
                   <li
                     key={message.id}
                     ref={
-                      message === latestMessage &&
-                      message.author === "assistant" &&
-                      !streamingResponse
+                      message === latestMessage && message.role === "assistant"
                         ? (node) => {
                             responseStartRef.current = node;
                           }
                         : undefined
                     }
                     data-response-start={
-                      message === latestMessage &&
-                      message.author === "assistant"
+                      message === latestMessage && message.role === "assistant"
                         ? "saved"
                         : undefined
                     }
                     className={cn(
                       "flex",
-                      message.author === "user"
-                        ? "justify-end"
-                        : "justify-start"
+                      message.role === "user" ? "justify-end" : "justify-start"
                     )}
                   >
                     <div
                       className={cn(
                         "max-w-[92%] space-y-3 [overflow-wrap:anywhere] sm:max-w-[88%]",
-                        message.author === "user" && "flex flex-col items-end"
+                        message.role === "user" && "flex flex-col items-end"
                       )}
                     >
-                      {evryResponseContent(message.body, message.artifacts).map(
-                        (part, index) =>
-                          part.kind === "text" ? (
-                            <div
-                              key={`text:${index}`}
-                              className={cn(
-                                "rounded-xl px-3.5 py-2.5 text-sm leading-relaxed",
-                                message.author === "user"
-                                  ? "bg-primary text-primary-foreground"
-                                  : "bg-muted text-foreground"
-                              )}
-                            >
-                              <span className="sr-only">
-                                {message.author === "user" ? "You" : "Evry"}
-                                :{" "}
-                              </span>
-                              {message.author === "user" ? (
-                                <p className="whitespace-pre-wrap">
-                                  {part.text}
-                                </p>
-                              ) : (
-                                <RichText
-                                  body={evryResponseMarkdown(part.text)}
-                                />
-                              )}
-                            </div>
-                          ) : (
-                            <EvryProductionArtifact
-                              key={part.entry.id}
-                              artifact={part.entry.artifact}
-                              activePlan={conversation.activePlan}
-                              artifactId={part.entry.id}
-                              conversationId={conversation.id}
-                              conversationStateVersion={
-                                conversation.stateVersion
-                              }
-                              interactive={part.entry.id === activeArtifactId}
-                              messageId={message.id}
-                              onEdit={(confirmation) => {
-                                setDraft(
-                                  "Revise this plan: " + confirmation.title
-                                );
-                                requestAnimationFrame(() =>
-                                  document
-                                    .getElementById("evry-message")
-                                    ?.focus()
-                                );
-                              }}
-                            />
-                          )
+                      {projectEveMessage(message).map((part, index) =>
+                        part.kind === "text" || part.kind === "question" ? (
+                          <div
+                            key={`text:${index}`}
+                            className={cn(
+                              "rounded-xl px-3.5 py-2.5 text-sm leading-relaxed",
+                              message.role === "user"
+                                ? "bg-primary text-primary-foreground"
+                                : "bg-muted text-foreground"
+                            )}
+                          >
+                            <span className="sr-only">
+                              {message.role === "user" ? "You" : "Evry"}:{" "}
+                            </span>
+                            {message.role === "user" ? (
+                              <p className="whitespace-pre-wrap">
+                                {part.kind === "question"
+                                  ? part.prompt
+                                  : part.text}
+                              </p>
+                            ) : (
+                              <RichText
+                                body={evryResponseMarkdown(
+                                  part.kind === "question"
+                                    ? part.prompt
+                                    : part.text
+                                )}
+                              />
+                            )}
+                            {part.kind === "question" ? (
+                              <EveQuestionOptions requestId={part.requestId} />
+                            ) : null}
+                          </div>
+                        ) : (
+                          <EvryProductionArtifact
+                            key={part.key}
+                            artifact={part.artifact}
+                            interactive={part.key === activeArtifactId}
+                            onEdit={(confirmation) => {
+                              setDraft(
+                                "Revise this plan: " + confirmation.title
+                              );
+                              requestAnimationFrame(() =>
+                                document.getElementById("evry-message")?.focus()
+                              );
+                            }}
+                          />
+                        )
                       )}
-
-                      {message.pageContext ? (
-                        <EvryArtifactRenderer
-                          model={{
-                            variant: "context",
-                            artifact: {
-                              sourceKind: message.pageContext.kind,
-                              recordId: message.pageContext.recordId,
-                              label: message.pageContext.label,
-                            },
-                          }}
-                        />
-                      ) : null}
                     </div>
                   </li>
                 ))}
@@ -391,7 +350,7 @@ export function ConversationSurface({ className }: { className?: string }) {
             <div
               className={cn(
                 "flex flex-col items-end gap-2",
-                conversation?.messages.length && "mt-4"
+                messages.length && "mt-4"
               )}
               aria-label={
                 pendingMessage.status === "failed"
@@ -416,10 +375,10 @@ export function ConversationSurface({ className }: { className?: string }) {
                     className="min-h-11 cursor-pointer"
                     onClick={() => {
                       document.getElementById("evry-message")?.focus();
-                      void sendMessageText(pendingMessage.body);
+                      resumeWatching();
                     }}
                   >
-                    Retry
+                    Reconnect
                   </Button>
                   <Button
                     type="button"
@@ -434,37 +393,6 @@ export function ConversationSurface({ className }: { className?: string }) {
                   </Button>
                 </div>
               ) : null}
-            </div>
-          ) : null}
-          {streamingResponse ? (
-            <div
-              ref={(node) => {
-                responseStartRef.current = node;
-              }}
-              data-response-start="streaming"
-              aria-label="Evry response in progress"
-              className="mt-4 max-w-[92%] space-y-3 [overflow-wrap:anywhere] sm:max-w-[88%]"
-            >
-              {evryResponseContent(
-                streamingResponse.response.body,
-                streamingResponse.response.artifacts.map((artifact) => ({
-                  artifact,
-                }))
-              ).map((part, index) =>
-                part.kind === "text" ? (
-                  <div
-                    key={`text:${index}`}
-                    className="bg-muted text-foreground rounded-xl px-3.5 py-2.5 text-sm leading-relaxed"
-                  >
-                    <RichText body={evryResponseMarkdown(part.text)} />
-                  </div>
-                ) : (
-                  <EvryArtifactRenderer
-                    key={`result:${index}`}
-                    model={{ variant: "read", artifact: part.entry.artifact }}
-                  />
-                )
-              )}
             </div>
           ) : null}
           <div className="mt-4 space-y-1">
@@ -494,7 +422,7 @@ export function ConversationSurface({ className }: { className?: string }) {
                 className="min-h-11 px-0"
                 onClick={isWatchingDetached ? resumeWatching : stopWatching}
               >
-                {isWatchingDetached ? "Reconnect to this run" : "Stop watching"}
+                {isWatchingDetached ? "Reconnect" : "Stop response"}
               </Button>
             ) : null}
           </div>
