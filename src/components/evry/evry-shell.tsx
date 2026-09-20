@@ -28,6 +28,7 @@ import {
   EveSessionBridge,
   readEveSession,
   type EveClient,
+  type EveSnapshot,
   type EveSessionBinding,
   type EveSessionMetadata,
 } from "./eve-client/session";
@@ -39,6 +40,16 @@ const EvryPanel = dynamic(() =>
 );
 const EMPTY_MESSAGES: readonly EveMessage[] = [];
 type ActivePlan = PublicEvryConversation["activePlan"];
+type PendingTurn = {
+  bindingKey: string;
+  operationId: string;
+  text: string;
+  clientContext:
+    | string
+    | { pageContext: VisibleEvryPageContext["wire"] | null };
+  inputResponses?: { requestId: string; text?: string; optionId?: string }[];
+  eventStartIndex: number;
+};
 
 export type EvryPeopleFileSubmission =
   | Readonly<{
@@ -144,6 +155,14 @@ export function EvryShell({
   bindingRef.current = binding;
   const [client, setClient] = useState<EveClient | null>(null);
   const clientRef = useRef<EveClient | null>(null);
+  const finishedSnapshot = useRef<EveSnapshot | null>(null);
+  const replayCompletion = useRef<ReturnType<
+    typeof Promise.withResolvers<void>
+  > | null>(null);
+  const pendingTurn = useRef<PendingTurn | null>(null);
+  const [failedTurn, setFailedTurn] = useState<PendingTurn | null>(null);
+  const [dismissedFailure, setDismissedFailure] = useState(false);
+  const sendingTurn = useRef<string | null>(null);
   const [metadata, setMetadata] = useState<EveSessionMetadata | null>(null);
   const metadataRef = useRef(metadata);
   metadataRef.current = metadata;
@@ -171,8 +190,14 @@ export function EvryShell({
   const isComposerBlocked =
     !client || loading || isWorking || client.status === "resuming";
   const lastUser = messages.findLast((message) => message.role === "user");
-  const pendingMessage =
-    lastUser?.metadata?.status === "failed"
+  const interruptedMessage = failedTurn
+    ? {
+        body: failedTurn.text,
+        status: "failed" as const,
+        requestId: failedTurn.operationId,
+        savedMessageId: lastUser?.id ?? "",
+      }
+    : lastUser?.metadata?.status === "failed"
       ? {
           body: lastUser.parts
             .filter((part) => part.type === "text")
@@ -183,6 +208,7 @@ export function EvryShell({
           savedMessageId: lastUser.id,
         }
       : null;
+  const pendingMessage = dismissedFailure ? null : interruptedMessage;
   const workRequestId =
     acknowledgement?.requestId ?? messages.at(-1)?.metadata?.turnId ?? null;
   const workState: EvryWorkState =
@@ -271,8 +297,11 @@ export function EvryShell({
           );
       });
   }, []);
-  const onFinish = useCallback(() => {
-    const id = clientRef.current?.session?.sessionId;
+  const onFinish = useCallback((snapshot: EveSnapshot) => {
+    finishedSnapshot.current = snapshot;
+    replayCompletion.current?.resolve();
+    replayCompletion.current = null;
+    const id = snapshot.session?.sessionId;
     if (!id) return;
     const key = bindingRef.current.key;
     void readEveSession({ sessionId: id })
@@ -299,6 +328,12 @@ export function EvryShell({
       updatePlan(null);
       setAcknowledgement(null);
       setDraft("");
+      pendingTurn.current = null;
+      sendingTurn.current = null;
+      replayCompletion.current?.resolve();
+      replayCompletion.current = null;
+      setFailedTurn(null);
+      setDismissedFailure(false);
       clientRef.current = null;
       setClient(null);
       setBinding(
@@ -325,6 +360,12 @@ export function EvryShell({
     setAcknowledgement(null);
     setError(null);
     setDraft("");
+    pendingTurn.current = null;
+    sendingTurn.current = null;
+    replayCompletion.current?.resolve();
+    replayCompletion.current = null;
+    setFailedTurn(null);
+    setDismissedFailure(false);
     clientRef.current = null;
     setClient(null);
     setBinding({ key: crypto.randomUUID() });
@@ -350,6 +391,110 @@ export function EvryShell({
     () => ({ pageContext: activeContext?.wire ?? null }),
     [activeContext]
   );
+  const requestHeaders = useCallback((): Record<string, string> => {
+    const operationId = pendingTurn.current?.operationId;
+    return operationId ? { "x-evry-operation-id": operationId } : {};
+  }, []);
+  const readFinishedSnapshot = useCallback(() => finishedSnapshot.current, []);
+  const replaySession = useCallback(
+    (current: EveClient, request?: PendingTurn) => {
+      if (!current.session)
+        throw new Error("A saved session is required for replay");
+      // Remount from authoritative events: native resume can reuse a settled reader.
+      const completion = Promise.withResolvers<void>();
+      replayCompletion.current = completion;
+      const next: EveSessionBinding = {
+        key: crypto.randomUUID(),
+        session: current.session,
+        events: current.events,
+      };
+      if (request) request.bindingKey = next.key;
+      bindingRef.current = next;
+      clientRef.current = null;
+      setBinding(next);
+      return completion.promise;
+    },
+    []
+  );
+  const deliver = useCallback(
+    async (request: PendingTurn, reconnect = false) => {
+      const current = clientRef.current;
+      if (!current || sendingTurn.current) return false;
+      sendingTurn.current = request.operationId;
+      finishedSnapshot.current = null;
+      setError(null);
+      setDismissedFailure(false);
+      try {
+        if (reconnect && current.session) {
+          // A lost POST response may still have queued a turn. Never send it twice.
+          await replaySession(current, request);
+        } else {
+          // No session was received. The same creation key recovers an accepted POST.
+          if (reconnect) current.reset();
+          if (request.inputResponses)
+            await current.respond(request.inputResponses, {
+              clientContext: request.clientContext,
+            });
+          else
+            await current.send(request.text, {
+              clientContext: request.clientContext,
+            });
+        }
+        const settled = readFinishedSnapshot();
+        if (!settled || settled.status === "error")
+          throw new Error("delivery failed");
+        if (reconnect && current.session) {
+          const received = settled.events
+            .slice(request.eventStartIndex)
+            .some((event) =>
+              request.inputResponses
+                ? event.type === "input.resolved" &&
+                  request.inputResponses.every((response) =>
+                    event.data.resolutions.some(
+                      (resolution) =>
+                        resolution.requestId === response.requestId &&
+                        resolution.outcome !== "invalid"
+                    )
+                  )
+                : event.type === "message.received" &&
+                  event.data.message === request.text
+            );
+          if (!received) {
+            if (bindingRef.current.key === request.bindingKey) {
+              pendingTurn.current = null;
+              setFailedTurn(null);
+              setDraft((value) => value || request.text);
+              setError(
+                "That message isn't in the saved conversation yet. Your draft is ready if you want to send it again."
+              );
+            }
+            return false;
+          }
+        }
+        if (bindingRef.current.key === request.bindingKey) {
+          pendingTurn.current = null;
+          setFailedTurn(null);
+          setDraft((value) => (value === request.text ? "" : value));
+        }
+        return true;
+      } catch {
+        if (bindingRef.current.key === request.bindingKey) {
+          setFailedTurn(request);
+          setDraft((value) => value || request.text);
+          setError(
+            (readFinishedSnapshot()?.session ?? current.session)
+              ? "The response was interrupted. Your draft is kept. Reconnect to check the conversation before sending again."
+              : "We couldn't connect. Your message is kept. Reconnect to retry it."
+          );
+        }
+        return false;
+      } finally {
+        if (sendingTurn.current === request.operationId)
+          sendingTurn.current = null;
+      }
+    },
+    [readFinishedSnapshot, replaySession]
+  );
   const send = useCallback(
     async (
       text: string,
@@ -358,6 +503,7 @@ export function EvryShell({
       const current = clientRef.current;
       if (
         !current ||
+        sendingTurn.current ||
         !text.trim() ||
         loading ||
         executing ||
@@ -366,36 +512,43 @@ export function EvryShell({
         current.status === "resuming"
       )
         return false;
+      const retained = pendingTurn.current;
+      if (retained) {
+        if (retained.text !== text || attachment) {
+          setError(
+            "Reconnect to check your last message before sending a different one."
+          );
+          return false;
+        }
+        return deliver(retained, true);
+      }
       setError(null);
+      const operationId = crypto.randomUUID();
       setAcknowledgement({
-        requestId: crypto.randomUUID(),
+        requestId: operationId,
         submittedAt: performance.now(),
       });
       setDraft("");
       const question = current.data.messages
         .flatMap(projectEveMessage)
         .findLast((part) => part.kind === "question");
-      try {
-        if (question?.kind === "question" && !attachment) {
-          await current.respond([{ requestId: question.requestId, text }], {
-            clientContext: contextForTurn(),
-          });
-        } else {
-          await current.send(text, {
-            clientContext: attachment
-              ? JSON.stringify({ ...contextForTurn(), attachment })
-              : contextForTurn(),
-          });
-        }
-        return true;
-      } catch {
-        setError(
-          "The response was interrupted. Reconnect to pick up where you left off."
-        );
-        return false;
-      }
+      const request: PendingTurn = {
+        bindingKey: bindingRef.current.key,
+        operationId,
+        text,
+        clientContext: attachment
+          ? JSON.stringify({ ...contextForTurn(), attachment })
+          : contextForTurn(),
+        inputResponses:
+          question?.kind === "question" && !attachment
+            ? [{ requestId: question.requestId, text }]
+            : undefined,
+        eventStartIndex: current.events.length,
+      };
+      pendingTurn.current = request;
+      return deliver(request);
     },
-    [contextForTurn, executing, loading]
+    [contextForTurn, deliver, executing, loading]
   );
   const sendMessageText = useCallback(
     async (text: string) => {
@@ -408,30 +561,45 @@ export function EvryShell({
   }, [send, draft]);
   const respondToQuestion = useCallback(
     async (requestId: string, text: string, optionId?: string) => {
-      setError(null);
-      try {
-        await clientRef.current?.respond(
-          [
-            {
-              requestId,
-              ...(optionId ? { optionId } : {}),
-              ...(text ? { text } : {}),
-            },
-          ],
-          { clientContext: contextForTurn() }
-        );
-      } catch {
-        setError("Unable to send your answer. Reconnect and try again.");
-      }
+      if (pendingTurn.current || !clientRef.current) return;
+      const request: PendingTurn = {
+        bindingKey: bindingRef.current.key,
+        operationId: crypto.randomUUID(),
+        text,
+        clientContext: contextForTurn(),
+        inputResponses: [
+          {
+            requestId,
+            ...(optionId ? { optionId } : {}),
+            ...(text ? { text } : {}),
+          },
+        ],
+        eventStartIndex: clientRef.current.events.length,
+      };
+      pendingTurn.current = request;
+      await deliver(request);
     },
-    [contextForTurn]
+    [contextForTurn, deliver]
   );
   const resumeWatching = useCallback(() => {
     setError(null);
-    void clientRef.current
-      ?.resume()
+    if (pendingTurn.current) {
+      void deliver(pendingTurn.current, true);
+      return;
+    }
+    if (!clientRef.current?.session) {
+      setError(
+        "There is no saved conversation to reconnect to. Your draft is kept."
+      );
+      return;
+    }
+    void replaySession(clientRef.current)
+      .then(() => {
+        if (readFinishedSnapshot()?.status === "error")
+          setError("Unable to reconnect. Try again.");
+      })
       .catch(() => setError("Unable to reconnect. Try again."));
-  }, []);
+  }, [deliver, readFinishedSnapshot, replaySession]);
   const stopWatching = useCallback(() => {
     void clientRef.current
       ?.cancel()
@@ -491,7 +659,12 @@ export function EvryShell({
               : `Review adding ${input.file.name} as this person's commitment document.`,
           attachment
         );
-        if (!submitted) throw new Error("File review was not submitted");
+        if (!submitted)
+          return {
+            status: "failed",
+            message:
+              "Your file is ready. Reconnect to retry sending its review.",
+          };
         return { status: "submitted" };
       } catch {
         return {
@@ -593,7 +766,8 @@ export function EvryShell({
     stopWatching,
     discardPendingMessage: () => {
       setError(null);
-      setDraft(pendingMessage?.body ?? "");
+      setDismissedFailure(true);
+      setDraft((value) => value || pendingMessage?.body || "");
     },
     canStopWatching: isSending || client?.status === "streaming",
     isWatchingDetached: client?.status === "error",
@@ -611,6 +785,7 @@ export function EvryShell({
           onChange={onClient}
           onSession={onSession}
           onFinish={onFinish}
+          headers={requestHeaders}
         />
       ) : null}
       <AuthenticatedNavigationIntentProvider value={recordNavigationIntent}>

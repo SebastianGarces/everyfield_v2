@@ -5,6 +5,7 @@ import { useEveAgent, type UseEveAgentHelpers } from "eve/react";
 import type {
   ClientSessionState,
   EveMessageData,
+  EveAgentStoreSnapshot,
   MessageStreamEvent,
 } from "eve/client";
 import { z } from "zod";
@@ -18,6 +19,7 @@ export const eveSessionMetadataSchema = z.object({
 });
 export type EveSessionMetadata = z.infer<typeof eveSessionMetadataSchema>;
 export type EveClient = UseEveAgentHelpers<EveMessageData>;
+export type EveSnapshot = EveAgentStoreSnapshot<EveMessageData>;
 export type EveSessionBinding = {
   key: string;
   metadata?: EveSessionMetadata;
@@ -46,16 +48,19 @@ export const EveSessionBridge = memo(function EveSessionBridge({
   onChange,
   onSession,
   onFinish,
+  headers,
 }: {
   binding: EveSessionBinding;
   onChange(client: EveClient): void;
   onSession(id: string): void;
-  onFinish(): void;
+  onFinish(snapshot: EveSnapshot): void;
+  headers(): Record<string, string>;
 }) {
   const client = useEveAgent({
     initialSession: binding.session,
     initialEvents: binding.events,
     optimistic: true,
+    headers,
     resume: binding.session !== undefined,
     onSessionChange(session) {
       if (session) onSession(session.sessionId);

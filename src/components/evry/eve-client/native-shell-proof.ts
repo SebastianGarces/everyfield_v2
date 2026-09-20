@@ -16,6 +16,307 @@ mock.module("@/components/header/header-context", {
   namedExports: { useHeader: () => ({ breadcrumbs: [] }) },
 });
 
+for (const file of [false, true]) {
+  test(`a lost first POST keeps ${file ? "the staged file" : "the draft"} and retries the same creation operation`, async (t) => {
+    Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+    t.mock.method(console, "error", () => {});
+    const posts: {
+      body: Record<string, unknown>;
+      operationId: string | null;
+    }[] = [];
+    let stream!: ReadableStreamDefaultController<Uint8Array>;
+    const metadata = {
+      id: "recovered-eve-session",
+      conversationId: "10000000-0000-4000-8000-000000000002",
+      title: "Recovered request",
+      createdAt: "2026-09-20T12:00:00.000Z",
+      updatedAt: "2026-09-20T12:00:00.000Z",
+    };
+    t.mock.method(
+      globalThis,
+      "fetch",
+      async (input: string | URL | Request, init?: RequestInit) => {
+        if (String(input).startsWith("/api/evry/eve/sessions"))
+          return Response.json({ session: metadata });
+        if (init?.method === "POST") {
+          posts.push({
+            body: JSON.parse(String(init.body)),
+            operationId: new Headers(init.headers).get("x-evry-operation-id"),
+          });
+          if (posts.length === 1) {
+            if (file)
+              return new Response("Service unavailable", { status: 503 });
+            throw new TypeError("The accepted response was lost");
+          }
+          return Response.json({
+            ok: true,
+            status: "accepted",
+            sessionId: metadata.id,
+          });
+        }
+        assert.match(
+          String(input),
+          /\/eve\/v1\/session\/recovered-eve-session\/stream/
+        );
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              stream = controller;
+            },
+          }),
+          {
+            headers: {
+              "x-eve-stream-version": "25",
+              "x-eve-stream-tail-index": "-1",
+              "content-type": "application/x-ndjson",
+            },
+          }
+        );
+      }
+    );
+    const { EvryShell, useEvryShell } = await import("../evry-shell");
+    let shell!: ReturnType<typeof useEvryShell>;
+    function Probe() {
+      const value = useEvryShell();
+      useEffect(() => {
+        shell = value;
+      }, [value]);
+      return null;
+    }
+    let renderer!: ReactTestRenderer;
+    await act(() => {
+      renderer = create(
+        createElement(EvryShell, {
+          enabled: true,
+          children: createElement(Probe),
+        })
+      );
+    });
+    t.after(async () => {
+      await act(() => renderer.unmount());
+    });
+    const text = file
+      ? "Review importing people from people.csv."
+      : "Where are we on launch?";
+    await act(async () => {
+      if (file) {
+        const result = await shell.submitPeopleFile({
+          kind: "people_csv",
+          file: new File(["name\nAlex"], "people.csv", { type: "text/csv" }),
+          prepared: {
+            reference: "signed-staged-reference",
+            digest: "digest",
+            duplicateRows: [],
+          },
+          duplicateResolutions: {},
+        });
+        assert.equal(
+          result.status,
+          "failed",
+          "a swallowed SDK failure must not report file submission success"
+        );
+      } else await shell.sendMessageText(text);
+    });
+    assert.equal(shell.sessionId, null);
+    assert.equal(shell.draft, text);
+    assert.equal(shell.pendingMessage?.body, text);
+    assert.match(shell.error ?? "", /message is kept/);
+    assert.match(posts[0]!.operationId ?? "", /^[a-f0-9-]{36}$/);
+    // A draft written after the failure must survive successful recovery.
+    await act(() => shell.setDraft("My next question"));
+    await act(async () => {
+      shell.resumeWatching();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+    assert.equal(posts.length, 2);
+    assert.deepEqual(
+      posts[1],
+      posts[0],
+      "retry must retain the exact message, attachment, context, and creation identity"
+    );
+    if (file)
+      assert.equal(
+        JSON.parse(String(posts[1]!.body.clientContext)).attachment.reference,
+        "signed-staged-reference"
+      );
+    let index = 0;
+    const emit = (type: string, data: object) =>
+      stream.enqueue(
+        new TextEncoder().encode(
+          JSON.stringify({ type, data, meta: { id: `retry-${index++}` } }) +
+            "\n"
+        )
+      );
+    await act(async () => {
+      emit("session.started", {});
+      emit("turn.started", { sequence: 1, turnId: "recovered-turn" });
+      emit("message.received", {
+        sequence: 1,
+        turnId: "recovered-turn",
+        message: text,
+      });
+      emit("message.appended", {
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "recovered-turn",
+        messageDelta: "Here is the review.",
+      });
+      emit("turn.completed", { sequence: 1, turnId: "recovered-turn" });
+      emit("session.waiting", { inputRequests: [] });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+    assert.equal(shell.sessionId, metadata.id);
+    assert.equal(shell.pendingMessage, null);
+    assert.equal(shell.error, null);
+    assert.equal(shell.draft, "My next question");
+    assert.equal(
+      shell.messages.filter((message) => message.role === "user").length,
+      1
+    );
+  });
+}
+
+for (const accepted of [true, false]) {
+  test(`an existing-session send ${accepted ? "recovers accepted output" : "keeps an unconfirmed draft"} without a duplicate POST`, async (t) => {
+    Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+    t.mock.method(console, "error", () => {});
+    let posts = 0;
+    let streams = 0;
+    let eventIndex = 0;
+    const text = "Which tasks are due today?";
+    const metadata = {
+      id: "existing-session",
+      conversationId: "10000000-0000-4000-8000-000000000003",
+      title: "Existing chat",
+      createdAt: "2026-09-20T12:00:00.000Z",
+      updatedAt: "2026-09-20T12:00:00.000Z",
+    };
+    t.mock.method(
+      globalThis,
+      "fetch",
+      async (input: string | URL | Request, init?: RequestInit) => {
+        if (String(input).startsWith("/api/evry/eve/sessions"))
+          return Response.json({ session: metadata });
+        if (init?.method === "POST") {
+          posts++;
+          throw new TypeError("Accepted response lost");
+        }
+        streams++;
+        const events =
+          streams === 1
+            ? [
+                { type: "session.started", data: {} },
+                { type: "session.waiting", data: { inputRequests: [] } },
+              ]
+            : !accepted
+              ? [{ type: "session.waiting", data: { inputRequests: [] } }]
+              : [
+                  {
+                    type: "turn.started",
+                    data: { sequence: 1, turnId: "accepted-turn" },
+                  },
+                  {
+                    type: "message.received",
+                    data: {
+                      sequence: 1,
+                      turnId: "accepted-turn",
+                      message: text,
+                    },
+                  },
+                  {
+                    type: "message.appended",
+                    data: {
+                      sequence: 1,
+                      stepIndex: 0,
+                      turnId: "accepted-turn",
+                      messageDelta: "One task is due today.",
+                    },
+                  },
+                  {
+                    type: "turn.completed",
+                    data: { sequence: 1, turnId: "accepted-turn" },
+                  },
+                  { type: "session.waiting", data: { inputRequests: [] } },
+                ];
+        const body =
+          events
+            .map((event) =>
+              JSON.stringify({
+                ...event,
+                meta: { id: `known-${eventIndex++}` },
+              })
+            )
+            .join("\n") + "\n";
+        return new Response(body, {
+          headers: {
+            "x-eve-stream-version": "25",
+            "x-eve-stream-tail-index": String(eventIndex - 1),
+            "content-type": "application/x-ndjson",
+          },
+        });
+      }
+    );
+    const { EvryShell, useEvryShell } = await import("../evry-shell");
+    let shell!: ReturnType<typeof useEvryShell>;
+    function Probe() {
+      const value = useEvryShell();
+      useEffect(() => {
+        shell = value;
+      }, [value]);
+      return null;
+    }
+    let renderer!: ReactTestRenderer;
+    await act(() => {
+      renderer = create(
+        createElement(EvryShell, {
+          enabled: true,
+          children: createElement(Probe),
+        })
+      );
+    });
+    t.after(async () => {
+      await act(() => renderer.unmount());
+    });
+    await act(async () => {
+      await shell.loadConversation(metadata.conversationId);
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+    await act(async () => {
+      await shell.sendMessageText(text);
+    });
+    assert.equal(posts, 1);
+    assert.equal(shell.draft, text);
+    assert(shell.pendingMessage);
+    await act(async () => {
+      shell.resumeWatching();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+    assert.equal(posts, 1, "reconnect must only read the durable stream");
+    assert.equal(shell.pendingMessage, null);
+    if (!accepted) {
+      assert.match(shell.error ?? "", /isn't in the saved conversation yet/);
+      assert.equal(shell.draft, text);
+      assert.equal(
+        shell.messages.filter((message) => message.role === "user").length,
+        0
+      );
+      return;
+    }
+    assert.equal(shell.error, null);
+    assert.equal(shell.draft, "");
+    assert.equal(
+      shell.messages.filter((message) => message.role === "user").length,
+      1
+    );
+    assert.match(JSON.stringify(shell.messages), /One task is due today/);
+  });
+}
+
 test("native Eve store shows an optimistic message before acceptance and streams without replacing the session", async (t) => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   t.mock.method(console, "error", (...args: unknown[]) => {
