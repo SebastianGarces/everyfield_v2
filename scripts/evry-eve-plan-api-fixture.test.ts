@@ -14,7 +14,13 @@ test(
   "actual Eve preparation and exact plan routes preserve approval, edit, cancellation and retry semantics",
   { skip: process.env.EVRY_EVE_PLAN_PROOF !== "1", timeout: 180_000 },
   async () => {
+    const startedAt = performance.now();
+    const checkpoint = (phase: string) =>
+      console.info(
+        `[Eve plan proof] ${phase}: ${Math.round(performance.now() - startedAt)}ms`
+      );
     const stack = await startFixtureStack(process.cwd());
+    checkpoint("database ready");
     const originalFetch = globalThis.fetch;
     const deliveries: {
       to: string[];
@@ -85,6 +91,7 @@ test(
       const manifest = createFixtureManifest("orientation-plan-api", 0);
       store.seed(manifest);
       const actor = await requireEvryPlantViewerForSession(manifest.sessionId);
+      checkpoint("fixture authenticated");
       const preparation = createEvePreparation({
         actor,
         conversationId: randomUUID(),
@@ -257,6 +264,7 @@ test(
         });
       });
       assert.equal(deliveries.length, 0, "automatic replacement does not send");
+      checkpoint("automatic review replacement verified");
       const initial = await prepare("orientation-prepare-1");
       assert.deepEqual(
         await prepare("orientation-prepare-1"),
@@ -371,13 +379,16 @@ test(
         "orientation-prepare-3",
         "Final orientation invitation"
       );
+      checkpoint("review authentication, edit and cancellation verified");
       const confirmed = await post(final, "confirm");
+      checkpoint("confirmation returned");
       assert.equal(
         confirmed.status,
         200,
         JSON.stringify(await confirmed.clone().json())
       );
       const retried = await post(final, "retry");
+      checkpoint("retry returned");
       assert.equal(
         retried.status,
         200,
@@ -450,6 +461,7 @@ test(
         401,
         "a revoked session cannot confirm an existing plan"
       );
+      checkpoint("replay and revocation verified");
     } finally {
       globalThis.fetch = originalFetch;
       await stack.cleanup();
