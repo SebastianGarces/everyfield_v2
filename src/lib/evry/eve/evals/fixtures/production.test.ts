@@ -175,7 +175,6 @@ test(
       for (const id of [
         "regression-today",
         "regression-followup-priority",
-        "regression-readable-copy",
         "regression-no-n-plus-one",
         "regression-separate-cohorts",
         "regression-attendance-not-rsvp",
@@ -207,6 +206,100 @@ test(
             await fixture.cleanup();
           }
         });
+      await t.test(
+        "private host capture mode grades real tool outputs, not runner facts",
+        async () => {
+          const httpAdapter = createProductionEveEvalAdapter({
+            store,
+            buildSha: "0".repeat(40),
+            captureMode: "isolated_http",
+            async runProduction({ actor, sessionId, sessionToken, now }) {
+              assert.ok(sessionToken.length > 0);
+              let freshAuthorizations = 0;
+              const directRegistry = createEveToolRegistry({
+                context: {
+                  actor,
+                  literalUserText: "My pending tasks due today",
+                  pageContext: null,
+                  now,
+                },
+                async authorizeRead(identity) {
+                  const result = await authorizeEvryReadCapabilityForSession(
+                    identity,
+                    sessionId
+                  );
+                  if (result) freshAuthorizations++;
+                  return result;
+                },
+              });
+              const input = {
+                where: {
+                  all: [
+                    {
+                      assignment: { kind: "mine" },
+                      due: { kind: "relative", period: "today" },
+                      status: ["not_started", "in_progress", "blocked"],
+                    },
+                  ],
+                },
+                query: { mode: "list" },
+              };
+              const output = await directRegistry.invoke("tasks.query", input, {
+                callId: "host-read-1",
+              });
+              return {
+                answer:
+                  "Fixture host-journal ingestion proof, not an HTTP or model quality proof.",
+                clarificationCount: 0,
+                costUsd: 0,
+                judge: null,
+                latency: {
+                  acknowledgementMs: 0,
+                  firstTextMs: null,
+                  totalMs: 0,
+                },
+                hostCapture: {
+                  calls: [
+                    { id: "host-read-1", name: "tasks.query", input, output },
+                  ],
+                  presented: ["host-read-1"],
+                  freshAuthorizations,
+                  refusedAuthorizations: 0,
+                  outboundMessages: 0,
+                  costUsd: 0,
+                  costBasis: "provider_usage",
+                },
+              };
+            },
+          });
+          const scenario = regressions.find(
+            (row) => row.id === "regression-readable-copy"
+          )!;
+          const fixture = await httpAdapter.prepare(scenario);
+          assert.ok(fixture);
+          try {
+            const observation = observationSchema.parse(
+              await fixture.run({
+                scenario,
+                signal: AbortSignal.timeout(30_000),
+                maxCostUsd: 0.1,
+              })
+            );
+            const grade = gradeObservation(
+              scenario.id,
+              fixture.expectations,
+              observation
+            );
+            assert.deepEqual(
+              grade.failures,
+              ["quality_not_reviewed"],
+              JSON.stringify(grade)
+            );
+          } finally {
+            await fixture.cleanup();
+          }
+        }
+      );
       await t.test(
         "orientation uses real saved location/template and next Sunday; revoked sessions stop reads",
         async (helperTest) => {

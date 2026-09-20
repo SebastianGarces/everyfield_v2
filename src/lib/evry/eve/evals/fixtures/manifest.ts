@@ -47,9 +47,8 @@ export function createFixtureManifest(caseId: string, repetition: number) {
   const ids = Object.fromEntries(
     fixtureSymbols.map((symbol) => [symbol, fixtureId(namespace, symbol)])
   ) as Record<FixtureSymbol, string>;
-  const sessionId = createHash("sha256")
-    .update(`${namespace}:session`)
-    .digest("hex");
+  const sessionToken = `${namespace}:session`;
+  const sessionId = createHash("sha256").update(sessionToken).digest("hex");
   const payload = {
     version: 1,
     caseId,
@@ -60,6 +59,7 @@ export function createFixtureManifest(caseId: string, repetition: number) {
   };
   return {
     ...payload,
+    sessionToken,
     sessionId,
     digest: createHash("sha256").update(JSON.stringify(payload)).digest("hex"),
   };

@@ -26,6 +26,12 @@ import {
 } from "./manifest";
 import type { FixtureStore } from "./store";
 import {
+  capturedReadArtifactSchema as artifact,
+  parseFixtureHostCapture,
+  type CapturedCall,
+  type FixtureHostCapture,
+} from "./host-capture";
+import {
   evryDateRangeSchema,
   resolveEvryDateRange,
 } from "@/lib/evry/reads/date-range";
@@ -37,38 +43,23 @@ type ProductionOutcome = Pick<
 > & {
   /** Include every generation and judge request. */
   costUsd: number;
+  /** Trusted server-side observation journal. Never populate this from model or browser data. */
+  hostCapture?: FixtureHostCapture;
 };
 export type ProductionEvalRunner = (input: {
   scenario: Scenario;
   registry: EveToolRegistry;
   actor: EvryPlantActor;
   sessionId: string;
+  /** Disposable fixture cookie token, not the stored hash. Never log it. */
+  sessionToken: string;
   now: Date;
   signal: AbortSignal;
   maxCostUsd: number;
   /** Called only by the host after present_result resolves its authorized result reference. */
   onPresentResult(callId: string): void;
 }) => Promise<ProductionOutcome>;
-type CapturedCall = {
-  id: string;
-  name: string;
-  input: unknown;
-  output: unknown;
-};
 const record = z.record(z.string(), z.unknown());
-const artifact = z.object({
-  kind: z.literal("read"),
-  counts: z.object({ matched: z.number() }),
-  items: z.array(
-    z.object({
-      id: z.string(),
-      label: z.string(),
-      facts: z
-        .array(z.object({ label: z.string(), value: z.string() }))
-        .optional(),
-    })
-  ),
-});
 const boundCases = new Set([
   "regression-today",
   "regression-followup-priority",
@@ -269,6 +260,8 @@ export function createProductionEveEvalAdapter(options: {
   store: FixtureStore;
   buildSha: string;
   runProduction: ProductionEvalRunner;
+  /** HTTP mode requires a private runtime host journal; in-process proofs use the observed registry. */
+  captureMode?: "in_process" | "isolated_http";
   preparation?(context: {
     actor: EvryPlantActor;
     manifest: FixtureManifest;
@@ -282,7 +275,8 @@ export function createProductionEveEvalAdapter(options: {
       if (!("fixture" in scenario) || !boundCases.has(scenario.id)) return null;
       if (
         scenario.id === "regression-orientation" &&
-        (!options.preparation || !options.readPreparedFacts)
+        ((!options.preparation && options.captureMode !== "isolated_http") ||
+          !options.readPreparedFacts)
       )
         return null;
       const manifest = createFixtureManifest(scenario.id, repetition++);
@@ -360,6 +354,7 @@ export function createProductionEveEvalAdapter(options: {
                     registry: observed,
                     actor,
                     sessionId: manifest.sessionId,
+                    sessionToken: manifest.sessionToken,
                     now: new Date(FIXTURE_NOW),
                     signal,
                     maxCostUsd,
@@ -376,6 +371,21 @@ export function createProductionEveEvalAdapter(options: {
                     },
                   })
               );
+              if (options.captureMode === "isolated_http") {
+                const capture = parseFixtureHostCapture(result.hostCapture);
+                calls.splice(0, calls.length, ...capture.calls);
+                presented.clear();
+                for (const id of capture.presented) presented.add(id);
+                freshAuthorizations = capture.freshAuthorizations;
+                refusedAuthorizations = capture.refusedAuthorizations;
+                outbound += capture.outboundMessages;
+                // The trusted host includes model reservations/usage; the runner
+                // total may additionally include independent judging charges.
+                assert.ok(
+                  result.costUsd >= capture.costUsd,
+                  "Runner total must include all host model cost"
+                );
+              }
               const domainWrites = options.store.writesSince(
                 before,
                 manifest
@@ -421,7 +431,9 @@ export function createProductionEveEvalAdapter(options: {
                   {
                     gate: "actor_authorization",
                     passed:
-                      freshAuthorizations === readCount &&
+                      (options.captureMode === "isolated_http"
+                        ? freshAuthorizations >= readCount
+                        : freshAuthorizations === readCount) &&
                       refusedAuthorizations === 0,
                     proof: `${freshAuthorizations} fresh session authorizations for ${readCount} read invocations; ${refusedAuthorizations} refusals.`,
                   },
