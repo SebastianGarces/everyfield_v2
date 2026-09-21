@@ -124,6 +124,7 @@ export function TaskFilters() {
                 ? "bg-primary text-primary-foreground"
                 : "hover:bg-muted"
             )}
+            aria-pressed={selected.view === view}
             onClick={() => updateParam("view", view)}
           >
             {VIEW_LABELS[view]}
@@ -133,6 +134,7 @@ export function TaskFilters() {
 
       {/* Show completed toggle */}
       <button
+        aria-pressed={selected.showCompleted}
         className={cn(
           "cursor-pointer rounded-md border px-3 py-1.5 text-xs font-medium transition-colors",
           selected.showCompleted

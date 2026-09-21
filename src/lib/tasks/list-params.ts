@@ -100,8 +100,14 @@ export function taskListParamsWith(
 
   if (value === null) params.delete(key);
   else params.set(key, value);
-  // The list otherwise excludes complete rows even with an explicit status filter.
-  if (key === "status" && value === "complete") params.set("completed", "true");
+  // Turning completed rows off also removes any explicit completed-status filter.
+  if (key === "completed" && value !== "true") {
+    const statuses = params
+      .getAll("status")
+      .filter((status) => status !== "complete");
+    params.delete("status");
+    for (const status of statuses) params.append("status", status);
+  }
 
   return canonicalTaskListParams(params);
 }
@@ -206,15 +212,19 @@ function parseEnumParam<T extends string>(
 export function parseTaskListSearchParams(params: {
   [key: string]: SearchParamValue;
 }): TaskListSearchParams {
+  const status = parseEnumParam(params.status, taskStatusSchema);
+  // The cursor reaches a UUID column; malformed bookmarks start at page one.
+  const cursor = z.string().uuid().safeParse(params.cursor);
   return {
     // The same list the toggle writes from, so a view can never be writable
     // and unreadable — which is exactly what `all` was (#660).
     view: isTaskListView(params.view) ? params.view : "my_tasks",
-    showCompleted: params.completed === "true",
-    status: parseEnumParam(params.status, taskStatusSchema),
+    showCompleted:
+      params.completed === "true" || !!status?.includes("complete"),
+    status,
     priority: parseEnumParam(params.priority, taskPrioritySchema),
     category: parseEnumParam(params.category, taskCategorySchema),
-    cursor: typeof params.cursor === "string" ? params.cursor : undefined,
+    cursor: cursor.success ? cursor.data : undefined,
     ...(z.string().date().safeParse(params.dueDateFrom).success
       ? { dueDateFrom: z.string().date().parse(params.dueDateFrom) }
       : {}),

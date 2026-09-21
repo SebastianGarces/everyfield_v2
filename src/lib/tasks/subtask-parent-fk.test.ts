@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { after, test, type TestContext } from "node:test";
 
-import { eq, like, sql } from "drizzle-orm";
+import { eq, like, or, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { churches, tasks, users } from "@/db/schema";
@@ -28,10 +28,9 @@ import { churches, tasks, users } from "@/db/schema";
 // nulls dangling parents before validating it) is
 // `src/db/schema/ruled-guards.test.ts`, which runs on every `pnpm test`.
 //
-// SOFT DELETES ARE GUARDED by the later Task-structure migration: a raw parent
-// update cannot strand live checklist rows. `deleteTask` still owns the
-// parent+children update because that is the one legal way to soft-delete the
-// whole checklist together.
+// The FK does not cascade soft deletes. Migration 0072 now rejects a parent-only
+// soft delete that would strand live children. The application must still stamp
+// parent and children together; the valid UPDATE keeps their rows intact.
 //
 // Everything written here is namespaced by `SCRATCH_NAME` and swept in `after`.
 // ----------------------------------------------------------------------------
@@ -138,7 +137,7 @@ test(
 );
 
 test(
-  "a HARD delete cascades while an orphaning soft delete is refused",
+  "parent-only soft deletion is refused; family soft deletion retains rows and hard deletion cascades",
   { skip },
   async (t: TestContext) => {
     if (!(await databaseReachable())) return t.skip(UNREACHABLE);
@@ -166,28 +165,43 @@ test(
       },
     ]);
 
-    // The FK cascade is for hard deletes. The deferred structure guard closes
-    // the soft-delete door by refusing a parent-only update that would leave
-    // live checklist rows behind.
+    const deletedAt = new Date();
     await assert.rejects(
-      () =>
-        db
-          .update(tasks)
-          .set({ deletedAt: new Date() })
-          .where(eq(tasks.id, parent.id)),
+      () => db.update(tasks).set({ deletedAt }).where(eq(tasks.id, parent.id)),
       (error: unknown) => {
-        const text = [
-          error instanceof Error ? error.message : String(error),
-          error instanceof Error && error.cause instanceof Error
-            ? error.cause.message
-            : "",
-        ].join(" ");
-        assert.match(
-          text,
-          /tasks_no_live_orphan_children_guard|A live checklist item cannot outlive or nest beneath its parent/
+        assert.ok(error instanceof Error && error.cause instanceof Error);
+        assert.ok("code" in error.cause);
+        assert.equal(error.cause.code, "23514");
+        assert.ok("constraint" in error.cause);
+        assert.equal(
+          error.cause.constraint,
+          "tasks_no_live_orphan_children_guard"
         );
         return true;
       }
+    );
+    const unchanged = await db
+      .select({ deletedAt: tasks.deletedAt })
+      .from(tasks)
+      .where(eq(tasks.churchId, churchId));
+    assert.equal(unchanged.length, 3);
+    assert.ok(
+      unchanged.every((row) => row.deletedAt === null),
+      "the rejected parent-only update must leave the whole family live"
+    );
+
+    // Match deleteTask's one-statement family update. Soft deletion keeps the
+    // rows; the deferred hierarchy guard sees both generations retired.
+    await db
+      .update(tasks)
+      .set({ deletedAt })
+      .where(or(eq(tasks.id, parent.id), eq(tasks.parentTaskId, parent.id)));
+    const retired = await db
+      .select({ deletedAt: tasks.deletedAt })
+      .from(tasks)
+      .where(eq(tasks.churchId, churchId));
+    assert.ok(
+      retired.every((row) => row.deletedAt?.getTime() === deletedAt.getTime())
     );
 
     const [{ afterSoft }] = await db
