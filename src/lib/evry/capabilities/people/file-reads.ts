@@ -15,6 +15,7 @@ import { buildExportFilename } from "@/lib/people/export";
 import { parseCsvImport } from "@/lib/people/import";
 import type { ImportPreview } from "@/lib/people/types";
 import { getPeopleForExport } from "@/lib/people/service";
+import { importPreviewIssues } from "./import-preview-copy";
 
 export const PEOPLE_FILE_READ_IDENTITIES = {
   commitmentDownload: "people.crm.assessments.get-commitment-download-url",
@@ -198,7 +199,12 @@ export function buildPeopleImportPreviewArtifact(
               : "Invalid",
           },
           ...(row.errors.length
-            ? [{ label: "Needs attention", value: row.errors.join("; ") }]
+            ? [
+                {
+                  label: "Needs attention",
+                  value: importPreviewIssues(row).join(" "),
+                },
+              ]
             : []),
           ...(mergeTarget
             ? [{ label: "Merge target", value: mergeTarget.displayName }]

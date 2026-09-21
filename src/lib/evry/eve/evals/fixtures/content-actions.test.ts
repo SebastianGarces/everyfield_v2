@@ -41,8 +41,7 @@ function csvCall(): CapturedCall {
               ? [
                   {
                     label: "Needs attention",
-                    value:
-                      "firstName: Invalid input: expected string, received undefined",
+                    value: "Add a first name.",
                   },
                 ]
               : []),
@@ -75,9 +74,7 @@ test("CSV facts require the exact bytes binding and all rows, regardless of card
     facts = observedPeopleCsvFacts([call], attachment);
   assert.deepEqual(facts.facts.missingNameRows, ["csv-row-3"]);
   assert.deepEqual(facts.facts.mergeTargets, ["csv-row-2:Ada Existing"]);
-  assert.deepEqual(facts.facts.rowErrors, [
-    "csv-row-3:firstName: Invalid input: expected string, received undefined",
-  ]);
+  assert.deepEqual(facts.facts.rowErrors, ["csv-row-3:Add a first name."]);
   const original = call.output as {
     items: { facts: { label: string; value: string }[] }[];
   };

@@ -3,13 +3,19 @@ import { test } from "node:test";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { neonConfig } from "@neondatabase/serverless";
-import { startFixtureStack } from "./stack";
-import { createFixtureStore } from "./store";
-import { createFixtureManifest, FIXTURE_NOW } from "./manifest";
-import { capturedReadArtifactSchema, type CapturedCall } from "./host-capture";
-import { questions } from "../catalog";
-import { observationSchema } from "../contract";
-import { gradeObservation } from "../grade";
+import { startFixtureStack } from "@/lib/evry/eve/evals/fixtures/stack";
+import { createFixtureStore } from "@/lib/evry/eve/evals/fixtures/store";
+import {
+  createFixtureManifest,
+  FIXTURE_NOW,
+} from "@/lib/evry/eve/evals/fixtures/manifest";
+import {
+  capturedReadArtifactSchema,
+  type CapturedCall,
+} from "@/lib/evry/eve/evals/fixtures/host-capture";
+import { questions } from "@/lib/evry/eve/evals/catalog";
+import { observationSchema } from "@/lib/evry/eve/evals/contract";
+import { gradeObservation } from "@/lib/evry/eve/evals/grade";
 import {
   contentActionId,
   bookmarkFixtureSlug,
@@ -19,7 +25,7 @@ import {
   createPeopleReviewAttachment,
   observedPeopleCsvFacts,
   observedBookmarkPlanFacts,
-} from "./content-actions";
+} from "@/lib/evry/eve/evals/fixtures/content-actions";
 
 test(
   "CSV review and bookmark preparation use isolated production reads and persisted plans",
@@ -57,8 +63,8 @@ test(
         { withAuthenticatedSessionId },
         { withEvryPeopleLiveProofStorage },
       ] = await Promise.all([
-        import("../../capabilities/registry"),
-        import("../../preparation"),
+        import("@/lib/evry/eve/capabilities/registry"),
+        import("@/lib/evry/eve/preparation"),
         import("@/lib/evry/eligibility/viewer"),
         import("@/lib/evry/eligibility/capabilities"),
         import("@/lib/auth/session-scope"),
@@ -152,8 +158,7 @@ test(
                       ?.facts?.find((fact) => fact.label === "Needs attention"),
                     {
                       label: "Needs attention",
-                      value:
-                        "firstName: Invalid input: expected string, received undefined",
+                      value: "Add a first name.",
                     }
                   );
                   assert.deepEqual(
@@ -335,9 +340,10 @@ test(
       await t.test(
         "shared adapter binds both cases, grades evidence and tracks real confirmation presentation",
         async () => {
-          const { createProductionEveEvalAdapter } = await import("./adapter");
+          const { createProductionEveEvalAdapter } =
+            await import("@/lib/evry/eve/evals/fixtures/adapter");
           const { collectResult, publicResultArtifacts } =
-            await import("../../runtime/results");
+            await import("@/lib/evry/eve/runtime/results");
           const secret = "isolated-adapter-content-action-secret";
           const unavailable = async (): Promise<never> => {
             throw new Error("Inline CSV must not use external storage");

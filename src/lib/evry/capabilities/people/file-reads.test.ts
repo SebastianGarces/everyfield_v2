@@ -49,7 +49,7 @@ test("CSV preview counts every displayed row once and keeps errors beside that r
   assert.ok(
     result.items[1]!.facts.some(
       (fact) =>
-        fact.label === "Needs attention" && fact.value === missingName.errors[0]
+        fact.label === "Needs attention" && fact.value === "Add a first name."
     )
   );
   assert.ok(

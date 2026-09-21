@@ -137,9 +137,7 @@ export function contentActionExpectations(
       missingNameRows: ["csv-row-3"],
       rowCount: 5,
       excludedRows: 0,
-      rowErrors: [
-        "csv-row-3:firstName: Invalid input: expected string, received undefined",
-      ],
+      rowErrors: ["csv-row-3:Add a first name."],
     };
   } else {
     const rows = store.query(
@@ -241,7 +239,7 @@ export function observedPeopleCsvFacts(
     const error = item.facts?.find((f) => f.label === "Needs attention")?.value;
     if (error) {
       rowErrors.push(`${item.id}:${error}`);
-      if (/^firstName:/.test(error)) missingNameRows.push(item.id);
+      if (error.includes("Add a first name.")) missingNameRows.push(item.id);
     }
   }
   return {
