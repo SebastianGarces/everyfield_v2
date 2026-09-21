@@ -1,4 +1,10 @@
 import { defineState } from "eve/context";
+import { z } from "zod";
+import { publicEvryArtifact } from "../../artifacts/public";
+import {
+  parseEvryConversationArtifactDocument,
+  hydrateStoredEvryConversationArtifact,
+} from "../../conversations/artifacts";
 import type { EveJsonValue } from "../capabilities/registry";
 
 type ResultRecord = {
@@ -11,6 +17,21 @@ export const evryResultState = defineState<ResultRecord[]>(
   "evry.authorized-results",
   () => []
 );
+
+/** Project at presentation time, including results saved by older agent builds. */
+export function publicResultArtifacts(artifacts: readonly EveJsonValue[]) {
+  return artifacts.map((artifact) =>
+    z
+      .json()
+      .parse(
+        publicEvryArtifact(
+          hydrateStoredEvryConversationArtifact(
+            parseEvryConversationArtifactDocument(artifact)
+          )
+        )
+      )
+  );
+}
 
 /** Only the authenticated registry wrapper writes this state; model task notes cannot. */
 export function collectResult(

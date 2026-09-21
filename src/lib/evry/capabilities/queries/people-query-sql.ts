@@ -140,6 +140,15 @@ export const peopleQuerySchema = z.strictObject({
 export const peopleGetManySchema = z.strictObject({
   resource: z.enum(["person", "household"]),
   ids,
+  contentOffset: z
+    .number()
+    .int()
+    .min(0)
+    .max(10_000_000)
+    .optional()
+    .describe(
+      "Character offset into profile notes when fields includes notes. Reads 240 characters; follow Next content offset to retrieve the rest for the same person IDs."
+    ),
   fields: z
     .array(
       z.enum([
@@ -189,6 +198,26 @@ const historyResourceSchema = z.discriminatedUnion("kind", [
 ]);
 export const peopleHistoryQuerySchema = z.strictObject({
   resource: historyResourceSchema,
+  recordIds: ids
+    .optional()
+    .describe(
+      "Exact history record IDs returned by a prior query, for reading more of those records."
+    ),
+  contentOffset: z
+    .number()
+    .int()
+    .min(0)
+    .max(10_000_000)
+    .optional()
+    .describe(
+      "Character offset into recorded notes. Read 240 characters per record; repeat with the returned next content offset until absent. This is independent of record pagination."
+    ),
+  dateBasis: z
+    .enum(["record_date", "created_at"])
+    .optional()
+    .describe(
+      "Use record_date for when the interview, assessment or signing happened; created_at for when it was entered into EveryField."
+    ),
   cohort: peopleCohortSchema.default({}),
   dates: dateRange.optional(),
   authorIds: ids
@@ -474,7 +503,10 @@ export function buildPeopleGetManyQuery(
     ${fields.has("stage") ? sql`persons.status` : sql`null::text`} as stage,
     ${fields.has("household") ? sql`h.name` : sql`null::text`} as household,
     ${fields.has("background_check") ? sql`persons.background_check_status` : sql`null::text`} as background_check,
-    ${fields.has("notes") ? sql`left(persons.notes, 2000)` : sql`null::text`} as notes,
+    ${fields.has("notes") ? sql`substring(persons.notes from ${(input.contentOffset ?? 0) + 1} for 240)` : sql`null::text`} as notes,
+    ${fields.has("notes") ? sql`char_length(persons.notes)` : sql`null::int`} as content_length,
+    ${input.contentOffset ?? 0}::int as content_offset,
+    ${fields.has("notes") ? sql`case when char_length(persons.notes) > ${(input.contentOffset ?? 0) + 240} then ${(input.contentOffset ?? 0) + 240}::int else null end` : sql`null::int`} as content_next_offset,
     ${fields.has("tags") ? sql`coalesce((select string_agg(tag.name, ', ' order by tag.name) from person_tags pt join tags tag on tag.id = pt.tag_id and tag.church_id = ${plantId}::uuid where pt.church_id = ${plantId}::uuid and pt.person_id = persons.id), 'None recorded')` : sql`null::text`} as tags,
     ${fields.has("skills") ? sql`coalesce((select string_agg(concat_ws(' · ', s.skill_name, s.skill_category, s.proficiency, s.notes), E'\n' order by s.skill_category, s.skill_name, s.id) from skills_inventory s where s.church_id = ${plantId}::uuid and s.person_id = persons.id), 'None recorded')` : sql`null::text`} as skills
     from persons left join households h on h.id = persons.household_id and h.church_id = ${plantId}::uuid
@@ -507,11 +539,21 @@ export function buildPeopleHistoryQuery(
   const source = historySource(plantId, input.resource);
   const conditions = joined([
     peopleCohortSql(plantId, input.cohort),
-    ...dateConditions(sql`h.date`, input.dates),
+    ...dateConditions(
+      input.dateBasis === "created_at"
+        ? localDate(sql`h.created_at`, plantId)
+        : sql`h.date`,
+      input.dates
+    ),
+    ...(input.recordIds ? [inValues(sql`h.id`, input.recordIds)] : []),
     ...(input.authorIds ? [inValues(sql`h.author_id`, input.authorIds)] : []),
     ...(input.text ? [sql`h.content ilike ${`%${input.text}%`}`] : []),
   ]);
-  const base = sql`select id, person_id, household_id, label, author_id, author, date, outcome, left(content, 2000) as content from (
+  const offset = input.contentOffset ?? 0;
+  const base = sql`select id, person_id, household_id, label, author_id, author, date, created_at, outcome,
+    substring(content from ${offset + 1} for 240) as content,
+    char_length(content) as content_length, ${offset}::int as content_offset,
+    case when char_length(content) > ${offset + 240} then ${offset + 240}::int else null end as content_next_offset from (
     select h.*, persons.household_id, concat_ws(' ', persons.first_name, persons.last_name) as label,
     coalesce(u.name, 'Unknown author') as author,
     row_number() over (partition by h.person_id order by h.date desc, h.created_at desc, h.id desc) as position

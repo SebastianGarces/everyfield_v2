@@ -203,7 +203,13 @@ export function EvryShell({
   const isLoading =
     loading || (client?.status === "resuming" && messages.length === 0);
   const isComposerBlocked =
-    !client || loading || isWorking || client.status === "resuming";
+    !client ||
+    loading ||
+    isWorking ||
+    client.status === "resuming" ||
+    messages
+      .flatMap(projectEveMessage)
+      .some((part) => part.kind === "session-limit");
   const lastUser = messages.findLast((message) => message.role === "user");
   const interruptedMessage = failedTurn
     ? {
@@ -540,6 +546,12 @@ export function EvryShell({
       )
         return false;
       const retained = pendingTurn.current;
+      if (
+        current.data.messages
+          .flatMap(projectEveMessage)
+          .some((part) => part.kind === "session-limit")
+      )
+        return false;
       if (retained?.retry === "resubmit") {
         if (!attachment) {
           if (retained.text !== text) {

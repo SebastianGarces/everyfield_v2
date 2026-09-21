@@ -29,7 +29,13 @@ import {
 } from "./content-core";
 
 export const wikiSearchSchema = z.strictObject({
-  queries: z.array(contentText).min(1).max(3),
+  queries: z
+    .array(contentText)
+    .max(3)
+    .default([])
+    .describe(
+      "Search terms. Omit or use an empty list to browse all visible articles, optionally filtered by phase, category, section or reading status."
+    ),
   phases: z.array(z.number().int().min(0).max(6)).min(1).max(7).optional(),
   categories: z.array(z.enum(wikiContentTypes)).min(1).optional(),
   sectionIds: z.array(z.uuid()).min(1).max(50).optional(),
@@ -42,10 +48,14 @@ export function wikiSearchQuery(
   plantId: string,
   userId: string,
   input: z.infer<typeof wikiSearchSchema>,
-  query: string
+  query: string | null
 ) {
   const vector = sql`(setweight(to_tsvector('english', ${wikiArticles.title}), 'A') || setweight(to_tsvector('english', coalesce(${wikiArticles.excerpt}, '')), 'B') || setweight(to_tsvector('english', ${wikiArticles.content}), 'C'))`;
-  const term = sql`websearch_to_tsquery('english', ${query})`;
+  const term = sql`websearch_to_tsquery('english', ${query ?? ""})`;
+  const rank =
+    query === null
+      ? sql<number>`0::real`
+      : sql<number>`ts_rank(${vector}, ${term})`;
   return db
     .select({
       id: wikiArticles.id,
@@ -54,8 +64,11 @@ export function wikiSearchQuery(
       updatedAt: sql<string>`${wikiArticles.updatedAt}::text`.as("updated_at"),
       phase: wikiArticles.phase,
       category: wikiArticles.contentType,
-      excerpt: sql<string>`ts_headline('english', ${wikiArticles.content}, ${term}, 'StartSel=, StopSel=, MaxWords=60, MinWords=20, MaxFragments=2')`,
-      rank: sql<number>`ts_rank(${vector}, ${term})`.as("rank"),
+      excerpt: (query === null
+        ? sql<string>`coalesce(${wikiArticles.excerpt}, left(${wikiArticles.content}, 300))`
+        : sql<string>`ts_headline('english', ${wikiArticles.content}, ${term}, 'StartSel=, StopSel=, MaxWords=60, MinWords=20, MaxFragments=2')`
+      ).as("ts_headline"),
+      rank: rank.as("rank"),
     })
     .from(wikiArticles)
     .leftJoin(
@@ -70,7 +83,7 @@ export function wikiSearchQuery(
         eq(wikiArticles.status, "published"),
         visibleToChurch(plantId),
         notOverriddenByChurch(plantId),
-        sql`${vector} @@ ${term}`,
+        query === null ? undefined : sql`${vector} @@ ${term}`,
         input.phases ? inArray(wikiArticles.phase, input.phases) : undefined,
         input.categories
           ? inArray(wikiArticles.contentType, input.categories)
@@ -86,11 +99,7 @@ export function wikiSearchQuery(
           : undefined
       )
     )
-    .orderBy(
-      sql`ts_rank(${vector}, ${term}) desc`,
-      wikiArticles.slug,
-      wikiArticles.id
-    );
+    .orderBy(sql`${rank} desc`, wikiArticles.slug, wikiArticles.id);
 }
 
 export const WIKI_SEARCH = defineEvryReadRegistration({
@@ -100,7 +109,7 @@ export const WIKI_SEARCH = defineEvryReadRegistration({
   async run({ authorization, now }, input) {
     const timeZone = await readEvryPlantTimeZone(authorization.actor.plantId);
     const pages = await Promise.all(
-      input.queries.map(async (query) => {
+      (input.queries.length ? input.queries : [null]).map(async (query) => {
         const filtered = wikiSearchQuery(
           authorization.actor.plantId,
           authorization.actor.userId,
@@ -126,7 +135,11 @@ export const WIKI_SEARCH = defineEvryReadRegistration({
             ),
           })
           .parse(result.rows[0]);
-        return { query, total: data.total, rows: data.rows };
+        return {
+          query: query ?? "Browse visible articles",
+          total: data.total,
+          rows: data.rows,
+        };
       })
     );
     const artifact = buildEvryReadArtifact({

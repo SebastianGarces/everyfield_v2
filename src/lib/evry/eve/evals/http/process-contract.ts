@@ -13,6 +13,7 @@ export const compiledFixtureRequest = z
         z.union([
           z.string().min(1),
           z.strictObject({ respond: z.string().min(1) }),
+          z.strictObject({ optionId: z.string().min(1) }),
         ])
       )
       .min(1),
@@ -34,6 +35,12 @@ export const compiledFixtureRequest = z
           .array(
             z.strictObject({
               text: z.string().optional(),
+              usage: z
+                .strictObject({
+                  inputTokens: z.number().int().nonnegative(),
+                  outputTokens: z.number().int().nonnegative(),
+                })
+                .optional(),
               toolCalls: z
                 .array(
                   z.strictObject({
@@ -93,6 +100,14 @@ export const httpEvalOutcomeSchema = z.object({
   runtimeProof: z
     .object({
       availableTools: z.array(z.string()),
+      modelRequests: z
+        .array(
+          z.object({
+            tools: z.array(z.string()),
+            inputBytes: z.number().int().nonnegative(),
+          })
+        )
+        .optional(),
       availableSkills: z.array(z.string()),
       turnInputs: z.array(z.string()),
       questionAnswers: z.array(z.string()),

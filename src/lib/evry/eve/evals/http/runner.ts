@@ -57,7 +57,9 @@ export function createHttpEveEvalRunner(config: {
   assertIsolatedFixtureTarget(config.origin, config.databaseUrl);
   const origin = new URL(config.origin).origin;
   return async (input: {
-    scenario: { turns: readonly (string | { respond: string })[] };
+    scenario: {
+      turns: readonly (string | { respond: string } | { optionId: string })[];
+    };
     actor: { userId: string; plantId: string };
     sessionToken: string;
     now: Date;
@@ -123,6 +125,11 @@ export function createHttpEveEvalRunner(config: {
           throw new Error(
             "Fixture response needs exactly one pending question"
           );
+        const explicitUsageStop =
+          typeof turn !== "string" &&
+          "optionId" in turn &&
+          turn.optionId === "stop" &&
+          pendingQuestions[0]?.kind === "session-limit";
         const options = {
           signal,
           streamReconnectPolicy: { reconnect: false as const },
@@ -134,7 +141,9 @@ export function createHttpEveEvalRunner(config: {
                 [
                   {
                     requestId: pendingQuestions[0]!.requestId,
-                    text: turn.respond,
+                    ...("optionId" in turn
+                      ? { optionId: turn.optionId }
+                      : { text: turn.respond }),
                   },
                 ],
                 options
@@ -157,7 +166,8 @@ export function createHttpEveEvalRunner(config: {
           if (event.type === "input.requested") {
             clarificationCount++;
             pendingQuestions = event.data.requests.filter(
-              (request) => request.kind === "question"
+              (request) =>
+                request.kind === "question" || request.kind === "session-limit"
             );
           }
           if (event.type === "input.resolved") {
@@ -171,7 +181,7 @@ export function createHttpEveEvalRunner(config: {
           if (
             event.type === "turn.failed" ||
             event.type === "session.failed" ||
-            event.type === "turn.cancelled"
+            (event.type === "turn.cancelled" && !explicitUsageStop)
           )
             throw new Error(`Evaluation runtime ended with ${event.type}`);
           if (

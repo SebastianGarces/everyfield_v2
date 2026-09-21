@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { and, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { after } from "next/server.js";
 import { z } from "zod";
 
@@ -151,6 +151,7 @@ const notificationSnapshotColumns = {
 export async function loadEvryUnreadNotificationSnapshot(input: {
   actor: EvryPlantActor;
   notificationId?: string;
+  notificationIds?: readonly string[];
   now: Date;
 }) {
   const viewer = viewerFor(input.actor);
@@ -164,6 +165,9 @@ export async function loadEvryUnreadNotificationSnapshot(input: {
         isNull(notifications.readAt),
         input.notificationId
           ? eq(notifications.id, input.notificationId)
+          : undefined,
+        input.notificationIds
+          ? inArray(notifications.id, [...input.notificationIds])
           : undefined,
         ...feedVisibility(input.now, categories)
       )
@@ -652,24 +656,44 @@ function notificationReview(input: {
   });
 }
 
+export const MAX_SELECTED_NOTIFICATION_COUNT = 10;
+
 export const PLATFORM_ARTIFACT_REVIEWS = [
-  defineEvryArtifactReview({
-    source: {
-      kind: "generic",
-      capabilityIdentities: [MARK_ONE_NOTIFICATION_IDENTITY],
-    },
-    build({ plan, document }) {
-      const step = document.steps[0]!;
-      const parsed = markOneArgumentsSchema.parse(step.arguments);
-      return notificationReview({
-        plan,
-        step,
-        rows: [parsed.notification],
-        title: "Mark notification read",
-        actionLabel: "Mark read",
-      });
-    },
-  }),
+  ...Array.from({ length: MAX_SELECTED_NOTIFICATION_COUNT }, (_, index) =>
+    defineEvryArtifactReview({
+      source: {
+        kind: "generic",
+        capabilityIdentities: [
+          MARK_ONE_NOTIFICATION_IDENTITY,
+          ...Array.from(
+            { length: index },
+            () => MARK_ONE_NOTIFICATION_IDENTITY
+          ),
+        ],
+      },
+      build({ plan, document }) {
+        const reviews = document.steps.map((step) =>
+          notificationReview({
+            plan,
+            step,
+            rows: [markOneArgumentsSchema.parse(step.arguments).notification],
+            title: "Mark notification read",
+            actionLabel: "Mark read",
+          })
+        );
+        return buildEvryConfirmationArtifact({
+          ...reviews[0]!,
+          title:
+            reviews.length === 1
+              ? "Mark notification read"
+              : `Mark ${reviews.length} selected notifications read`,
+          actionLabel:
+            reviews.length === 1 ? "Mark read" : "Mark selected read",
+          steps: reviews.flatMap((review) => review.steps),
+        });
+      },
+    })
+  ),
   defineEvryArtifactReview({
     source: {
       kind: "generic",

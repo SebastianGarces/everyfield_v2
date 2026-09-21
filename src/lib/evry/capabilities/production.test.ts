@@ -27,6 +27,10 @@ import type { TaskEffectExport } from "./tasks/effect-contracts";
 import taskInventory from "./tasks/inventory.generated.json";
 import teamsInventory from "./teams/inventory.generated.json";
 import platformInventory from "./platform/inventory.generated.json";
+import {
+  MARK_ONE_NOTIFICATION_IDENTITY,
+  MAX_SELECTED_NOTIFICATION_COUNT,
+} from "./platform/effects";
 import plantIntelligenceInventory from "./plant-intelligence/inventory.generated.json";
 import documentsWikiInventory from "./documents-wiki/inventory.generated.json";
 import { createEveToolRegistry } from "@/lib/evry/eve/capabilities/registry";
@@ -118,7 +122,9 @@ test("production composes every Communication, Launch, Meetings, People, and Tas
     .toSorted();
   const reviewIdentities = PRODUCTION_EVRY_ARTIFACT_REVIEWS.flatMap(
     ({ source }) =>
-      source.kind === "generic" ? [...source.capabilityIdentities] : []
+      source.kind === "generic" && source.capabilityIdentities.length === 1
+        ? [...source.capabilityIdentities]
+        : []
   ).toSorted();
   const recipeIdentities = PRODUCTION_EVRY_ARTIFACT_REVIEWS.flatMap(
     ({ source }) => (source.kind === "recipe" ? [source.identity] : [])
@@ -126,6 +132,18 @@ test("production composes every Communication, Launch, Meetings, People, and Tas
 
   assert.deepEqual(reviewIdentities, effectIdentities);
   assert.deepEqual(recipeIdentities, ["meeting.invitation.reference"]);
+  const batchReviews = PRODUCTION_EVRY_ARTIFACT_REVIEWS.flatMap(({ source }) =>
+    source.kind === "generic" && source.capabilityIdentities.length > 1
+      ? [[...source.capabilityIdentities]]
+      : []
+  );
+  assert.deepEqual(
+    batchReviews,
+    Array.from({ length: MAX_SELECTED_NOTIFICATION_COUNT - 1 }, (_, index) =>
+      Array.from({ length: index + 2 }, () => MARK_ONE_NOTIFICATION_IDENTITY)
+    ),
+    "Only the exact supported notification batch shapes may add multi-step reviews"
+  );
 });
 
 test("production continuation selection keeps installed families disjoint", () => {

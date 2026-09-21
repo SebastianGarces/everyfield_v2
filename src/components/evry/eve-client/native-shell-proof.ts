@@ -16,6 +16,166 @@ mock.module("@/components/header/header-context", {
   namedExports: { useHeader: () => ({ breadcrumbs: [] }) },
 });
 
+test("a usage pause blocks ordinary sends, preserves the draft, and requires an explicit Continue", async (t) => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  t.mock.method(console, "error", () => {});
+  const posts: Record<string, unknown>[] = [];
+  const metadata = {
+    id: "usage-paused-session",
+    conversationId: "10000000-0000-4000-8000-000000000008",
+    title: "Task follow-up",
+    createdAt: "2026-09-20T12:00:00.000Z",
+    updatedAt: "2026-09-20T12:00:00.000Z",
+  };
+  let stream!: ReadableStreamDefaultController<Uint8Array>;
+  let index = 0;
+  const emit = (type: string, data: object) =>
+    stream.enqueue(
+      new TextEncoder().encode(
+        JSON.stringify({
+          type,
+          data,
+          meta: {
+            id: `usage-pause-${index++}`,
+            at: metadata.createdAt,
+            deliveryIds: ["continued-delivery"],
+          },
+        }) + "\n"
+      )
+    );
+  t.mock.method(
+    globalThis,
+    "fetch",
+    async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).startsWith("/api/evry/eve/sessions"))
+        return Response.json({ session: metadata });
+      if (init?.method === "POST") {
+        posts.push(JSON.parse(String(init.body)));
+        return Response.json({
+          ok: true,
+          status: "accepted",
+          sessionId: metadata.id,
+          deliveryId: "continued-delivery",
+        });
+      }
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            stream = controller;
+            emit("session.started", {});
+            emit("turn.started", { sequence: 1, turnId: "paused-turn" });
+            emit("input.requested", {
+              sequence: 1,
+              stepIndex: 1,
+              turnId: "paused-turn",
+              requests: [
+                {
+                  requestId: "usage-pause",
+                  kind: "session-limit",
+                  prompt: "SDK usage limit",
+                  allowFreeform: false,
+                  options: [
+                    { id: "continue", label: "Approve" },
+                    { id: "stop", label: "Stop" },
+                  ],
+                  action: {
+                    kind: "tool-call",
+                    callId: "usage-pause",
+                    toolName: "session_limit_continuation",
+                    input: { kind: "input", limit: 300000, usedTokens: 300001 },
+                  },
+                },
+              ],
+            });
+            emit("session.waiting", {
+              continuationToken: "fixture",
+              wait: "input-response",
+            });
+          },
+        }),
+        {
+          headers: {
+            "content-type": "application/x-ndjson",
+            "x-eve-stream-version": "25",
+            "x-eve-stream-tail-index": "3",
+          },
+        }
+      );
+    }
+  );
+  const { EvryShell, useEvryShell } = await import("../evry-shell");
+  let shell!: ReturnType<typeof useEvryShell>;
+  function Probe() {
+    const value = useEvryShell();
+    useEffect(() => {
+      shell = value;
+    }, [value]);
+    return null;
+  }
+  let renderer!: ReactTestRenderer;
+  await act(() => {
+    renderer = create(
+      createElement(EvryShell, {
+        enabled: true,
+        children: createElement(Probe),
+      })
+    );
+  });
+  t.after(async () => {
+    await act(() => renderer.unmount());
+  });
+  await act(async () => {
+    await shell.loadConversation(metadata.conversationId);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  });
+  assert.equal(shell.isWorking, false);
+  assert.equal(shell.isComposerBlocked, true);
+  await act(() => shell.setDraft("Only high priority"));
+  await act(() => shell.sendMessageText("Only high priority"));
+  assert.equal(
+    posts.length,
+    0,
+    "Neither replay nor a freeform message approves more usage"
+  );
+  assert.equal(shell.draft, "Only high priority");
+  let continuing!: Promise<void>;
+  await act(async () => {
+    continuing = shell.respondToQuestion("usage-pause", "", "continue");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  });
+  assert.equal(posts.length, 1);
+  assert.deepEqual(posts[0]?.inputResponses, [
+    { requestId: "usage-pause", optionId: "continue" },
+  ]);
+  await act(async () => {
+    emit("input.resolved", {
+      sequence: 1,
+      stepIndex: 1,
+      turnId: "paused-turn",
+      resolutions: [
+        {
+          kind: "session-limit",
+          requestId: "usage-pause",
+          outcome: "approved",
+          response: { requestId: "usage-pause", optionId: "continue" },
+        },
+      ],
+    });
+    emit("turn.completed", {
+      sequence: 1,
+      turnId: "paused-turn",
+      stepCount: 1,
+    });
+    emit("session.waiting", {
+      continuationToken: "continued",
+      wait: "next-user-message",
+    });
+    await continuing;
+  });
+  assert.equal(shell.isComposerBlocked, false);
+  assert.equal(shell.draft, "Only high priority");
+});
+
 for (const reload of [false, true]) {
   test(`a parked model failure stays visible ${reload ? "after history replay" : "after send"} and explicit retry starts one same-session turn`, async (t) => {
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });

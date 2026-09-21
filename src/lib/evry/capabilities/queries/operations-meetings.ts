@@ -115,6 +115,15 @@ const getShape = {
     .min(1)
     .default(["details"]),
   relatedLimit: z.number().int().min(1).max(20).default(10),
+  relatedOffset: z
+    .number()
+    .int()
+    .min(0)
+    .max(100_000)
+    .optional()
+    .describe(
+      "Offset into each requested related section; starts at zero. If a section total exceeds offset + relatedLimit, request the next page with that offset. Keep the same IDs and sections."
+    ),
 };
 export function meetingsGetManyStatement(
   input: z.infer<z.ZodObject<typeof getShape>>,
@@ -137,13 +146,13 @@ export function meetingsGetManyStatement(
   let evidence = facts(...detail);
   if (input.sections.includes("agenda")) {
     const agenda = sql`case when jsonb_typeof(m.agenda) = 'array' then m.agenda else '[]'::jsonb end`;
-    evidence = sql`${evidence} || ${facts(fact("Agenda total", sql`jsonb_array_length(${agenda})`), fact("Agenda coverage", sql`case when m.agenda is null then 'No agenda recorded' when jsonb_typeof(m.agenda) <> 'array' then 'Stored agenda format is not readable' else 'Requested first items; see agenda total' end`))} || coalesce((select jsonb_agg(${fact("Agenda item", sql`coalesce(entry ->> 'title', entry ->> 'name', entry ->> 'topic', 'Untitled agenda item') || coalesce(': ' || (entry ->> 'description'), '')`)} order by ordinal) from (select entry, ordinal from jsonb_array_elements(${agenda}) with ordinality as a(entry, ordinal) limit ${input.relatedLimit}) a), '[]'::jsonb)`;
+    evidence = sql`${evidence} || ${facts(fact("Agenda total", sql`jsonb_array_length(${agenda})`), fact("Agenda coverage", sql`case when m.agenda is null then 'No agenda recorded' when jsonb_typeof(m.agenda) <> 'array' then 'Stored agenda format is not readable' else 'Requested page; see agenda total' end`))} || coalesce((select jsonb_agg(${fact("Agenda item", sql`coalesce(entry ->> 'title', entry ->> 'name', entry ->> 'topic', 'Untitled agenda item') || coalesce(': ' || (entry ->> 'description'), '')`)} order by ordinal) from (select entry, ordinal from jsonb_array_elements(${agenda}) with ordinality as a(entry, ordinal) order by ordinal limit ${input.relatedLimit} offset ${input.relatedOffset ?? 0}) a), '[]'::jsonb)`;
   }
   if (input.sections.includes("checklist"))
-    evidence = sql`${evidence} || ${facts(fact("Checklist total", sql`(select count(*) from meeting_checklist_items c where c.church_id = ${plantId} and c.meeting_id = m.id)`))} || coalesce((select jsonb_agg(${relatedFact("Preparation item", sql`c.item_name || ' · ' || case when c.is_checked then 'Complete' else 'Incomplete' end || coalesce(' · ' || c.notes, '')`, sql`c.item_name || ' [' || c.id || ']'`)} order by c.id) from (select c.id, c.item_name, c.is_checked, c.notes from meeting_checklist_items c where c.church_id = ${plantId} and c.meeting_id = m.id order by c.id limit ${input.relatedLimit}) c), '[]'::jsonb)`;
+    evidence = sql`${evidence} || ${facts(fact("Checklist total", sql`(select count(*) from meeting_checklist_items c where c.church_id = ${plantId} and c.meeting_id = m.id)`))} || coalesce((select jsonb_agg(${relatedFact("Preparation item", sql`c.item_name || ' · ' || case when c.is_checked then 'Complete' else 'Incomplete' end || coalesce(' · ' || c.notes, '')`, sql`c.item_name || ' [' || c.id || ']'`)} order by c.id) from (select c.id, c.item_name, c.is_checked, c.notes from meeting_checklist_items c where c.church_id = ${plantId} and c.meeting_id = m.id order by c.id limit ${input.relatedLimit} offset ${input.relatedOffset ?? 0}) c), '[]'::jsonb)`;
   if (input.sections.includes("evaluation"))
     evidence = sql`${evidence} || ${facts(fact("Evaluation score", sql`e.total_score`), fact("Evaluation notes", sql`e.notes`), fact("Evaluated at", sql`e.created_at`, { format: "instant" }))}`;
-  const source = sql`select m.id::text as id, coalesce(m.title, ${displayLabel(sql`m.type`, "meeting_type")}) as label, '/meetings/' || m.id as href, ${evidence} || ${facts(fact("Related evidence limit per section", sql`${input.relatedLimit}::int`))} as facts from church_meetings m left join locations l on l.id = m.location_id and l.church_id = ${plantId} left join meeting_evaluations e on e.meeting_id = m.id and e.church_id = ${plantId} where m.church_id = ${plantId} and ${inValues(sql`m.id::text`, input.ids)}`;
+  const source = sql`select m.id::text as id, coalesce(m.title, ${displayLabel(sql`m.type`, "meeting_type")}) as label, '/meetings/' || m.id as href, ${evidence} || ${facts(fact("Related evidence limit per section", sql`${input.relatedLimit}::int`, { modelOnly: true }), fact("Related evidence offset", sql`${input.relatedOffset ?? 0}::int`, { modelOnly: true }))} as facts from church_meetings m left join locations l on l.id = m.location_id and l.church_id = ${plantId} left join meeting_evaluations e on e.meeting_id = m.id and e.church_id = ${plantId} where m.church_id = ${plantId} and ${inValues(sql`m.id::text`, input.ids)}`;
   return operationsStatement(
     source,
     { mode: "list", limit: 50, sort: "id", direction: "asc" },

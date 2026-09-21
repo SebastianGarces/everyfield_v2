@@ -113,7 +113,7 @@ test("each lasting platform capability has plan, execution, and review compositi
       SUBMIT_FEEDBACK_PLAN.identity,
     ].toSorted()
   );
-  assert.equal(PLATFORM_ARTIFACT_REVIEWS.length, 3);
+  assert.equal(PLATFORM_ARTIFACT_REVIEWS.length, 12);
   for (const execution of PLATFORM_EXECUTION_CAPABILITIES) {
     assert.equal(
       PRODUCTION_EVRY_EXECUTION_REGISTRY.registrationFor(

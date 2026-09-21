@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   evryResultState,
   findResult,
+  publicResultArtifacts,
 } from "../../src/lib/evry/eve/runtime/results";
 import { withEveRuntimeScope } from "../../src/lib/evry/eve/runtime/scope";
 import { fixtureRun } from "../../src/lib/evry/eve/runtime/fixture-bridge";
@@ -20,7 +21,10 @@ export default defineTool({
           appSessionId: scope.appSessionId,
         })?.present(reference);
       return result
-        ? { status: "presented", artifacts: result.artifacts }
+        ? {
+            status: "presented",
+            artifacts: publicResultArtifacts(result.artifacts),
+          }
         : { status: "unavailable", artifacts: [] };
     }),
   toModelOutput: (result) => ({

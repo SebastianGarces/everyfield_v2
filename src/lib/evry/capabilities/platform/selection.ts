@@ -15,6 +15,7 @@ export type PlatformEvrySelection =
       before: Readonly<{ createdAt: string; id: string }> | null;
     }>
   | Readonly<{ kind: "mark_one"; notificationId: string }>
+  | Readonly<{ kind: "mark_selected"; notificationIds: readonly string[] }>
   | Readonly<{ kind: "mark_all" }>
   | Readonly<{
       kind: "feedback";

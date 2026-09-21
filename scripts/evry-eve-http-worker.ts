@@ -65,6 +65,7 @@ process.on("message", async (message) => {
     phase = "scripted provider configuration";
     let responseIndex = 0;
     const availableTools = new Set<string>();
+    const modelRequests: Array<{ tools: string[]; inputBytes: number }> = [];
     const availableSkills = new Set<string>();
     const turnInputs: string[] = [];
     const questionAnswers = new Set<string>();
@@ -75,6 +76,15 @@ process.on("message", async (message) => {
         ? mockModel({
             modelId: "isolated-runtime-script",
             respond: (modelRequest) => {
+              modelRequests.push({
+                tools: modelRequest.tools.map((tool) => tool.name),
+                inputBytes: Buffer.byteLength(
+                  JSON.stringify({
+                    messages: modelRequest.messages,
+                    tools: modelRequest.tools,
+                  })
+                ),
+              });
               for (const tool of modelRequest.tools)
                 availableTools.add(tool.name);
               for (const result of modelRequest.toolResults) {
@@ -99,7 +109,7 @@ process.on("message", async (message) => {
                 throw new Error("Scripted model responses exhausted");
               return {
                 ...response,
-                usage: { inputTokens: 0, outputTokens: 0 },
+                usage: response.usage ?? { inputTokens: 0, outputTokens: 0 },
               };
             },
           })
@@ -163,6 +173,7 @@ process.on("message", async (message) => {
         ...outcome,
         runtimeProof: {
           availableTools: [...availableTools],
+          modelRequests,
           availableSkills: [...availableSkills],
           turnInputs,
           questionAnswers: [...questionAnswers],

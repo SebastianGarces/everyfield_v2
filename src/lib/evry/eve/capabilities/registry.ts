@@ -9,6 +9,7 @@ import {
 import { PEOPLE_QUERY_READS } from "@/lib/evry/capabilities/queries/people";
 import { OPERATIONS_QUERY_READS } from "@/lib/evry/capabilities/queries/operations";
 import { CONTENT_QUERY_READS } from "@/lib/evry/capabilities/queries/content";
+import { COMMITMENT_DOWNLOAD_READ } from "@/lib/evry/capabilities/people/file-reads";
 import { EVE_CAPABILITY_CATALOG } from "./catalog";
 import {
   extendedEveReadSchema,
@@ -66,6 +67,7 @@ export const EVE_READ_REGISTRATIONS = Object.freeze([
   ...PEOPLE_QUERY_READS,
   ...OPERATIONS_QUERY_READS,
   ...CONTENT_QUERY_READS,
+  COMMITMENT_DOWNLOAD_READ,
 ]);
 const descriptions = new Map<string, string>(
   EVE_CAPABILITY_CATALOG.map(([name, description]) => [name, description])

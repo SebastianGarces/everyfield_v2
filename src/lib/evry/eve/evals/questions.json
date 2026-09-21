@@ -331,7 +331,7 @@
       "likelihood": "medium",
       "shape": "collection",
       "tools": ["people.history.query"],
-      "expected": "Filter stored concern fields; report recorded wording without inventing a judgment.",
+      "expected": "Assessments store four scores and notes, not a concern flag. Read complete notes and entry timestamps; explain the recorded evidence or ask for a specific criterion, without inventing a score threshold.",
       "recipe": null
     },
     {
@@ -751,7 +751,7 @@
       "likelihood": "medium",
       "shape": "aggregate",
       "tools": ["teams.query", "people.get_many"],
-      "expected": "Group active assignments by person; return distinct active team count.",
+      "expected": "Use active assignments and count distinct team IDs per person, not role rows. Two roles in one team count as one team; include a fixture with that distractor.",
       "recipe": null
     },
     {
@@ -783,7 +783,7 @@
       "likelihood": "high",
       "shape": "relation",
       "tools": ["teams.query"],
-      "expected": "Use stored responsibility/assignment semantics; don't invent an owner from the team leader.",
+      "expected": "Explain that individual responsibility assignees are not recorded. May show incomplete responsibilities as incomplete, never label them unassigned or infer an owner from the team leader.",
       "recipe": null
     },
     {
@@ -1194,7 +1194,7 @@
       "likelihood": "medium",
       "shape": "action",
       "tools": ["launch.query", "actions.prepare"],
-      "expected": "Validate supplied counts and exact launch record; no fabricated attendance; confirm outcome write.",
+      "expected": "Validate supplied attendance and exact launch record. There is no structured guest-count field: never substitute guests for decisions. Explain the limitation and ask whether to preserve guest count in outcome notes, then show an exact confirmation before writing.",
       "recipe": null
     },
     {

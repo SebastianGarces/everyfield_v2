@@ -18,6 +18,9 @@ export function EveQuestionOptions({ requestId }: { requestId: string }) {
       ? request.toolMetadata?.eve?.inputRequest?.options
       : undefined;
   if (!options?.length) return null;
+  const isUsagePause =
+    request?.type === "dynamic-tool" &&
+    request.toolMetadata?.eve?.inputRequest?.kind === "session-limit";
   return (
     <div className="mt-3 flex flex-wrap gap-2" aria-label="Choose an answer">
       {options.map((option) => (
@@ -25,11 +28,11 @@ export function EveQuestionOptions({ requestId }: { requestId: string }) {
           key={option.id}
           type="button"
           variant="outline"
-          className="h-auto min-h-11 text-left whitespace-normal"
+          className="h-auto min-h-11 cursor-pointer text-left whitespace-normal"
           disabled={isWorking}
           onClick={() => void respondToQuestion(requestId, "", option.id)}
         >
-          {option.label}
+          {isUsagePause && option.id === "continue" ? "Continue" : option.label}
         </Button>
       ))}
     </div>

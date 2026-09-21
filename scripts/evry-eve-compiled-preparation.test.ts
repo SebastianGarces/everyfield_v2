@@ -45,6 +45,15 @@ test(
               {
                 toolCalls: [
                   {
+                    id: "load-preparation",
+                    name: "load_tools",
+                    input: { names: ["actions.prepare"] },
+                  },
+                ],
+              },
+              {
+                toolCalls: [
+                  {
                     id: "fixture-prepare",
                     name: "actions_prepare",
                     input: {

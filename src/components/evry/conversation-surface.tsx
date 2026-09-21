@@ -287,7 +287,7 @@ export function ConversationSurface({ className }: { className?: string }) {
                       )}
                     >
                       {projectEveMessage(message).map((part, index) =>
-                        part.kind === "text" || part.kind === "question" ? (
+                        part.kind !== "artifact" ? (
                           <div
                             key={`text:${index}`}
                             className={cn(
@@ -302,20 +302,16 @@ export function ConversationSurface({ className }: { className?: string }) {
                             </span>
                             {message.role === "user" ? (
                               <p className="whitespace-pre-wrap">
-                                {part.kind === "question"
-                                  ? part.prompt
-                                  : part.text}
+                                {part.kind !== "text" ? part.prompt : part.text}
                               </p>
                             ) : (
                               <RichText
                                 body={evryResponseMarkdown(
-                                  part.kind === "question"
-                                    ? part.prompt
-                                    : part.text
+                                  part.kind !== "text" ? part.prompt : part.text
                                 )}
                               />
                             )}
-                            {part.kind === "question" ? (
+                            {part.kind !== "text" ? (
                               <EveQuestionOptions requestId={part.requestId} />
                             ) : null}
                           </div>

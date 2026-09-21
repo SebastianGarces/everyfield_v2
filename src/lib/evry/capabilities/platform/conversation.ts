@@ -35,6 +35,7 @@ import type { EvryCapabilityPreparationContinuation } from "../conversation";
 import {
   MARK_ALL_NOTIFICATIONS_IDENTITY,
   MARK_ONE_NOTIFICATION_IDENTITY,
+  MAX_SELECTED_NOTIFICATION_COUNT,
   SUBMIT_FEEDBACK_IDENTITY,
   feedbackArgumentsSchema,
   loadEvryUnreadNotificationSnapshot,
@@ -55,6 +56,7 @@ import {
 function identityFor(selection: PlatformEvrySelection) {
   switch (selection.kind) {
     case "mark_one":
+    case "mark_selected":
       return MARK_ONE_NOTIFICATION_IDENTITY;
     case "mark_all":
       return MARK_ALL_NOTIFICATIONS_IDENTITY;
@@ -97,8 +99,7 @@ async function storePlan(input: {
   actor: EvryPlantActor;
   identity: string;
   requestKey: EvryPlanRequestKey;
-  stepId: string;
-  arguments: Record<string, unknown>;
+  steps: readonly { id: string; arguments: Record<string, unknown> }[];
 }) {
   const authorization = await authorizeEvryEffectCapability(input.identity);
   if (
@@ -110,14 +111,12 @@ async function storePlan(input: {
   }
   const document = parseEvryActionPlanCandidate({
     candidate: {
-      steps: [
-        {
-          id: input.stepId,
-          capabilityIdentity: input.identity,
-          arguments: input.arguments,
-          dependsOn: [],
-        },
-      ],
+      steps: input.steps.map((step) => ({
+        id: step.id,
+        capabilityIdentity: input.identity,
+        arguments: step.arguments,
+        dependsOn: [],
+      })),
     },
     registry: PLATFORM_EVRY_PLAN_REGISTRY,
     eligibleCapabilities: eligibleEvryCapabilitiesFor(authorization.actor),
@@ -149,7 +148,7 @@ async function proposeEffect(input: {
   actor: EvryPlantActor;
   selection: Extract<
     PlatformEvrySelection,
-    { kind: "mark_one" | "mark_all" | "feedback" }
+    { kind: "mark_one" | "mark_selected" | "mark_all" | "feedback" }
   >;
   requestKey: EvryPlanRequestKey;
   now: Date;
@@ -159,13 +158,17 @@ async function proposeEffect(input: {
       actor: input.actor,
       identity: SUBMIT_FEEDBACK_IDENTITY,
       requestKey: input.requestKey,
-      stepId: "submit-feedback",
-      arguments: feedbackArgumentsSchema.parse({
-        feedbackId: platformEffectUuid(input.requestKey, "feedback"),
-        category: input.selection.category,
-        description: input.selection.description,
-        pageUrl: input.selection.pageUrl,
-      }),
+      steps: [
+        {
+          id: "submit-feedback",
+          arguments: feedbackArgumentsSchema.parse({
+            feedbackId: platformEffectUuid(input.requestKey, "feedback"),
+            category: input.selection.category,
+            description: input.selection.description,
+            pageUrl: input.selection.pageUrl,
+          }),
+        },
+      ],
     });
   }
 
@@ -175,9 +178,36 @@ async function proposeEffect(input: {
       input.selection.kind === "mark_one"
         ? input.selection.notificationId
         : undefined,
+    notificationIds:
+      input.selection.kind === "mark_selected"
+        ? input.selection.notificationIds
+        : undefined,
     now: input.now,
   });
   if (exact.notifications.length === 0) return null;
+  if (input.selection.kind === "mark_selected") {
+    const ids = new Set(input.selection.notificationIds);
+    if (
+      ids.size === 0 ||
+      ids.size > MAX_SELECTED_NOTIFICATION_COUNT ||
+      exact.notifications.length !== ids.size ||
+      exact.notifications.some((row) => !ids.has(row.id))
+    )
+      return null;
+    const steps = exact.notifications.map((notification, index) => ({
+      id: `mark-notification-${index + 1}-read`,
+      arguments: markOneArgumentsSchema.parse({
+        notification,
+        visibility: exact.visibility,
+      }),
+    }));
+    return storePlan({
+      actor: input.actor,
+      identity: MARK_ONE_NOTIFICATION_IDENTITY,
+      requestKey: input.requestKey,
+      steps,
+    });
+  }
   if (input.selection.kind === "mark_one") {
     const reviewable = markOneArgumentsSchema.safeParse({
       notification: exact.notifications[0],
@@ -188,8 +218,7 @@ async function proposeEffect(input: {
       actor: input.actor,
       identity: MARK_ONE_NOTIFICATION_IDENTITY,
       requestKey: input.requestKey,
-      stepId: "mark-notification-read",
-      arguments: reviewable.data,
+      steps: [{ id: "mark-notification-read", arguments: reviewable.data }],
     });
   }
   const reviewable = markAllArgumentsSchema.safeParse(exact);
@@ -198,14 +227,14 @@ async function proposeEffect(input: {
     actor: input.actor,
     identity: MARK_ALL_NOTIFICATIONS_IDENTITY,
     requestKey: input.requestKey,
-    stepId: "mark-all-notifications-read",
-    arguments: reviewable.data,
+    steps: [{ id: "mark-all-notifications-read", arguments: reviewable.data }],
   });
 }
 
 function recoverPlan(input: {
   stored: StoredEvryActionPlan;
   expectedIdentity: string;
+  selectedCount?: number;
 }) {
   if (
     !validateStoredEvryActionPlan(input.stored, PLATFORM_EVRY_PLAN_REGISTRY)
@@ -217,8 +246,10 @@ function recoverPlan(input: {
     registry: PLATFORM_EVRY_PLAN_REGISTRY,
   });
   if (
-    document.steps.length !== 1 ||
-    document.steps[0]?.capabilityIdentity !== input.expectedIdentity
+    document.steps.length !== (input.selectedCount ?? 1) ||
+    document.steps.some(
+      (step) => step.capabilityIdentity !== input.expectedIdentity
+    )
   ) {
     throw new Error("Stored platform plan does not match the request");
   }
@@ -251,7 +282,7 @@ export function createPlatformEvryConversationContinuation(
   },
   preparedSelection?: Extract<
     PlatformEvrySelection,
-    { kind: "mark_one" | "mark_all" | "feedback" }
+    { kind: "mark_one" | "mark_selected" | "mark_all" | "feedback" }
   >
 ): EvryCapabilityPreparationContinuation {
   return {
@@ -313,7 +344,15 @@ export function createPlatformEvryConversationContinuation(
         plantId: input.actor.plantId,
         requestKey,
       });
-      if (stored) return recoverPlan({ stored, expectedIdentity });
+      if (stored)
+        return recoverPlan({
+          stored,
+          expectedIdentity,
+          selectedCount:
+            selection.kind === "mark_selected"
+              ? new Set(selection.notificationIds).size
+              : undefined,
+        });
       const proposal = await dependencies.propose({
         actor: input.actor,
         selection,

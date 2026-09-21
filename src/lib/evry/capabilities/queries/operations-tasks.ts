@@ -181,6 +181,15 @@ const getShape = {
     .min(1)
     .default(["details"]),
   relatedLimit: z.number().int().min(1).max(20).default(10),
+  relatedOffset: z
+    .number()
+    .int()
+    .min(0)
+    .max(100_000)
+    .optional()
+    .describe(
+      "Offset into each requested related section; starts at zero. If a section total exceeds offset + relatedLimit, request the next page with that offset. Keep the same IDs and sections."
+    ),
 };
 export function tasksGetManyStatement(
   input: z.infer<z.ZodObject<typeof getShape>>,
@@ -202,10 +211,10 @@ export function tasksGetManyStatement(
     );
   let evidence = facts(...detailFacts);
   if (input.sections.includes("checklist"))
-    evidence = sql`${evidence} || ${facts(fact("Checklist total", sql`(select count(*) from (${checklist}) children)`))} || coalesce((select jsonb_agg(${relatedFact("Checklist item", sql`c.title || ' · ' || ${displayLabel(sql`c.status`, "task_status")}`, sql`c.title || ' [' || c.id || ']'`)} order by c.id) from (${checklist} order by c.id limit ${input.relatedLimit}) c), '[]'::jsonb)`;
+    evidence = sql`${evidence} || ${facts(fact("Checklist total", sql`(select count(*) from (${checklist}) children)`))} || coalesce((select jsonb_agg(${relatedFact("Checklist item", sql`c.title || ' · ' || ${displayLabel(sql`c.status`, "task_status")}`, sql`c.title || ' [' || c.id || ']'`)} order by c.id) from (${checklist} order by c.id limit ${input.relatedLimit} offset ${input.relatedOffset ?? 0}) c), '[]'::jsonb)`;
   if (input.sections.includes("dependencies"))
-    evidence = sql`${evidence} || ${facts(fact("Prerequisite total", sql`(select count(*) from (${dependencies}) dependencies)`))} || coalesce((select jsonb_agg(${relatedFact("Prerequisite", sql`p.title || ' · ' || ${displayLabel(sql`p.status`, "task_status")} || ' · ' || coalesce(p.assignee, 'Unassigned or unavailable')`, sql`p.title || ' [' || p.id || ']' || coalesce(' account [' || p.account_id || ']', '')`)} order by p.id) from (${dependencies} order by p.id limit ${input.relatedLimit}) p), '[]'::jsonb)`;
-  const source = sql`select t.id::text as id, t.title as label, '/tasks/' || t.id as href, ${evidence} || ${facts(fact("Related evidence limit per section", sql`${input.relatedLimit}::int`))} as facts from tasks t left join users a on a.id = t.assigned_to_id and a.church_id = ${plantId} and a.sending_church_id is null and a.sending_network_id is null where t.church_id = ${plantId} and t.deleted_at is null and ${inValues(sql`t.id::text`, input.ids)}`;
+    evidence = sql`${evidence} || ${facts(fact("Prerequisite total", sql`(select count(*) from (${dependencies}) dependencies)`))} || coalesce((select jsonb_agg(${relatedFact("Prerequisite", sql`p.title || ' · ' || ${displayLabel(sql`p.status`, "task_status")} || ' · ' || coalesce(p.assignee, 'Unassigned or unavailable')`, sql`p.title || ' [' || p.id || ']' || coalesce(' account [' || p.account_id || ']', '')`)} order by p.id) from (${dependencies} order by p.id limit ${input.relatedLimit} offset ${input.relatedOffset ?? 0}) p), '[]'::jsonb)`;
+  const source = sql`select t.id::text as id, t.title as label, '/tasks/' || t.id as href, ${evidence} || ${facts(fact("Related evidence limit per section", sql`${input.relatedLimit}::int`, { modelOnly: true }), fact("Related evidence offset", sql`${input.relatedOffset ?? 0}::int`, { modelOnly: true }))} as facts from tasks t left join users a on a.id = t.assigned_to_id and a.church_id = ${plantId} and a.sending_church_id is null and a.sending_network_id is null where t.church_id = ${plantId} and t.deleted_at is null and ${inValues(sql`t.id::text`, input.ids)}`;
   return operationsStatement(
     source,
     { mode: "list", limit: 50, sort: "id", direction: "asc" },

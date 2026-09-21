@@ -45,6 +45,15 @@ test(
           {
             toolCalls: [
               {
+                id: "load-tasks",
+                name: "load_tools",
+                input: { names: ["tasks.query"] },
+              },
+            ],
+          },
+          {
+            toolCalls: [
+              {
                 id: "adapter-today",
                 name: "tasks_query",
                 input: { where: { all: [filters] }, query: { mode: "list" } },
@@ -104,7 +113,20 @@ test(
           model,
           onOutcome(outcome) {
             executed++;
-            assert.equal(outcome.runtimeProof?.modelCalls, 6);
+            assert.equal(outcome.runtimeProof?.modelCalls, 7);
+            const requests = outcome.runtimeProof?.modelRequests;
+            assert.ok(requests?.length);
+            assert.ok(requests[0]!.tools.includes("load_tools"));
+            assert.ok(!requests[0]!.tools.includes("tasks_query"));
+            assert.ok(requests[1]!.tools.includes("tasks_query"));
+            assert.ok(!requests[1]!.tools.includes("actions_prepare"));
+            assert.ok(
+              requests[0]!.inputBytes < 75_000,
+              `Initial context grew to ${requests[0]!.inputBytes} bytes`
+            );
+            console.info(
+              `Compiled initial context: ${requests[0]!.inputBytes} bytes; task step: ${requests[1]!.inputBytes} bytes`
+            );
             assert.deepEqual(outcome.runtimeProof?.turnInputs, scenario.turns);
             assert.deepEqual(
               outcome.hostCapture.calls.map((call) => call.name),

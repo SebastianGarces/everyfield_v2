@@ -72,9 +72,13 @@ const rowSchema = z.object({
   members: z.number().int().nonnegative().optional(),
   author_id: z.string().uuid().nullable().optional(),
   author: z.string().optional(),
-  date: z.string().optional(),
+  date: z.string().nullable().optional(),
   outcome: z.string().nullable().optional(),
   content: z.string().nullable().optional(),
+  created_at: z.string().optional(),
+  content_length: z.number().int().nonnegative().nullable().optional(),
+  content_offset: z.number().int().nonnegative().optional(),
+  content_next_offset: z.number().int().nonnegative().nullable().optional(),
   meeting: z.string().optional(),
   status: z.string().optional(),
   attendance_type: z.string().nullable().optional(),
@@ -278,6 +282,18 @@ function rowItem(
         row[key]
           ? [{ label: key, value: row[key], modelOnly: true as const }]
           : []
+      ),
+      ...(
+        [
+          ["Recorded at (UTC)", row.created_at],
+          ["Notes character count", row.content_length],
+          ["Notes character offset", row.content_offset],
+          ["Next content offset", row.content_next_offset],
+        ] as const
+      ).flatMap(([label, value]) =>
+        value === null || value === undefined
+          ? []
+          : [{ label, value: String(value), modelOnly: true as const }]
       ),
     ],
   };

@@ -136,6 +136,15 @@ export const intelligenceQuerySchema = z.strictObject({
   transitionKind: z.enum(phaseTransitionKinds).optional(),
   category: z.string().min(1).max(100).optional(),
   includeFactSnapshot: z.boolean().default(false),
+  contentOffset: z
+    .number()
+    .int()
+    .min(0)
+    .max(10_000_000)
+    .optional()
+    .describe(
+      "Character offset for report snapshots, insight text and cited facts. Reads 2000 characters per field. Follow Next content offset with the same record selection until absent; record pagination is separate."
+    ),
 });
 export function intelligenceFilteredQuery(
   plantId: string,
@@ -160,9 +169,9 @@ function intelligenceSourceQuery(
   input: z.infer<typeof intelligenceQuerySchema>
 ) {
   if (input.resource === "assessments")
-    return sql`select id::text as id, 'Stored assessment'::text as label, jsonb_build_object('Generated at', generated_at, 'Phase', phase, 'Rubric version', rubric_version, 'Status', status, 'Fact snapshot', ${input.includeFactSnapshot ? sql`fact_snapshot` : sql`null`}, 'Snapshot note', ${input.includeFactSnapshot ? "Stored report-time facts, which can differ from current records" : "Request includeFactSnapshot to read the stored evidence"}) as facts, '/phase'::text as href, status::text as group_key, generated_at::text as sort_key from plant_assessments where church_id = ${plantId} and status = 'complete' and ${contentIn(sql`id`, input.assessmentIds)} and ${contentRange(sql`generated_at`, input.window)}`;
+    return sql`select id::text as id, 'Stored assessment'::text as label, jsonb_build_object('Generated at', generated_at, 'Phase', phase, 'Rubric version', rubric_version, 'Status', status, 'Fact snapshot', ${input.includeFactSnapshot ? sql`substring(fact_snapshot::text from ${(input.contentOffset ?? 0) + 1} for 2000)` : sql`null`}, 'Next content offset', jsonb_build_object('value', case when ${input.includeFactSnapshot} and char_length(fact_snapshot::text) > ${(input.contentOffset ?? 0) + 2000} then ${(input.contentOffset ?? 0) + 2000}::int else null end, 'modelOnly', true), 'Snapshot note', ${input.includeFactSnapshot ? "Stored report-time facts, which can differ from current records" : "Request includeFactSnapshot to read the stored evidence"}::text) as facts, '/phase'::text as href, status::text as group_key, generated_at::text as sort_key from plant_assessments where church_id = ${plantId} and status = 'complete' and ${contentIn(sql`id`, input.assessmentIds)} and ${contentRange(sql`generated_at`, input.window)}`;
   if (input.resource === "insights")
-    return sql`select i.id::text as id, i.title as label, jsonb_build_object('Assessment ID', a.id, 'Generated at', a.generated_at, 'Rubric version', a.rubric_version, 'Category', i.category, 'Severity', i.severity, 'Stored finding', i.body, 'Cited facts', i.cited_facts) as facts, '/phase'::text as href, i.category::text as group_key, a.generated_at::text || ':' || (10000 - i.rank)::text as sort_key from plant_insights i join plant_assessments a on a.id = i.assessment_id and a.church_id = ${plantId} and a.status = 'complete' where i.church_id = ${plantId} and i.audience = 'planter' and ${contentIn(sql`a.id`, input.assessmentIds)} and ${contentRange(sql`a.generated_at`, input.window)} and ${input.category ? sql`i.category = ${input.category}` : sql`true`}`;
+    return sql`select i.id::text as id, i.title as label, jsonb_build_object('Assessment ID', a.id, 'Generated at', a.generated_at, 'Rubric version', a.rubric_version, 'Category', i.category, 'Severity', i.severity, 'Stored finding', substring(i.body from ${(input.contentOffset ?? 0) + 1} for 2000), 'Cited facts', substring(i.cited_facts::text from ${(input.contentOffset ?? 0) + 1} for 2000), 'Next content offset', jsonb_build_object('value', case when greatest(char_length(i.body), char_length(i.cited_facts::text)) > ${(input.contentOffset ?? 0) + 2000} then ${(input.contentOffset ?? 0) + 2000}::int else null end, 'modelOnly', true)) as facts, '/phase'::text as href, i.category::text as group_key, a.generated_at::text || ':' || (10000 - i.rank)::text as sort_key from plant_insights i join plant_assessments a on a.id = i.assessment_id and a.church_id = ${plantId} and a.status = 'complete' where i.church_id = ${plantId} and i.audience = 'planter' and ${contentIn(sql`a.id`, input.assessmentIds)} and ${contentRange(sql`a.generated_at`, input.window)} and ${input.category ? sql`i.category = ${input.category}` : sql`true`}`;
   if (input.resource === "attestations")
     return sql`select id::text as id, signal_key as label, jsonb_build_object('Evidence kind', 'Self-attested, not independently measured', 'Value', value, 'Attested at', attested_at) as facts, '/phase'::text as href, signal_key::text as group_key, attested_at::text as sort_key from plant_signals where church_id = ${plantId} and ${contentRange(sql`attested_at`, input.window)}`;
   return sql`select id::text as id, kind as label, jsonb_build_object('From phase', from_phase, 'To phase', to_phase, 'Kind', kind, 'Reason', reason, 'Recorded at', created_at, 'Rubric version', rubric_version) as facts, '/phase'::text as href, kind::text as group_key, created_at::text as sort_key from phase_transitions where church_id = ${plantId} and ${input.transitionKind ? sql`kind = ${input.transitionKind}` : sql`true`} and ${contentRange(sql`created_at`, input.window)}`;

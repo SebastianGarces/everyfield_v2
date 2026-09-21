@@ -39,9 +39,9 @@ function selection(): EvryCapabilityConversationSelectionInput {
     },
   };
 }
-test("18 typed preparation contracts reject model-authored snapshots and forged scope", () => {
-  assert.equal(CONTENT_MODEL_PREPARATIONS.length, 18);
-  assert.equal(new Set(CONTENT_MODEL_PREPARATIONS.map((p) => p.id)).size, 18);
+test("typed preparation contracts reject model-authored snapshots and forged scope", () => {
+  assert.equal(CONTENT_MODEL_PREPARATIONS.length, 19);
+  assert.equal(new Set(CONTENT_MODEL_PREPARATIONS.map((p) => p.id)).size, 19);
   for (const p of CONTENT_MODEL_PREPARATIONS)
     assert.equal(
       p.inputSchema.safeParse({

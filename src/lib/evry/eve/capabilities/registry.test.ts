@@ -44,7 +44,7 @@ const helpers: EveHelperDependencies = {
   listTemplates: async () => [],
 };
 
-test("registry carries all 23 baseline contracts with one schema source and no execution tool", () => {
+test("registry carries the full capability catalog with one schema source and no execution tool", () => {
   const registry = createEveToolRegistry({
     context,
     authorizeRead: async () => null,
@@ -60,11 +60,13 @@ test("registry carries all 23 baseline contracts with one schema source and no e
   const names = registry.describe().map((entry) => entry.name);
   for (const [name] of EVE_CAPABILITY_CATALOG)
     assert.ok(names.includes(name), name);
-  assert.equal(EVE_CAPABILITY_CATALOG.length, 23);
-  assert.equal(names.length, 28);
+  assert.equal(EVE_CAPABILITY_CATALOG.length, 24);
+  assert.equal(names.length, 29);
   assert.equal(new Set(names).size, names.length);
   assert.equal(
-    names.some((name) => /execute|confirm|commit|send$/.test(name)),
+    names.some((name) =>
+      /(?:^|[._-])(?:execute|confirm|commit|send)$/.test(name)
+    ),
     false
   );
   for (const description of registry.describe())

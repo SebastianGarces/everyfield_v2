@@ -29,6 +29,7 @@ import { PLANT_INTELLIGENCE_EFFECT_IDENTITIES } from "../plant-intelligence/cata
 import { createPlatformEvryConversationContinuation } from "../platform/conversation";
 import {
   MARK_ONE_NOTIFICATION_IDENTITY,
+  MAX_SELECTED_NOTIFICATION_COUNT,
   MARK_ALL_NOTIFICATIONS_IDENTITY,
   SUBMIT_FEEDBACK_IDENTITY,
 } from "../platform/effects";
@@ -260,6 +261,25 @@ export const CONTENT_MODEL_PREPARATIONS = [
       createPlatformEvryConversationContinuation(undefined, {
         kind: "mark_one",
         ...args,
+      }).continue(context),
+  }),
+  defineEvryModelPreparation({
+    id: "notifications.mark_selected_read",
+    capabilityIdentities: [MARK_ONE_NOTIFICATION_IDENTITY],
+    inputSchema: z
+      .strictObject({
+        notificationIds: z
+          .array(id)
+          .min(1)
+          .max(MAX_SELECTED_NOTIFICATION_COUNT),
+      })
+      .describe(
+        "Prepare one exact review for the selected unread notifications only. Does not mark all notifications or execute anything until confirmed."
+      ),
+    run: (context, args) =>
+      createPlatformEvryConversationContinuation(undefined, {
+        kind: "mark_selected",
+        notificationIds: [...new Set(args.notificationIds)],
       }).continue(context),
   }),
   defineEvryModelPreparation({

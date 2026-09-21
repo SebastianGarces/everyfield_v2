@@ -80,7 +80,7 @@ export function selectPeopleFileRead(
   return parsed.success ? { kind: "export", ...parsed.data } : null;
 }
 
-const COMMITMENT_DOWNLOAD_READ = defineEvryReadRegistration({
+export const COMMITMENT_DOWNLOAD_READ = defineEvryReadRegistration({
   id: "people.commitment-download",
   capabilityIdentity: PEOPLE_FILE_READ_IDENTITIES.commitmentDownload,
   inputShape: { commitmentId: uuid },

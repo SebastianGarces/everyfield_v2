@@ -1,6 +1,11 @@
 /** Coverage metadata is shared by tools, skills and the evaluation inventory. */
 export const EVE_CAPABILITY_CATALOG = [
   [
+    "people.commitment-download",
+    "Find the saved document attached to a commitment and return an authenticated download link. Use commitment IDs from people.history.query; unavailable records do not establish whether a document exists elsewhere.",
+    ["commitments"],
+  ],
+  [
     "people.query",
     "Find, count or group people using stage, tags (IDs or exact case-insensitive names), skills and recorded interview, follow-up and attendance relationships.",
     ["people", "interviews", "assessments", "commitments", "notes"],
@@ -12,7 +17,7 @@ export const EVE_CAPABILITY_CATALOG = [
   ],
   [
     "people.history.query",
-    "Read recorded interviews, assessments, commitments, notes and activity for person cohorts. Missing records are not proof of events outside EveryField.",
+    "Read recorded interviews, assessments, commitments, notes and activity for person cohorts. Use recordIds and contentOffset for full notes, and dateBasis for event date versus entry date. Assessments store scores and notes, not a concern enum; explain recorded evidence without inventing a score threshold. Missing records are not proof of events outside EveryField.",
     ["interviews", "assessments", "commitments", "notes"],
   ],
   [
@@ -47,7 +52,7 @@ export const EVE_CAPABILITY_CATALOG = [
   ],
   [
     "teams.query",
-    "Find ministry teams, roles, active rosters, vacancies and responsibilities with scoped relationships.",
+    "Find ministry teams, roles, active rosters, vacancies and responsibilities with scoped relationships. Assignment groups count roles, not distinct teams: deduplicate team relationships for multi-team volunteers. Responsibilities record completion but have no individual assignee; do not call incomplete items unassigned.",
     ["teams", "roles"],
   ],
   [
@@ -82,7 +87,7 @@ export const EVE_CAPABILITY_CATALOG = [
   ],
   [
     "wiki.search",
-    "Search the visible wiki corpus for relevant passages and citations.",
+    "Search the visible wiki corpus for relevant passages and citations. Omit queries to browse articles by phase, category, section or reading status.",
     ["wiki"],
   ],
   [

@@ -7,6 +7,7 @@ import {
 import { eveRuntimeToolSchema } from "../../src/lib/evry/eve/runtime/tool-schemas";
 import { withEveRuntimeScope } from "../../src/lib/evry/eve/runtime/scope";
 import { captureEveTurnInput } from "../../src/lib/evry/eve/runtime/turn-context";
+import { evryLoadedTools } from "../../src/lib/evry/eve/runtime/tool-selection";
 
 export default defineDynamic({
   events: {
@@ -16,10 +17,15 @@ export default defineDynamic({
         identity: authenticatedSessionOf(ctx.session.auth.current),
         messages: ctx.messages,
       });
-      const tools: Record<string, DynamicToolSet[string]> = {};
-      for (const entry of describeEveRuntimeTools(
+      return null;
+    },
+    "step.started"(_event, ctx) {
+      const catalog = describeEveRuntimeTools(
         authenticatedSessionOf(ctx.session.auth.current)
-      )) {
+      );
+      const tools: Record<string, DynamicToolSet[string]> = {};
+      const selected = new Set(evryLoadedTools.get());
+      for (const entry of catalog.filter((entry) => selected.has(entry.name))) {
         const name = entry.name;
         const key = name.replaceAll(".", "_");
         if (tools[key]) throw new Error("Duplicate provider tool name");
