@@ -47,6 +47,7 @@ const expectedOriginals = [
   "wiki-02",
   "wiki-05",
   "wiki-07",
+  "wiki-06",
   "intelligence-04",
   "notifications-02",
   "people-02",
@@ -72,14 +73,14 @@ const expectedRegressions = [
   "regression-wiki-injection",
 ].sort();
 
-test("default production fixture coverage has 60 bindings and does not claim the remaining 98 pass", () => {
+test("default production fixture coverage has 61 bindings and does not claim the remaining 97 pass", () => {
   const coverage = productionFixtureCoverage();
   const corpus = [...questions, ...regressions];
   assert.deepEqual(coverage.counts, {
-    runnable: 60,
-    originals: 50,
+    runnable: 61,
+    originals: 51,
     regressions: 10,
-    unbound: 98,
+    unbound: 97,
     corpus: 158,
   });
   assert.deepEqual([...coverage.originalIds].sort(), expectedOriginals);
@@ -128,7 +129,7 @@ test("adapter eligibility agrees with coverage before any storage or runtime wor
       await assert.rejects(adapter.prepare(scenario), reachedSeed);
     else assert.equal(await adapter.prepare(scenario), null, scenario.id);
   }
-  assert.equal(seeds, 60);
+  assert.equal(seeds, 61);
   assert.equal(
     await adapter.prepare({ ...questions[0]!, id: "unknown-case" }),
     null
@@ -139,7 +140,7 @@ test("adapter eligibility agrees with coverage before any storage or runtime wor
     await adapter.prepare({ ...questions[0]!, id: "regression-today" }),
     null
   );
-  assert.equal(seeds, 60);
+  assert.equal(seeds, 61);
 });
 
 test("document comparison is opt-in only after a file transport is supplied", async () => {
@@ -160,10 +161,10 @@ test("document comparison is opt-in only after a file transport is supplied", as
     };
   };
   assert.deepEqual(productionFixtureCoverage({ prepareDocumentFiles }).counts, {
-    runnable: 61,
-    originals: 51,
+    runnable: 62,
+    originals: 52,
     regressions: 10,
-    unbound: 97,
+    unbound: 96,
     corpus: 158,
   });
   assert.ok(productionFixtureCoverage().unboundIds.includes("documents-04"));
@@ -235,4 +236,66 @@ test("family wiring preserves shared historical distractors before the owning fa
     owningFamily > historical,
     "people-history seeding retains its original order"
   );
+});
+
+test("CSV review requires its signed attachment transport and revokes a failed setup", async () => {
+  const scenario = questions.find(({ id }) => id === "documents-06")!;
+  let seeded = 0;
+  let revoked = 0;
+  const provisionError = new Error("Attachment setup failed");
+  const store = {
+    ...createFixtureStore("evry-eve-fixture-000000000000-pg"),
+    seed() {
+      seeded++;
+    },
+    sql() {
+      throw new Error("CSV provisioning must precede family seeds");
+    },
+    revoke() {
+      revoked++;
+    },
+  };
+  const base = {
+    store,
+    buildSha: "0".repeat(40),
+    async runProduction(): Promise<never> {
+      throw new Error("Eligibility must not invoke Eve");
+    },
+  };
+  assert.equal(
+    await createProductionEveEvalAdapter(base).prepare(scenario),
+    null
+  );
+  assert.equal(seeded, 0);
+  const preparePeopleCsv = async (): Promise<never> => {
+    throw provisionError;
+  };
+  assert.deepEqual(productionFixtureCoverage({ preparePeopleCsv }).counts, {
+    runnable: 62,
+    originals: 52,
+    regressions: 10,
+    unbound: 96,
+    corpus: 158,
+  });
+  assert.deepEqual(
+    productionFixtureCoverage({
+      preparePeopleCsv,
+      prepareDocumentFiles: async () => async () => {},
+    }).counts,
+    {
+      runnable: 63,
+      originals: 53,
+      regressions: 10,
+      unbound: 95,
+      corpus: 158,
+    }
+  );
+  await assert.rejects(
+    createProductionEveEvalAdapter({ ...base, preparePeopleCsv }).prepare(
+      scenario
+    ),
+    provisionError
+  );
+  assert.equal(seeded, 1);
+  assert.equal(revoked, 1);
 });

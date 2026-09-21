@@ -122,6 +122,22 @@ import {
 } from "./document-review";
 import type { DocumentFixtureTransport } from "./document-storage";
 import { observedLaunchStaffing } from "./launch-staffing";
+import {
+  contentActionFixtureIds,
+  seedContentActionFixture,
+  cleanupContentActionFixture,
+  contentActionExpectations,
+  bindContentActionTurns,
+  observedPeopleCsvFacts,
+  observedBookmarkPlanFacts,
+  type PeopleReviewAttachment,
+} from "./content-actions";
+
+type FixtureTransports = {
+  prepareDocumentFiles?: DocumentFixtureTransport;
+  /** Caller configures the production host with the same attachment signing key. */
+  preparePeopleCsv?(manifest: FixtureManifest): Promise<PeopleReviewAttachment>;
+};
 
 type Scenario = EvalQuestion | Regression;
 type ProductionOutcome = Pick<
@@ -249,14 +265,15 @@ const fixtureFamilies: readonly FixtureFamily[] = [
 const familyCaseIds = [
   ...fixtureFamilies.flatMap((family) => family.ids),
   ...securityFixtureIds,
+  ...contentActionFixtureIds,
 ];
 
 /** Bound means a runnable fixture, not a passed model-quality evaluation. */
-export function productionFixtureCoverage(
-  options: { prepareDocumentFiles?: DocumentFixtureTransport } = {}
-) {
+export function productionFixtureCoverage(options: FixtureTransports = {}) {
   const runnableIds = [...boundCases, ...familyCaseIds].filter(
-    (id) => id !== "documents-04" || options.prepareDocumentFiles
+    (id) =>
+      (id !== "documents-04" || options.prepareDocumentFiles) &&
+      (id !== "documents-06" || options.preparePeopleCsv)
   );
   const bound = new Set(runnableIds);
   const originalIds = questions
@@ -515,25 +532,27 @@ function expectationsFor(
 }
 
 /** The caller owns one disposable stack for the suite; each preparation gets a distinct tenant. */
-export function createProductionEveEvalAdapter(options: {
-  store: FixtureStore;
-  buildSha: string;
-  runProduction: ProductionEvalRunner;
-  /** Upload declared fixture bytes before DB metadata; caller configures the host's isolated endpoint. */
-  prepareDocumentFiles?: DocumentFixtureTransport;
-  /** HTTP mode requires a private runtime host journal; in-process proofs use the observed registry. */
-  captureMode?: "in_process" | "isolated_http";
-  preparation?(context: {
-    actor: EvryPlantActor;
-    manifest: FixtureManifest;
-  }): EvePreparation;
-  /** Override for additional persisted-plan fixtures; orientation has a scoped default reader. */
-  readPreparedFacts?(manifest: FixtureManifest): Promise<Expectations["facts"]>;
-}): EvalAdapter {
+export function createProductionEveEvalAdapter(
+  options: FixtureTransports & {
+    store: FixtureStore;
+    buildSha: string;
+    runProduction: ProductionEvalRunner;
+    /** HTTP mode requires a private runtime host journal; in-process proofs use the observed registry. */
+    captureMode?: "in_process" | "isolated_http";
+    preparation?(context: {
+      actor: EvryPlantActor;
+      manifest: FixtureManifest;
+    }): EvePreparation;
+    /** Override for additional persisted-plan fixtures; orientation has a scoped default reader. */
+    readPreparedFacts?(
+      manifest: FixtureManifest
+    ): Promise<Expectations["facts"]>;
+  }
+): EvalAdapter {
   let repetition = 0;
   return {
     async prepare(scenario) {
-      if (scenario.id === "documents-04" && !options.prepareDocumentFiles)
+      if (!productionFixtureCoverage(options).runnableIds.includes(scenario.id))
         return null;
       if (
         !familyCaseIds.includes(scenario.id) &&
@@ -544,39 +563,53 @@ export function createProductionEveEvalAdapter(options: {
       options.store.seed(manifest);
       let cleanupFiles: (() => Promise<void>) | undefined;
       try {
+        const peopleCsv =
+          scenario.id === "documents-06"
+            ? await options.preparePeopleCsv!(manifest)
+            : undefined;
         if (scenario.id === "documents-04")
           cleanupFiles = await options.prepareDocumentFiles!(
             documentReviewFiles(manifest)
           );
         for (const family of fixtureFamilies)
           family.seed(manifest, options.store);
+        seedContentActionFixture(manifest, options.store);
         const securityFixture = seedSecurityFixture(manifest, options.store);
         const boundScenario =
-          scenario.id === "documents-04"
+          scenario.id === "documents-06"
             ? {
                 ...scenario,
-                turns: bindDocumentReviewTurns(manifest, scenario.turns),
+                turns: bindContentActionTurns(
+                  manifest,
+                  scenario.turns,
+                  peopleCsv
+                ),
               }
-            : securityFixture && "fixture" in scenario
-              ? bindSecurityScenario(scenario, securityFixture)
-              : scenario.id === "intelligence-04"
-                ? {
-                    ...scenario,
-                    // The original question is ambiguous without page context.
-                    // Supply a visible user clarification, not hidden domain metadata.
-                    turns: [
-                      ...scenario.turns,
-                      "The Plant Intelligence reports for our church.",
-                    ],
-                  }
-                : {
-                    ...scenario,
-                    turns: bindContentTurns(manifest, scenario.turns),
-                  };
+            : scenario.id === "documents-04"
+              ? {
+                  ...scenario,
+                  turns: bindDocumentReviewTurns(manifest, scenario.turns),
+                }
+              : securityFixture && "fixture" in scenario
+                ? bindSecurityScenario(scenario, securityFixture)
+                : scenario.id === "intelligence-04"
+                  ? {
+                      ...scenario,
+                      // The original question is ambiguous without page context.
+                      // Supply a visible user clarification, not hidden domain metadata.
+                      turns: [
+                        ...scenario.turns,
+                        "The Plant Intelligence reports for our church.",
+                      ],
+                    }
+                  : {
+                      ...scenario,
+                      turns: bindContentTurns(manifest, scenario.turns),
+                    };
         let expectations =
           securityFixture && "fixture" in scenario
             ? securityExpectations(scenario, securityFixture)
-            : null;
+            : contentActionExpectations(manifest, options.store);
         for (const family of fixtureFamilies) {
           if (expectations) break;
           expectations = family.expectations(manifest, options.store);
@@ -623,7 +656,8 @@ export function createProductionEveEvalAdapter(options: {
               },
               preparation:
                 options.preparation?.({ actor, manifest }) ??
-                (scenario.id === "regression-orientation"
+                (scenario.id === "regression-orientation" ||
+                scenario.id === "wiki-06"
                   ? createEvePreparation({
                       actor,
                       conversationId: randomUUID(),
@@ -741,6 +775,21 @@ export function createProductionEveEvalAdapter(options: {
                     : undefined
               );
               const foreignIds = options.store.foreignRecordIds(manifest);
+              const contentAction =
+                scenario.id === "wiki-06"
+                  ? await observedBookmarkPlanFacts(
+                      manifest,
+                      options.store,
+                      calls,
+                      presented
+                    )
+                  : peopleCsv
+                    ? observedPeopleCsvFacts(calls, peopleCsv)
+                    : null;
+              if (contentAction) {
+                Object.assign(captured.facts, contentAction.facts);
+                captured.evidence.push(...contentAction.evidence);
+              }
               const securityObserved = securityFixture
                 ? observeSecurityFixture(securityFixture, calls, result.answer)
                 : null;
@@ -809,6 +858,7 @@ export function createProductionEveEvalAdapter(options: {
             } finally {
               cleanupHistoricalFixture(manifest, options.store);
               cleanupContentFixture(manifest, options.store);
+              cleanupContentActionFixture(manifest, options.store);
               options.store.revoke(manifest);
             }
           },
@@ -819,6 +869,7 @@ export function createProductionEveEvalAdapter(options: {
         } finally {
           cleanupHistoricalFixture(manifest, options.store);
           cleanupContentFixture(manifest, options.store);
+          cleanupContentActionFixture(manifest, options.store);
           options.store.revoke(manifest);
         }
         throw error;

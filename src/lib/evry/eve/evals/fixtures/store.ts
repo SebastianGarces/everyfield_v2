@@ -165,7 +165,15 @@ export function createFixtureStore(container: string) {
         do $$ declare r record; begin for r in select table_name from information_schema.columns where table_schema='public' and column_name='church_id' and table_name not like 'evry_%' loop
           execute format('drop trigger if exists eve_eval_audit on %I',r.table_name);
           execute format('create trigger eve_eval_audit after insert or update or delete on %I for each row execute function eve_eval.audit_write()',r.table_name);
-        end loop; end $$;`);
+        end loop; end $$;
+        create or replace function eve_eval.audit_bookmark_write() returns trigger language plpgsql as $$ begin
+          insert into eve_eval.writes(table_name,church_id,operation)
+          select distinct TG_TABLE_NAME,u.church_id::text,TG_OP from users u
+          where u.id::text in (to_jsonb(new)->>'user_id',to_jsonb(old)->>'user_id') and u.church_id is not null;
+          return null;
+        end $$;
+        drop trigger if exists eve_eval_audit on wiki_bookmarks;
+        create trigger eve_eval_audit after insert or update or delete on wiki_bookmarks for each row execute function eve_eval.audit_bookmark_write();`);
       return Number(sql("select coalesce(max(id),0) from eve_eval.writes"));
     },
     writesSince(after: number, m: FixtureManifest) {

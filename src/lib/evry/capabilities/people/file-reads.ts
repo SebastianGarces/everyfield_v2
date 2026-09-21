@@ -13,6 +13,7 @@ import { createEvryReadContinuation } from "@/lib/evry/reads/core";
 import { getCommitment } from "@/lib/people/commitments";
 import { buildExportFilename } from "@/lib/people/export";
 import { parseCsvImport } from "@/lib/people/import";
+import type { ImportPreview } from "@/lib/people/types";
 import { getPeopleForExport } from "@/lib/people/service";
 
 export const PEOPLE_FILE_READ_IDENTITIES = {
@@ -156,6 +157,17 @@ export async function readPeopleImportPreviewArtifact(input: {
         input.actor.plantId
       )
     : null;
+  return buildPeopleImportPreviewArtifact(
+    preview,
+    attachment?.document.originalName
+  );
+}
+
+/** Validation errors describe displayed rows; exclusions describe omitted records. */
+export function buildPeopleImportPreviewArtifact(
+  preview: ImportPreview | null,
+  originalName?: string
+) {
   const rows = preview
     ? [
         ...preview.validRows,
@@ -165,15 +177,10 @@ export async function readPeopleImportPreviewArtifact(input: {
     : [];
   return buildEvryReadArtifact({
     title: preview
-      ? `Preview ${attachment!.document.originalName}`
+      ? `Preview ${originalName ?? "People CSV"}`
       : "Import preview unavailable",
     filters: [{ label: "Plant", value: "Current plant" }],
-    exclusions: preview
-      ? preview.invalidRows.map((row) => ({
-          reason: `Row ${row.rowNumber}: ${row.errors.join("; ")}`,
-          count: 1,
-        }))
-      : [{ reason: "Attachment unavailable", count: 1 }],
+    exclusions: preview ? [] : [{ reason: "Attachment unavailable", count: 1 }],
     items: rows.map((row) => {
       const mergeTarget =
         row.duplicates.exactMatch ?? row.duplicates.potentialMatches[0];
@@ -190,6 +197,9 @@ export async function readPeopleImportPreviewArtifact(input: {
                 : "Valid"
               : "Invalid",
           },
+          ...(row.errors.length
+            ? [{ label: "Needs attention", value: row.errors.join("; ") }]
+            : []),
           ...(mergeTarget
             ? [{ label: "Merge target", value: mergeTarget.displayName }]
             : []),
