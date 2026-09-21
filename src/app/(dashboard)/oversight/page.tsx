@@ -27,6 +27,9 @@
 // ============================================================================
 
 import Link from "next/link";
+import { getDiscoveryAssociatesForOrg } from "@/lib/discovery/associations";
+import { invitationActorFromSession } from "@/lib/invitations/core";
+import { DiscoveryAssociates } from "./discovery-associates";
 
 import { HeaderBreadcrumbs } from "@/components/header";
 import { PageCanvas } from "@/components/layout/page-frame";
@@ -63,7 +66,10 @@ export default async function OversightDashboardPage() {
   // (`@/lib/oversight/read`), which is where every other oversight surface asks
   // its question — and where the two decisions are assertable from a rendered
   // statement instead of from this file's text.
-  const plants = await getOversightPortfolio(user);
+  const [plants, discoveryAssociates] = await Promise.all([
+    getOversightPortfolio(user),
+    getDiscoveryAssociatesForOrg(invitationActorFromSession({ user })),
+  ]);
 
   const portfolio = summarizePortfolioPhases(
     plants.map((plant) => plant.currentPhase)
@@ -218,6 +224,22 @@ export default async function OversightDashboardPage() {
                   ))}
                 </div>
               )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Discovery associates</CardTitle>
+              <CardDescription>
+                People exploring church planting before creating a plant. These
+                accounts are separate from your plant portfolio.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <DiscoveryAssociates
+                associates={discoveryAssociates}
+                canManage={holdsSeatFor(user, "org.invitation.manage")}
+              />
             </CardContent>
           </Card>
 

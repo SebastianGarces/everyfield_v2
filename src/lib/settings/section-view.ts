@@ -184,7 +184,7 @@ export type AssociationSectionView = {
   pending: readonly PendingInvitationRow[];
 } & (
   | {
-      answerer: "plant";
+      answerer: "plant" | "discovery";
       associations: readonly CurrentAssociationRow[];
       /**
        * CS-013's consent lines, or `null` for a plant that already has an

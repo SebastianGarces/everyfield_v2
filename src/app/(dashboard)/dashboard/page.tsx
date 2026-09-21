@@ -8,6 +8,8 @@ import { NoPlantEmptyState } from "./no-plant-empty-state";
 import { OnboardingDashboard } from "./onboarding-dashboard";
 import { PlantDashboard } from "./plant-dashboard";
 import { isOversightUser } from "@/lib/auth/tenancy";
+import { hasDiscoveryProfile } from "@/lib/discovery/profile";
+import { DiscoveryHome } from "./discovery-home";
 
 export const dynamic = "force-dynamic";
 
@@ -43,6 +45,9 @@ export default async function DashboardPage({
     searchParams,
   ]);
   const { churchCreated, step } = resolvedSearchParams;
+  if (!user.seat && !user.churchId && (await hasDiscoveryProfile(user.id))) {
+    return <DiscoveryHome />;
+  }
 
   // Redirect an oversight tenancy to its dedicated dashboard
   if (isOversightUser(user)) {

@@ -13,6 +13,7 @@ import {
 } from "@/lib/testing/source-span";
 
 import { assignedPlantsSafely } from "./assigned-plants";
+import { discoveryIdentityForShell } from "./discovery-identity";
 
 // ----------------------------------------------------------------------------
 // THE SHELL DOES NOT WAIT ON THE COACHING QUERY (#569).
@@ -78,26 +79,25 @@ test("the layout starts the coaching read without awaiting it", () => {
   );
 });
 
-test("the shell awaits the request itself and nothing else", () => {
+test("the shell awaits request state and conditional discovery identity only", () => {
   // The general form of the rule, and the reason this file is not a third
   // hand-written guard after #227 and #569. Both bugs were the same edit: a
   // per-request read added above the returned tree of a layout that runs on
   // EVERY dashboard route, in a file that argues against exactly that thirty
   // lines up. Prose in the file did not stop the second one.
   //
-  // So the layout's awaits are an ALLOWLIST. The three below are what the
-  // render cannot be decided without: who is asking, what they asked for, and
-  // how they left the sidebar. Everything else a dashboard route needs is
-  // either a page's job or a slot's — read below a `<Suspense>` boundary,
-  // through a loader that reports failure as a value.
+  // The request reads identify the viewer and sidebar state. Discovery adds
+  // one identity lookup only for an account with no seat or tenancy, because
+  // it chooses the shell navigation and settings. Its failure cannot safely
+  // become false. Optional coaching and notification reads stay in Suspense.
   const awaited = [...ABOVE_THE_TREE.matchAll(/await\s+([\w$.]+)\(/g)].map(
     (match) => match[1]
   );
 
   assert.deepEqual(
     awaited,
-    ["getCurrentSession", "headers", "cookies"],
-    "a new await in the dashboard layout delays EVERY dashboard route and fails all of them if it throws — read it in a Suspense slot instead (`./notification-badge`, `./assigned-plants`), or change this list deliberately"
+    ["getCurrentSession", "headers", "cookies", "discoveryIdentityForShell"],
+    "new optional reads belong in a Suspense slot; only required request state and the conditional identity lookup may delay the shell"
   );
 });
 
@@ -216,6 +216,81 @@ test("a control-flow error wrapped as a cause is still rethrown", async () => {
         throw new Error("assignments read failed", { cause });
       }
     }),
+    (error: unknown) => error instanceof Error
+  );
+});
+
+const unseatedAccount = {
+  id: "viewer",
+  seat: null,
+  churchId: null,
+  sendingChurchId: null,
+  sendingNetworkId: null,
+} as const;
+
+test("discovery identity reads only accounts with no seat and no tenancy", async () => {
+  let calls = 0;
+  const load = async () => {
+    calls++;
+    throw new Error("must not read");
+  };
+  for (let mask = 1; mask < 16; mask++) {
+    for (const seat of ["owner", "admin", "member"] as const) {
+      assert.equal(
+        await discoveryIdentityForShell(
+          {
+            ...unseatedAccount,
+            seat: mask & 1 ? seat : null,
+            churchId: mask & 2 ? "plant" : null,
+            sendingChurchId: mask & 4 ? "sending" : null,
+            sendingNetworkId: mask & 8 ? "network" : null,
+          },
+          load
+        ),
+        false
+      );
+    }
+  }
+  assert.equal(calls, 0);
+});
+
+test("discovery identity uses the current viewer and preserves both read results", async () => {
+  for (const result of [true, false]) {
+    const seen: string[] = [];
+    assert.equal(
+      await discoveryIdentityForShell(unseatedAccount, async (id) => {
+        seen.push(id);
+        return result;
+      }),
+      result
+    );
+    assert.deepEqual(seen, [unseatedAccount.id]);
+  }
+});
+
+test("failed discovery identity is never rendered as a negative identity", async () => {
+  const failure = new Error("discovery read unavailable");
+  await assert.rejects(
+    discoveryIdentityForShell(unseatedAccount, async () => {
+      throw failure;
+    }),
+    (error) => error === failure
+  );
+  await assert.rejects(
+    discoveryIdentityForShell(unseatedAccount, () => {
+      throw failure;
+    }),
+    (error) => error === failure
+  );
+});
+
+test("discovery identity preserves framework control flow", async () => {
+  await assert.rejects(
+    discoveryIdentityForShell(unseatedAccount, async () => redirect("/login")),
+    (error: unknown) => error instanceof Error
+  );
+  await assert.rejects(
+    discoveryIdentityForShell(unseatedAccount, async () => notFound()),
     (error: unknown) => error instanceof Error
   );
 });

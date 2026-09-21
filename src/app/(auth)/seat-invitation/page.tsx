@@ -51,7 +51,8 @@ export default async function SeatInvitationPage({
           Accept to join as a {described.invitedAs.seat}. Your coaching
           assignments stay with your account. An account that holds a seat or
           belongs to a plant or organization cannot accept another seat
-          invitation.
+          invitation. If you have discovery associations, leave them in
+          Association settings before accepting.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">

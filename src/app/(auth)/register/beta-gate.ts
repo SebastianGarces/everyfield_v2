@@ -109,6 +109,7 @@ export type InvitationForRegistration = Pick<
   | "status"
   | "expiresAt"
   | "inviteeEmail"
+  | "targetUserId"
   | "targetChurchId"
   | "targetSendingChurchId"
   | "sendingChurchId"
@@ -122,6 +123,7 @@ export type InvitationForRegistration = Pick<
  */
 export type OpenRedeemableInvitation = InvitationForRegistration & {
   inviteeEmail: string;
+  targetUserId: null;
   targetChurchId: null;
   targetSendingChurchId: null;
 };
@@ -171,6 +173,7 @@ export function isOpenRedeemableInvitation(
   if (invitation.expiresAt && invitation.expiresAt < now) return false;
   if (!invitation.inviteeEmail) return false;
   return (
+    invitation.targetUserId === null &&
     invitation.targetChurchId === null &&
     invitation.targetSendingChurchId === null
   );

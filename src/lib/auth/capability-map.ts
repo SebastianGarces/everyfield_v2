@@ -221,10 +221,8 @@ export const CAPABILITY_BY_EXPORT: Readonly<Record<string, string>> = {
     "self.write",
   "src/app/(dashboard)/settings/actions.ts → setSharingToggleAction":
     "sharing.toggle",
-  "src/app/(dashboard)/settings/association/actions.ts → acceptAssociationInvitation":
-    "association.answer",
-  "src/app/(dashboard)/settings/association/actions.ts → declineAssociationInvitation":
-    "association.answer",
+  "src/app/(dashboard)/oversight/discovery-actions.ts → removeDiscoveryAssociate":
+    "org.invitation.manage",
   "src/app/(dashboard)/settings/association/actions.ts → leaveNetwork":
     "org.association.leave",
   "src/app/(dashboard)/settings/association/actions.ts → leaveOversightOrg":

@@ -1,3 +1,5 @@
+import { oversightOrgOf } from "@/lib/auth/tenancy";
+import type { InvitationActor } from "./core";
 import { and, desc, eq } from "drizzle-orm";
 
 import { db } from "@/db";
@@ -109,4 +111,30 @@ export async function getAssociationHistoryForOrg(
   churchId: string
 ): Promise<AssociationHistoryEntry[]> {
   return associationHistoryQuery(org, churchId);
+}
+
+/** Discovery history is scoped to the requesting org, including former associations. */
+export async function getDiscoveryAssociationHistoryForOrg(
+  actor: InvitationActor,
+  userId: string
+): Promise<AssociationHistoryEntry[]> {
+  const org = oversightOrgOf(actor);
+  if (!org) return [];
+  return db
+    .select({
+      id: associationEvents.id,
+      event: associationEvents.event,
+      actorName: users.name,
+      occurredAt: associationEvents.createdAt,
+    })
+    .from(associationEvents)
+    .leftJoin(users, eq(users.id, associationEvents.actorUserId))
+    .where(
+      and(
+        eq(associationEvents.discoveryUserId, userId),
+        eq(associationEvents.orgType, org.type),
+        eq(associationEvents.orgId, org.id)
+      )
+    )
+    .orderBy(desc(associationEvents.createdAt));
 }

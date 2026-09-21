@@ -1,3 +1,5 @@
+import { discoveryProfiles } from "@/db/schema/discovery-profile";
+import { respondDiscoveryInvitationAs } from "@/lib/discovery/associations";
 // ============================================================================
 // Organization invitations — the logic layer (issue #265).
 //
@@ -247,14 +249,19 @@ export function invitationActorFromSession(session: {
  */
 export type InvitationView = Omit<
   OrganizationInvitation,
-  "inviterUserId" | "respondedBy"
+  "inviterUserId" | "respondedBy" | "targetUserId"
 >;
 
 /** The row, minus the two internal user ids. Total, so a new column is a compile error away from being reviewed. */
 export function invitationView(row: OrganizationInvitation): InvitationView {
   return {
     id: row.id,
-    type: row.type,
+    type:
+      row.type === "discovery_to_network"
+        ? "church_to_network"
+        : row.type === "discovery_to_sending_church"
+          ? "church_to_sending_church"
+          : row.type,
     // The address the ADMIN typed, not an identifier anybody can aim a request
     // at — and the only thing an invitations row has to render.
     inviteeEmail: row.inviteeEmail,
@@ -304,6 +311,7 @@ export interface InvitationRequest {
    * client. Kept on the request type — rather than as extra parameters — so
    * `resolveInvitationRequest` stays pure and unit-testable without a database.
    */
+  targetUserId?: string;
   targetChurchId?: string;
   targetSendingChurchId?: string;
 }
@@ -412,7 +420,7 @@ export type AssociationFacts = Pick<
   | "targetSendingChurchId"
   | "sendingChurchId"
   | "sendingNetworkId"
->;
+> & { targetUserId?: string | null };
 
 /**
  * The row to insert, fully resolved. No expiry field: the window is
@@ -423,6 +431,7 @@ export interface ResolvedInvitation {
   type: OrganizationInvitationType;
   inviterUserId: string;
   inviteeEmail: string;
+  targetUserId?: string | null;
   targetChurchId: string | null;
   targetSendingChurchId: string | null;
   sendingChurchId: string | null;
@@ -462,6 +471,7 @@ export function resolveInvitationRequest(
   actor: InvitationActor,
   request: InvitationRequest
 ): ResolveResult {
+  const targetUserId = request.targetUserId ?? null;
   const targetChurchId = request.targetChurchId ?? null;
   const targetSendingChurchId = request.targetSendingChurchId ?? null;
   const inviteeEmail = normalizeInviteeEmail(request.inviteeEmail);
@@ -469,9 +479,14 @@ export function resolveInvitationRequest(
   if (!EMAIL_RE.test(inviteeEmail)) {
     return { ok: false, error: INVALID_EMAIL_MESSAGE };
   }
-  if (targetChurchId && targetSendingChurchId) {
+  if (
+    [targetChurchId, targetSendingChurchId, targetUserId].filter(Boolean)
+      .length > 1
+  ) {
     return { ok: false, error: "Invite one organization at a time" };
   }
+  if (targetUserId && !isUuid(targetUserId))
+    return { ok: false, error: ACCOUNT_NOT_INVITABLE_MESSAGE };
   if (targetChurchId && !isUuid(targetChurchId)) {
     return { ok: false, error: "That is not a church we can invite" };
   }
@@ -490,6 +505,7 @@ export function resolveInvitationRequest(
   const base = {
     inviterUserId: actor.id,
     inviteeEmail,
+    targetUserId,
     targetChurchId,
     targetSendingChurchId,
   };
@@ -512,7 +528,9 @@ export function resolveInvitationRequest(
       ok: true,
       values: {
         ...base,
-        type: "church_to_sending_church",
+        type: targetUserId
+          ? "discovery_to_sending_church"
+          : "church_to_sending_church",
         sendingChurchId: actor.sendingChurchId,
         sendingNetworkId: null,
       },
@@ -524,8 +542,9 @@ export function resolveInvitationRequest(
       ok: true,
       values: {
         ...base,
-        type:
-          kind === "sending_church"
+        type: targetUserId
+          ? "discovery_to_network"
+          : kind === "sending_church"
             ? "sending_church_to_network"
             : "church_to_network",
         sendingChurchId: null,
@@ -599,11 +618,14 @@ export function resolveInvitationForResolvedTarget(
   target: InviteeTarget
 ): ResolveResult {
   const targeted =
-    target.targetChurchId != null || target.targetSendingChurchId != null;
+    target.targetUserId != null ||
+    target.targetChurchId != null ||
+    target.targetSendingChurchId != null;
 
   const resolved = resolveInvitationRequest(actor, {
     inviteeEmail: request.inviteeEmail,
     inviteAs: request.inviteAs,
+    targetUserId: target.targetUserId,
     targetChurchId: target.targetChurchId,
     targetSendingChurchId: target.targetSendingChurchId,
   });
@@ -633,6 +655,7 @@ export async function insertInvitation(
     type: values.type,
     inviterUserId: values.inviterUserId,
     inviteeEmail: values.inviteeEmail,
+    targetUserId: values.targetUserId,
     targetChurchId: values.targetChurchId,
     targetSendingChurchId: values.targetSendingChurchId,
     sendingChurchId: values.sendingChurchId,
@@ -641,6 +664,29 @@ export async function insertInvitation(
     expiresAt,
   };
 
+  if (values.targetUserId) {
+    requireAssociationPair(values);
+    const [, inserted] = await db.batch([
+      db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.id, values.targetUserId))
+        .for("update"),
+      db.execute<{ id: string }>(sql`insert into organization_invitations
+        (type,inviter_user_id,invitee_email,target_user_id,sending_church_id,sending_network_id,status,expires_at)
+        select ${values.type},${values.inviterUserId}::uuid,${values.inviteeEmail},u.id,${values.sendingChurchId}::uuid,${values.sendingNetworkId}::uuid,'pending',${expiresAt}
+        from users u join discovery_profiles p on p.user_id=u.id
+        where u.id=${values.targetUserId}::uuid and lower(u.email)=lower(${values.inviteeEmail})
+        and u.seat is null and u.church_id is null and u.sending_church_id is null and u.sending_network_id is null
+        and ${values.type === "discovery_to_network" ? sql`p.sending_network_id` : sql`p.sending_church_id`} is null
+        returning id`),
+    ]);
+    const id = inserted.rows[0]?.id;
+    if (!id) throw new InvitationError(ACCOUNT_NOT_INVITABLE_MESSAGE);
+    const invitation = await getInvitation(id);
+    if (!invitation) throw new InvitationError(ACCOUNT_NOT_INVITABLE_MESSAGE);
+    return invitation;
+  }
   const [invitation] = await db
     .insert(organizationInvitations)
     .values(row)
@@ -670,7 +716,7 @@ export async function insertInvitation(
  */
 export type InviteeTarget = Pick<
   InvitationRequest,
-  "targetChurchId" | "targetSendingChurchId"
+  "targetChurchId" | "targetSendingChurchId" | "targetUserId"
 >;
 
 export function inviteeAccountTarget(
@@ -736,15 +782,26 @@ export async function resolveInvitationTarget(
 ): Promise<{ ok: true; target: InviteeTarget } | { ok: false; error: string }> {
   const [existing] = await db
     .select({
+      id: users.id,
+      discoveryId: discoveryProfiles.userId,
       seat: users.seat,
       churchId: users.churchId,
       sendingChurchId: users.sendingChurchId,
       sendingNetworkId: users.sendingNetworkId,
     })
     .from(users)
+    .leftJoin(discoveryProfiles, eq(discoveryProfiles.userId, users.id))
     .where(eq(users.email, inviteeEmail))
     .limit(1);
 
+  if (
+    existing?.discoveryId &&
+    !existing.seat &&
+    !existing.churchId &&
+    !existing.sendingChurchId &&
+    !existing.sendingNetworkId
+  )
+    return { ok: true, target: { targetUserId: existing.id } };
   return inviteeAccountTarget(existing);
 }
 
@@ -799,6 +856,19 @@ async function heldOversightSlot(
     !held ? null : held === ours ? ("ours" as const) : ("other" as const);
 
   switch (values.type) {
+    case "discovery_to_sending_church":
+    case "discovery_to_network": {
+      if (!values.targetUserId) return null;
+      const [profile] = await db
+        .select()
+        .from(discoveryProfiles)
+        .where(eq(discoveryProfiles.userId, values.targetUserId))
+        .limit(1);
+      if (!profile) return null;
+      return values.type === "discovery_to_network"
+        ? verdict(profile.sendingNetworkId, values.sendingNetworkId)
+        : verdict(profile.sendingChurchId, values.sendingChurchId);
+    }
     case "church_to_sending_church":
     case "church_to_network": {
       if (!values.targetChurchId) return null;
@@ -852,8 +922,13 @@ async function heldOversightSlot(
  * address is what makes both caps count the thing they defend.
  */
 export function targetReachFilter(
-  values: Pick<ResolvedInvitation, "targetChurchId" | "targetSendingChurchId">
+  values: Pick<
+    ResolvedInvitation,
+    "targetChurchId" | "targetSendingChurchId" | "targetUserId"
+  >
 ): SQL | null {
+  if (values.targetUserId)
+    return eq(organizationInvitations.targetUserId, values.targetUserId);
   if (values.targetChurchId) {
     return eq(organizationInvitations.targetChurchId, values.targetChurchId);
   }
@@ -924,6 +999,10 @@ export function afterTheLastAssociationEventFilter(
         and(
           org,
           or(
+            eq(
+              associationEvents.discoveryUserId,
+              organizationInvitations.targetUserId
+            ),
             eq(
               associationEvents.churchId,
               organizationInvitations.targetChurchId
@@ -1442,6 +1521,7 @@ export async function lookupInvitingOrgName(invitation: {
   sendingNetworkId: string | null;
 }): Promise<string | null> {
   switch (invitation.type) {
+    case "discovery_to_sending_church":
     case "church_to_sending_church": {
       if (!invitation.sendingChurchId) return null;
       const [org] = await db
@@ -1452,6 +1532,7 @@ export async function lookupInvitingOrgName(invitation: {
       return org?.name ?? null;
     }
 
+    case "discovery_to_network":
     case "church_to_network":
     case "sending_church_to_network": {
       if (!invitation.sendingNetworkId) return null;
@@ -1566,6 +1647,8 @@ export async function acceptInvitationAs(
 ): Promise<OrganizationInvitation> {
   // Authority first, then status: see `loadRespondableInvitation`.
   const invitation = await loadRespondableInvitation(actor, invitationId);
+  if (invitation.targetUserId)
+    return respondDiscoveryInvitationAs(actor, invitation, "accepted");
 
   // All of them built BEFORE anything is written, so an invitation whose FKs
   // contradict its `type` throws instead of half-applying.
@@ -1819,7 +1902,9 @@ export async function declineInvitationAs(
   invitationId: string
 ): Promise<OrganizationInvitation> {
   // Authority first, then status: see `loadRespondableInvitation`.
-  await loadRespondableInvitation(actor, invitationId);
+  const invitation = await loadRespondableInvitation(actor, invitationId);
+  if (invitation.targetUserId)
+    return respondDiscoveryInvitationAs(actor, invitation, "declined");
 
   const [updated] = await respondToInvitationQuery(
     actor,
@@ -2003,6 +2088,16 @@ function freeOrHolds(column: AnyPgColumn, value: string): SQL {
  */
 export type AssociationPair =
   | {
+      type: "discovery_to_sending_church";
+      targetUserId: string;
+      sendingChurchId: string;
+    }
+  | {
+      type: "discovery_to_network";
+      targetUserId: string;
+      sendingNetworkId: string;
+    }
+  | {
       type: "church_to_sending_church";
       targetChurchId: string;
       sendingChurchId: string;
@@ -2060,6 +2155,34 @@ export function requireAssociationPair(
   invitation: AssociationFacts
 ): AssociationPair {
   switch (invitation.type) {
+    case "discovery_to_sending_church":
+      if (
+        !invitation.targetUserId ||
+        !invitation.sendingChurchId ||
+        invitation.targetChurchId ||
+        invitation.targetSendingChurchId ||
+        invitation.sendingNetworkId
+      )
+        throw new InvitationError(NOT_AUTHORIZED_MESSAGE);
+      return {
+        type: invitation.type,
+        targetUserId: invitation.targetUserId,
+        sendingChurchId: invitation.sendingChurchId,
+      };
+    case "discovery_to_network":
+      if (
+        !invitation.targetUserId ||
+        !invitation.sendingNetworkId ||
+        invitation.targetChurchId ||
+        invitation.targetSendingChurchId ||
+        invitation.sendingChurchId
+      )
+        throw new InvitationError(NOT_AUTHORIZED_MESSAGE);
+      return {
+        type: invitation.type,
+        targetUserId: invitation.targetUserId,
+        sendingNetworkId: invitation.sendingNetworkId,
+      };
     case "church_to_sending_church": {
       if (!invitation.targetChurchId || !invitation.sendingChurchId) {
         throw new InvitationError(
@@ -2137,6 +2260,15 @@ export function requireAssociationPair(
  */
 export function lockTargetRow(invitation: AssociationFacts) {
   switch (invitation.type) {
+    case "discovery_to_sending_church":
+    case "discovery_to_network":
+      if (!invitation.targetUserId)
+        throw new InvitationError(NOT_AUTHORIZED_MESSAGE);
+      return db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.id, invitation.targetUserId))
+        .for("update");
     case "church_to_sending_church":
     case "church_to_network": {
       if (!invitation.targetChurchId) {
@@ -2196,6 +2328,9 @@ export function unboundTargetSlot(invitation: AssociationFacts): SQL {
   const pair = requireAssociationPair(invitation);
 
   switch (pair.type) {
+    case "discovery_to_sending_church":
+    case "discovery_to_network":
+      return sql`exists (select 1 from discovery_profiles p join users u on u.id=p.user_id where p.user_id=${pair.targetUserId}::uuid and u.seat is null and u.church_id is null and u.sending_church_id is null and u.sending_network_id is null and ${pair.type === "discovery_to_network" ? sql`p.sending_network_id` : sql`p.sending_church_id`} is null)`;
     case "church_to_sending_church": {
       return exists(
         db
@@ -3020,13 +3155,23 @@ export async function getInvitationsForOrg(
  */
 export function bindOpenInvitationTargetQuery(
   invitationId: string,
-  target: { targetChurchId?: string; targetSendingChurchId?: string },
+  target: {
+    targetChurchId?: string;
+    targetSendingChurchId?: string;
+    targetUserId?: string;
+  },
   respondedBy: string,
   now: Date
 ) {
   return db
     .update(organizationInvitations)
     .set({
+      targetUserId: target.targetUserId ?? null,
+      ...(target.targetUserId
+        ? {
+            type: sql`case when ${organizationInvitations.type} = 'church_to_sending_church' then 'discovery_to_sending_church' else 'discovery_to_network' end`,
+          }
+        : {}),
       targetChurchId: target.targetChurchId ?? null,
       targetSendingChurchId: target.targetSendingChurchId ?? null,
       respondedBy,
@@ -3034,6 +3179,11 @@ export function bindOpenInvitationTargetQuery(
     .where(
       and(
         pendingInvitation(invitationId),
+        sql`${organizationInvitations.targetUserId} is null`,
+        sql`(${organizationInvitations.expiresAt} is null or ${organizationInvitations.expiresAt} > statement_timestamp())`,
+        target.targetUserId
+          ? sql`${organizationInvitations.type} in ('church_to_sending_church','church_to_network','sending_church_to_network') and exists(select 1 from users u join discovery_profiles p on p.user_id=u.id where u.id=${target.targetUserId}::uuid and u.id=${respondedBy}::uuid and lower(u.email)=lower(${organizationInvitations.inviteeEmail}) and u.seat is null and u.church_id is null and u.sending_church_id is null and u.sending_network_id is null)`
+          : undefined,
         sql`${organizationInvitations.targetChurchId} is null`,
         sql`${organizationInvitations.targetSendingChurchId} is null`,
         sql`(${organizationInvitations.expiresAt} is null or ${organizationInvitations.expiresAt} > ${now})`
@@ -3045,19 +3195,34 @@ export function bindOpenInvitationTargetQuery(
 /** Run the bind. `null` means somebody else already redeemed the link. */
 export async function bindOpenInvitationTarget(
   invitationId: string,
-  target: { targetChurchId?: string; targetSendingChurchId?: string },
+  target: {
+    targetChurchId?: string;
+    targetSendingChurchId?: string;
+    targetUserId?: string;
+  },
   respondedBy: string,
   now = new Date()
 ): Promise<OrganizationInvitation | null> {
   if (!isUuid(invitationId)) return null;
 
-  const [updated] = await bindOpenInvitationTargetQuery(
+  const query = bindOpenInvitationTargetQuery(
     invitationId,
     target,
     respondedBy,
     now
   );
-
+  if (target.targetUserId) {
+    const [, bound] = await db.batch([
+      db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.id, respondedBy))
+        .for("update"),
+      query,
+    ]);
+    return bound[0] ?? null;
+  }
+  const [updated] = await query;
   return updated ?? null;
 }
 
@@ -3191,6 +3356,23 @@ export function associationStatement(
   const pair = requireAssociationPair(invitation);
 
   switch (pair.type) {
+    case "discovery_to_sending_church":
+    case "discovery_to_network":
+      return db
+        .update(discoveryProfiles)
+        .set(
+          pair.type === "discovery_to_network"
+            ? { sendingNetworkId: pair.sendingNetworkId }
+            : { sendingChurchId: pair.sendingChurchId }
+        )
+        .where(
+          and(
+            eq(discoveryProfiles.userId, pair.targetUserId),
+            claimed,
+            unboundTargetSlot(invitation)
+          )
+        )
+        .returning({ id: discoveryProfiles.userId });
     case "church_to_sending_church": {
       return db
         .update(churches)
@@ -3268,10 +3450,21 @@ export function verifyInvitationAuthority(
   invitation: Pick<
     OrganizationInvitation,
     "type" | "targetChurchId" | "targetSendingChurchId"
-  >,
+  > & { targetUserId?: string | null },
   actor: InvitationActor
 ): void {
   switch (invitation.type) {
+    case "discovery_to_sending_church":
+    case "discovery_to_network":
+      if (
+        actor.id !== invitation.targetUserId ||
+        actor.seat ||
+        actor.churchId ||
+        actor.sendingChurchId ||
+        actor.sendingNetworkId
+      )
+        throw new InvitationError(NOT_AUTHORIZED_MESSAGE);
+      break;
     case "church_to_sending_church":
     case "church_to_network": {
       // The target is a church — the actor must be the OWNER of that church.
