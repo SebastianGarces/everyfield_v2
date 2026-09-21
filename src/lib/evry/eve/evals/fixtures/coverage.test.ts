@@ -59,6 +59,13 @@ const expectedOriginals = [
   "notes-01",
   "notes-02",
   "notes-04",
+  "interviews-06",
+  "notes-03",
+  "meetings-04",
+  "orientations-02",
+  "cross-02",
+  "cross-04",
+  "notifications-01",
 ].sort();
 const expectedRegressions = [
   "regression-today",
@@ -71,16 +78,17 @@ const expectedRegressions = [
   "regression-orientation",
   "regression-cross-tenant",
   "regression-wiki-injection",
+  "regression-pagination",
 ].sort();
 
-test("default production fixture coverage has 61 bindings and does not claim the remaining 97 pass", () => {
+test("default production fixture coverage has 69 bindings and does not claim the remaining 89 pass", () => {
   const coverage = productionFixtureCoverage();
   const corpus = [...questions, ...regressions];
   assert.deepEqual(coverage.counts, {
-    runnable: 61,
-    originals: 51,
-    regressions: 10,
-    unbound: 97,
+    runnable: 69,
+    originals: 58,
+    regressions: 11,
+    unbound: 89,
     corpus: 158,
   });
   assert.deepEqual([...coverage.originalIds].sort(), expectedOriginals);
@@ -129,7 +137,7 @@ test("adapter eligibility agrees with coverage before any storage or runtime wor
       await assert.rejects(adapter.prepare(scenario), reachedSeed);
     else assert.equal(await adapter.prepare(scenario), null, scenario.id);
   }
-  assert.equal(seeds, 61);
+  assert.equal(seeds, 69);
   assert.equal(
     await adapter.prepare({ ...questions[0]!, id: "unknown-case" }),
     null
@@ -140,7 +148,7 @@ test("adapter eligibility agrees with coverage before any storage or runtime wor
     await adapter.prepare({ ...questions[0]!, id: "regression-today" }),
     null
   );
-  assert.equal(seeds, 61);
+  assert.equal(seeds, 69);
 });
 
 test("document comparison is opt-in only after a file transport is supplied", async () => {
@@ -161,10 +169,10 @@ test("document comparison is opt-in only after a file transport is supplied", as
     };
   };
   assert.deepEqual(productionFixtureCoverage({ prepareDocumentFiles }).counts, {
-    runnable: 62,
-    originals: 52,
-    regressions: 10,
-    unbound: 96,
+    runnable: 70,
+    originals: 59,
+    regressions: 11,
+    unbound: 88,
     corpus: 158,
   });
   assert.ok(productionFixtureCoverage().unboundIds.includes("documents-04"));
@@ -195,11 +203,70 @@ test("document comparison is opt-in only after a file transport is supplied", as
   assert.equal(revoked, true);
 });
 
-test("family wiring preserves shared historical distractors before the owning family seed", async () => {
-  const scenario = questions.find(({ id }) => id === "interviews-05");
+for (const caseId of ["interviews-05", "interviews-06"]) {
+  test(`family wiring preserves historical distractors before the ${caseId} family seed`, async () => {
+    const scenario = questions.find(({ id }) => id === caseId);
+    assert.ok(scenario);
+    const statements: string[] = [];
+    const reachedTruth = new Error("Stop before the independent SQL read");
+    const adapter = createProductionEveEvalAdapter({
+      store: {
+        ...createFixtureStore("evry-eve-fixture-000000000000-pg"),
+        seed() {
+          statements.push("base");
+        },
+        sql(statement) {
+          statements.push(statement);
+          return "";
+        },
+        query() {
+          throw reachedTruth;
+        },
+        revoke() {},
+      },
+      buildSha: "0".repeat(40),
+      async runProduction() {
+        throw new Error("Seeding must not invoke Eve");
+      },
+    });
+    await assert.rejects(adapter.prepare(scenario), reachedTruth);
+    assert.equal(statements[0], "base");
+    const historical = statements.findIndex((sql) =>
+      sql.includes("Completed core follow-up")
+    );
+    const owningFamily = statements.findIndex((sql) =>
+      sql.includes("first_name='Alex'")
+    );
+    assert.ok(
+      historical > 0,
+      "historical distractors apply beyond the family's binding IDs"
+    );
+    assert.ok(
+      owningFamily > historical,
+      "the owning family must seed after shared historical distractors"
+    );
+    if (caseId === "interviews-06") {
+      assert.match(
+        statements[owningFamily]!,
+        /not exists\(select 1 from interviews/
+      );
+      assert.match(statements[owningFamily]!, /Sunday Vision Meeting/);
+      assert.equal(
+        statements.filter((sql) => sql.includes("Sunday Vision Meeting"))
+          .length,
+        1,
+        "readiness fixtures seed once, after historical interview records"
+      );
+    }
+  });
+}
+
+test("unread notification binding seeds its feed before independent expectations", async () => {
+  const scenario = questions.find(({ id }) => id === "notifications-01");
   assert.ok(scenario);
   const statements: string[] = [];
-  const reachedTruth = new Error("Stop before the independent SQL read");
+  const reachedTruth = new Error("Stop at independent notification truth");
+  let revoked = false;
   const adapter = createProductionEveEvalAdapter({
     store: {
       ...createFixtureStore("evry-eve-fixture-000000000000-pg"),
@@ -210,10 +277,24 @@ test("family wiring preserves shared historical distractors before the owning fa
         statements.push(statement);
         return "";
       },
-      query() {
+      query(statement) {
+        assert.match(statement, /from notifications n/);
+        assert.equal(statements[0], "base");
+        assert.equal(
+          statements.filter((sql) => sql.includes("insert into notifications("))
+            .length,
+          1
+        );
+        assert.ok(
+          statements.some((sql) =>
+            sql.includes("insert into notification_preferences")
+          )
+        );
         throw reachedTruth;
       },
-      revoke() {},
+      revoke() {
+        revoked = true;
+      },
     },
     buildSha: "0".repeat(40),
     async runProduction() {
@@ -221,21 +302,7 @@ test("family wiring preserves shared historical distractors before the owning fa
     },
   });
   await assert.rejects(adapter.prepare(scenario), reachedTruth);
-  assert.equal(statements[0], "base");
-  const historical = statements.findIndex((sql) =>
-    sql.includes("Completed core follow-up")
-  );
-  const owningFamily = statements.findIndex((sql) =>
-    sql.includes("first_name='Alex'")
-  );
-  assert.ok(
-    historical > 0,
-    "historical distractors apply beyond the family's binding IDs"
-  );
-  assert.ok(
-    owningFamily > historical,
-    "people-history seeding retains its original order"
-  );
+  assert.equal(revoked, true);
 });
 
 test("CSV review requires its signed attachment transport and revokes a failed setup", async () => {
@@ -271,10 +338,10 @@ test("CSV review requires its signed attachment transport and revokes a failed s
     throw provisionError;
   };
   assert.deepEqual(productionFixtureCoverage({ preparePeopleCsv }).counts, {
-    runnable: 62,
-    originals: 52,
-    regressions: 10,
-    unbound: 96,
+    runnable: 70,
+    originals: 59,
+    regressions: 11,
+    unbound: 88,
     corpus: 158,
   });
   assert.deepEqual(
@@ -283,10 +350,10 @@ test("CSV review requires its signed attachment transport and revokes a failed s
       prepareDocumentFiles: async () => async () => {},
     }).counts,
     {
-      runnable: 63,
-      originals: 53,
-      regressions: 10,
-      unbound: 95,
+      runnable: 71,
+      originals: 60,
+      regressions: 11,
+      unbound: 87,
       corpus: 158,
     }
   );

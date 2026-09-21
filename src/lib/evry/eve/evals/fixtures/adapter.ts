@@ -132,6 +132,18 @@ import {
   observedBookmarkPlanFacts,
   type PeopleReviewAttachment,
 } from "./content-actions";
+import {
+  readinessCohortFixtureIds,
+  seedReadinessCohortFixture,
+  readinessCohortExpectations,
+  observedReadinessCohortFacts,
+} from "./readiness-cohorts";
+import {
+  notificationFeedFixtureIds,
+  seedNotificationFeedFixture,
+  notificationFeedExpectations,
+  observedNotificationFeedFacts,
+} from "./notification-feed";
 
 type FixtureTransports = {
   prepareDocumentFiles?: DocumentFixtureTransport;
@@ -260,6 +272,18 @@ const fixtureFamilies: readonly FixtureFamily[] = [
     seed: seedDocumentReviewFixture,
     expectations: documentReviewExpectations,
     observe: observedDocumentReviewFacts,
+  },
+  {
+    ids: readinessCohortFixtureIds,
+    seed: seedReadinessCohortFixture,
+    expectations: readinessCohortExpectations,
+    observe: observedReadinessCohortFacts,
+  },
+  {
+    ids: notificationFeedFixtureIds,
+    seed: seedNotificationFeedFixture,
+    expectations: notificationFeedExpectations,
+    observe: observedNotificationFeedFacts,
   },
 ];
 const familyCaseIds = [
