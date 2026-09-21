@@ -106,6 +106,7 @@ const expectedOriginals = [
   "communication-02",
   "communication-03",
   "communication-04",
+  "communication-06",
 ].sort();
 const expectedRegressions = [
   "regression-today",
@@ -124,14 +125,14 @@ const expectedRegressions = [
   "regression-template-placeholders",
 ].sort();
 
-test("default production fixture coverage has 95 bindings and does not claim the remaining 63 pass", () => {
+test("default production fixture coverage has 96 bindings and does not claim the remaining 62 pass", () => {
   const coverage = productionFixtureCoverage();
   const corpus = [...questions, ...regressions];
   assert.deepEqual(coverage.counts, {
-    runnable: 95,
-    originals: 81,
+    runnable: 96,
+    originals: 82,
     regressions: 14,
-    unbound: 63,
+    unbound: 62,
     corpus: 158,
   });
   assert.deepEqual([...coverage.originalIds].sort(), expectedOriginals);
@@ -180,7 +181,7 @@ test("adapter eligibility agrees with coverage before any storage or runtime wor
       await assert.rejects(adapter.prepare(scenario), reachedSeed);
     else assert.equal(await adapter.prepare(scenario), null, scenario.id);
   }
-  assert.equal(seeds, 95);
+  assert.equal(seeds, coverage.runnableIds.length);
   assert.equal(
     await adapter.prepare({ ...questions[0]!, id: "unknown-case" }),
     null
@@ -191,7 +192,7 @@ test("adapter eligibility agrees with coverage before any storage or runtime wor
     await adapter.prepare({ ...questions[0]!, id: "regression-today" }),
     null
   );
-  assert.equal(seeds, 95);
+  assert.equal(seeds, coverage.runnableIds.length);
 });
 
 test("document comparison is opt-in only after a file transport is supplied", async () => {
@@ -212,10 +213,10 @@ test("document comparison is opt-in only after a file transport is supplied", as
     };
   };
   assert.deepEqual(productionFixtureCoverage({ prepareDocumentFiles }).counts, {
-    runnable: 96,
-    originals: 82,
+    runnable: 97,
+    originals: 83,
     regressions: 14,
-    unbound: 62,
+    unbound: 61,
     corpus: 158,
   });
   assert.ok(productionFixtureCoverage().unboundIds.includes("documents-04"));
@@ -381,10 +382,10 @@ test("CSV review requires its signed attachment transport and revokes a failed s
     throw provisionError;
   };
   assert.deepEqual(productionFixtureCoverage({ preparePeopleCsv }).counts, {
-    runnable: 96,
-    originals: 82,
+    runnable: 97,
+    originals: 83,
     regressions: 14,
-    unbound: 62,
+    unbound: 61,
     corpus: 158,
   });
   assert.deepEqual(
@@ -393,10 +394,10 @@ test("CSV review requires its signed attachment transport and revokes a failed s
       prepareDocumentFiles: async () => async () => {},
     }).counts,
     {
-      runnable: 97,
-      originals: 83,
+      runnable: 98,
+      originals: 84,
       regressions: 14,
-      unbound: 61,
+      unbound: 60,
       corpus: 158,
     }
   );

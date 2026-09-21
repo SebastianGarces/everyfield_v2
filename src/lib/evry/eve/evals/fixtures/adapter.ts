@@ -175,6 +175,13 @@ import {
   communicationDeliveryExpectations,
   observedCommunicationDeliveryFacts,
 } from "./communication-delivery";
+import {
+  communicationRetryFixtureIds,
+  seedCommunicationRetryFixture,
+  bindCommunicationRetryTurns,
+  communicationRetryExpectations,
+  readPreparedCommunicationRetryFacts,
+} from "./communication-retry";
 
 type FixtureTransports = {
   prepareDocumentFiles?: DocumentFixtureTransport;
@@ -385,6 +392,7 @@ const familyCaseIds = [
   ...fixtureFamilies.flatMap((family) => family.ids),
   ...securityFixtureIds,
   ...contentActionFixtureIds,
+  ...communicationRetryFixtureIds,
 ];
 
 /** Bound means a runnable fixture, not a passed model-quality evaluation. */
@@ -694,38 +702,47 @@ export function createProductionEveEvalAdapter(
         for (const family of fixtureFamilies)
           family.seed(manifest, options.store);
         seedContentActionFixture(manifest, options.store);
+        if (scenario.id === "communication-06")
+          seedCommunicationRetryFixture(manifest, options.store);
         const securityFixture = seedSecurityFixture(manifest, options.store);
         const boundScenario =
-          scenario.id === "documents-06"
+          scenario.id === "communication-06"
             ? {
                 ...scenario,
-                turns: bindContentActionTurns(manifest, scenario.turns),
+                turns: bindCommunicationRetryTurns(manifest, scenario.turns),
               }
-            : scenario.id === "documents-04"
+            : scenario.id === "documents-06"
               ? {
                   ...scenario,
-                  turns: bindDocumentReviewTurns(manifest, scenario.turns),
+                  turns: bindContentActionTurns(manifest, scenario.turns),
                 }
-              : securityFixture && "fixture" in scenario
-                ? bindSecurityScenario(scenario, securityFixture)
-                : scenario.id === "intelligence-04"
-                  ? {
-                      ...scenario,
-                      // The original question is ambiguous without page context.
-                      // Supply a visible user clarification, not hidden domain metadata.
-                      turns: [
-                        ...scenario.turns,
-                        "The Plant Intelligence reports for our church.",
-                      ],
-                    }
-                  : {
-                      ...scenario,
-                      turns: bindContentTurns(manifest, scenario.turns),
-                    };
+              : scenario.id === "documents-04"
+                ? {
+                    ...scenario,
+                    turns: bindDocumentReviewTurns(manifest, scenario.turns),
+                  }
+                : securityFixture && "fixture" in scenario
+                  ? bindSecurityScenario(scenario, securityFixture)
+                  : scenario.id === "intelligence-04"
+                    ? {
+                        ...scenario,
+                        // The original question is ambiguous without page context.
+                        // Supply a visible user clarification, not hidden domain metadata.
+                        turns: [
+                          ...scenario.turns,
+                          "The Plant Intelligence reports for our church.",
+                        ],
+                      }
+                    : {
+                        ...scenario,
+                        turns: bindContentTurns(manifest, scenario.turns),
+                      };
         let expectations =
-          securityFixture && "fixture" in scenario
-            ? securityExpectations(scenario, securityFixture)
-            : contentActionExpectations(manifest, options.store);
+          scenario.id === "communication-06"
+            ? communicationRetryExpectations(manifest, options.store)
+            : securityFixture && "fixture" in scenario
+              ? securityExpectations(scenario, securityFixture)
+              : contentActionExpectations(manifest, options.store);
         for (const family of fixtureFamilies) {
           if (expectations) break;
           expectations = family.expectations(manifest, options.store);
@@ -782,12 +799,13 @@ export function createProductionEveEvalAdapter(
               preparation:
                 options.preparation?.({ actor, manifest }) ??
                 (scenario.id === "regression-orientation" ||
+                scenario.id === "communication-06" ||
                 scenario.id === "wiki-06"
                   ? createEvePreparation({
                       actor,
                       conversationId: randomUUID(),
                       userRequestKey: randomUUID(),
-                      literalUserText: scenario.turns.join("\n"),
+                      literalUserText: boundScenario.turns.join("\n"),
                       pageContext: null,
                       now,
                       authorizeRead: (identity) =>
@@ -902,22 +920,29 @@ export function createProductionEveEvalAdapter(
               );
               const foreignIds = options.store.foreignRecordIds(manifest);
               const contentAction =
-                scenario.id === "wiki-06"
-                  ? await observedBookmarkPlanFacts(
+                scenario.id === "communication-06"
+                  ? await readPreparedCommunicationRetryFacts({
                       manifest,
-                      options.store,
+                      store: options.store,
                       calls,
-                      presented
-                    )
-                  : peopleCsv && result.eveSessionId
-                    ? observedBoundPeopleCsvFacts(
+                      presented,
+                    })
+                  : scenario.id === "wiki-06"
+                    ? await observedBookmarkPlanFacts(
                         manifest,
                         options.store,
                         calls,
-                        result.eveSessionId,
-                        peopleCsv.bytesBase64
+                        presented
                       )
-                    : null;
+                    : peopleCsv && result.eveSessionId
+                      ? observedBoundPeopleCsvFacts(
+                          manifest,
+                          options.store,
+                          calls,
+                          result.eveSessionId,
+                          peopleCsv.bytesBase64
+                        )
+                      : null;
               if (contentAction) {
                 Object.assign(captured.facts, contentAction.facts);
                 captured.evidence.push(...contentAction.evidence);
