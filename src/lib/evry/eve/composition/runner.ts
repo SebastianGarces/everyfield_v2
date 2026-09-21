@@ -1,5 +1,6 @@
 import {
   experimental_runCodeMode,
+  CodeModeToolError,
   type CodeModeExecutionPolicy,
 } from "@ai-sdk/code-mode";
 import { tool, type ToolSet } from "ai";
@@ -62,6 +63,13 @@ export function createCompositionBudget(maxCalls = 48): CompositionBudget {
 
 export type CompositionOutcome =
   | { status: "completed"; output: unknown; calls: number }
+  | {
+      status: "failed";
+      reason: "invalid_input";
+      toolName: string;
+      requiredFields: string[];
+      calls: number;
+    }
   | {
       status: "failed";
       reason: "cancelled" | "limit" | "program_failed";
@@ -168,6 +176,37 @@ export async function runEvryComposition(options: {
     if (budgetExceeded) return { status: "failed", reason: "limit", calls };
     return { status: "completed", output, calls };
   } catch (error) {
+    // Return only trusted schema names, never the SDK's reflected input or error
+    // message. Invalid arguments remain rejected before the registry is invoked.
+    if (
+      !options.signal?.aborted &&
+      !budgetExceeded &&
+      error instanceof CodeModeToolError
+    ) {
+      const invalid = z
+        .object({ toolName: z.string(), input: z.unknown() })
+        .safeParse(error.details);
+      if (invalid.success && Object.hasOwn(invalid.data, "input")) {
+        const entry = options.registry
+          .describe()
+          .find(({ name }) => name === invalid.data.toolName);
+        if (
+          entry &&
+          !(await entry.inputSchema.safeParseAsync(invalid.data.input)).success
+        ) {
+          const schema = z.toJSONSchema(entry.inputSchema, {
+            unrepresentable: "any",
+          });
+          return {
+            status: "failed",
+            reason: "invalid_input",
+            toolName: entry.name,
+            requiredFields: (schema.required ?? []).slice(0, 16),
+            calls,
+          };
+        }
+      }
+    }
     const code = z.object({ code: z.string() }).safeParse(error);
     const limited =
       code.success && /LIMIT|TIMEOUT|TOO_LARGE|MEMORY/.test(code.data.code);

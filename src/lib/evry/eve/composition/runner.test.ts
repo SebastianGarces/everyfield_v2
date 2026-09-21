@@ -132,6 +132,67 @@ test("shared turn budget is not reset between programs and cannot be caught away
   assert.equal(budget.used, 1);
 });
 
+test("invalid-input feedback contains only trusted tool and schema field names", async () => {
+  const result = await runEvryComposition({
+    ...base(),
+    registry: {
+      describe: () => [
+        {
+          name: "people.query",
+          description: "Read people",
+          effect: "read",
+          inputSchema: z.strictObject({ ids: z.array(z.string()) }),
+        },
+      ],
+      invoke: async () => {
+        throw new Error("must not invoke");
+      },
+    },
+    js: `return await tools["people.query"]({"secret-key-person@example.test":"secret-value-token",ids:"private-input"});`,
+  });
+  assert.deepEqual(result, {
+    status: "failed",
+    reason: "invalid_input",
+    toolName: "people.query",
+    requiredFields: ["ids"],
+    calls: 0,
+  });
+  assert.doesNotMatch(JSON.stringify(result), /secret|private|example/);
+});
+
+test("validation feedback bounds trusted schema names and omits custom refinement messages", async () => {
+  const schema = z
+    .strictObject(
+      Object.fromEntries(
+        Array.from({ length: 20 }, (_, index) => [`field${index}`, z.string()])
+      )
+    )
+    .refine(() => false, "private refinement diagnostic");
+  const result = await runEvryComposition({
+    ...base(),
+    registry: {
+      describe: () => [
+        {
+          name: "people.query",
+          description: "Read people",
+          effect: "read",
+          inputSchema: schema,
+        },
+      ],
+      invoke: async () => {
+        throw new Error("must not invoke");
+      },
+    },
+    js: `return await tools["people.query"](Object.fromEntries(Array.from({length:20},(_,i)=>["field"+i,"sensitive-value"])));`,
+  });
+  assert.equal(result.status, "failed");
+  if (result.status !== "failed" || result.reason !== "invalid_input")
+    assert.fail("Expected bounded validation feedback");
+  assert.equal(result.requiredFields.length, 16);
+  assert.equal(result.calls, 0);
+  assert.doesNotMatch(JSON.stringify(result), /private|sensitive/);
+});
+
 test("infinite code is interrupted by the real worker deadline", async () => {
   const result = await runEvryComposition({
     ...base(),
