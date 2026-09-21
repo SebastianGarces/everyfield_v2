@@ -36,7 +36,6 @@ import { stagePeopleFile } from "./eve-client/files";
 import type { PreparedEvryPeopleFile } from "./people-file-state";
 import {
   EVE_RETRY_MESSAGE,
-  EVE_TURN_FAILURE_MESSAGE,
   latestEveTurnFailure,
 } from "./eve-client/turn-failure";
 
@@ -195,8 +194,7 @@ export function EvryShell({
       ? null
       : latestEveTurnFailure(client?.events ?? []);
   const visibleError =
-    error ??
-    (!dismissedFailure && turnFailure ? EVE_TURN_FAILURE_MESSAGE : null);
+    error ?? (!dismissedFailure && turnFailure ? turnFailure.message : null);
   const isSending = client?.status === "submitted";
   const isWorking =
     isSending || client?.status === "streaming" || executing || uploading;

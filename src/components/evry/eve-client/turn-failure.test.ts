@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { MessageStreamEvent } from "eve/client";
-import { latestEveTurnFailure } from "./turn-failure";
+import { latestEveTurnFailure, EVE_TURN_FAILURE_MESSAGE } from "./turn-failure";
+import {
+  EVE_PROCESSING_LIMIT_SENTINEL,
+  EVE_PROCESSING_LIMIT_MESSAGE,
+} from "@/lib/evry/eve/runtime/processing-budget-policy";
 
 const at = "2026-09-20T12:00:00.000Z";
 const started = {
@@ -28,7 +32,49 @@ const waiting: MessageStreamEvent = {
 test("a recoverable failed turn survives parking and history replay without exposing provider details", () => {
   assert.deepEqual(latestEveTurnFailure([started, failed, waiting]), {
     turnId: "turn-1",
+    message: EVE_TURN_FAILURE_MESSAGE,
   });
+});
+
+test("only the exact processing guard failure receives its specific safe explanation", () => {
+  const limit = {
+    ...failed,
+    data: { ...failed.data, message: EVE_PROCESSING_LIMIT_SENTINEL },
+  };
+  assert.equal(
+    latestEveTurnFailure([started, limit, waiting])?.message,
+    EVE_PROCESSING_LIMIT_MESSAGE
+  );
+  assert.equal(
+    latestEveTurnFailure([
+      { ...limit, data: { ...limit.data, code: "EVENT_HANDLER_FAILED" } },
+      waiting,
+    ])?.message,
+    EVE_PROCESSING_LIMIT_MESSAGE
+  );
+  for (const message of [
+    "Provider " + EVE_PROCESSING_LIMIT_SENTINEL,
+    "Sensitive provider detail",
+  ])
+    assert.equal(
+      latestEveTurnFailure([{ ...failed, data: { ...failed.data, message } }])
+        ?.message,
+      EVE_TURN_FAILURE_MESSAGE
+    );
+  assert.equal(
+    latestEveTurnFailure([
+      { ...limit, data: { ...limit.data, code: "COMPACTION_FAILED" } },
+      waiting,
+    ])?.message,
+    EVE_PROCESSING_LIMIT_MESSAGE
+  );
+  assert.equal(
+    latestEveTurnFailure([
+      { ...failed, data: { ...failed.data, code: "COMPACTION_FAILED" } },
+      waiting,
+    ])?.message,
+    EVE_TURN_FAILURE_MESSAGE
+  );
 });
 
 test("a new turn, completion, or cancellation supersedes the previous failure", () => {
