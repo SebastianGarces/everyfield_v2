@@ -184,11 +184,11 @@ for (const audience of [
           "automatic preparation plus repeated result markers must render one review"
         );
         const confirmation = confirmations[0];
-      assert.ok(
-        confirmation.kind === "artifact" &&
-          confirmation.artifact.kind === "confirmation"
-      );
-      assert.ok("steps" in confirmation.artifact);
+        assert.ok(
+          confirmation.kind === "artifact" &&
+            confirmation.artifact.kind === "confirmation"
+        );
+        assert.ok("steps" in confirmation.artifact);
         assert.deepEqual(
           confirmation.artifact.steps
             .find((step) => step.audience?.kind === "guests")

@@ -26,7 +26,10 @@ test("quantity guidance preserves denominator and scope through the closing summ
 });
 
 test("review handoffs avoid duplication without shortening substantive overviews or bypassing confirmation", () => {
-  assert.match(instructions, /brief handoff rather than a second field-by-field/);
+  assert.match(
+    instructions,
+    /brief handoff rather than a second field-by-field/
+  );
   assert.match(instructions, /when the user asked for that explanation/);
   assert.match(instructions, /not to substantive overviews or explanations/);
   assert.match(
@@ -34,7 +37,10 @@ test("review handoffs avoid duplication without shortening substantive overviews
     /progress out of the total, the most important open work, and supported implications/
   );
   assert.match(launch, /Do not replace the whole overview with a one-record/);
-  assert.match(invitation, /without repeating them as another checklist in prose/);
+  assert.match(
+    invitation,
+    /without repeating them as another checklist in prose/
+  );
   assert.match(invitation, /one editable subject\/body preview/);
   assert.match(invitation, /Use future tense until execution receipts/);
   assert.match(invitation, /not confirmation of an unseen execution plan/);

@@ -12,7 +12,10 @@ import {
 } from "@/lib/evry/eve/evals/fixtures/manifest";
 import { runCompiledEveFixture } from "@/lib/evry/eve/evals/http/process";
 import { withLiveReviewBudget } from "./evry-eve-live-budget";
-import { seedLaunchReviewFixture, launchReviewTruth } from "@/lib/evry/eve/evals/fixtures/launch-review";
+import {
+  seedLaunchReviewFixture,
+  launchReviewTruth,
+} from "@/lib/evry/eve/evals/fixtures/launch-review";
 
 async function review(allowance: number) {
   if (!Number.isFinite(allowance) || allowance <= 0 || allowance > 1)
@@ -48,7 +51,9 @@ async function review(allowance: number) {
       const manifest = createFixtureManifest(`review-corrections-${name}`, 0);
       const i = manifest.ids;
       store.seed(manifest);
-      store.sql(`update locations set name='Evry Community Center', address='100 Example Lane, Albany, NY 12207' where id='${i["church-location"]}';`);
+      store.sql(
+        `update locations set name='Evry Community Center', address='100 Example Lane, Albany, NY 12207' where id='${i["church-location"]}';`
+      );
       seedLaunchReviewFixture(manifest, store);
       const truth = launchReviewTruth(manifest, store);
       const before = store.auditStart();
@@ -125,10 +130,16 @@ async function review(allowance: number) {
           latency: outcome.latency,
           visible,
           questions: outcome.messages.flatMap((message) =>
-            message.parts.flatMap((part) => part.type === "dynamic-tool" && part.toolName === "ask_question" ? [{
-                input: part.input,
-                metadata: part.toolMetadata?.eve,
-              }] : [])
+            message.parts.flatMap((part) =>
+              part.type === "dynamic-tool" && part.toolName === "ask_question"
+                ? [
+                    {
+                      input: part.input,
+                      metadata: part.toolMetadata?.eve,
+                    },
+                  ]
+                : []
+            )
           ),
           calls: outcome.hostCapture.calls,
           failures: outcome.runtimeProof?.failures,
