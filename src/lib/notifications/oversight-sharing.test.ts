@@ -46,7 +46,8 @@ test("every feature the panel writes is a feature the action admits", () => {
   }
   assert.equal(isSharingFeature("everything"), false);
   assert.equal(isSharingFeature("share_people"), false);
-  assert.equal(EVERY_FEATURE.length, 7);
+  assert.equal(EVERY_FEATURE.length, 8);
+  assert.equal(privacyColumnFor("wiki"), "shareWiki");
 });
 
 test("every column CS-013 turns on has a switch in the panel", () => {
