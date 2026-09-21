@@ -63,6 +63,7 @@ async function main() {
     await import("../src/lib/tasks/dependencies");
   const {
     completeTask,
+    ActiveTaskOccurrenceError,
     reopenTask,
     defaultBulkTaskDeps,
     createNextRecurrence,
@@ -288,6 +289,30 @@ async function main() {
     assert.equal(children[0]!.status, "not_started");
     evidence.push(
       "barrier-forced series race: exact unique refusal, one weekly successor and one unticked checklist"
+    );
+    await assert.rejects(reopenTask(plant.id, first.id, actor), (error) => {
+      assert.ok(error instanceof ActiveTaskOccurrenceError);
+      assert.ok(error.message.includes(rows[0]!.title));
+      assert.ok(error.message.includes("2026-09-28"));
+      assert.ok(
+        error.message.includes("Continue with that occurrence in Tasks")
+      );
+      return true;
+    });
+    const [stillComplete] = await db
+      .select()
+      .from(tasks)
+      .where(eq(tasks.id, first.id));
+    assert.equal(stillComplete!.status, "complete");
+    await deleteTask(plant.id, rows[0]!.id);
+    await reopenTask(plant.id, first.id, actor);
+    const [reopenedPredecessor] = await db
+      .select()
+      .from(tasks)
+      .where(eq(tasks.id, first.id));
+    assert.equal(reopenedPredecessor!.status, "not_started");
+    evidence.push(
+      "real recurrence index: reopen names active successor and preserves completed predecessor; succeeds after successor deletion"
     );
     const parent = await fresh();
     const child = await fresh({ parentTaskId: parent.id });

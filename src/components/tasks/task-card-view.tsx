@@ -321,7 +321,7 @@ export function TaskCardView({
                 "flex items-center gap-1",
                 !isComplete &&
                   dueDateInfo.isOverdue &&
-                  "font-medium text-red-600",
+                  "font-medium text-red-600 dark:text-red-400",
                 !isComplete &&
                   dueDateInfo.isDueToday &&
                   "font-medium text-orange-600",

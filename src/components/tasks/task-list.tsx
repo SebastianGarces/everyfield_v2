@@ -133,7 +133,7 @@ function groupTasksByDueDate(tasks: TaskListRow[], now: Date): TaskGroup[] {
 }
 
 const GROUP_STYLES: Record<string, string> = {
-  overdue: "text-red-600",
+  overdue: "text-red-600 dark:text-red-400",
   today: "text-orange-600",
   upcoming: "text-blue-600",
   later: "text-muted-foreground",

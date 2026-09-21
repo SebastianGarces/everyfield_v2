@@ -24,6 +24,7 @@ import {
   isNull,
   lte,
   ne,
+  notExists,
   or,
   sql,
   type SQL,
@@ -1341,6 +1342,16 @@ export async function completeTask(
   return { task: completed, nextInstance };
 }
 
+export class ActiveTaskOccurrenceError extends Error {
+  constructor(active: Pick<Task, "title" | "dueDate">) {
+    const due = active.dueDate ? ` (due ${active.dueDate})` : "";
+    super(
+      `This recurring task already has an open occurrence: "${active.title}"${due}. Continue with that occurrence in Tasks.`
+    );
+    this.name = "ActiveTaskOccurrenceError";
+  }
+}
+
 /**
  * Reopen a completed task (set status back to not_started).
  */
@@ -1360,8 +1371,35 @@ export async function reopenTask(
     throw new Error("Task is not complete");
   }
 
-  const [, [reopened]] = await db.batch([
+  const active = alias(tasks, "active_occurrence");
+  // Derive the series from the current row inside the locked transaction,
+  // not the preflight snapshot. Match the database arbiter's exact key.
+  const activeOccurrence = db
+    .select({ title: active.title, dueDate: active.dueDate })
+    .from(tasks)
+    .innerJoin(
+      active,
+      and(
+        eq(active.churchId, tasks.churchId),
+        ne(active.id, tasks.id),
+        eq(active.isRecurring, true),
+        ne(active.status, "complete"),
+        isNull(active.deletedAt),
+        sql`coalesce(${active.recurrenceRule}->>'seriesId', ${active.id}::text) = coalesce(${tasks.recurrenceRule}->>'seriesId', ${tasks.id}::text)`
+      )
+    )
+    .where(
+      and(
+        eq(tasks.churchId, churchId),
+        eq(tasks.id, taskId),
+        eq(tasks.isRecurring, true),
+        isNull(tasks.deletedAt)
+      )
+    )
+    .limit(1);
+  const [, [openOccurrence], [reopened]] = await db.batch([
     taskStructureLockStatement(churchId),
+    activeOccurrence,
     db
       .update(tasks)
       .set({
@@ -1374,15 +1412,16 @@ export async function reopenTask(
         and(
           eq(tasks.churchId, churchId),
           eq(tasks.id, taskId),
-          isNull(tasks.deletedAt)
+          isNull(tasks.deletedAt),
+          eq(tasks.status, "complete"),
+          notExists(activeOccurrence)
         )
       )
       .returning(),
   ]);
 
-  if (!reopened) {
-    throw new Error("Failed to reopen task");
-  }
+  if (openOccurrence) throw new ActiveTaskOccurrenceError(openOccurrence);
+  if (!reopened) throw new Error("Task is not complete");
 
   // Reopen is a re-enqueue, and it works because cancelling RELEASED the dedupe
   // key: the unique index is partial on `status <> 'cancelled'`, so the rows
