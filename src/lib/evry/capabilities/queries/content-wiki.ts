@@ -61,7 +61,9 @@ export function wikiSearchQuery(
       id: wikiArticles.id,
       slug: wikiArticles.slug,
       title: wikiArticles.title,
-      updatedAt: sql<string>`${wikiArticles.updatedAt}::text`.as("updated_at"),
+      updatedAt: sql<string>`${wikiArticles.updatedAt} at time zone 'UTC'`.as(
+        "updated_at"
+      ),
       phase: wikiArticles.phase,
       category: wikiArticles.contentType,
       excerpt: (query === null

@@ -41,6 +41,11 @@ test("wiki union counts distinct articles before one shared page", () => {
   assert.equal((statement.sql.match(/ limit /g) ?? []).length, 1);
   assert.equal((statement.sql.match(/ offset /g) ?? []).length, 1);
   assert.match(statement.sql, /jsonb_agg\(distinct query_provenance/);
+  assert.match(
+    statement.sql,
+    /"wiki_articles"\."updated_at" at time zone 'UTC' as "updated_at"/,
+    "JSON search revisions carry an explicit offset, matching UTC driver decoding"
+  );
 });
 
 test(

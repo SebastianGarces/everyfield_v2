@@ -20,8 +20,11 @@ test(
   async (t) => {
     const stack = await startFixtureStack(process.cwd());
     const originalFetch = globalThis.fetch;
+    const originalTimeZone = process.env.TZ;
     let outboundAttempts = 0;
     try {
+      // Search revisions must match driver-decoded reads outside UTC as well.
+      process.env.TZ = "America/New_York";
       process.env.DATABASE_URL = stack.databaseUrl;
       process.env.RESEND_API_KEY = "re_eve_fixture_never_sent";
       neonConfig.fetchEndpoint = stack.proxyUrl;
@@ -152,7 +155,13 @@ test(
                   )?.value;
                   assert.ok(slug);
                   let offset = 0;
-                  let revision: string | undefined;
+                  let revision = item.facts?.find(
+                    (f) => f.label === "Revision"
+                  )?.value;
+                  assert.ok(
+                    revision,
+                    "Search supplies the initial revision pin"
+                  );
                   do {
                     const read = capturedReadArtifactSchema.parse(
                       await invoke(
@@ -285,6 +294,8 @@ test(
         });
     } finally {
       globalThis.fetch = originalFetch;
+      if (originalTimeZone === undefined) delete process.env.TZ;
+      else process.env.TZ = originalTimeZone;
       await stack.cleanup();
     }
   }
