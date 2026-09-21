@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   boolean,
+  check,
   date,
   index,
   integer,
@@ -51,6 +52,9 @@ export const PREDEFINED_TEAM_KEYS = [
 ] as const;
 
 export type PredefinedTeamKey = (typeof PREDEFINED_TEAM_KEYS)[number];
+
+export const teamLeaderSources = ["explicit", "role", "legacy"] as const;
+export type TeamLeaderSource = (typeof teamLeaderSources)[number];
 
 export const teamStatuses = ["forming", "active", "paused"] as const;
 export type TeamStatus = (typeof teamStatuses)[number];
@@ -142,19 +146,17 @@ export const ministryTeams = pgTable(
       .default("predefined"),
     description: text("description"),
     icon: varchar("icon", { length: 50 }),
-    /**
-     * The team's leader, as a PERSON.
-     *
-     * TWO DOORS WRITE IT AND THEY ARE NOT EQUALS (#311 WS2). `assignTeamLeader`
-     * is the EXPLICIT one and it sets this column unconditionally. The DERIVED
-     * one is `leader-sync.ts`: a filled leadership role implies the team's
-     * leader, but only while the column is NULL, so an explicit answer is never
-     * overwritten by somebody being seated.
-     *
-     * NOTHING RECORDS WHICH DOOR WROTE IT, deliberately — see `leader-sync.ts`
-     * for what that costs.
-     */
+    /** MT-003/MT-004b: explicit appointments survive role changes. */
     leaderId: uuid("leader_id").references(() => persons.id),
+    leaderSource: varchar("leader_source", {
+      length: 10,
+    }).$type<TeamLeaderSource>(),
+    /**
+     * The role that supplied a derived leader. This is an internal provenance
+     * token, not an authorization grant or a cascading foreign key: deleteRole
+     * removes the role before clearing its derived leadership.
+     */
+    leaderRoleId: uuid("leader_role_id"),
     /**
      * When this team was offered its playbook responsibilities — the CLAIM that
      * makes that offer happen exactly once (#311 WS1).
@@ -188,6 +190,16 @@ export const ministryTeams = pgTable(
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (table) => [
+    check(
+      "ministry_teams_leader_provenance_check",
+      sql`(
+        (${table.leaderId} is null and ${table.leaderSource} is null and ${table.leaderRoleId} is null)
+        or (${table.leaderId} is not null and ${table.leaderSource} is not null and (
+          (${table.leaderSource} in ('explicit', 'legacy') and ${table.leaderRoleId} is null)
+          or (${table.leaderSource} = 'role' and ${table.leaderRoleId} is not null)
+        ))
+      )`
+    ),
     index("ministry_teams_church_id_idx").on(table.churchId),
     index("ministry_teams_leader_id_idx").on(table.leaderId),
     uniqueIndex("ministry_teams_predefined_name_unique_idx")

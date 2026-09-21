@@ -8,6 +8,8 @@ export const organizationInvitationTypes = [
   "church_to_sending_church",
   "sending_church_to_network",
   "church_to_network",
+  "discovery_to_sending_church",
+  "discovery_to_network",
 ] as const;
 export type OrganizationInvitationType =
   (typeof organizationInvitationTypes)[number];
@@ -43,6 +45,7 @@ export const organizationInvitations = pgTable(
     // account yet has no target row to point at until they register (see
     // `bindOpenInvitationTarget` in `src/lib/invitations/core.ts`).
     inviteeEmail: varchar("invitee_email", { length: 255 }),
+    targetUserId: uuid("target_user_id").references(() => users.id),
     // Target entity being invited
     targetChurchId: uuid("target_church_id").references(() => churches.id),
     targetSendingChurchId: uuid("target_sending_church_id").references(
@@ -70,6 +73,7 @@ export const organizationInvitations = pgTable(
     index("org_invitations_target_sending_church_id_idx").on(
       table.targetSendingChurchId
     ),
+    index("org_invitations_target_user_id_idx").on(table.targetUserId),
     index("org_invitations_status_idx").on(table.status),
     index("org_invitations_inviter_user_id_idx").on(table.inviterUserId),
     // The invitations surface lists by INVITING org, not by inviter (#23): the
