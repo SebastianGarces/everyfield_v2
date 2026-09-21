@@ -157,6 +157,24 @@ import {
   staffingOverviewExpectations,
   observedStaffingOverviewFacts,
 } from "./staffing-overview";
+import {
+  peopleCohortsFixtureIds,
+  seedPeopleCohortsFixture,
+  peopleCohortsExpectations,
+  observedPeopleCohortsFacts,
+} from "./people-cohorts";
+import {
+  intelligenceReportsFixtureIds,
+  seedIntelligenceReportsFixture,
+  intelligenceReportsExpectations,
+  observedIntelligenceReportsFacts,
+} from "./intelligence-reports";
+import {
+  communicationDeliveryFixtureIds,
+  seedCommunicationDeliveryFixture,
+  communicationDeliveryExpectations,
+  observedCommunicationDeliveryFacts,
+} from "./communication-delivery";
 
 type FixtureTransports = {
   prepareDocumentFiles?: DocumentFixtureTransport;
@@ -343,6 +361,24 @@ const fixtureFamilies: readonly FixtureFamily[] = [
     seed: seedStaffingOverviewFixture,
     expectations: staffingOverviewExpectations,
     observe: observedStaffingOverviewFacts,
+  },
+  {
+    ids: peopleCohortsFixtureIds,
+    seed: seedPeopleCohortsFixture,
+    expectations: peopleCohortsExpectations,
+    observe: observedPeopleCohortsFacts,
+  },
+  {
+    ids: intelligenceReportsFixtureIds,
+    seed: seedIntelligenceReportsFixture,
+    expectations: intelligenceReportsExpectations,
+    observe: observedIntelligenceReportsFacts,
+  },
+  {
+    ids: communicationDeliveryFixtureIds,
+    seed: seedCommunicationDeliveryFixture,
+    expectations: communicationDeliveryExpectations,
+    observe: observedCommunicationDeliveryFacts,
   },
 ];
 const familyCaseIds = [

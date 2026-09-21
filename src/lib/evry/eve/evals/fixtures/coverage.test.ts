@@ -92,6 +92,20 @@ const expectedOriginals = [
   "roles-02",
   "training-04",
   "cross-03",
+  "people-01",
+  "people-04",
+  "people-07",
+  "interviews-04",
+  "commitments-02",
+  "commitments-04",
+  "intelligence-01",
+  "intelligence-02",
+  "intelligence-03",
+  "intelligence-05",
+  "communication-01",
+  "communication-02",
+  "communication-03",
+  "communication-04",
 ].sort();
 const expectedRegressions = [
   "regression-today",
@@ -107,16 +121,17 @@ const expectedRegressions = [
   "regression-pagination",
   "regression-multi-assignee",
   "regression-today-midnight",
+  "regression-template-placeholders",
 ].sort();
 
-test("default production fixture coverage has 80 bindings and does not claim the remaining 78 pass", () => {
+test("default production fixture coverage has 95 bindings and does not claim the remaining 63 pass", () => {
   const coverage = productionFixtureCoverage();
   const corpus = [...questions, ...regressions];
   assert.deepEqual(coverage.counts, {
-    runnable: 80,
-    originals: 67,
-    regressions: 13,
-    unbound: 78,
+    runnable: 95,
+    originals: 81,
+    regressions: 14,
+    unbound: 63,
     corpus: 158,
   });
   assert.deepEqual([...coverage.originalIds].sort(), expectedOriginals);
@@ -165,7 +180,7 @@ test("adapter eligibility agrees with coverage before any storage or runtime wor
       await assert.rejects(adapter.prepare(scenario), reachedSeed);
     else assert.equal(await adapter.prepare(scenario), null, scenario.id);
   }
-  assert.equal(seeds, 80);
+  assert.equal(seeds, 95);
   assert.equal(
     await adapter.prepare({ ...questions[0]!, id: "unknown-case" }),
     null
@@ -176,7 +191,7 @@ test("adapter eligibility agrees with coverage before any storage or runtime wor
     await adapter.prepare({ ...questions[0]!, id: "regression-today" }),
     null
   );
-  assert.equal(seeds, 80);
+  assert.equal(seeds, 95);
 });
 
 test("document comparison is opt-in only after a file transport is supplied", async () => {
@@ -197,10 +212,10 @@ test("document comparison is opt-in only after a file transport is supplied", as
     };
   };
   assert.deepEqual(productionFixtureCoverage({ prepareDocumentFiles }).counts, {
-    runnable: 81,
-    originals: 68,
-    regressions: 13,
-    unbound: 77,
+    runnable: 96,
+    originals: 82,
+    regressions: 14,
+    unbound: 62,
     corpus: 158,
   });
   assert.ok(productionFixtureCoverage().unboundIds.includes("documents-04"));
@@ -366,10 +381,10 @@ test("CSV review requires its signed attachment transport and revokes a failed s
     throw provisionError;
   };
   assert.deepEqual(productionFixtureCoverage({ preparePeopleCsv }).counts, {
-    runnable: 81,
-    originals: 68,
-    regressions: 13,
-    unbound: 77,
+    runnable: 96,
+    originals: 82,
+    regressions: 14,
+    unbound: 62,
     corpus: 158,
   });
   assert.deepEqual(
@@ -378,10 +393,10 @@ test("CSV review requires its signed attachment transport and revokes a failed s
       prepareDocumentFiles: async () => async () => {},
     }).counts,
     {
-      runnable: 82,
-      originals: 69,
-      regressions: 13,
-      unbound: 76,
+      runnable: 97,
+      originals: 83,
+      regressions: 14,
+      unbound: 61,
       corpus: 158,
     }
   );
