@@ -95,6 +95,8 @@ export const observationSchema = z.strictObject({
   latency: z.strictObject({
     acknowledgementMs: z.number().nonnegative(),
     firstTextMs: z.number().nonnegative().nullable(),
+    // Omitted in older captures; null means no interaction was received.
+    firstInteractionMs: z.number().nonnegative().nullable().optional(),
     totalMs: z.number().nonnegative(),
   }),
   costUsd: z.number().nonnegative(),

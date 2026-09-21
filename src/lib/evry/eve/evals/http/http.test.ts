@@ -289,6 +289,9 @@ test("official Eve client runner uses cookie auth, fixed-session follow-ups and 
       signal: new AbortController().signal,
     });
     assert.equal(result.answer, "Answer 1\n\nAnswer 2");
+    assert.ok(result.latency.firstInteractionMs !== null);
+    assert.ok(result.latency.firstInteractionMs !== undefined);
+    assert.ok(result.latency.firstInteractionMs <= result.latency.firstTextMs!);
     assert.equal(result.clarificationCount, 0);
     assert.deepEqual(result.clarificationMeasurement, {
       basis: "structural_lower_bound",

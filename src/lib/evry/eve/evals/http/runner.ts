@@ -14,6 +14,7 @@ import {
 } from "./host";
 import { fixtureTranscript } from "./transcript";
 import { observeClarifications } from "./clarifications";
+import { splitEveResponse } from "../../presentation";
 import type { Observation } from "../contract";
 import { isDeepStrictEqual } from "node:util";
 import {
@@ -27,6 +28,7 @@ export type HttpEvalOutcome = {
   latency: {
     acknowledgementMs: number;
     firstTextMs: number | null;
+    firstInteractionMs?: number | null;
     totalMs: number;
   };
   clarificationCount: number;
@@ -48,6 +50,45 @@ export type HttpEvalOutcome = {
     invocationsAfter: number;
   };
 };
+
+/** Receipt time of visible text or a question the chat can actually answer. */
+export function createFirstInteractionObserver() {
+  let firstInteractionMs: number | null = null;
+  const textByStep = new Map<string, string>();
+  return {
+    get firstInteractionMs() {
+      return firstInteractionMs;
+    },
+    receive(event: MessageStreamEvent, elapsedMs: number) {
+      if (firstInteractionMs !== null) return;
+      if (
+        event.type === "input.requested" &&
+        event.data.requests.some(
+          (request) => request.kind === "question" && request.prompt.trim()
+        )
+      ) {
+        firstInteractionMs = elapsedMs;
+      } else if (
+        event.type === "message.appended" ||
+        event.type === "message.completed"
+      ) {
+        const key = JSON.stringify([event.data.turnId, event.data.stepIndex]);
+        const complete = event.type === "message.completed";
+        const text =
+          event.type === "message.appended"
+            ? (textByStep.get(key) ?? "") + event.data.messageDelta
+            : (event.data.message ?? "");
+        textByStep.set(key, text);
+        if (
+          splitEveResponse(text, complete).some(
+            (part) => part.kind === "text" && part.text.trim()
+          )
+        )
+          firstInteractionMs = elapsedMs;
+      }
+    },
+  };
+}
 
 /** Uses the production cookie-authenticated protocol, never /info or a replacement tool loop. */
 export function createHttpEveEvalRunner(config: {
@@ -114,6 +155,7 @@ export function createHttpEveEvalRunner(config: {
     const started = performance.now();
     let acknowledgementMs = 0;
     let firstTextMs: number | null = null;
+    const interaction = createFirstInteractionObserver();
     const events: MessageStreamEvent[] = [];
     let pendingQuestions: readonly InputRequest[] = [];
     try {
@@ -174,6 +216,7 @@ export function createHttpEveEvalRunner(config: {
         if (index === 0) acknowledgementMs = performance.now() - started;
         let ended = false;
         for await (const event of response) {
+          interaction.receive(event, performance.now() - started);
           events.push(event);
           config.onEvent?.(event);
           if (
@@ -286,6 +329,7 @@ export function createHttpEveEvalRunner(config: {
         latency: {
           acknowledgementMs,
           firstTextMs,
+          firstInteractionMs: interaction.firstInteractionMs,
           totalMs: performance.now() - started,
         },
         ...observeClarifications(transcript),

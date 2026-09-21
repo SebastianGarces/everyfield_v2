@@ -176,6 +176,7 @@ export const httpEvalOutcomeSchema = z.object({
   latency: z.object({
     acknowledgementMs: z.number(),
     firstTextMs: z.number().nullable(),
+    firstInteractionMs: z.number().nonnegative().nullable().optional(),
     totalMs: z.number(),
   }),
   clarificationCount: z.number(),
