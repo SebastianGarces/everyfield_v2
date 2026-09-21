@@ -17,6 +17,7 @@ export const churchPrivacySettings = pgTable(
       .default(false)
       .notNull(),
     shareFacilities: boolean("share_facilities").default(false).notNull(),
+    shareWiki: boolean("share_wiki").default(false).notNull(),
     /**
      * F11 N-026 (ruled 2026-07-27) — the ONE control over everything an
      * oversight recipient (`sending_church_admin`, `network_admin`) is told

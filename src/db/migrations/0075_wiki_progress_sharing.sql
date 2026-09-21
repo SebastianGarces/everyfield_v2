@@ -1,0 +1,24 @@
+-- #62. Root-allocated index 75; generated against actual main through 0069.
+-- Migration timestamp: 1789045871929.
+-- Slots 0070-0074 belong to pending Evri work and are intentionally absent here.
+-- No prior migration or snapshot is imported, rewritten or restamped.
+--
+-- DEPLOYMENT HOLD: do not apply to a shared database until the orchestrator
+-- resolves the pending 0070-0074 ledger order. A database that applies this
+-- timestamp first will silently skip lower-timestamp migrations arriving later.
+-- The Evri owner/root must provide a forward reconciliation for that case;
+-- this migration does not rewrite any historical ledger row.
+-- Before shared apply, inspect the ledger and pending migration set read-only:
+-- if any required lower-timestamp migration is absent, STOP for orchestration.
+-- If they are already applied, root still verifies their committed hashes and
+-- releases this migration explicitly. No IF NOT EXISTS hides unknown DDL.
+--
+-- SNAPSHOT: 0075 currently descends from 0069. When Evri 0070-0074 are integrated,
+-- regenerate 0075 against the combined actual schema with the last preceding
+-- snapshot as parent. Preserve the applied SQL bytes and journal timestamp.
+--
+-- Rollback (scratch or explicit operator action only):
+-- ALTER TABLE "church_privacy_settings" DROP COLUMN "share_wiki";
+-- Existing sharing choices are untouched; no existing row is opted into wiki.
+
+ALTER TABLE "church_privacy_settings" ADD COLUMN "share_wiki" boolean DEFAULT false NOT NULL;
