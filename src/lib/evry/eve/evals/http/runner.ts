@@ -121,6 +121,18 @@ export function createHttpEveEvalRunner(config: {
         : input.scenario.turns
       ).entries()) {
         signal.throwIfAborted();
+        const questionReply =
+          typeof turn === "string" &&
+          pendingQuestions.length === 1 &&
+          pendingQuestions[0]?.kind === "question";
+        if (
+          typeof turn === "string" &&
+          pendingQuestions.length &&
+          !questionReply
+        )
+          throw new Error(
+            "A paused evaluation requires an explicit response, not another message"
+          );
         if (typeof turn !== "string" && pendingQuestions.length !== 1)
           throw new Error(
             "Fixture response needs exactly one pending question"
@@ -135,15 +147,17 @@ export function createHttpEveEvalRunner(config: {
           streamReconnectPolicy: { reconnect: false as const },
         };
         const response =
-          typeof turn === "string"
+          typeof turn === "string" && !questionReply
             ? await session.send(turn, options)
             : await session.respond(
                 [
                   {
                     requestId: pendingQuestions[0]!.requestId,
-                    ...("optionId" in turn
-                      ? { optionId: turn.optionId }
-                      : { text: turn.respond }),
+                    ...(typeof turn === "string"
+                      ? { text: turn }
+                      : "optionId" in turn
+                        ? { optionId: turn.optionId }
+                        : { text: turn.respond }),
                   },
                 ],
                 options

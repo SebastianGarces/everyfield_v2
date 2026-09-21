@@ -140,6 +140,15 @@ export const httpEvalOutcomeSchema = z.object({
     outboundMessages: z.number(),
     costUsd: z.number(),
     costBasis: z.enum(["provider_usage", "reserved_upper_bound"]),
+    modelCalls: z.array(
+      z.object({
+        reservedUsd: z.number(),
+        inputBytes: z.number(),
+        inputTokens: z.number().nullable(),
+        outputTokens: z.number().nullable(),
+        costUsd: z.number().nullable(),
+      })
+    ),
   }),
   eveSessionId: z.string(),
 });

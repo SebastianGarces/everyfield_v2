@@ -49,7 +49,10 @@ test(
                   {
                     id: "load-preparation",
                     name: "load_tools",
-                    input: { names: ["actions.prepare"] },
+                    input: {
+                      names: ["actions.prepare"],
+                      preparationOperations: ["recipe.meeting-invite"],
+                    },
                   },
                 ],
               },

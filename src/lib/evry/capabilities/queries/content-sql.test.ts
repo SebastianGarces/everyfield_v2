@@ -120,7 +120,11 @@ before(() => {
     insert into generated_documents (id,church_id,user_id,template_id,format,created_at) values ('${message}','${plant}','${account}','commitment-card','pdf','2026-09-10'), ('${other}','${other}','${account}','commitment-card','pdf','2026-09-10');
     insert into wiki_articles (id,church_id,slug,title,content,status,content_type,phase,updated_at) values ('${message}',null,'orientation','Orientation','Orientation with guests','published','guide',2,'2026-09-09'), ('${other}','${other}','private','Orientation','Private orientation','published','guide',2,'2026-09-09');
     insert into launches (id,church_id,status,target_date,updated_at) values ('${message}','${plant}','planning','2026-09-20','2026-09-09');
-    insert into launch_milestones (id,church_id,title,area,sort_order) values ('${message}','${plant}','Ready','operations',1);
+    insert into launch_milestones (id,church_id,launch_id,title,area,sort_order) values ('${message}','${plant}','${message}','Ready','operations',1);
+    insert into launch_milestones (id,church_id,launch_id,title,area,sort_order,completed_at) select gen_random_uuid(),'${plant}','${message}','Milestone ' || n,'operations',n + 1,case when n <= 4 then '2026-09-01'::timestamp else null end from generate_series(1,8) n;
+    insert into launch_milestones (id,church_id,launch_id,title,area,sort_order) values (gen_random_uuid(),'${other}','${message}','Foreign','operations',1), (gen_random_uuid(),'${plant}','${other}','Other launch','operations',1);
+    insert into tasks(id,church_id,title,status,assigned_to_id,due_date) values ('${message}','${plant}','Prepare launch','not_started','${account}','2026-09-19');
+    insert into launch_milestone_tasks(id,church_id,milestone_id,task_id) values ('${message}','${plant}','${message}','${message}');
     insert into plant_assessments (id,church_id,status,generated_at,phase,rubric_version) values ('${message}','${plant}','complete','2026-09-09',2,'v1'), ('${other}','${other}','complete','2026-09-09',2,'v1');
   `);
 });
@@ -317,6 +321,25 @@ test(
       )
     )[0];
     assert.equal(launch.rows[0].facts["Days until launch"], 10);
+    assert.equal(launch.rows[0].facts["Milestones total"], 9);
+    assert.equal(launch.rows[0].facts["Milestones complete"], 4);
+    assert.equal(launch.rows[0].facts["Milestones remaining"], 5);
+    const launchTasks = execute(
+      contentPageQuery(
+        launchFilteredQuery(
+          plant,
+          "2026-09-10",
+          launchQuerySchema.parse({ resource: "milestone_tasks" })
+        ),
+        "list",
+        10,
+        0
+      )
+    )[0];
+    assert.equal(launchTasks.rows.length, 1);
+    assert.equal(launchTasks.rows[0].facts.Assigned, true);
+    assert.equal(launchTasks.rows[0].facts.Assignee, "Alex");
+    assert.equal(launchTasks.rows[0].facts["Due date"], "2026-09-19");
     for (const resource of [
       "assessments",
       "insights",

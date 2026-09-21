@@ -7,7 +7,10 @@ import {
 import { eveRuntimeToolSchema } from "../../src/lib/evry/eve/runtime/tool-schemas";
 import { withEveRuntimeScope } from "../../src/lib/evry/eve/runtime/scope";
 import { captureEveTurnInput } from "../../src/lib/evry/eve/runtime/turn-context";
-import { evryLoadedTools } from "../../src/lib/evry/eve/runtime/tool-selection";
+import {
+  evryLoadedTools,
+  evryLoadedPreparations,
+} from "../../src/lib/evry/eve/runtime/tool-selection";
 
 export default defineDynamic({
   events: {
@@ -25,13 +28,17 @@ export default defineDynamic({
       );
       const tools: Record<string, DynamicToolSet[string]> = {};
       const selected = new Set(evryLoadedTools.get());
+      const preparations = evryLoadedPreparations.get();
       for (const entry of catalog.filter((entry) => selected.has(entry.name))) {
         const name = entry.name;
+        // A restored session may predate operation-level selection. It can reload
+        // an exact operation through load_tools without exposing the full union.
+        if (name === "actions.prepare" && preparations.length === 0) continue;
         const key = name.replaceAll(".", "_");
         if (tools[key]) throw new Error("Duplicate provider tool name");
         tools[key] = defineTool({
           description: `${entry.description} Canonical code-mode name: ${entry.name}.`,
-          inputSchema: eveRuntimeToolSchema(name),
+          inputSchema: eveRuntimeToolSchema(name, preparations),
           execute: (input, toolContext) =>
             withEveRuntimeScope(toolContext, (scope) =>
               createBoundEveRegistry(scope).invoke(name, input, {

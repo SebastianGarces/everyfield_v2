@@ -14,6 +14,7 @@ export type FixtureIdentity = {
   plantId: string;
 };
 export type FixtureReservation = {
+  run<T>(work: () => Promise<T>): Promise<T>;
   finish(inputTokens: number, outputTokens: number): void;
 };
 export type FixtureRunHooks = {

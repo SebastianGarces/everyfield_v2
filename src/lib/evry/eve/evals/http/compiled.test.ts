@@ -6,10 +6,7 @@ import { startFixtureStack } from "../fixtures/stack";
 import { createFixtureStore } from "../fixtures/store";
 import { createFixtureManifest, FIXTURE_NOW } from "../fixtures/manifest";
 import { runCompiledEveFixture } from "./process";
-import {
-  EVE_CAPABILITY_CATALOG,
-  EVE_WORKFLOW_COVERAGE,
-} from "../../capabilities/catalog";
+import { EVE_WORKFLOW_COVERAGE } from "../../capabilities/catalog";
 
 test(
   "compiled Eve HTTP runtime uses cookie auth, production task read and trusted presentation against isolated Postgres",
@@ -46,6 +43,15 @@ test(
           model: {
             mode: "scripted",
             responses: [
+              {
+                toolCalls: [
+                  {
+                    id: "load-tasks",
+                    name: "load_tools",
+                    input: { names: ["tasks.query"] },
+                  },
+                ],
+              },
               {
                 toolCalls: [
                   {
@@ -147,8 +153,8 @@ test(
       );
       assert.equal(outcome.replay.snapshots, 2);
       assert.ok(outcome.replay.eventCount > 0);
-      assert.equal(outcome.replay.generationsBefore, 6);
-      assert.equal(outcome.replay.generationsAfter, 6);
+      assert.equal(outcome.replay.generationsBefore, 7);
+      assert.equal(outcome.replay.generationsAfter, 7);
       assert.equal(outcome.replay.invocationsBefore, 2);
       assert.equal(outcome.replay.invocationsAfter, 2);
       assert.deepEqual(
@@ -173,19 +179,17 @@ test(
         "My pending tasks due today, excluding overdue",
         "Only high priority",
       ]);
-      const expectedTools = [
-        ...EVE_CAPABILITY_CATALOG.map(([name]) => name.replaceAll(".", "_")),
-        "context_get",
-        "calendar_resolve",
-        "locations_query",
-        "locations_get",
-        "templates_for_meeting",
-      ];
+      const expectedTools = ["load_tools", "tasks_query", "present_result"];
       for (const name of expectedTools)
         assert.ok(
           outcome.runtimeProof?.availableTools.includes(name),
           `Missing compiled tool: ${name}`
         );
+      assert.equal(
+        outcome.runtimeProof?.availableTools.includes("actions_prepare"),
+        false,
+        "Unselected preparation schemas must not consume task-query context"
+      );
       assert.deepEqual(
         outcome.runtimeProof?.availableSkills.sort(),
         EVE_WORKFLOW_COVERAGE.map((skill) => skill.name).sort()
@@ -233,7 +237,7 @@ test(
           proxyUrl: stack.proxyUrl,
           sessionToken: manifest.sessionToken,
           actor: { userId: manifest.ids.actor, plantId: manifest.ids.plant },
-          turns: [request, { respond: "Yes, only high priority" }],
+          turns: [request, "Yes, only high priority"],
           now: FIXTURE_NOW.toISOString(),
           maxCostUsd: 1,
           prices: {
@@ -254,6 +258,15 @@ test(
                       prompt: "Only high priority?",
                       allowFreeform: true,
                     },
+                  },
+                ],
+              },
+              {
+                toolCalls: [
+                  {
+                    id: "load-after-question",
+                    name: "load_tools",
+                    input: { names: ["tasks.query"] },
                   },
                 ],
               },

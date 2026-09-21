@@ -18,6 +18,13 @@ const fixtureBudgetMiddleware: LanguageModelMiddleware = {
     return fixture
       ? {
           ...params,
+          providerOptions: {
+            ...params.providerOptions,
+            openai: {
+              ...params.providerOptions?.openai,
+              serviceTier: "default",
+            },
+          },
           maxOutputTokens: Math.min(
             params.maxOutputTokens ?? fixture.maxOutputTokens,
             fixture.maxOutputTokens
@@ -28,9 +35,11 @@ const fixtureBudgetMiddleware: LanguageModelMiddleware = {
   wrapGenerate: async ({ doGenerate, params }) => {
     const fixture = currentFixtureRun();
     const reservation = fixture?.reserve(params);
-    const result = fixture?.model
-      ? await fixture.model.doGenerate(params)
-      : await doGenerate();
+    const generate = async () =>
+      fixture?.model ? fixture.model.doGenerate(params) : doGenerate();
+    const result = reservation
+      ? await reservation.run(generate)
+      : await generate();
     if (reservation)
       reservation.finish(
         result.usage.inputTokens.total ?? NaN,
@@ -41,9 +50,9 @@ const fixtureBudgetMiddleware: LanguageModelMiddleware = {
   wrapStream: async ({ doStream, params }) => {
     const fixture = currentFixtureRun();
     const reservation = fixture?.reserve(params);
-    const result = fixture?.model
-      ? await fixture.model.doStream(params)
-      : await doStream();
+    const stream = async () =>
+      fixture?.model ? fixture.model.doStream(params) : doStream();
+    const result = reservation ? await reservation.run(stream) : await stream();
     if (!reservation) return result;
     return {
       ...result,

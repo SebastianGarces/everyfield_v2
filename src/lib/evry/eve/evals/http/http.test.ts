@@ -97,7 +97,7 @@ test("host reserves before generation, retains failed-call exposure, and never b
     });
     const hooks = globalThis.__everyfieldIsolatedEveFixtureHost!.run(identity);
     const reservation = hooks.reserve({ prompt: [], maxOutputTokens: 1_000 });
-    assert.equal(fixture.snapshot().costUsd, 0.012);
+    assert.equal(fixture.snapshot().costUsd, 0.016096);
     assert.throws(
       () => hooks.reserve({ prompt: [], maxOutputTokens: 1_000 }),
       /budget/
@@ -119,6 +119,67 @@ test("host reserves before generation, retains failed-call exposure, and never b
     assert.equal(fixture.snapshot().outboundMessages, 1);
   } finally {
     host.close();
+    process.env.DATABASE_URL = previousDb;
+  }
+});
+
+test("paid transport refuses unreserved calls, concurrent reuse and retries of one reservation", async () => {
+  const previousDb = process.env.DATABASE_URL;
+  const originalFetch = globalThis.fetch;
+  process.env.DATABASE_URL = databaseUrl;
+  let dispatched = 0;
+  globalThis.fetch = async () => {
+    dispatched++;
+    return Response.json({});
+  };
+  const host = installIsolatedFixtureHost({
+    origin,
+    databaseUrl,
+    allowPaidProviderCalls: true,
+  });
+  try {
+    const fixture = host.register({
+      ...actor,
+      sessionToken,
+      now,
+      prices,
+      maxCostUsd: 0.02,
+    });
+    const hooks = globalThis.__everyfieldIsolatedEveFixtureHost!.run(identity);
+    await assert.rejects(
+      fetch("https://api.openai.com/v1/responses"),
+      /outbound/
+    );
+    const reservation = hooks.reserve({ prompt: [], maxOutputTokens: 1000 });
+    const attempts = await reservation.run(() =>
+      Promise.allSettled([
+        fetch("https://api.openai.com/v1/responses"),
+        fetch("https://api.openai.com/v1/responses"),
+      ])
+    );
+    assert.equal(
+      attempts.filter((result) => result.status === "fulfilled").length,
+      1
+    );
+    await assert.rejects(
+      reservation.run(() => fetch("https://api.openai.com/v1/responses")),
+      /outbound/
+    );
+    assert.equal(dispatched, 1);
+    assert.throws(
+      () => hooks.reserve({ prompt: [], maxOutputTokens: 1000 }),
+      /budget/
+    );
+    assert.equal(fixture.snapshot().modelCalls[0].costUsd, null);
+    reservation.finish(100, 100);
+    assert.equal(fixture.snapshot().modelCalls[0].inputTokens, 100);
+    await assert.rejects(
+      reservation.run(() => fetch("https://api.openai.com/v1/responses")),
+      /closed/
+    );
+  } finally {
+    host.close();
+    globalThis.fetch = originalFetch;
     process.env.DATABASE_URL = previousDb;
   }
 });

@@ -74,5 +74,22 @@ provider-added framing. No live model-quality run has been performed by this
 proof. A future quality judge must also use the same reservation accounting.
 
 External fetches are blocked in scripted mode. Approved live mode permits only
-the OpenAI API in addition to loopback; email, Jev and Langfuse remain blocked.
+one OpenAI HTTP attempt per active prepaid reservation in addition to loopback;
+unreserved calls, parallel reuse and internal retries are blocked. Email, Jev
+and Langfuse remain blocked. Per-call reservation and provider token counts are
+included in the outcome, without credentials. Fixture requests force standard
+service tier. A plain follow-up answers a pending clarification, but never
+implicitly accepts a usage-limit continuation.
 The temporary process directory and Docker fixtures are removed on completion.
+
+`scripts/evry-eve-review-corrections.live.ts` is an opt-in two-case review, not
+part of CI. It requires fresh approval and `EVRY_APPROVED_REVIEW_USD` set to the
+remaining approved amount, at most 1. `EVRY_REVIEW_CASE=launch` or `orientation`
+selects one case. A rerun does not replenish the user's allowance. It
+reserves the full Luna context-window ceiling at long-context/cache-write
+prices before each call, rather than relying on the usual prompt-byte estimate.
+It stops if a case cannot return usage evidence and retains that case's entire
+allocation. Successful cases share one $1 total allowance; cache discounts are
+ignored, so reported cost is a conservative estimate, not an invoice. The
+runner checks actual database state and renders the native transcript for human
+review; it does not claim that deterministic assertions establish answer quality.

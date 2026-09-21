@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { z } from "zod";
 import type {
   FixtureIdentity,
@@ -16,6 +17,13 @@ export type HostCapture = {
   outboundMessages: number;
   costUsd: number;
   costBasis: "provider_usage" | "reserved_upper_bound";
+  modelCalls: Array<{
+    reservedUsd: number;
+    inputBytes: number;
+    inputTokens: number | null;
+    outputTokens: number | null;
+    costUsd: number | null;
+  }>;
 };
 const loopback = (hostname: string) =>
   ["localhost", "127.0.0.1", "[::1]"].includes(hostname);
@@ -88,6 +96,7 @@ export function installIsolatedFixtureHost(config: {
   };
   globalThis.__everyfieldIsolatedEveFixtureHost = host;
   const originalFetch = globalThis.fetch;
+  const providerReservation = new AsyncLocalStorage<{ dispatched: boolean }>();
   let outboundMessages = 0;
   const guardedFetch: typeof fetch = (input, init) => {
     const url = new URL(
@@ -97,12 +106,18 @@ export function installIsolatedFixtureHost(config: {
           ? input.href
           : input.url
     );
-    if (
-      !loopback(url.hostname) &&
-      !(
-        config.allowPaidProviderCalls && url.origin === "https://api.openai.com"
-      )
-    ) {
+    if (!loopback(url.hostname)) {
+      const reservation = providerReservation.getStore();
+      if (
+        config.allowPaidProviderCalls &&
+        url.origin === "https://api.openai.com" &&
+        reservation &&
+        !reservation.dispatched
+      ) {
+        // One HTTP attempt per prepaid generation. SDK retries must get a fresh reservation.
+        reservation.dispatched = true;
+        return originalFetch(input, init);
+      }
       if (url.hostname === "api.resend.com") outboundMessages++;
       return Promise.reject(
         new Error("Isolated evaluation outbound request blocked")
@@ -145,13 +160,14 @@ export function installIsolatedFixtureHost(config: {
         outboundMessages: 0,
         costUsd: 0,
         costBasis: "provider_usage",
+        modelCalls: [],
       };
       let stopped = false;
       let pending = 0;
       let generations = 0;
       let invocations = 0;
       const ceiling =
-        (prices.maxInputBytes * prices.inputUsdPerMillion +
+        ((prices.maxInputBytes + 4096) * prices.inputUsdPerMillion +
           prices.maxOutputTokens * prices.outputUsdPerMillion) /
         1_000_000;
       const hooks: FixtureRunHooks = {
@@ -178,7 +194,8 @@ export function installIsolatedFixtureHost(config: {
         },
         reserve(params: FixtureModelParams) {
           if (stopped) throw new Error("Evaluation has stopped");
-          // UTF-8 bytes conservatively bound visible token input; provider-added framing is not billed here.
+          // Reserve one token per UTF-8 byte plus 4096 tokens of provider framing.
+          // Unknown/failed usage keeps the reservation; no retry receives it for free.
           const bytes = Buffer.byteLength(
             JSON.stringify({ prompt: params.prompt, tools: params.tools })
           );
@@ -191,11 +208,27 @@ export function installIsolatedFixtureHost(config: {
           if (capture.costUsd + ceiling > input.maxCostUsd + Number.EPSILON)
             throw new Error("Evaluation budget exhausted before generation");
           capture.costUsd += ceiling;
+          const call: HostCapture["modelCalls"][number] = {
+            reservedUsd: ceiling,
+            inputBytes: bytes,
+            inputTokens: null,
+            outputTokens: null,
+            costUsd: null,
+          };
+          capture.modelCalls.push(call);
           generations++;
           pending++;
           capture.costBasis = "reserved_upper_bound";
           let settled = false;
+          const ticket = { dispatched: false };
           return {
+            run: (work) => {
+              if (settled || stopped)
+                return Promise.reject(
+                  new Error("Evaluation reservation is closed")
+                );
+              return providerReservation.run(ticket, work);
+            },
             finish(inputTokens, outputTokens) {
               if (settled) return;
               settled = true;
@@ -212,6 +245,9 @@ export function installIsolatedFixtureHost(config: {
                 (inputTokens * prices.inputUsdPerMillion +
                   outputTokens * prices.outputUsdPerMillion) /
                 1_000_000;
+              call.inputTokens = inputTokens;
+              call.outputTokens = outputTokens;
+              call.costUsd = actual;
               capture.costUsd += actual - ceiling;
               pending--;
               capture.costBasis = pending

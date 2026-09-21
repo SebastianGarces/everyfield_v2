@@ -11,7 +11,7 @@ import {
 import { runCompiledEveFixture } from "@/lib/evry/eve/evals/http/process";
 
 test(
-  "compiled native preparation produces one real review card and no unconfirmed effects",
+  "compiled two-turn orientation keeps preparation context bounded and produces one unexecuted review",
   { skip: process.env.EVRY_EVE_HTTP_PROOF !== "1", timeout: 180_000 },
   async () => {
     const stack = await startFixtureStack(process.cwd());
@@ -28,7 +28,8 @@ test(
           sessionToken: manifest.sessionToken,
           actor: { userId: manifest.ids.actor, plantId: manifest.ids.plant },
           turns: [
-            "Prepare an orientation for the core team next Sunday at 10am at church. Two hours; use the saved invitation template.",
+            "Prepare an orientation for the core team next Sunday at 10am at church.",
+            "Two hours; use the saved location and invitation template.",
           ],
           now: FIXTURE_NOW.toISOString(),
           maxCostUsd: 1,
@@ -42,12 +43,16 @@ test(
           model: {
             mode: "scripted",
             responses: [
+              { text: "How long should the orientation last?" },
               {
                 toolCalls: [
                   {
                     id: "load-preparation",
                     name: "load_tools",
-                    input: { names: ["actions.prepare"] },
+                    input: {
+                      names: ["actions.prepare"],
+                      preparationOperations: ["recipe.meeting-invite"],
+                    },
                   },
                 ],
               },
@@ -92,6 +97,20 @@ test(
         AbortSignal.timeout(120_000)
       );
       const visible = outcome.messages.flatMap(projectEveMessage);
+      assert.equal(
+        visible.some((part) => part.kind === "session-limit"),
+        false
+      );
+      const requests = outcome.runtimeProof?.modelRequests;
+      assert.ok(requests && requests.length >= 5);
+      for (const request of requests)
+        assert.ok(
+          request.inputBytes < 60_000,
+          `Orientation context grew to ${request.inputBytes} bytes`
+        );
+      assert.ok(
+        requests.reduce((sum, request) => sum + request.inputBytes, 0) < 300_000
+      );
       const confirmations = visible.filter(
         (part) =>
           part.kind === "artifact" && part.artifact.kind === "confirmation"

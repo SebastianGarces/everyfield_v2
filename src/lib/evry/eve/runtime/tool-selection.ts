@@ -5,11 +5,20 @@ import { z } from "zod";
 export const toolSelectionSchema = z
   .object({
     names: z.array(z.string().min(1).max(160)).max(8),
+    preparationOperations: z
+      .array(z.string().min(1).max(160))
+      .max(3)
+      .default([]),
   })
   .strict();
 
 export const evryLoadedTools = defineState<string[]>(
   "evry.loaded-tools",
+  () => []
+);
+
+export const evryLoadedPreparations = defineState<string[]>(
+  "evry.loaded-preparations",
   () => []
 );
 

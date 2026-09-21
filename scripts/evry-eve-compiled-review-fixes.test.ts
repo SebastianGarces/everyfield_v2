@@ -146,7 +146,10 @@ test(
               {
                 id: "load-preparation",
                 name: "load_tools",
-                input: { names: ["actions.prepare"] },
+                input: {
+                  names: ["actions.prepare"],
+                  preparationOperations: ["notifications.mark_selected_read"],
+                },
               },
             ],
           },

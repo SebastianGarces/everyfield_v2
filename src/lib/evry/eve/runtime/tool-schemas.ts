@@ -4,11 +4,20 @@ import {
   createEveHelperTools,
   productionEveHelperDependencies,
 } from "../capabilities/helpers";
-import { evePreparationInputSchema } from "../preparation";
+import {
+  evePreparationInputSchema,
+  selectedEvePreparationSchema,
+} from "../preparation";
 
 /** Eve replays this schema factory from a canonical name, never a captured Zod object or identity. */
-export function eveRuntimeToolSchema(name: string) {
-  if (name === "actions.prepare") return evePreparationInputSchema;
+export function eveRuntimeToolSchema(
+  name: string,
+  preparationOperations?: readonly string[]
+) {
+  if (name === "actions.prepare")
+    return preparationOperations
+      ? selectedEvePreparationSchema(preparationOperations)
+      : evePreparationInputSchema;
   const read = EVE_READ_REGISTRATIONS.find((entry) => entry.id === name);
   if (read) return extendedEveReadSchema(read);
   const helper = createEveHelperTools(

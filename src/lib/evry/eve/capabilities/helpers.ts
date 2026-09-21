@@ -133,7 +133,7 @@ export function createEveHelperTools(
     helper({
       name: "locations.query",
       description:
-        "Find saved active operational meeting locations. Look here before asking the user for the church location. A search returning multiple plausible places needs clarification, not an invented default.",
+        "Find saved active operational meeting locations. Look here before asking for an address. If a search such as church has no matches, query without search and offer an existing venue by name/address for confirmation. A search returning multiple plausible places needs clarification, not an invented default.",
       inputSchema: z.strictObject({
         search: z.string().trim().min(1).max(200).optional(),
         offset: z.number().int().min(0).max(100000).default(0),

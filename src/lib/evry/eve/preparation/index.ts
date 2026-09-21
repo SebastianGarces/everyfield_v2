@@ -64,6 +64,21 @@ export const evePreparationInputSchema = z.strictObject({
   ),
 });
 
+/** Model discovery loads only the operations needed now; invocation still uses the full trusted registry. */
+export function selectedEvePreparationSchema(operations: readonly string[]) {
+  const selected = [...new Set(operations)].map((id) => {
+    const entry = byOperation.get(id);
+    if (!entry) throw new Error(`Unknown preparation operation: ${id}`);
+    return z.strictObject({
+      operation: z.literal(entry.id),
+      arguments: entry.inputSchema,
+    });
+  });
+  if (!selected.length)
+    throw new Error("Select at least one preparation operation");
+  return z.strictObject({ request: z.union(selected) });
+}
+
 export function createEvePreparation(options: {
   actor: EvryPlantActor;
   conversationId: string;
