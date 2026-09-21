@@ -298,7 +298,7 @@ test("§3c assignMember claims the seat with ON CONFLICT (#409 D1)", () => {
   );
   assert.match(
     assign,
-    /if \(!inserted\) \{[\s\S]{0,200}throw new ExpectedError\(\s*await seatRefusalMessage\(churchId, roleId, personId\)/,
+    /if \(!written\)\s+throw new ExpectedError\(\s*await seatRefusalMessage\(churchId, roleId, personId\)/,
     "#409 D1: an empty returning() is the loser of the race and must be reported, not returned as undefined"
   );
   // #411 quality round 1, second pass — THE REACTIVATION PATH'S OWN GUARD.
@@ -315,11 +315,17 @@ test("§3c assignMember claims the seat with ON CONFLICT (#409 D1)", () => {
     /\.update\(teamMemberships\)[\s\S]{0,600}eq\(teamMemberships\.status, "inactive"\)/,
     "#411 quality round 1: the reactivation UPDATE must be conditional on the row still being inactive — keyed on the row id alone it has no guard at all"
   );
-  assert.match(
-    assign,
-    /if \(!reactivated\) \{[\s\S]{0,200}throw new ExpectedError\(\s*await seatRefusalMessage\(churchId, roleId, personId\)/,
-    "#411 quality round 1: the conditional UPDATE's empty returning() is the loser of the race and must be refused, not returned as undefined"
-  );
+  // #830 uses one RETURNING CTE for both insertion and reactivation. The
+  // common empty-result guard must run before either branch emits events.
+  assertInOrder(assign, "assignMember", [
+    'const assigned = db.$with("assigned_membership")',
+    ".update(teamMemberships)",
+    ".insert(teamMemberships)",
+    "db.with(assigned, filled).select().from(assigned)",
+    "if (!written)",
+    "membership = written;",
+    "await emitTeamMemberAssigned(",
+  ]);
   // #411 round 2 — the thrown half. The reactivation UPDATE takes no ON
   // CONFLICT, and a RACED insert raises on the non-arbiter index, so this is a
   // live refusal path and it must end in the SAME holder read as the empty
@@ -340,7 +346,7 @@ test("§3c assignMember claims the seat with ON CONFLICT (#409 D1)", () => {
   // false to the planter who filled it.
   const refusal = sourceReader(source, "memberships.ts").span(
     "async function seatRefusalMessage",
-    "Assign a person to a team role"
+    "export async function assignMember"
   );
   assertInOrder(
     refusal,
