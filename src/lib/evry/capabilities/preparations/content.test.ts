@@ -40,8 +40,11 @@ function selection(): EvryCapabilityConversationSelectionInput {
   };
 }
 test("typed preparation contracts reject model-authored snapshots and forged scope", () => {
-  assert.equal(CONTENT_MODEL_PREPARATIONS.length, 19);
-  assert.equal(new Set(CONTENT_MODEL_PREPARATIONS.map((p) => p.id)).size, 19);
+  assert.equal(CONTENT_MODEL_PREPARATIONS.length, 20);
+  assert.equal(
+    new Set(CONTENT_MODEL_PREPARATIONS.map((p) => p.id)).size,
+    CONTENT_MODEL_PREPARATIONS.length
+  );
   for (const p of CONTENT_MODEL_PREPARATIONS)
     assert.equal(
       p.inputSchema.safeParse({
@@ -70,6 +73,35 @@ test("typed preparation contracts reject model-authored snapshots and forged sco
     }).success,
     false
   );
+});
+test("failed-delivery preparation accepts source selection but never replacement content or authority", () => {
+  const retry = CONTENT_MODEL_PREPARATIONS.find(
+    (p) => p.id === "communication.retry_failed"
+  );
+  assert.ok(retry);
+  const source = { communicationId: "50000000-0000-4000-8000-000000000001" };
+  assert.equal(retry.inputSchema.safeParse(source).success, true);
+  assert.equal(
+    retry.inputSchema.safeParse({
+      ...source,
+      recipientIds: ["60000000-0000-4000-8000-000000000001"],
+    }).success,
+    true
+  );
+  for (const extra of [
+    { plantId: actor.plantId },
+    { actorId: actor.userId },
+    { subject: "Replacement subject" },
+    { body: "Replacement message" },
+    { failureOrigin: "provider" },
+    { confirmed: true },
+    { frozenRecipients: [] },
+    { recipientIds: [] },
+  ])
+    assert.equal(
+      retry.inputSchema.safeParse({ ...source, ...extra }).success,
+      false
+    );
 });
 test("typed intent reaches existing proposer without a command phrase and after request-key recovery", async () => {
   const order: string[] = [];

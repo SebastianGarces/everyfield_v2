@@ -70,6 +70,7 @@ export function ConversationSurface({ className }: { className?: string }) {
     error,
     isComposerBlocked,
     isLoading,
+    isRestoringHistory,
     isSending,
     isWatchingDetached,
     resumeWatching,
@@ -101,7 +102,8 @@ export function ConversationSurface({ className }: { className?: string }) {
   const showJumpToLatest =
     scrollback.conversationId === conversationId && scrollback.visible;
   const latestMessage = messages.at(-1);
-  const pendingRequestId = messages.length ? workRequestId : null;
+  const hasMessages = messages.length > 0;
+  const pendingRequestId = hasMessages ? workRequestId : null;
   const responseKey =
     latestMessage?.role === "assistant"
       ? (latestMessage.metadata?.turnId ?? latestMessage.id)
@@ -126,7 +128,15 @@ export function ConversationSurface({ className }: { className?: string }) {
 
   useLayoutEffect(() => {
     const transcript = transcriptRef.current;
-    if (!transcript || isLoading) return;
+    // Saved metadata arrives before Eve attaches its replayed transcript. Do
+    // not consume initial positioning while that conversation is still empty.
+    if (
+      !transcript ||
+      isLoading ||
+      isRestoringHistory ||
+      (conversationId && !hasMessages)
+    )
+      return;
     if (openedConversationRef.current !== conversationId) {
       const adoptingRequest =
         positionedRequestRef.current !== null &&
@@ -167,7 +177,15 @@ export function ConversationSurface({ className }: { className?: string }) {
         if (offset !== 0) transcript.scrollTop += offset;
       }
     }
-  }, [conversationId, isLoading, pendingRequestId, responseKey, workRequestId]);
+  }, [
+    conversationId,
+    hasMessages,
+    isLoading,
+    isRestoringHistory,
+    pendingRequestId,
+    responseKey,
+    workRequestId,
+  ]);
 
   const updateScrollback = useCallback(() => {
     const transcript = transcriptRef.current;

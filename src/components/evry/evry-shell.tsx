@@ -110,6 +110,7 @@ type EvryShellValue = {
   isPanelOpen: boolean;
   isComposerBlocked: boolean;
   isLoading: boolean;
+  isRestoringHistory: boolean;
   isSending: boolean;
   isWorking: boolean;
   workState: EvryWorkState;
@@ -227,6 +228,10 @@ export function EvryShell({
     isSending || client?.status === "streaming" || executing || uploading;
   const isLoading =
     loading || (client?.status === "resuming" && messages.length === 0);
+  const isRestoringHistory =
+    loading ||
+    (metadata !== null && client === null) ||
+    client?.status === "resuming";
   const isComposerBlocked =
     !client ||
     loading ||
@@ -902,6 +907,7 @@ export function EvryShell({
     isPanelOpen,
     isComposerBlocked,
     isLoading,
+    isRestoringHistory,
     isSending,
     isWorking,
     workState,
