@@ -1,6 +1,8 @@
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { users, userInvitations } from "@/db/schema";
+import { discoveryProfiles } from "@/db/schema/discovery-profile";
+import { retireEmptyDiscoveryProfileStatement } from "@/lib/discovery/profile-repository";
 import { tenancyColumns } from "@/lib/auth/tenancy";
 import {
   accountPersonLinkStatements,
@@ -55,12 +57,28 @@ export function acceptSeatInvitationStatements(
       update ${userInvitations} set status = 'accepted', responded_by = ${userId}, responded_at = ${now.toISOString()}
       where id = ${invitation.id} and token_hash = ${tokenHash} and kind = 'seat'
         and status = 'pending' and expires_at > ${now.toISOString()}
+        and expires_at > statement_timestamp()
+        and seat = ${invitation.invitedAs.seat}
+        and church_id is not distinct from ${tenancy.churchId}::uuid
+        and sending_church_id is not distinct from ${tenancy.sendingChurchId}::uuid
+        and sending_network_id is not distinct from ${tenancy.sendingNetworkId}::uuid
+        and not exists (select 1 from ${discoveryProfiles}
+          where ${discoveryProfiles.userId} = ${userId}
+            and (${discoveryProfiles.sendingChurchId} is not null
+              or ${discoveryProfiles.sendingNetworkId} is not null))
         and exists (select 1 from ${users} where ${users.id} = ${userId}
           and lower(${users.email}) = lower(${userInvitations.inviteeEmail}) and ${emptyAccount})
       returning seat, church_id, sending_church_id, sending_network_id
+    ), retired as (
+      ${retireEmptyDiscoveryProfileStatement(
+        { id: userId },
+        sql`exists (select 1 from claimed)`
+      )}
     ) update ${users} set seat = claimed.seat, church_id = claimed.church_id,
       sending_church_id = claimed.sending_church_id, sending_network_id = claimed.sending_network_id,
       updated_at = ${now.toISOString()} from claimed where ${users.id} = ${userId} and ${emptyAccount}
+      and (not exists (select 1 from ${discoveryProfiles} where ${discoveryProfiles.userId} = ${userId})
+        or exists (select 1 from retired where "userId" = ${userId}))
       returning ${users.id}`),
     ...(invitation.tenancy.type === "church"
       ? accountPersonLinkStatements({

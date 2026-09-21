@@ -361,6 +361,7 @@ export async function register(
   // invitation (memory/invariants.md → Multi-Tenancy).
   if (invitation) {
     await redeemRegistrationInvitation(invitation, {
+      discovery: accountType === "discovery" && !seatInvitation,
       id: userId,
       seat,
       churchId,
@@ -419,6 +420,7 @@ const USERS_EMAIL_UNIQUE = "users_email_unique";
 async function redeemRegistrationInvitation(
   invitation: RegistrationInvitation,
   user: {
+    discovery: boolean;
     id: string;
     seat: UserSeat | null;
     churchId: string | null;
@@ -426,8 +428,9 @@ async function redeemRegistrationInvitation(
     sendingNetworkId: string | null;
   }
 ): Promise<void> {
-  const target =
-    invitation.accountType === "planter"
+  const target = user.discovery
+    ? { targetUserId: user.id }
+    : invitation.accountType === "planter"
       ? user.churchId
         ? { targetChurchId: user.churchId }
         : null

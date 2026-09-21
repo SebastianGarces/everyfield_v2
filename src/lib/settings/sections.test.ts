@@ -323,3 +323,20 @@ test("every section carries the copy the modal renders", () => {
     );
   }
 });
+
+test("only an explicit discovery profile exposes association settings for an unseated account", () => {
+  const viewer: SeatFields = {
+    seat: null,
+    churchId: null,
+    sendingChurchId: null,
+    sendingNetworkId: null,
+  };
+  assert.equal(
+    settingsSectionsFor(viewer).some((section) => section.id === "association"),
+    false
+  );
+  assert.deepEqual(
+    settingsSectionsFor(viewer, true).map((section) => section.id),
+    ["account", "association", "notifications"]
+  );
+});

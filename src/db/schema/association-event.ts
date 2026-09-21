@@ -80,7 +80,11 @@ export type AssociationOrgType = (typeof associationOrgTypes)[number];
  * CHECK that exactly one is set is what makes "every row has exactly one
  * subject" a property of the data rather than of the writer.
  */
-export const associationSubjectTypes = ["church", "sending_church"] as const;
+export const associationSubjectTypes = [
+  "church",
+  "sending_church",
+  "discovery",
+] as const;
 export type AssociationSubjectType = (typeof associationSubjectTypes)[number];
 
 /**
@@ -117,6 +121,7 @@ export const associationEvents = pgTable(
      * only when `subject_sending_church_id` carries the subject instead. There
      * is no row in this table without a subject.
      */
+    discoveryUserId: uuid("discovery_user_id").references(() => users.id),
     churchId: uuid("church_id").references(() => churches.id),
     /**
      * The SENDING CHURCH subject: which sending church joined or left a network
@@ -200,6 +205,10 @@ export const associationEvents = pgTable(
     ),
     // The org-side read: everything that happened to one oversight org's
     // portfolio — who joined, who left.
+    index("association_events_discovery_user_idx").on(
+      table.discoveryUserId,
+      table.createdAt
+    ),
     index("association_events_org_idx").on(table.orgType, table.orgId),
     // The enums, in the DATA. `.$type<>()` on a varchar is a compile-time brand
     // and nothing else — the same reasoning migration 0024 applied to the
@@ -227,11 +236,17 @@ export const associationEvents = pgTable(
       sql`(
         (${table.subjectType} = 'church'
           and ${table.churchId} is not null
-          and ${table.subjectSendingChurchId} is null)
+          and ${table.subjectSendingChurchId} is null
+          and ${table.discoveryUserId} is null)
         or
         (${table.subjectType} = 'sending_church'
           and ${table.subjectSendingChurchId} is not null
-          and ${table.churchId} is null)
+          and ${table.churchId} is null
+          and ${table.discoveryUserId} is null)
+        or (${table.subjectType} = 'discovery'
+          and ${table.discoveryUserId} is not null
+          and ${table.churchId} is null
+          and ${table.subjectSendingChurchId} is null)
       )`
     ),
   ]

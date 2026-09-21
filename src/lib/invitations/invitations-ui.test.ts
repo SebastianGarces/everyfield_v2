@@ -853,6 +853,7 @@ function registrationRowFrom(
     status: "pending",
     expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
     inviteeEmail: resolved.values.inviteeEmail,
+    targetUserId: resolved.values.targetUserId ?? null,
     targetChurchId: resolved.values.targetChurchId,
     targetSendingChurchId: resolved.values.targetSendingChurchId,
     sendingChurchId: resolved.values.sendingChurchId,
@@ -1319,6 +1320,7 @@ function storedRowFrom(resolved: ReturnType<typeof resolveInvitationRequest>) {
   return {
     id: "99999999-9999-4999-8999-999999999999",
     ...resolved.values,
+    targetUserId: resolved.values.targetUserId ?? null,
     status: "pending" as const,
     createdAt: sentAt,
     expiresAt: new Date("2026-08-24T15:00:00.000Z"),
@@ -1798,4 +1800,43 @@ test("ONE definition decides what /register may act on", async () => {
       `${reader} no longer calls the shared predicate inside its own body`
     );
   }
+});
+
+test("a discovery-targeted invitation is indistinguishable from an unknown token on both registration readers", async () => {
+  const id = "edededed-eded-4ded-8ded-edededededed";
+  const base = registrationRowFrom(
+    id,
+    resolveInvitationForResolvedTarget(
+      NET_ADMIN,
+      { inviteeEmail: "discovery@example.com", inviteAs: "church" },
+      {}
+    )
+  );
+  const targeted: InvitationForRegistration = {
+    ...base,
+    type: "discovery_to_network",
+    targetUserId: "abababab-abab-4bab-8bab-abababababab",
+  };
+  const reader = readerFor([targeted]);
+  assert.equal(await describeInvitationForRegistration(id, reader), null);
+  assert.equal(
+    await hasValidInvitationBypass(id, "discovery@example.com", reader),
+    false
+  );
+  assert.equal(
+    await describeInvitationForRegistration(
+      "ffffffff-ffff-4fff-8fff-ffffffffffff",
+      reader
+    ),
+    null
+  );
+  assert.equal(
+    await hasValidInvitationBypass(
+      "ffffffff-ffff-4fff-8fff-ffffffffffff",
+      "discovery@example.com",
+      reader
+    ),
+    false
+  );
+  assert.equal(reader.orgLookups, 0);
 });

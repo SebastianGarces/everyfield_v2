@@ -168,6 +168,8 @@ export function invitingOrgForInvitation(
     case "church_to_network":
       return oversightOrgOfKind("network", invitation.sendingNetworkId);
     case "sending_church_to_network":
+    case "discovery_to_sending_church":
+    case "discovery_to_network":
       return noOversightOrg();
   }
 }
