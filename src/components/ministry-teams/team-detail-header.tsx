@@ -31,8 +31,10 @@ export function TeamDetailHeader({ team }: TeamDetailHeaderProps) {
           <Icon className="h-6 w-6" />
         </div>
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold tracking-tight">{team.name}</h1>
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="min-w-0 text-2xl font-bold tracking-tight break-words">
+              {team.name}
+            </h1>
             <Badge
               variant="secondary"
               className={cn(
@@ -77,7 +79,11 @@ export function TeamDetailHeader({ team }: TeamDetailHeaderProps) {
             </div>
             <div className="flex items-center gap-3">
               <span className="text-muted-foreground text-sm">Staffing:</span>
-              <Progress value={staffing} className="h-2 w-24" />
+              <Progress
+                value={staffing}
+                aria-label="Team staffing"
+                className="h-2 w-24"
+              />
               <span className="text-sm font-medium">
                 {team.filledRoles}/{team.totalRoles}
               </span>
