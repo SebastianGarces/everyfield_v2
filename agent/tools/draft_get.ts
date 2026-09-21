@@ -4,7 +4,7 @@ import { evryTaskState } from "../../src/lib/evry/eve/runtime/task-state";
 
 export default defineTool({
   description:
-    "Read the current task goal, remembered constraints, selected records and pending question. These are planning notes, not approvals or current database evidence.",
+    "Read task notes when absent from the turn context or after a revision conflict. Current notes and revision are normally supplied at the start of each turn. These are planning notes, not approvals or current database evidence.",
   inputSchema: z.object({}).strict(),
   execute: () => evryTaskState.get(),
 });

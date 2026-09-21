@@ -7,7 +7,7 @@ import {
 
 export default defineTool({
   description:
-    "Remember task constraints before asking a question or preparing a review. Facts merge by key, preserving prior date, time, audience and message choices unless deliberately changed. Cannot approve or execute anything.",
+    "Save task constraints before a clarification, preparation, or long investigation, using the revision supplied in the turn context or last update. Group known choices in one update rather than saving each lookup separately. Facts merge by key, preserving prior choices unless deliberately changed. Cannot approve or execute anything.",
   inputSchema: taskPatchSchema,
   execute(input) {
     evryTaskState.update((state) => applyTaskPatch(state, input));
