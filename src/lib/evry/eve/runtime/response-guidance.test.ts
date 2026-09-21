@@ -14,6 +14,40 @@ const invitation = readFileSync(
 );
 
 // Protect the authored contract; live evaluations must still judge actual prose.
+test("simple missing input can be requested without discovery or an empty draft while preserving accumulated choices", () => {
+  assert.match(
+    instructions,
+    /ask directly when there are no accumulated choices to save/
+  );
+  assert.match(
+    instructions,
+    /Do not load a skill or save an empty draft merely to ask for that input/
+  );
+  assert.match(instructions, /conversation already retains the request/);
+  assert.match(
+    instructions,
+    /Continue to preserve existing multi-turn choices/
+  );
+  assert.match(instructions, /A short reply .* continues the pending task/);
+  assert.match(instructions, /Do not ask again for details already given/);
+  assert.match(
+    instructions,
+    /Look up saved locations, audiences and full message templates/
+  );
+  assert.match(
+    instructions,
+    /Show the exact date, location, audience and editable message in the review/
+  );
+  assert.match(
+    instructions,
+    /All lasting changes and email sends require an exact human confirmation/
+  );
+  assert.match(
+    instructions,
+    /Reads and preparation tools do not execute changes/
+  );
+});
+
 test("quantity guidance preserves denominator and scope through the closing summary", () => {
   assert.match(instructions, /quantities, denominators and scope consistent/);
   assert.match(instructions, /including its closing summary/);
