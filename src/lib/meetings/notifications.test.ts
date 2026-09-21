@@ -12,6 +12,7 @@ import path from "node:path";
 import { test } from "node:test";
 
 import { MS_PER_DAY } from "@/lib/datetime";
+import { CORE_GROUP_STATUSES } from "@/lib/people/core-group";
 import { stripComments } from "@/lib/testing/source-span";
 import {
   clearStillLivePredicates,
@@ -21,7 +22,6 @@ import {
 import { FakeNotificationQueue } from "@/lib/testing/notification-queue";
 
 import {
-  CORE_GROUP_STATUSES,
   MEETING_NOTIFICATION_TYPES,
   MEETING_REMINDER_OFFSET_DAYS,
   MEETING_SCHEDULED_TYPE,

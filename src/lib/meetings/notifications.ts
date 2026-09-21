@@ -9,9 +9,9 @@ import {
   users,
   type MeetingStatus,
   type MeetingType,
-  type PersonStatus,
 } from "@/db/schema";
 import { MS_PER_DAY, formatDateTime } from "@/lib/datetime";
+import { CORE_GROUP_STATUSES } from "@/lib/people/core-group";
 import type { NotificationCategory } from "@/lib/notifications/categories";
 import {
   registerStillLivePredicates,
@@ -127,25 +127,6 @@ export const MEETING_NOTIFICATION_TYPES = [
   MEETING_SCHEDULED_TYPE,
   ...MEETING_REMINDER_OFFSET_DAYS.map(meetingReminderType),
 ];
-
-/**
- * WHO the Core Group is, for the purpose of being told about a meeting.
- *
- * The three statuses at or past the core-group commitment in F2's ladder
- * (`memory/invariants.md` → People): a person who has committed and then moved
- * on to the launch team or into leadership has not left the core group, and
- * dropping them would mean the plant's most committed people were the ones who
- * stopped hearing about its meetings.
- *
- * `prospect`, `attendee`, `following_up` and `interviewed` are deliberately
- * out: they have not committed to anything, and a meeting announcement is not
- * an invitation.
- */
-export const CORE_GROUP_STATUSES = [
-  "core_group",
-  "launch_team",
-  "leader",
-] as const satisfies readonly PersonStatus[];
 
 /**
  * What a meeting notification is composed from.

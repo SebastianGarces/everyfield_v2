@@ -20,6 +20,7 @@ import { churchMeetings, meetingAttendance } from "@/db/schema/meetings";
 import { persons } from "@/db/schema/people";
 import type { AttendanceType } from "@/db/schema/meetings";
 import type { PersonStatus } from "@/db/schema/people";
+import { isCoreGroupStatus } from "@/lib/people/core-group";
 
 /**
  * NO `isRecruitedContact()` HERE, and that is the decision rather than an
@@ -33,13 +34,11 @@ import type { PersonStatus } from "@/db/schema/people";
  * and calling them one would corrupt the new-vs-returning breakdown in the
  * other direction.
  */
-const CORE_GROUP_STATUSES = ["core_group", "launch_team", "leader"] as const;
-
 export function attendanceTypeFromDerivationFacts(input: {
   personStatus: PersonStatus;
   hasPriorAttendance: boolean;
 }): AttendanceType {
-  if ((CORE_GROUP_STATUSES as readonly string[]).includes(input.personStatus)) {
+  if (isCoreGroupStatus(input.personStatus)) {
     return "core_group";
   }
   return input.hasPriorAttendance ? "returning" : "first_time";

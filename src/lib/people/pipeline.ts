@@ -1,4 +1,5 @@
 import { db } from "@/db";
+import { CORE_GROUP_STATUSES } from "./core-group";
 import {
   personActivities,
   persons,
@@ -61,7 +62,7 @@ const PIPELINE_COLUMNS: PipelineColumnDef[] = [
   {
     id: "core_group",
     title: "Core Group",
-    statuses: ["core_group", "launch_team", "leader"],
+    statuses: [...CORE_GROUP_STATUSES],
   },
 ];
 
