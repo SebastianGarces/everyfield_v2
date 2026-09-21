@@ -168,6 +168,11 @@ test(
                     );
                     assert.equal(read.items.length, 1);
                     const fields = read.items[0]!.facts!;
+                    assert.equal(
+                      fields.find((f) => f.label === "Citation slug")?.value,
+                      slug,
+                      "Every content page preserves the exact reusable article identifier"
+                    );
                     revision = fields.find(
                       (f) => f.label === "Revision"
                     )!.value;

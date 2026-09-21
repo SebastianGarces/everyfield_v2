@@ -209,7 +209,14 @@ export const wikiReadManySchema = z.strictObject({
   articles: z
     .array(
       z.strictObject({
-        slug: z.string().trim().min(1).max(500),
+        slug: z
+          .string()
+          .trim()
+          .min(1)
+          .max(500)
+          .describe(
+            "Exact raw Citation slug returned by wiki.search or wiki.read_many. Copy it unchanged, including spaces, %, #, and ?. This is not a URL or the encoded suffix of an article link."
+          ),
         offset: z.number().int().min(0).max(2000000).default(0),
         revision: z.iso.datetime().optional(),
       })
@@ -291,6 +298,7 @@ export const WIKI_READ_MANY = defineEvryReadRegistration({
           id: `${row.id}:${request.offset}`,
           label: contentBound(row.title, 160),
           facts: contentFacts({
+            "Citation slug": row.slug,
             Content: content,
             "Citation range": `Characters ${request.offset + 1}-${end} of ${row.content.length}`,
             Revision: row.revision.toISOString(),
