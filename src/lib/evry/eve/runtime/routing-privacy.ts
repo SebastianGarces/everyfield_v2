@@ -5,12 +5,16 @@ const sensitiveField =
 const redactString = (value: string) =>
   value
     .replace(
+      /\b(authorization|proxy-authorization|cookie|set-cookie)["']?\s*[:=]\s*[^\r\n]*(?:\r?\n[\t ]+[^\r\n]*)*/gi,
+      "$1: [redacted credential]"
+    )
+    .replace(
       /\b(?:sk|pk)-(?:proj-|lf-|live-|test-)?[a-zA-Z0-9_-]{12,}\b/g,
       "[redacted credential]"
     )
     .replace(/\bBearer\s+[a-zA-Z0-9._~+/=-]+/gi, "Bearer [redacted credential]")
     .replace(
-      /\b(password|api[_ -]?key|access[_ -]?token|refresh[_ -]?token|secret)\s*[:=]\s*["']?[^\s"',;]+["']?/gi,
+      /\b(password|api[_ -]?key|access[_ -]?token|refresh[_ -]?token|session(?:[_ -]?token)?|secret)["']?\s*[:=]\s*(?:"(?:\\[\s\S]|[^"\\])*(?:"|$)|'(?:\\[\s\S]|[^'\\])*(?:'|$)|[^\r\n,;]+)/gi,
       "$1=[redacted credential]"
     );
 
