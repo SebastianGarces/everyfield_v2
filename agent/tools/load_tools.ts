@@ -14,7 +14,7 @@ import {
 
 export default defineTool({
   description:
-    "Load full definitions before calling tools or composing code. Select up to eight canonical names from the catalog. For actions.prepare, also select up to three preparationOperations from the operation catalog; omit that selection to list available operations without loading their schemas. Replaces the previous working set without losing results or task notes. An empty names list unloads it.",
+    "Load missing capability definitions, or replace the working set when the next work needs different tools. Tools already listed with full schemas can be called directly, including through code_mode; do not reload them just to select a smaller subset. Select up to eight canonical names from the catalog. For actions.prepare, also select up to three preparationOperations from the operation catalog; omit that selection to list available operations without loading their schemas. Replaces the previous working set without losing results or task notes. An empty names list unloads it.",
   inputSchema: toolSelectionSchema,
   execute({ names, preparationOperations }, ctx) {
     const selected = selectRuntimeTools(

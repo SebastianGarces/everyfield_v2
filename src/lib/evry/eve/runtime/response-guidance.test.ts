@@ -12,8 +12,54 @@ const invitation = readFileSync(
   resolve("agent/skills/meeting-invite/SKILL.md"),
   "utf8"
 );
+const loader = readFileSync(resolve("agent/tools/load_tools.ts"), "utf8");
 
 // Protect the authored contract; live evaluations must still judge actual prose.
+test("discovery guidance uses already available tools without a schema housekeeping step", () => {
+  assert.match(loader, /Load missing capability definitions/);
+  assert.match(loader, /when the next work needs different tools/);
+  assert.match(
+    loader,
+    /Tools already listed with full schemas can be called directly/
+  );
+  assert.match(loader, /including through code_mode/);
+  assert.match(loader, /do not reload them just to select a smaller subset/);
+  assert.doesNotMatch(loader, /Load full definitions before calling tools/);
+  assert.match(instructions, /use those tools immediately/);
+  assert.match(instructions, /use them without a separate selection step/);
+  assert.match(
+    instructions,
+    /answer rather than adding a step only to unload tools/
+  );
+  assert.doesNotMatch(
+    instructions,
+    /unload tools with an empty list before composing/
+  );
+});
+
+test("discovery guidance retains later replacement and exact preparation selection", () => {
+  assert.match(
+    loader,
+    /Replaces the previous working set without losing results or task notes/
+  );
+  assert.match(loader, /An empty names list unloads it/);
+  assert.match(loader, /Select up to eight canonical names/);
+  assert.match(
+    loader,
+    /For actions\.prepare, also select up to three preparationOperations/
+  );
+  assert.match(instructions, /When the next work needs different tools/);
+  assert.match(instructions, /select the definitions needed for that stage/);
+  assert.match(
+    instructions,
+    /Loading a schema grants no permission and executes nothing/
+  );
+  assert.match(
+    instructions,
+    /All lasting changes and email sends require an exact human confirmation/
+  );
+});
+
 test("focused launch questions use relevant evidence without requiring a readiness audit", () => {
   const focused = launch
     .split("\n\n")
