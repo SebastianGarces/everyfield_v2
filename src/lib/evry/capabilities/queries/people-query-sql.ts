@@ -19,6 +19,7 @@ import {
 import { peopleTextSearch } from "@/lib/people/service";
 
 const ids = z.array(z.string().uuid()).min(1).max(50);
+const tagNames = z.array(z.string().trim().min(1).max(100)).min(1).max(50);
 const dateRange = z
   .strictObject({
     from: z.iso.date().optional(),
@@ -64,13 +65,20 @@ const peopleCondition = z.strictObject({
       any: ids.optional(),
       all: ids.optional(),
       none: ids.optional(),
-      names: z
-        .array(z.string().trim().min(1).max(100))
-        .min(1)
-        .max(50)
+      names: tagNames
         .optional()
         .describe(
           "Match any of these exact tag names, case-insensitively, within this plant."
+        ),
+      allNames: tagNames
+        .optional()
+        .describe(
+          "Require every exact tag name, case-insensitively, within this plant."
+        ),
+      noneNames: tagNames
+        .optional()
+        .describe(
+          "Exclude people with any of these exact tag names, case-insensitively, within this plant."
         ),
     })
     .optional(),
@@ -348,12 +356,20 @@ function conditionSql(
       clauses.push(sql`not exists (${tagExists(condition.tags.none)})`);
     for (const id of new Set(condition.tags.all))
       clauses.push(sql`exists (${tagExists([id])})`);
+    const namedTagExists = (names: string[]) =>
+      sql`select 1 from person_tags pt join tags tag on tag.id = pt.tag_id and tag.church_id = ${plantId}::uuid where pt.church_id = ${plantId}::uuid and pt.person_id = persons.id and ${inValues(
+        sql`lower(tag.name)`,
+        names.map((name) => name.toLowerCase())
+      )}`;
     if (condition.tags.names)
+      clauses.push(sql`exists (${namedTagExists(condition.tags.names)})`);
+    for (const name of new Set(
+      condition.tags.allNames?.map((value) => value.toLowerCase())
+    ))
+      clauses.push(sql`exists (${namedTagExists([name])})`);
+    if (condition.tags.noneNames)
       clauses.push(
-        sql`exists (select 1 from person_tags pt join tags tag on tag.id = pt.tag_id and tag.church_id = ${plantId}::uuid where pt.church_id = ${plantId}::uuid and pt.person_id = persons.id and ${inValues(
-          sql`lower(tag.name)`,
-          condition.tags.names.map((name) => name.toLowerCase())
-        )})`
+        sql`not exists (${namedTagExists(condition.tags.noneNames)})`
       );
   }
   if (condition.skill) {

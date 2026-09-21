@@ -20,7 +20,9 @@ import {
   locations,
   meetingChecklistItems,
   meetingEvaluations,
+  PREDEFINED_TEAM_KEYS,
 } from "@/db/schema";
+import { teamRequiresBackgroundCheck } from "@/lib/ministry-teams/role-templates";
 import { storedEvryReadArtifactDocument } from "@/lib/evry/conversations/artifacts";
 import { publicEvryArtifact } from "@/lib/evry/artifacts/public";
 import { formatOperationValue } from "./operations-display";
@@ -109,6 +111,30 @@ test("eight public contracts reject unsupported filters and tenant input", () =>
       },
     })
   );
+});
+
+test("team and role requirements derive background checks from the native template policy", () => {
+  for (const resource of ["teams", "roles"] as const) {
+    const compiled = dialect.sqlToQuery(
+      teamsGetManyStatement(
+        {
+          resource,
+          ids: [resource === "teams" ? TEAM : ROLE],
+          sections: ["requirements"],
+          relatedLimit: 10,
+        },
+        PLANT
+      )
+    );
+    assert.match(compiled.sql, /coalesce\(mt\.template_key in/);
+    assert.ok(compiled.params.includes("Background check required"));
+    assert.deepEqual(
+      compiled.params.filter((value) =>
+        PREDEFINED_TEAM_KEYS.some((key) => key === value)
+      ),
+      PREDEFINED_TEAM_KEYS.filter(teamRequiresBackgroundCheck)
+    );
+  }
 });
 
 test("task dates retain plant-local today and completion windows", () => {
@@ -533,6 +559,97 @@ before(() => {
 after(() => {
   if (container) postgres(`drop database if exists ${database};`, "postgres");
 });
+
+test(
+  "PostgreSQL proof: renamed team requirements follow native policy and do not leak foreign teams",
+  { skip: !container },
+  () => {
+    const customTeam = "50000000-0000-4000-8000-000000000090";
+    const foreignTeam = "50000000-0000-4000-8000-000000000091";
+    const customRole = "60000000-0000-4000-8000-000000000090";
+    const foreignRole = "60000000-0000-4000-8000-000000000091";
+    postgres(`
+      update ministry_teams set name='Next Generation', template_key='childrens_ministry' where id='${TEAM}';
+      insert into ministry_teams(id,church_id,name,template_key,status) values
+        ('${customTeam}','${PLANT}','Children''s Ministry',null,'active'),
+        ('${foreignTeam}','${OTHER}','Other church children','childrens_ministry','active');
+      insert into team_roles(id,church_id,team_id,name,status) values
+        ('${customRole}','${PLANT}','${customTeam}','Check-in','open'),
+        ('${foreignRole}','${OTHER}','${foreignTeam}','Private role','open');
+    `);
+    try {
+      for (const resource of ["teams", "roles"] as const) {
+        const ids =
+          resource === "teams"
+            ? [TEAM, customTeam, foreignTeam]
+            : [ROLE, customRole, foreignRole];
+        const result = runSql(
+          teamsGetManyStatement(
+            {
+              resource,
+              ids,
+              sections: ["requirements"],
+              relatedLimit: 10,
+            },
+            PLANT
+          )
+        );
+        assert.equal(result.total, 2);
+        const artifact = operationsArtifact(
+          "Requirements",
+          "/teams",
+          result,
+          {},
+          NOW,
+          ZONE
+        );
+        assert.deepEqual(
+          artifact.items.map((item) => [
+            item.id,
+            item.facts.find(
+              (field) => field.label === "Background check required"
+            )?.value,
+          ]),
+          [
+            [ids[0], "Yes"],
+            [ids[1], "No"],
+          ]
+        );
+        assert.ok(
+          !result.rows.some((row: { id: string }) => row.id === ids[2])
+        );
+      }
+      for (const key of PREDEFINED_TEAM_KEYS) {
+        postgres(
+          `update ministry_teams set template_key=${literal(key)} where id='${TEAM}';`
+        );
+        const result = runSql(
+          teamsGetManyStatement(
+            {
+              resource: "teams",
+              ids: [TEAM],
+              sections: ["requirements"],
+              relatedLimit: 10,
+            },
+            PLANT
+          )
+        );
+        assert.equal(
+          result.rows[0].facts.find(
+            (field: { label: string }) =>
+              field.label === "Background check required"
+          )?.value,
+          String(teamRequiresBackgroundCheck(key)),
+          key
+        );
+      }
+    } finally {
+      postgres(
+        `delete from team_roles where id in ('${customRole}','${foreignRole}'); delete from ministry_teams where id in ('${customTeam}','${foreignTeam}'); update ministry_teams set name='Welcome',template_key=null where id='${TEAM}';`
+      );
+    }
+  }
+);
 
 test(
   "PostgreSQL proof: all eight readers execute, filter and aggregate real fixtures",

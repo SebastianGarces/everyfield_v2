@@ -52,6 +52,12 @@ export const communicationQuerySchema = z.strictObject({
   statuses: z.array(z.enum(communicationStatuses)).min(1).optional(),
   deliveryStatuses: z.array(z.enum(recipientStatuses)).min(1).optional(),
   category: z.enum(templateCategories).optional(),
+  channel: z
+    .enum(["email", "sms"])
+    .optional()
+    .describe(
+      "Delivery channel. For recipients, selects actual recipient deliveries; mixed-channel messages and templates can support either channel."
+    ),
   window: contentWindow.optional(),
   timeField: z.enum(["created", "sent"]).default("created"),
   groupBy: z
@@ -102,10 +108,10 @@ function communicationSourceQuery(plantId: string, input: Query) {
       throw new Error(
         "Message and recipient filters cannot be applied to templates"
       );
-    return sql`select mt.id::text as id, mt.name as label, jsonb_build_object('Category', mt.category, 'Channel', mt.channel, 'Description', mt.description, 'Placeholders', mt.merge_fields) as facts, '/communication/templates/' || mt.id as href, ${input.groupBy === "channel" ? sql`mt.channel` : input.groupBy === "template" ? sql`mt.id::text` : sql`mt.category`}::text as group_key, mt.updated_at::text as sort_key from message_templates mt where ${visibleCommunicationTemplates(plantId)} and ${contentIn(sql`mt.id`, input.templateIds)} and ${input.category ? sql`mt.category = ${input.category}` : sql`true`} and ${input.search ? sql`(mt.name ilike ${`%${input.search}%`} or mt.description ilike ${`%${input.search}%`})` : sql`true`} and ${contentRange(sql`mt.created_at`, input.window)}`;
+    return sql`select mt.id::text as id, mt.name as label, jsonb_build_object('Category', mt.category, 'Channel', mt.channel, 'Description', mt.description, 'Placeholders', mt.merge_fields) as facts, '/communication/templates/' || mt.id as href, ${input.groupBy === "channel" ? sql`mt.channel` : input.groupBy === "template" ? sql`mt.id::text` : sql`mt.category`}::text as group_key, mt.updated_at::text as sort_key from message_templates mt where ${visibleCommunicationTemplates(plantId)} and ${contentIn(sql`mt.id`, input.templateIds)} and ${input.channel ? sql`mt.channel in (${input.channel}, 'both')` : sql`true`} and ${input.category ? sql`mt.category = ${input.category}` : sql`true`} and ${input.search ? sql`(mt.name ilike ${`%${input.search}%`} or mt.description ilike ${`%${input.search}%`})` : sql`true`} and ${contentRange(sql`mt.created_at`, input.window)}`;
   }
-  const recipientFilter = sql`${contentIn(sql`r.person_id`, input.personIds)} and ${contentIn(sql`r.status`, input.deliveryStatuses)} and ${input.teamIds ? sql`exists (select 1 from team_memberships tm where tm.church_id = ${plantId} and tm.person_id = r.person_id and tm.status = 'active' and ${contentIn(sql`tm.team_id`, input.teamIds)})` : sql`true`}`;
-  const messageFilter = sql`c.church_id = ${plantId} and ${contentIn(sql`c.id`, input.messageIds)} and ${contentIn(sql`c.meeting_id`, input.meetingIds)} and ${contentIn(sql`c.template_id`, input.templateIds)} and ${contentIn(sql`c.status`, input.statuses)} and ${contentRange(input.timeField === "sent" ? sql`c.sent_at` : sql`c.created_at`, input.window)} and ${input.search ? sql`(c.subject ilike ${`%${input.search}%`} or c.body ilike ${`%${input.search}%`})` : sql`true`} and ${input.category ? sql`exists (select 1 from message_templates mt where mt.id = c.template_id and (mt.church_id = ${plantId} or (mt.church_id is null and mt.is_system = true)) and mt.category = ${input.category})` : sql`true`}`;
+  const recipientFilter = sql`${contentIn(sql`r.person_id`, input.personIds)} and ${contentIn(sql`r.status`, input.deliveryStatuses)} and ${input.channel ? sql`r.channel = ${input.channel}` : sql`true`} and ${input.teamIds ? sql`exists (select 1 from team_memberships tm where tm.church_id = ${plantId} and tm.person_id = r.person_id and tm.status = 'active' and ${contentIn(sql`tm.team_id`, input.teamIds)})` : sql`true`}`;
+  const messageFilter = sql`c.church_id = ${plantId} and ${input.channel ? sql`c.channel in (${input.channel}, 'both')` : sql`true`} and ${contentIn(sql`c.id`, input.messageIds)} and ${contentIn(sql`c.meeting_id`, input.meetingIds)} and ${contentIn(sql`c.template_id`, input.templateIds)} and ${contentIn(sql`c.status`, input.statuses)} and ${contentRange(input.timeField === "sent" ? sql`c.sent_at` : sql`c.created_at`, input.window)} and ${input.search ? sql`(c.subject ilike ${`%${input.search}%`} or c.body ilike ${`%${input.search}%`})` : sql`true`} and ${input.category ? sql`exists (select 1 from message_templates mt where mt.id = c.template_id and (mt.church_id = ${plantId} or (mt.church_id is null and mt.is_system = true)) and mt.category = ${input.category})` : sql`true`}`;
   if (input.resource === "messages") {
     const group = {
       status: sql`c.status`,

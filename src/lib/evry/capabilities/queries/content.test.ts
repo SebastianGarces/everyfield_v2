@@ -206,6 +206,36 @@ test("distinct recipient query counts the complete joined population by person",
   assert.match(text, /p.deleted_at is null/);
 });
 
+test("communication channel filters distinguish actual email recipients from SMS within mixed messages", () => {
+  for (const resource of [
+    "messages",
+    "recipients",
+    "distinct_recipients",
+    "templates",
+  ] as const) {
+    const { sql: text, params } = compile(
+      communicationFilteredQuery(
+        plant,
+        communicationQuerySchema.parse({ resource, channel: "email" })
+      )
+    );
+    assert.ok(params.includes("email"));
+    assert.match(
+      text,
+      resource === "templates" ? /mt.channel in/ : /c.channel in/
+    );
+    if (resource === "recipients" || resource === "distinct_recipients")
+      assert.match(text, /r.channel =/);
+  }
+  assert.equal(
+    communicationQuerySchema.safeParse({
+      resource: "distinct_recipients",
+      channel: "fax",
+    }).success,
+    false
+  );
+});
+
 test("template override suppression occurs in SQL before filtering and paging", () => {
   const { sql: text, params } = compile(
     communicationFilteredQuery(

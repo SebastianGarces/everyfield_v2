@@ -1,6 +1,11 @@
 import { sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
-import { teamStatuses, membershipStatuses } from "@/db/schema";
+import {
+  teamStatuses,
+  membershipStatuses,
+  PREDEFINED_TEAM_KEYS,
+} from "@/db/schema";
+import { teamRequiresBackgroundCheck } from "@/lib/ministry-teams/role-templates";
 import { defineEvryReadRegistration } from "@/lib/evry/reads/contract";
 import { evryDateRangeSchema } from "@/lib/evry/reads/date-range";
 import {
@@ -267,8 +272,12 @@ export function teamsGetManyStatement(
     evidence = sql`${evidence} || ${facts(fact("Role slots total", sql`(select count(*) from team_roles r where r.church_id = ${plantId} and r.team_id = mt.id)`), fact("Open role slots", openSlots(plantId)))} || coalesce((select jsonb_agg(${relatedFact("Role", sql`role.name || ' · ' || ${displayLabel(sql`role.status`, "team_status")}`, sql`role.name || ' [' || role.id || ']'`)} order by role.id) from (select r.id, r.name, r.status from team_roles r where r.church_id = ${plantId} and r.team_id = mt.id order by r.id limit ${input.relatedLimit}) role), '[]'::jsonb)`;
   if (input.sections.includes("responsibilities"))
     evidence = sql`${evidence} || ${facts(fact("Responsibilities total", sql`(select count(*) from team_responsibilities responsibility where responsibility.church_id = ${plantId} and responsibility.team_id = mt.id)`))} || coalesce((select jsonb_agg(${fact("Responsibility", sql`responsibility.title || ' · ' || case when responsibility.completed_at is null then 'Incomplete' else 'Complete' end`)} order by responsibility.id) from (select responsibility.id, responsibility.title, responsibility.completed_at from team_responsibilities responsibility where responsibility.church_id = ${plantId} and responsibility.team_id = mt.id order by responsibility.id limit ${input.relatedLimit}) responsibility), '[]'::jsonb)`;
-  if (input.sections.includes("requirements"))
-    evidence = sql`${evidence} || ${facts(fact("Required training programs total", sql`(select count(*) from training_programs program where program.church_id = ${plantId} and (program.team_id = mt.id or program.team_id is null) and program.is_required)`))} || coalesce((select jsonb_agg(${relatedFact("Required training", sql`program.name`, sql`program.name || ' [' || program.id || ']'`)} order by program.id) from (select program.id, program.name from training_programs program where program.church_id = ${plantId} and (program.team_id = mt.id or program.team_id is null) and program.is_required order by program.id limit ${input.relatedLimit}) program), '[]'::jsonb)`;
+  if (input.sections.includes("requirements")) {
+    const checkRequiredKeys = PREDEFINED_TEAM_KEYS.filter(
+      teamRequiresBackgroundCheck
+    );
+    evidence = sql`${evidence} || ${facts(fact("Background check required", checkRequiredKeys.length ? sql`coalesce(${inValues(sql`mt.template_key`, checkRequiredKeys)}, false)` : sql`false`, { format: "boolean" }), fact("Required training programs total", sql`(select count(*) from training_programs program where program.church_id = ${plantId} and (program.team_id = mt.id or program.team_id is null) and program.is_required)`))} || coalesce((select jsonb_agg(${relatedFact("Required training", sql`program.name`, sql`program.name || ' [' || program.id || ']'`)} order by program.id) from (select program.id, program.name from training_programs program where program.church_id = ${plantId} and (program.team_id = mt.id or program.team_id is null) and program.is_required order by program.id limit ${input.relatedLimit}) program), '[]'::jsonb)`;
+  }
   const source = sql`select ${roleOnly ? sql`r.id` : sql`mt.id`}::text as id, ${roleOnly ? sql`r.name` : sql`mt.name`} as label, '/teams/' || mt.id as href, ${evidence} || ${facts(fact("Related evidence limit per section", sql`${input.relatedLimit}::int`))} as facts from ministry_teams mt ${roleOnly ? sql`join team_roles r on r.team_id = mt.id and r.church_id = ${plantId}` : sql``} where mt.church_id = ${plantId} and ${inValues(roleOnly ? sql`r.id::text` : sql`mt.id::text`, input.ids)}`;
   return operationsStatement(
     source,

@@ -96,6 +96,51 @@ test("every persisted People and attendance enum has a human-facing label", () =
   }
 });
 
+test("named tag all/none predicates intersect with legacy names and ID filters before pagination", () => {
+  const input = peopleQuerySchema.parse({
+    cohort: {
+      all: {
+        tags: {
+          any: [id],
+          all: [id],
+          none: [plant],
+          names: ["Worship", "Hospitality"],
+          allNames: ["Volunteer", "VOLUNTEER"],
+          noneNames: ["Inactive", "x' OR true --"],
+        },
+      },
+    },
+    result: { mode: "list", limit: 2 },
+  });
+  const compiled = dialect.sqlToQuery(buildPeopleQuery(plant, input));
+  assert.equal(
+    compiled.params.filter((value) => value === "volunteer").length,
+    1
+  );
+  assert.ok(compiled.params.includes("inactive"));
+  assert.ok(compiled.params.includes("x' or true --"));
+  assert.doesNotMatch(compiled.sql, /OR true --/);
+  assert.equal(
+    (compiled.sql.match(/not exists \(select 1 from person_tags/g) ?? [])
+      .length,
+    2
+  );
+  assert.equal((compiled.sql.match(/lower\(tag.name\)/g) ?? []).length, 3);
+  assert.ok(
+    compiled.sql.indexOf("not exists") < compiled.sql.indexOf("result_page as")
+  );
+  for (const key of ["names", "allNames", "noneNames"]) {
+    for (const value of [[], [" "], Array(51).fill("tag")])
+      assert.equal(
+        peopleQuerySchema.safeParse({
+          cohort: { all: { tags: { [key]: value } } },
+          result: { mode: "count" },
+        }).success,
+        false
+      );
+  }
+});
+
 test("People public projection uses domain labels and calendar dates without rewriting note text", () => {
   const note = "Keep snake_case and user_first_name exactly as recorded.";
   const artifact = peopleQueryArtifact(

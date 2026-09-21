@@ -93,7 +93,7 @@ const scalar = (value: unknown): string =>
       : value === null
         ? "null"
         : `'${String(value).replaceAll("'", "''")}'`;
-function execute(query: SQL): unknown[] {
+function execute(query: SQL, extraFixture = ""): unknown[] {
   assert.ok(
     enabled && container,
     "Only the explicitly disposable proof container may be used"
@@ -116,7 +116,7 @@ function execute(query: SQL): unknown[] {
       "ON_ERROR_STOP=1",
     ],
     {
-      input: `begin; ${fixture} prepare proof_query as select row_to_json(proof_result) from (${compiled.sql}) proof_result; execute proof_query(${compiled.params.map(scalar).join(",")}); rollback;`,
+      input: `begin; ${fixture} ${extraFixture} prepare proof_query as select row_to_json(proof_result) from (${compiled.sql}) proof_result; execute proof_query(${compiled.params.map(scalar).join(",")}); rollback;`,
       encoding: "utf8",
     }
   );
@@ -201,6 +201,117 @@ test("Postgres AND/OR tags do not duplicate people", { skip: !enabled }, () => {
   assert.equal(result.total, 1);
   assert.equal(result.rows[0]?.id, person(41));
 });
+test(
+  "Postgres named tag unions, intersections and exclusions filter the full cohort before paging",
+  { skip: !enabled },
+  () => {
+    const worship = person(101);
+    const hospitality = person(102);
+    const inactive = person(103);
+    const foreignWorship = person(104);
+    const foreignInactive = person(105);
+    const extraFixture = `
+      insert into tags(id,church_id,name) values
+        ('${worship}','${plant}','Worship'),
+        ('${hospitality}','${plant}','HOSPITALITY'),
+        ('${inactive}','${plant}','Inactive'),
+        ('${foreignWorship}','${foreign}','Worship'),
+        ('${foreignInactive}','${foreign}','Inactive'),
+        ('${person(106)}','${plant}','Worship team');
+      insert into person_tags(church_id,person_id,tag_id)
+        select '${plant}', ('20000000-0000-4000-8000-' || lpad(n::text,12,'0'))::uuid,
+          case when n % 2 = 0 then '${hospitality}'::uuid else '${worship}'::uuid end
+        from generate_series(1,12) n;
+      insert into person_tags(church_id,person_id,tag_id)
+        select '${plant}', ('20000000-0000-4000-8000-' || lpad(n::text,12,'0'))::uuid, '${worship}'
+        from generate_series(2,12,2) n;
+      insert into person_tags(church_id,person_id,tag_id) values
+        ('${plant}','${person(3)}','${inactive}'),
+        ('${plant}','${person(7)}','${inactive}'),
+        ('${plant}','${person(11)}','${inactive}'),
+        ('${plant}','${person(2)}','${foreignInactive}'),
+        ('${foreign}','${person(4)}','${inactive}'),
+        ('${plant}','${person(13)}','${foreignWorship}'),
+        ('${foreign}','${person(15)}','${worship}'),
+        ('${plant}','${person(14)}','${person(106)}'),
+        ('${plant}','${person(70)}','${worship}'),
+        ('${plant}','${person(71)}','${worship}');
+    `;
+    const cohort = {
+      all: {
+        tags: {
+          names: ["wOrShIp", "hospitality"],
+          noneNames: ["INACTIVE"],
+        },
+      },
+    };
+    const read = (input: unknown) =>
+      resultSchema.parse(
+        execute(
+          buildPeopleQuery(plant, peopleQuerySchema.parse(input)),
+          extraFixture
+        )[0]
+      );
+    const expected = [1, 2, 4, 5, 6, 8, 9, 10, 12].map(person);
+    const first = read({ cohort, result: { mode: "list", limit: 4 } });
+    const second = read({
+      cohort,
+      result: { mode: "list", limit: 4, afterId: first.rows.at(-1)?.id },
+    });
+    const third = read({
+      cohort,
+      result: { mode: "list", limit: 4, afterId: second.rows.at(-1)?.id },
+    });
+    for (const page of [first, second, third]) assert.equal(page.total, 9);
+    assert.deepEqual(
+      [...first.rows, ...second.rows, ...third.rows].map((row) => row.id),
+      expected
+    );
+    assert.equal(first.has_more, true);
+    assert.equal(second.has_more, true);
+    assert.equal(third.has_more, false);
+    assert.equal(read({ cohort, result: { mode: "count" } }).total, 9);
+    assert.equal(
+      read({ cohort, result: { mode: "group", by: "stage" } }).groups[0]?.count,
+      9
+    );
+    const both = read({
+      cohort: {
+        all: {
+          tags: {
+            allNames: ["worship", "Hospitality", "WORSHIP"],
+            noneNames: ["inactive"],
+          },
+        },
+      },
+      result: { mode: "list" },
+    });
+    assert.deepEqual(
+      both.rows.map((row) => row.id),
+      [2, 4, 6, 8, 10, 12].map(person)
+    );
+    assert.equal(both.total, 6);
+    const mixed = read({
+      cohort: {
+        all: {
+          tags: { names: ["worship"], all: [hospitality], none: [inactive] },
+        },
+      },
+      result: { mode: "list" },
+    });
+    assert.deepEqual(
+      mixed.rows.map((row) => row.id),
+      both.rows.map((row) => row.id)
+    );
+    assert.equal(
+      read({
+        cohort: { all: { tags: { allNames: ["worship", "missing tag"] } } },
+        result: { mode: "count" },
+      }).total,
+      0
+    );
+  }
+);
 test(
   "Postgres midnight boundaries use the plant's calendar day",
   { skip: !enabled },

@@ -41,7 +41,7 @@ export const wikiSearchSchema = z.strictObject({
   sectionIds: z.array(z.uuid()).min(1).max(50).optional(),
   readingStatuses: z.array(z.enum(wikiProgressStatuses)).min(1).optional(),
   ...contentPage,
-  // Up to three searches share one persisted artifact (maximum 100 items).
+  // Search phrases share one distinct article page.
   limit: z.number().int().min(1).max(30).default(20),
 });
 export function wikiSearchQuery(
@@ -66,7 +66,7 @@ export function wikiSearchQuery(
       category: wikiArticles.contentType,
       excerpt: (query === null
         ? sql<string>`coalesce(${wikiArticles.excerpt}, left(${wikiArticles.content}, 300))`
-        : sql<string>`ts_headline('english', ${wikiArticles.content}, ${term}, 'StartSel=, StopSel=, MaxWords=60, MinWords=20, MaxFragments=2')`
+        : sql<string>`ts_headline('english', ${wikiArticles.content}, ${term}, 'StartSel="", StopSel="", MaxWords=60, MinWords=20, MaxFragments=2')`
       ).as("ts_headline"),
       rank: rank.as("rank"),
     })
@@ -102,46 +102,54 @@ export function wikiSearchQuery(
     .orderBy(sql`${rank} desc`, wikiArticles.slug, wikiArticles.id);
 }
 
+/** Count and page the union, not separate phrase pages that can repeat articles. */
+export function wikiSearchPageQuery(
+  plantId: string,
+  userId: string,
+  input: z.infer<typeof wikiSearchSchema>
+) {
+  const queries = input.queries.length ? [...new Set(input.queries)] : [null];
+  const matches = queries.map((query) => {
+    const filtered = wikiSearchQuery(plantId, userId, input, query);
+    return sql`select source.*, ${query ?? "Browse visible articles"}::text as query_provenance from (${filtered}) source`;
+  });
+  return sql`with matches as (${sql.join(matches, sql` union all `)}),
+    articles as (select distinct on (id) * from matches order by id, rank desc, query_provenance),
+    provenance as (select id, jsonb_agg(distinct query_provenance order by query_provenance) as queries from matches group by id),
+    page as (select articles.*, provenance.queries from articles join provenance using (id) order by rank desc, slug, id limit ${input.limit} offset ${input.offset})
+    select (select count(*)::int from articles) as total, coalesce((select jsonb_agg(page order by rank desc, slug, id) from page), '[]'::jsonb) as rows`;
+}
+
 export const WIKI_SEARCH = defineEvryReadRegistration({
   id: "wiki.search",
   capabilityIdentity: "wiki.search",
   inputShape: wikiSearchSchema.shape,
   async run({ authorization, now }, input) {
     const timeZone = await readEvryPlantTimeZone(authorization.actor.plantId);
-    const pages = await Promise.all(
-      (input.queries.length ? input.queries : [null]).map(async (query) => {
-        const filtered = wikiSearchQuery(
-          authorization.actor.plantId,
-          authorization.actor.userId,
-          input,
-          query
-        );
-        const result = await db.execute(
-          sql`with filtered as (${filtered}), page as (select * from filtered order by rank desc, slug, id limit ${input.limit} offset ${input.offset}) select (select count(*)::int from filtered) as total, coalesce((select jsonb_agg(page) from page), '[]'::jsonb) as rows`
-        );
-        const data = z
-          .object({
-            total: z.coerce.number(),
-            rows: z.array(
-              z.object({
-                id: z.string(),
-                slug: z.string(),
-                title: z.string(),
-                updated_at: z.string(),
-                phase: z.number().nullable(),
-                content_type: z.string(),
-                ts_headline: z.string(),
-              })
-            ),
-          })
-          .parse(result.rows[0]);
-        return {
-          query: query ?? "Browse visible articles",
-          total: data.total,
-          rows: data.rows,
-        };
-      })
+    const result = await db.execute(
+      wikiSearchPageQuery(
+        authorization.actor.plantId,
+        authorization.actor.userId,
+        input
+      )
     );
+    const data = z
+      .object({
+        total: z.coerce.number(),
+        rows: z.array(
+          z.object({
+            id: z.string(),
+            slug: z.string(),
+            title: z.string(),
+            updated_at: z.string(),
+            phase: z.number().nullable(),
+            content_type: z.string(),
+            ts_headline: z.string(),
+            queries: z.array(z.string()),
+          })
+        ),
+      })
+      .parse(result.rows[0]);
     const artifact = buildEvryReadArtifact({
       title: "Wiki search results",
       filters: [
@@ -149,43 +157,39 @@ export const WIKI_SEARCH = defineEvryReadRegistration({
           label: "As of",
           value: contentInstantLabel(now ?? new Date(), timeZone),
         },
-        ...pages.flatMap(({ query, total, rows }) => [
-          { label: "Query", value: query },
-          {
-            label: "Matching articles",
-            value: String(total),
-          },
-          ...(input.offset + rows.length < total
-            ? [
-                {
-                  label: "Next offset",
-                  value: String(input.offset + input.limit),
-                },
-              ]
-            : []),
-        ]),
+        {
+          label: "Query",
+          value: input.queries.join("; ") || "Browse visible articles",
+        },
+        { label: "Matching articles", value: String(data.total) },
+        ...(input.offset + data.rows.length < data.total
+          ? [
+              {
+                label: "Next offset",
+                value: String(input.offset + input.limit),
+              },
+            ]
+          : []),
       ],
       exclusions: [],
-      items: pages.flatMap(({ query, rows }, queryIndex) =>
-        rows.map((row) => ({
-          id: `${queryIndex}:${row.id}`,
-          label: contentBound(row.title, 160),
-          facts: contentFacts({
-            "Query provenance": query,
-            Passage: row.ts_headline,
-            Revision: new Date(row.updated_at).toISOString(),
-            Phase: row.phase,
-            Category: row.content_type,
-            "Citation slug": row.slug,
-            "Citation scope":
-              "Search passage; read the article for surrounding context",
-          }),
-          sourceLink: trustedEvryApplicationSourceLink({
-            label: "Open article",
-            href: wikiHref(row.slug),
-          }),
-        }))
-      ),
+      items: data.rows.map((row) => ({
+        id: row.id,
+        label: contentBound(row.title, 160),
+        facts: contentFacts({
+          "Query provenance": row.queries,
+          Passage: row.ts_headline,
+          Revision: new Date(row.updated_at).toISOString(),
+          Phase: row.phase,
+          Category: row.content_type,
+          "Citation slug": row.slug,
+          "Citation scope":
+            "Search passage; read the article for surrounding context",
+        }),
+        sourceLink: trustedEvryApplicationSourceLink({
+          label: "Open article",
+          href: wikiHref(row.slug),
+        }),
+      })),
       sourceLinks: [
         trustedEvryApplicationSourceLink({ label: "Open Wiki", href: "/wiki" }),
       ],
@@ -195,7 +199,7 @@ export const WIKI_SEARCH = defineEvryReadRegistration({
       resultMode: "list" as const,
       counts: {
         ...artifact.counts,
-        matched: pages.reduce((sum, page) => sum + page.total, 0),
+        matched: data.total,
       },
     };
   },
