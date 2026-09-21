@@ -36,6 +36,21 @@ export function createFixtureStore(container: string) {
   return {
     sql,
     query,
+    /** Discover all foreign rows after scenario seeding, not just the base manifest. */
+    foreignRecordIds(m: FixtureManifest) {
+      const plant = z.uuid().parse(m.ids["foreign-plant"]);
+      const selects =
+        query(`select format('select id::text as id from %I.%I where church_id = %L::uuid', c.table_schema, c.table_name, '${plant}') as statement
+        from information_schema.columns c
+        where c.table_schema='public' and c.column_name='church_id' and c.udt_name='uuid'
+        and exists (select 1 from information_schema.columns i where i.table_schema=c.table_schema and i.table_name=c.table_name and i.column_name='id' and i.udt_name='uuid')`).map(
+          (row) => z.string().parse(row.statement)
+        );
+      return [
+        plant,
+        ...query(selects.join(" union ")).map((row) => z.uuid().parse(row.id)),
+      ].sort();
+    },
     seed(m: FixtureManifest) {
       const i = m.ids;
       const task = (
@@ -129,8 +144,16 @@ export function createFixtureStore(container: string) {
           `select id from persons where church_id='${p}' and status='core_group' and deleted_at is null`
         ),
         launch: query(
-          `select target_date::text, (select count(*)::int from launch_milestones where church_id='${p}' and completed_at is null) open_milestones, (select count(*)::int from team_roles where church_id='${p}' and status='open') open_roles from launches where church_id='${p}'`
+          `select target_date::text, (select count(*)::int from launch_milestones where church_id='${p}' and completed_at is null) open_milestones, (select count(*)::int from team_roles r join ministry_teams t on t.id=r.team_id and t.church_id='${p}' where r.church_id='${p}' and not exists(select 1 from team_memberships s join persons person on person.id=s.person_id and person.church_id='${p}' and person.deleted_at is null where s.church_id='${p}' and s.team_id=r.team_id and s.role_id=r.id and s.status='active')) open_roles from launches where church_id='${p}'`
         )[0],
+        openRoleTeams: query(
+          `select r.team_id::text as team_id, count(*)::int as amount from team_roles r join ministry_teams t on t.id=r.team_id and t.church_id='${p}' where r.church_id='${p}' and not exists(select 1 from team_memberships s join persons person on person.id=s.person_id and person.church_id='${p}' and person.deleted_at is null where s.church_id='${p}' and s.team_id=r.team_id and s.role_id=r.id and s.status='active') group by r.team_id`
+        )
+          .map(
+            (row) =>
+              `${z.uuid().parse(row.team_id)}:${z.number().int().positive().parse(row.amount)}`
+          )
+          .sort(),
       };
     },
     auditStart() {

@@ -46,9 +46,9 @@ test(
               {
                 toolCalls: [
                   {
-                    id: "load-tasks",
-                    name: "load_tools",
-                    input: { names: ["tasks.query"] },
+                    id: "load-daily-work",
+                    name: "load_skill",
+                    input: { skill: "daily-work" },
                   },
                 ],
               },
@@ -73,15 +73,8 @@ test(
                 ],
               },
               {
-                toolCalls: [
-                  {
-                    id: "fixture-present",
-                    name: "present_result",
-                    input: { reference: "fixture-tasks" },
-                  },
-                ],
+                text: "Here are your tasks due today.\n\n[[evry-result:fixture-tasks]]",
               },
-              { text: "Here are your tasks due today." },
               {
                 toolCalls: [
                   {
@@ -104,15 +97,8 @@ test(
                 ],
               },
               {
-                toolCalls: [
-                  {
-                    id: "fixture-high-present",
-                    name: "present_result",
-                    input: { reference: "fixture-high" },
-                  },
-                ],
+                text: "Here is the high-priority task.\n\n[[evry-result:fixture-high]]",
               },
-              { text: "Here is the high-priority task." },
             ],
           },
         },
@@ -153,8 +139,8 @@ test(
       );
       assert.equal(outcome.replay.snapshots, 2);
       assert.ok(outcome.replay.eventCount > 0);
-      assert.equal(outcome.replay.generationsBefore, 7);
-      assert.equal(outcome.replay.generationsAfter, 7);
+      assert.equal(outcome.replay.generationsBefore, 5);
+      assert.equal(outcome.replay.generationsAfter, 5);
       assert.equal(outcome.replay.invocationsBefore, 2);
       assert.equal(outcome.replay.invocationsAfter, 2);
       assert.deepEqual(
@@ -179,12 +165,18 @@ test(
         "My pending tasks due today, excluding overdue",
         "Only high priority",
       ]);
-      const expectedTools = ["load_tools", "tasks_query", "present_result"];
+      const expectedTools = ["load_tools", "load_skill", "tasks_query"];
       for (const name of expectedTools)
         assert.ok(
           outcome.runtimeProof?.availableTools.includes(name),
           `Missing compiled tool: ${name}`
         );
+      assert.equal(outcome.runtimeProof?.modelCalls, 5);
+      assert.equal(
+        outcome.runtimeProof?.availableTools.includes("present_result"),
+        false,
+        "Card placement is part of the final streamed answer, not a tool round trip"
+      );
       assert.equal(
         outcome.runtimeProof?.availableTools.includes("actions_prepare"),
         false,
@@ -292,21 +284,19 @@ test(
                 ],
               },
               {
-                toolCalls: [
-                  {
-                    id: "fixture-after-question-present",
-                    name: "present_result",
-                    input: { reference: "fixture-after-question" },
-                  },
-                ],
+                text: "Here is your high-priority task due today.\n\n[[evry-result:fixture-after-question]]",
               },
-              { text: "Here is your high-priority task due today." },
             ],
           },
         },
         AbortSignal.timeout(120_000)
       );
       assert.equal(outcome.clarificationCount, 1);
+      assert.equal(outcome.runtimeProof?.modelCalls, 4);
+      assert.equal(
+        outcome.runtimeProof?.availableTools.includes("present_result"),
+        false
+      );
       assert.deepEqual(outcome.runtimeProof?.questionAnswers, [
         "Yes, only high priority",
       ]);

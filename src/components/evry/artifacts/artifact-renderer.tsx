@@ -528,6 +528,65 @@ function customerCountLabel(label: string): string {
   return subject && action ? `${subject} to ${action}` : label;
 }
 
+function ConfirmationAudience({
+  audience,
+}: {
+  audience: NonNullable<
+    EvryDetailedConfirmationArtifactDocument["steps"][number]["audience"]
+  >;
+}) {
+  const targets = audience.people;
+  const recipients = audience.kind === "email_recipients";
+  const label = recipients ? "Email recipients" : "Guests";
+  function list(items: typeof targets) {
+    return (
+      <ul className="space-y-2 text-sm">
+        {items.map((target, index) => (
+          <li
+            key={`${target.sourceLink.href}-${index}`}
+            className="leading-relaxed [overflow-wrap:anywhere]"
+          >
+            <AuthenticatedLink
+              href={target.sourceLink.href}
+              className={linkClassName}
+            >
+              {target.name}
+              {target.email ? ` <${target.email}>` : ""}
+            </AuthenticatedLink>
+          </li>
+        ))}
+      </ul>
+    );
+  }
+  return (
+    <section className="space-y-2">
+      <h5 className="text-sm font-medium">{label}</h5>
+      {list(targets.slice(0, 5))}
+      {targets.length > 5 ? (
+        <Dialog>
+          <DialogTrigger asChild>
+            <Button variant="outline" size="sm">
+              View all {targets.length.toLocaleString()}{" "}
+              {recipients ? "recipients" : "guests"}
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="max-h-[85dvh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>{label}</DialogTitle>
+              <DialogDescription>
+                {recipients
+                  ? "These people will receive the invitation after you confirm."
+                  : "These people will be added to the meeting after you confirm."}
+              </DialogDescription>
+            </DialogHeader>
+            {list(targets)}
+          </DialogContent>
+        </Dialog>
+      ) : null}
+    </section>
+  );
+}
+
 function DetailedConfirmation({
   artifact,
 }: {
@@ -599,6 +658,10 @@ function DetailedConfirmation({
                     </div>
                   ))}
                 </dl>
+              ) : null}
+
+              {step.audience ? (
+                <ConfirmationAudience audience={step.audience} />
               ) : null}
 
               {step.dateTime ? (

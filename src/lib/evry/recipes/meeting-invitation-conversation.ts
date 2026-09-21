@@ -252,7 +252,20 @@ export async function prepareMeetingInvitation(
       artifacts: [storedEvryClarificationArtifactDocument(resolution.artifact)],
     };
   }
-  if (resolution.kind !== "planned") return null;
+  if (resolution.kind !== "planned") {
+    if (
+      resolution.kind === "unavailable" &&
+      resolution.reason === "unresolved_guests"
+    ) {
+      return {
+        status: "needs_resolution" as const,
+        reason: "unresolved_guests" as const,
+        body: "Some selected guests could not be found in the current church records. Refresh the people lookup and reuse the exact returned IDs, or use the named audience the user requested. Do not guess IDs or omit anyone. No meeting was created and nothing was sent.",
+        artifacts: [],
+      };
+    }
+    return null;
+  }
 
   const rawResolverInput = MEETING_INVITATION_PLAN_RESOLVER_INPUT_SCHEMA.parse({
     request,

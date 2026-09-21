@@ -1,5 +1,6 @@
 import { defineState } from "eve/context";
 import type { LanguageModelMiddleware } from "ai";
+import type { JevClient } from "../jev/client";
 
 export type FixtureModelParams = Parameters<
   NonNullable<LanguageModelMiddleware["transformParams"]>
@@ -21,6 +22,7 @@ export type FixtureRunHooks = {
   now: Date;
   maxOutputTokens: number;
   model?: FixtureModel;
+  routingClient?: JevClient;
   turnInput(text: string): void;
   authorize(allowed: boolean): void;
   call(value: {

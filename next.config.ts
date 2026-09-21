@@ -56,5 +56,6 @@ export default withEve(
 
     // Route Sentry requests through the app to avoid ad-blockers.
     tunnelRoute: "/monitoring",
-  })
+  }),
+  { eveBuildCommand: "pnpm evry:build" }
 );

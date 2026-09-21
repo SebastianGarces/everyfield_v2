@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { fixtureMessageSchema } from "./transcript";
+import { processingSnapshotSchema } from "./processing-snapshot";
 
 export const compiledFixtureRequest = z
   .strictObject({
@@ -27,7 +28,29 @@ export const compiledFixtureRequest = z
     }),
     timeoutMs: z.number().int().positive().max(600_000).default(120_000),
     verifyReplay: z.boolean().optional(),
+    expectedTurnFailureMessage: z
+      .enum([
+        "EVRY_PROCESSING_LIMIT_REACHED",
+        "EVRY_SCRIPTED_STREAM_FAILURE",
+        "EVRY_SCRIPTED_COMPACTION_FAILURE",
+      ])
+      .optional(),
+    verifyProcessingState: z.boolean().optional(),
     verifyRestart: z.boolean().optional(),
+    routing: z
+      .array(
+        z.discriminatedUnion("status", [
+          z.strictObject({
+            status: z.literal("available"),
+            probabilities: z.record(z.string(), z.number().min(0).max(1)),
+          }),
+          z.strictObject({
+            status: z.literal("unavailable"),
+            reason: z.enum(["not_configured", "timeout", "provider_error"]),
+          }),
+        ])
+      )
+      .optional(),
     model: z.discriminatedUnion("mode", [
       z.strictObject({
         mode: z.literal("scripted"),
@@ -35,6 +58,8 @@ export const compiledFixtureRequest = z
           .array(
             z.strictObject({
               text: z.string().optional(),
+              failStream: z.boolean().optional(),
+              failGenerate: z.boolean().optional(),
               usage: z
                 .strictObject({
                   inputTokens: z.number().int().nonnegative(),
@@ -60,6 +85,18 @@ export const compiledFixtureRequest = z
       }),
     ]),
   })
+  .refine((request) => !request.routing || request.model.mode === "scripted", {
+    message: "Injected routing requires a scripted fixture",
+    path: ["routing"],
+  })
+  .refine(
+    (request) =>
+      !request.verifyProcessingState || request.model.mode === "scripted",
+    {
+      message: "Processing snapshot proof requires a scripted provider",
+      path: ["verifyProcessingState"],
+    }
+  )
   .refine(
     (request) => !request.verifyRestart || request.model.mode === "scripted",
     {
@@ -69,6 +106,8 @@ export const compiledFixtureRequest = z
   );
 export type CompiledFixtureRequest = z.input<typeof compiledFixtureRequest>;
 export const httpEvalOutcomeSchema = z.object({
+  routingRequests: z.array(z.json()).optional(),
+  processingSnapshots: z.array(processingSnapshotSchema).optional(),
   restart: z
     .object({
       matchingTranscript: z.boolean(),
@@ -105,6 +144,22 @@ export const httpEvalOutcomeSchema = z.object({
           z.object({
             tools: z.array(z.string()),
             inputBytes: z.number().int().nonnegative(),
+            retainedOriginalRequest: z.boolean().optional(),
+            authoredSkills: z
+              .array(z.object({ name: z.string(), sha256: z.string() }))
+              .optional(),
+            toolSchemas: z
+              .array(z.object({ name: z.string(), inputSchema: z.json() }))
+              .optional(),
+            toolErrors: z
+              .array(
+                z.object({
+                  id: z.string(),
+                  name: z.string(),
+                  output: z.unknown(),
+                })
+              )
+              .optional(),
           })
         )
         .optional(),
@@ -143,6 +198,15 @@ export const httpEvalOutcomeSchema = z.object({
     modelCalls: z.array(
       z.object({
         reservedUsd: z.number(),
+        startedMs: z.number().nonnegative(),
+        durationMs: z.number().nonnegative().nullable(),
+        tools: z.array(z.string()),
+        assistantTextHistory: z.array(
+          z.object({
+            phase: z.enum(["commentary", "final_answer"]).nullable(),
+            hasItemId: z.boolean(),
+          })
+        ),
         inputBytes: z.number(),
         inputTokens: z.number().nullable(),
         outputTokens: z.number().nullable(),

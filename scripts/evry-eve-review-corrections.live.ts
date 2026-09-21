@@ -1,5 +1,7 @@
 /** Explicitly opt-in, isolated review. Never sends email or touches shared data. */
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { projectEveMessage } from "@/components/evry/eve-message-projection";
 import { startFixtureStack } from "@/lib/evry/eve/evals/fixtures/stack";
@@ -9,9 +11,10 @@ import {
   FIXTURE_NOW,
 } from "@/lib/evry/eve/evals/fixtures/manifest";
 import { runCompiledEveFixture } from "@/lib/evry/eve/evals/http/process";
+import { withLiveReviewBudget } from "./evry-eve-live-budget";
+import { seedLaunchReviewFixture, launchReviewTruth } from "@/lib/evry/eve/evals/fixtures/launch-review";
 
-async function main() {
-  const allowance = Number(process.env.EVRY_APPROVED_REVIEW_USD);
+async function review(allowance: number) {
   if (!Number.isFinite(allowance) || allowance <= 0 || allowance > 1)
     throw new Error(
       "Requires an explicitly approved remaining allowance of at most $1"
@@ -45,17 +48,9 @@ async function main() {
       const manifest = createFixtureManifest(`review-corrections-${name}`, 0);
       const i = manifest.ids;
       store.seed(manifest);
-      store.sql(`update locations set name='Evry Community Center', address='100 Example Lane, Albany, NY 12207' where id='${i["church-location"]}';
-        insert into launch_milestones(launch_id,church_id,template_key,area,title,completed_at)
-        select '${i.launch}','${i.plant}','operations.review_'||n,'operations','Preparation '||n,
-        case when n<=3 then '2026-09-10'::timestamptz else null end from generate_series(1,7) n;
-        with added as (insert into tasks(church_id,title,status,priority,due_date,assigned_to_id,created_by_id)
-        select '${i.plant}','Launch preparation '||n,'not_started','medium','2026-09-25','${i.actor}','${i.actor}' from generate_series(1,13) n returning id)
-        insert into launch_milestone_tasks(church_id,milestone_id,task_id) select '${i.plant}','${i["milestone-open"]}',id from added;`);
-      const truth = store.query(
-        `select count(*)::int total, count(*) filter(where completed_at is not null)::int complete, count(*) filter(where completed_at is null)::int remaining from launch_milestones where church_id='${i.plant}' and launch_id='${i.launch}'`
-      );
-      assert.deepEqual(truth, [{ total: 9, complete: 4, remaining: 5 }]);
+      store.sql(`update locations set name='Evry Community Center', address='100 Example Lane, Albany, NY 12207' where id='${i["church-location"]}';`);
+      seedLaunchReviewFixture(manifest, store);
+      const truth = launchReviewTruth(manifest, store);
       const before = store.auditStart();
       const ceiling =
         ((prices.maxInputBytes + 4096) * prices.inputUsdPerMillion +
@@ -69,7 +64,15 @@ async function main() {
       // Print before dispatch. If the child exits without usage evidence, stop
       // the whole review and retain its entire allocation, never retry for free.
       console.log(
-        JSON.stringify({ event: "allocate", name, allocation, prices })
+        JSON.stringify({
+          event: "allocate",
+          name,
+          allocation,
+          prices,
+          compiledEntrySha256: createHash("sha256")
+            .update(readFileSync(resolve(".output/server/index.mjs")))
+            .digest("hex"),
+        })
       );
       let outcome: Awaited<ReturnType<typeof runCompiledEveFixture>>;
       try {
@@ -121,6 +124,12 @@ async function main() {
           modelCalls: outcome.hostCapture.modelCalls,
           latency: outcome.latency,
           visible,
+          questions: outcome.messages.flatMap((message) =>
+            message.parts.flatMap((part) => part.type === "dynamic-tool" && part.toolName === "ask_question" ? [{
+                input: part.input,
+                metadata: part.toolMetadata?.eve,
+              }] : [])
+          ),
           calls: outcome.hostCapture.calls,
           failures: outcome.runtimeProof?.failures,
           truth,
@@ -161,9 +170,17 @@ async function main() {
         remaining,
       })
     );
+    return { result: undefined, costUsd: allowance - remaining };
   } finally {
     await stack.cleanup();
   }
+}
+async function main() {
+  const ledger = process.env.EVRY_REVIEW_LEDGER;
+  if (!ledger)
+    throw new Error("An existing approved EVRY_REVIEW_LEDGER is required");
+  const allowance = Number(process.env.EVRY_APPROVED_REVIEW_USD);
+  return withLiveReviewBudget(ledger, allowance, () => review(allowance));
 }
 main().catch((error) => {
   console.error(error);

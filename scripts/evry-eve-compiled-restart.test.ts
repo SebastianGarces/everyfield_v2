@@ -80,21 +80,17 @@ test(
                 ],
               },
               {
-                toolCalls: [
-                  {
-                    id: "fixture-show-review",
-                    name: "present_result",
-                    input: { reference: "fixture-prepare" },
-                  },
-                ],
-              },
-              {
-                text: "Review the orientation and invitation below. Nothing has been sent.",
+                text: "Review the orientation and invitation below.\n\n[[evry-result:fixture-prepare]]\n\nNothing has been sent.",
               },
             ],
           },
         },
         AbortSignal.timeout(120_000)
+      );
+      assert.equal(outcome.runtimeProof?.modelCalls, 3);
+      assert.equal(
+        outcome.runtimeProof?.availableTools.includes("present_result"),
+        false
       );
       assert.ok(outcome.restart);
       const { firstPid, replacementPid, ...restart } = outcome.restart;

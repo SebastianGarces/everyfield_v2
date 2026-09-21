@@ -6,6 +6,7 @@ import {
   hydrateStoredEvryConversationArtifact,
 } from "../../conversations/artifacts";
 import type { EveJsonValue } from "../capabilities/registry";
+import { eveResultPresentationSchema } from "../presentation";
 
 type ResultRecord = {
   reference: string;
@@ -68,4 +69,30 @@ export function findResult(
   return records.find(
     (item) => item.reference === reference && item.turnId === turnId
   );
+}
+
+/** Native executors own this envelope; generated code can only populate data. */
+export function withResultPresentation(
+  data: unknown,
+  turnId: string,
+  references: readonly string[]
+) {
+  const selected = new Set(references);
+  return {
+    // Match the native JSON transport, which drops undefined object properties.
+    data: z.json().parse(JSON.parse(JSON.stringify(data))),
+    presentation: eveResultPresentationSchema.parse({
+      version: 1,
+      turnId,
+      results: evryResultState
+        .get()
+        .filter(
+          (record) => record.turnId === turnId && selected.has(record.reference)
+        )
+        .map((record) => ({
+          reference: record.reference,
+          artifacts: publicResultArtifacts(record.artifacts),
+        })),
+    }),
+  };
 }

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 import { isDeepStrictEqual } from "node:util";
+import { readFixtureProcessingSnapshots } from "./processing-snapshot";
 import {
   compiledFixtureRequest,
   httpEvalOutcomeSchema,
@@ -21,6 +22,14 @@ export async function runCompiledEveFixture(
   const directory = await mkdtemp(join(tmpdir(), "evry-eve-http-fixture-"));
   try {
     const first = await runWorker(request, signal, directory);
+    if (request.verifyProcessingState) {
+      if (request.model.mode !== "scripted")
+        throw new Error(
+          "Processing snapshot proof requires an isolated scripted model"
+        );
+      first.outcome.processingSnapshots =
+        await readFixtureProcessingSnapshots(directory);
+    }
     if (!request.verifyRestart) return first.outcome;
     signal.throwIfAborted();
     const second = await runWorker(
@@ -69,6 +78,9 @@ async function runWorker(
     // production adapter and substitute only our explicit, isolated provider.
     NODE_ENV: "production",
     EVE_MOCK_AUTHORED_MODELS: "0",
+    // The worker owns a disposable cwd, but imports the application's actual
+    // transcript projector with its source aliases.
+    TSX_TSCONFIG_PATH: join(__dirname, "../../../../../../tsconfig.json"),
     // Explicit fixture-owned disk storage survives the replacement process.
     WORKFLOW_TARGET_WORLD: "local",
     WORKFLOW_LOCAL_DATA_DIR: join(directory, ".eve/.workflow-data"),

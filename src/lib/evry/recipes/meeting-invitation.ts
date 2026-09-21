@@ -2,6 +2,10 @@ import { and, eq, inArray, isNull } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/db";
+import {
+  CORE_GROUP_STATUSES,
+  isCoreGroupStatus,
+} from "@/lib/people/core-group";
 import { meetingTypes, type MeetingType } from "@/db/schema/meetings";
 import {
   churches,
@@ -86,8 +90,6 @@ export const MEETING_INVITATION_SEND_IDENTITY = "communication.messages.send";
 export const MEETING_INVITATION_PLAN_RESOLVER_IDENTITY =
   "meeting.invitation.plan.resolve";
 
-const CORE_TEAM_STATUSES = new Set(["core_group", "launch_team", "leader"]);
-
 export type MeetingInvitationReferenceRequest = Readonly<{
   sourceText: string;
   meetingType?: MeetingType;
@@ -167,7 +169,7 @@ export type ResolvedMeetingInvitationReference = Readonly<{
 export type MeetingInvitationReferenceResolution =
   | ResolvedMeetingInvitationReference
   | Readonly<{ kind: "clarification"; artifact: EvryClarificationArtifact }>
-  | Readonly<{ kind: "unavailable" }>;
+  | Readonly<{ kind: "unavailable"; reason?: "unresolved_guests" }>;
 
 export const MEETING_INVITATION_PLAN_SNAPSHOT_SCHEMA = z.strictObject({
   meeting: MEETINGS_EFFECT_ARGUMENT_SCHEMAS.createMeetingAction,
@@ -659,6 +661,17 @@ export function buildMeetingInvitationConfirmation(input: {
         effectKind: "other",
         reversibility: "reversible",
         resolvedTargets: persistedTargets(guestStep),
+        audience: {
+          kind: "guests",
+          people: guests.targets.map((guest) => ({
+            name: guest.label,
+            email: guest.email,
+            sourceLink: trustedEvryApplicationSourceLink({
+              label: "Open person",
+              href: `/people/${guest.personId}`,
+            }),
+          })),
+        },
         counts: [{ label: "Guests to add", count: guests.targets.length }],
         exclusions: exclusionCounts(guests.exclusions),
         dateTime: null,
@@ -671,6 +684,17 @@ export function buildMeetingInvitationConfirmation(input: {
         effectKind: "communication",
         reversibility: "irreversible",
         resolvedTargets: persistedTargets(sendStep),
+        audience: {
+          kind: "email_recipients",
+          people: communication.audience.recipients.map((recipient) => ({
+            name: recipient.label,
+            email: recipient.email,
+            sourceLink: trustedEvryApplicationSourceLink({
+              label: "Open person",
+              href: `/people/${recipient.personId}`,
+            }),
+          })),
+        },
         counts: [
           {
             label: "Invitation emails to send",
@@ -927,11 +951,10 @@ function resolveAudience(
       explicitGuests
         ? explicitGuests.has(person.id)
         : audience === "core_team"
-          ? CORE_TEAM_STATUSES.has(person.status)
+          ? isCoreGroupStatus(person.status)
           : audience === "prospects"
             ? person.status === "prospect"
-            : CORE_TEAM_STATUSES.has(person.status) ||
-              person.status === "prospect"
+            : isCoreGroupStatus(person.status) || person.status === "prospect"
     )
     .toSorted((left, right) => left.id.localeCompare(right.id));
   const guests: MeetingInvitationGuest[] = [];
@@ -1045,7 +1068,7 @@ export function createMeetingInvitationReferenceResolver(
         (id) => !facts.people.some((person) => person.id === id)
       )
     )
-      return { kind: "unavailable" };
+      return { kind: "unavailable", reason: "unresolved_guests" };
     if (input.request.guestPersonIds && input.request.audience)
       return { kind: "unavailable" };
     const audience = resolveAudience(
@@ -1112,12 +1135,7 @@ async function loadProductionFacts(
           eq(persons.churchId, actor.plantId),
           request?.guestPersonIds
             ? inArray(persons.id, [...request.guestPersonIds])
-            : inArray(persons.status, [
-                "prospect",
-                "core_group",
-                "launch_team",
-                "leader",
-              ]),
+            : inArray(persons.status, ["prospect", ...CORE_GROUP_STATUSES]),
           isNull(persons.deletedAt)
         )
       )

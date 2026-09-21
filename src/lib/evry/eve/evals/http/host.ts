@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { z } from "zod";
+import type { JevClient } from "../../jev/client";
 import type {
   FixtureIdentity,
   FixtureModelParams,
@@ -18,6 +19,13 @@ export type HostCapture = {
   costUsd: number;
   costBasis: "provider_usage" | "reserved_upper_bound";
   modelCalls: Array<{
+    startedMs: number;
+    durationMs: number | null;
+    tools: string[];
+    assistantTextHistory: Array<{
+      phase: "commentary" | "final_answer" | null;
+      hasItemId: boolean;
+    }>;
     reservedUsd: number;
     inputBytes: number;
     inputTokens: number | null;
@@ -64,6 +72,7 @@ export function installIsolatedFixtureHost(config: {
   databaseUrl: string;
   allowPaidProviderCalls?: true;
   scriptedModel?: FixtureModel;
+  routingClient?: JevClient;
   onTurnInput?: (text: string) => void;
 }) {
   assertIsolatedFixtureTarget(config.origin, config.databaseUrl);
@@ -163,6 +172,7 @@ export function installIsolatedFixtureHost(config: {
         modelCalls: [],
       };
       let stopped = false;
+      const started = performance.now();
       let pending = 0;
       let generations = 0;
       let invocations = 0;
@@ -174,6 +184,7 @@ export function installIsolatedFixtureHost(config: {
         now: new Date(input.now),
         maxOutputTokens: prices.maxOutputTokens,
         model: config.scriptedModel,
+        routingClient: config.routingClient,
         turnInput(text) {
           config.onTurnInput?.(text);
         },
@@ -209,6 +220,27 @@ export function installIsolatedFixtureHost(config: {
             throw new Error("Evaluation budget exhausted before generation");
           capture.costUsd += ceiling;
           const call: HostCapture["modelCalls"][number] = {
+            startedMs: performance.now() - started,
+            durationMs: null,
+            tools: (params.tools ?? []).map((tool) => tool.name),
+            assistantTextHistory: params.prompt.flatMap((message) =>
+              message.role === "assistant"
+                ? message.content.flatMap((part) => {
+                    if (part.type !== "text") return [];
+                    const options = part.providerOptions?.openai;
+                    return [
+                      {
+                        phase:
+                          options?.phase === "commentary" ||
+                          options?.phase === "final_answer"
+                            ? options.phase
+                            : null,
+                        hasItemId: typeof options?.itemId === "string",
+                      },
+                    ];
+                  })
+                : []
+            ),
             reservedUsd: ceiling,
             inputBytes: bytes,
             inputTokens: null,
@@ -246,6 +278,7 @@ export function installIsolatedFixtureHost(config: {
                   outputTokens * prices.outputUsdPerMillion) /
                 1_000_000;
               call.inputTokens = inputTokens;
+              call.durationMs = performance.now() - started - call.startedMs;
               call.outputTokens = outputTokens;
               call.costUsd = actual;
               capture.costUsd += actual - ceiling;
@@ -276,6 +309,7 @@ export function installIsolatedFixtureHost(config: {
         maxOutputTokens: prices.maxOutputTokens,
         activity: () => ({ generations, invocations }),
         snapshot: () => structuredClone({ ...capture, outboundMessages }),
+        present: hooks.present,
         stop() {
           stopped = true;
         },

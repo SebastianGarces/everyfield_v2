@@ -1,4 +1,5 @@
 import { createServer } from "node:net";
+import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { access } from "node:fs/promises";
@@ -31,6 +32,9 @@ process.on("message", async (message) => {
   if (used) return;
   used = true;
   let phase = "configuration";
+  const failures: string[] = [];
+  const eventTypes: string[] = [];
+  const scriptedDiagnostics: string[] = [];
   let host: ReturnType<typeof installIsolatedFixtureHost> | undefined;
   try {
     const { request, replaySessionId } = z
@@ -65,19 +69,68 @@ process.on("message", async (message) => {
     phase = "scripted provider configuration";
     let responseIndex = 0;
     const availableTools = new Set<string>();
-    const modelRequests: Array<{ tools: string[]; inputBytes: number }> = [];
+    const originalRequest =
+      typeof request.turns[0] === "string" ? request.turns[0] : undefined;
+    const modelRequests: Array<{
+      tools: string[];
+      inputBytes: number;
+      retainedOriginalRequest?: boolean;
+      toolSchemas?: Array<{
+        name: string;
+        inputSchema: z.infer<ReturnType<typeof z.json>>;
+      }>;
+      toolErrors?: Array<{ id: string; name: string; output: unknown }>;
+      authoredSkills?: Array<{ name: string; sha256: string }>;
+    }> = [];
     const availableSkills = new Set<string>();
     const turnInputs: string[] = [];
+    const routingRequests: z.infer<ReturnType<typeof z.json>>[] = [];
     const questionAnswers = new Set<string>();
-    const failures: string[] = [];
-    const eventTypes: string[] = [];
     const model =
       request.model.mode === "scripted"
         ? mockModel({
             modelId: "isolated-runtime-script",
             respond: (modelRequest) => {
               modelRequests.push({
+                retainedOriginalRequest:
+                  originalRequest !== undefined &&
+                  modelRequest.messages.some((message) =>
+                    message.text.includes(originalRequest)
+                  ),
                 tools: modelRequest.tools.map((tool) => tool.name),
+                authoredSkills: modelRequest.messages.flatMap((message) =>
+                  message.role === "system"
+                    ? [
+                        ...message.text.matchAll(
+                          /<evry-authored-skill name="([a-z0-9-]+)">\n([\s\S]*?)\n<\/evry-authored-skill>/g
+                        ),
+                      ].map((match) => ({
+                        name: match[1],
+                        sha256: createHash("sha256")
+                          .update(match[2])
+                          .digest("hex"),
+                      }))
+                    : []
+                ),
+                // Scripted fixtures only: inspect the actual model boundary, including
+                // validation errors that Eve deliberately omits from runtime actions.
+                toolSchemas: modelRequest.tools.flatMap((tool) =>
+                  tool.inputSchema === undefined
+                    ? []
+                    : [
+                        {
+                          name: tool.name,
+                          inputSchema: z
+                            .json()
+                            .parse(
+                              JSON.parse(JSON.stringify(tool.inputSchema))
+                            ),
+                        },
+                      ]
+                ),
+                toolErrors: modelRequest.toolResults
+                  .filter((result) => result.isError)
+                  .map(({ id, name, output }) => ({ id, name, output })),
                 inputBytes: Buffer.byteLength(
                   JSON.stringify({
                     messages: modelRequest.messages,
@@ -116,8 +169,57 @@ process.on("message", async (message) => {
         : undefined;
     if (typeof model === "string")
       throw new Error("Fixture requires a direct model");
+    const recordScriptedFailure = (error: unknown): never => {
+      scriptedDiagnostics.push(
+        error instanceof z.ZodError
+          ? error.issues
+              .map((issue) => `${issue.code}:${issue.path.join(".")}`)
+              .join(";")
+          : error instanceof Error
+            ? `${error.name}:${error.message.slice(0, 500)}`
+            : "unknown scripted failure"
+      );
+      throw error;
+    };
     const scriptedModel = model
-      ? wrapLanguageModel({ model, middleware: [] })
+      ? wrapLanguageModel({
+          model,
+          middleware: {
+            wrapGenerate: async ({ doGenerate }) => {
+              const response = await Promise.resolve(doGenerate()).catch(
+                recordScriptedFailure
+              );
+              if (
+                request.model.mode === "scripted" &&
+                request.model.responses[responseIndex - 1]?.failGenerate
+              )
+                throw new Error("EVRY_SCRIPTED_COMPACTION_FAILURE");
+              return response;
+            },
+            wrapStream: async ({ doStream }) => {
+              const response = await Promise.resolve(doStream()).catch(
+                recordScriptedFailure
+              );
+              if (
+                request.model.mode !== "scripted" ||
+                !request.model.responses[responseIndex - 1]?.failStream
+              )
+                return response;
+              return {
+                ...response,
+                stream: response.stream.pipeThrough(
+                  new TransformStream({
+                    transform(part, controller) {
+                      if (part.type === "text-end")
+                        throw new Error("EVRY_SCRIPTED_STREAM_FAILURE");
+                      controller.enqueue(part);
+                    },
+                  })
+                ),
+              };
+            },
+          },
+        })
       : undefined;
     phase = "isolated host configuration";
     host = installIsolatedFixtureHost({
@@ -128,6 +230,39 @@ process.on("message", async (message) => {
         ? { allowPaidProviderCalls: true }
         : {}),
       ...(scriptedModel ? { scriptedModel } : {}),
+      ...(request.routing && request.model.mode === "scripted"
+        ? {
+            routingClient: async (
+              routingRequest: import("../src/lib/evry/eve/jev/client").JevRequest
+            ) => {
+              routingRequests.push(z.json().parse(routingRequest));
+              const response = request.routing?.[routingRequests.length - 1];
+              if (!response || response.status === "unavailable")
+                return (
+                  response ?? {
+                    status: "unavailable" as const,
+                    reason: "not_configured" as const,
+                  }
+                );
+              const probabilities = Object.fromEntries(
+                Object.entries(routingRequest.questions).map(
+                  ([id, question]) => {
+                    const { candidate } = z
+                      .object({ candidate: z.object({ name: z.string() }) })
+                      .parse(question.instructions);
+                    return [id, response.probabilities[candidate.name] ?? 0.1];
+                  }
+                )
+              );
+              return {
+                status: "available" as const,
+                probabilities,
+                usage: { inputTokens: 0, outputTokens: 0 },
+                durationMs: 0,
+              };
+            },
+          }
+        : {}),
     });
     phase = "compiled runtime startup";
     await import(pathToFileURL(request.compiledEntry).href);
@@ -150,9 +285,16 @@ process.on("message", async (message) => {
       prices: request.prices,
       timeoutMs: request.timeoutMs,
       verifyReplay: request.verifyReplay,
+      expectedTurnFailureMessage: request.expectedTurnFailureMessage,
       replaySessionId,
       onEvent(event) {
         eventTypes.push(event.type);
+        if (event.type === "turn.failed")
+          failures.push(
+            event.data.message === request.expectedTurnFailureMessage
+              ? `${event.data.code}:${event.data.message}`
+              : event.data.code
+          );
         if (event.type === "action.result" && event.data.status !== "completed")
           failures.push(
             `${event.data.result.kind}:${event.data.error?.code ?? event.data.status}`
@@ -171,20 +313,44 @@ process.on("message", async (message) => {
       type: "result",
       outcome: {
         ...outcome,
+        ...(request.model.mode === "scripted" && request.routing
+          ? { routingRequests }
+          : {}),
         runtimeProof: {
           availableTools: [...availableTools],
-          modelRequests,
+          modelRequests:
+            request.model.mode === "scripted"
+              ? modelRequests
+              : outcome.hostCapture.modelCalls.map((call) => ({
+                  tools: call.tools,
+                  inputBytes: call.inputBytes,
+                })),
           availableSkills: [...availableSkills],
           turnInputs,
           questionAnswers: [...questionAnswers],
-          modelCalls: responseIndex,
+          modelCalls: outcome.hostCapture.modelCalls.length,
           failures,
           eventTypes,
         },
       },
     });
-  } catch {
-    process.send?.({ type: "failed", phase });
+  } catch (error) {
+    const reason =
+      error instanceof Error &&
+      [
+        "Evaluation runtime ended with turn.failed",
+        "Evaluation runtime ended with session.failed",
+        "Evaluation stream ended before a durable turn boundary",
+        "Evaluation exceeded its reserved budget",
+        "A paused evaluation requires an explicit response, not another message",
+        "Fixture response needs exactly one pending question",
+      ].includes(error.message)
+        ? error.message
+        : "isolated runtime failure";
+    process.send?.({
+      type: "failed",
+      phase: `${phase}: ${reason}; events=${eventTypes.slice(-5).join(",")}; failures=${failures.join(",")}; scripted=${scriptedDiagnostics.join(",")}`,
+    });
   } finally {
     host?.close();
   }

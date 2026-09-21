@@ -19,6 +19,7 @@ import type {
   Regression,
 } from "../contract";
 import type { EvalAdapter } from "../runner";
+import { questions, regressions } from "../catalog";
 import {
   createFixtureManifest,
   FIXTURE_NOW,
@@ -61,6 +62,66 @@ import {
   orientationTemplateExpectations,
   readPreparedOrientationFacts,
 } from "./prepared-facts";
+import {
+  staffingFixtureIds,
+  seedStaffingFixture,
+  staffingExpectations,
+  observedStaffingFacts,
+} from "./staffing";
+import {
+  peopleHistoryFixtureIds,
+  seedPeopleHistoryFixture,
+  peopleHistoryExpectations,
+  observedPeopleHistoryFacts,
+} from "./people-history";
+import {
+  contentFixtureIds,
+  bindContentTurns,
+  cleanupContentFixture,
+  seedContentFixture,
+  contentExpectations,
+  observedContentFacts,
+} from "./content";
+import {
+  taskQueryFixtureIds,
+  seedTaskQueryFixture,
+  taskQueryExpectations,
+  observedTaskQueryFacts,
+} from "./task-queries";
+import {
+  engagementFixtureIds,
+  seedEngagementFixture,
+  engagementExpectations,
+  observedEngagementFacts,
+} from "./engagement";
+import {
+  taskInvestigationFixtureIds,
+  seedTaskInvestigationFixture,
+  taskInvestigationExpectations,
+  observedTaskInvestigationFacts,
+} from "./task-investigations";
+import {
+  noteHistoryFixtureIds,
+  seedNoteHistoryFixture,
+  noteHistoryExpectations,
+  observedNoteHistoryFacts,
+} from "./note-history";
+import {
+  trainingReviewFixtureIds,
+  seedTrainingReviewFixture,
+  trainingReviewExpectations,
+  observedTrainingReviewFacts,
+} from "./training-review";
+import {
+  documentReviewFixtureIds,
+  seedDocumentReviewFixture,
+  documentReviewExpectations,
+  observedDocumentReviewFacts,
+  bindDocumentReviewTurns,
+  documentReviewFiles,
+} from "./document-review";
+import type { DocumentFixtureTransport } from "./document-storage";
+import { observedLaunchStaffing } from "./launch-staffing";
 
 type Scenario = EvalQuestion | Regression;
 type ProductionOutcome = Pick<
@@ -82,7 +143,7 @@ export type ProductionEvalRunner = (input: {
   now: Date;
   signal: AbortSignal;
   maxCostUsd: number;
-  /** Called only by the host after present_result resolves its authorized result reference. */
+  /** Called only by the host after the projector resolves an authorized result reference. */
   onPresentResult(callId: string): void;
 }) => Promise<ProductionOutcome>;
 const record = z.record(z.string(), z.unknown());
@@ -96,6 +157,127 @@ const boundCases = new Set([
   "regression-launch-overview",
   "regression-orientation",
 ]);
+
+type FixtureFamily = {
+  ids: readonly string[];
+  seed(manifest: FixtureManifest, store: FixtureStore): void;
+  expectations(
+    manifest: FixtureManifest,
+    store: FixtureStore
+  ): Expectations | null;
+  observe(
+    caseId: string,
+    calls: readonly CapturedCall[],
+    presented: ReadonlySet<string>
+  ): { facts: Expectations["facts"]; evidence: string[] };
+};
+
+// Order preserves fixture seeding and expectation precedence. Run every seed:
+// some families add shared distractors for questions owned by another family.
+const fixtureFamilies: readonly FixtureFamily[] = [
+  {
+    ids: historicalFixtureIds,
+    seed: seedHistoricalFixture,
+    expectations: historicalExpectations,
+    observe: observedHistoricalFacts,
+  },
+  {
+    ids: relationalFixtureIds,
+    seed: seedRelationalFixture,
+    expectations: relationalExpectations,
+    observe: observedRelationalFacts,
+  },
+  {
+    ids: staffingFixtureIds,
+    seed: seedStaffingFixture,
+    expectations: staffingExpectations,
+    observe: observedStaffingFacts,
+  },
+  {
+    ids: contentFixtureIds,
+    seed: seedContentFixture,
+    expectations: contentExpectations,
+    observe: observedContentFacts,
+  },
+  {
+    ids: taskQueryFixtureIds,
+    seed: seedTaskQueryFixture,
+    expectations: taskQueryExpectations,
+    observe: observedTaskQueryFacts,
+  },
+  {
+    ids: engagementFixtureIds,
+    seed: seedEngagementFixture,
+    expectations: engagementExpectations,
+    observe: observedEngagementFacts,
+  },
+  {
+    ids: taskInvestigationFixtureIds,
+    seed: seedTaskInvestigationFixture,
+    expectations: taskInvestigationExpectations,
+    observe: observedTaskInvestigationFacts,
+  },
+  {
+    ids: noteHistoryFixtureIds,
+    seed: seedNoteHistoryFixture,
+    expectations: noteHistoryExpectations,
+    observe: observedNoteHistoryFacts,
+  },
+  {
+    ids: trainingReviewFixtureIds,
+    seed: seedTrainingReviewFixture,
+    expectations: trainingReviewExpectations,
+    observe: observedTrainingReviewFacts,
+  },
+  {
+    ids: peopleHistoryFixtureIds,
+    seed: seedPeopleHistoryFixture,
+    expectations: peopleHistoryExpectations,
+    observe: observedPeopleHistoryFacts,
+  },
+  {
+    ids: documentReviewFixtureIds,
+    seed: seedDocumentReviewFixture,
+    expectations: documentReviewExpectations,
+    observe: observedDocumentReviewFacts,
+  },
+];
+const familyCaseIds = [
+  ...fixtureFamilies.flatMap((family) => family.ids),
+  ...securityFixtureIds,
+];
+
+/** Bound means a runnable fixture, not a passed model-quality evaluation. */
+export function productionFixtureCoverage(
+  options: { prepareDocumentFiles?: DocumentFixtureTransport } = {}
+) {
+  const runnableIds = [...boundCases, ...familyCaseIds].filter(
+    (id) => id !== "documents-04" || options.prepareDocumentFiles
+  );
+  const bound = new Set(runnableIds);
+  const originalIds = questions
+    .filter(({ id }) => bound.has(id))
+    .map(({ id }) => id);
+  const regressionIds = regressions
+    .filter(({ id }) => bound.has(id))
+    .map(({ id }) => id);
+  const unboundIds = [...questions, ...regressions]
+    .filter(({ id }) => !bound.has(id))
+    .map(({ id }) => id);
+  return {
+    runnableIds,
+    originalIds,
+    regressionIds,
+    unboundIds,
+    counts: {
+      runnable: runnableIds.length,
+      originals: originalIds.length,
+      regressions: regressionIds.length,
+      unbound: unboundIds.length,
+      corpus: questions.length + regressions.length,
+    },
+  };
+}
 const path = (value: unknown, ...keys: string[]): unknown =>
   keys.reduce<unknown>(
     (current, key) =>
@@ -133,7 +315,7 @@ function inputFilters(input: unknown, ...keys: string[]) {
   return Array.isArray(found) ? found : [];
 }
 
-/** Observe returned records and selected result references, never infer facts from model prose. */
+/** Verify retrieved evidence separately from card placement and the mandatory answer-quality review. */
 export function observedFixtureFacts(
   caseId: string,
   calls: readonly CapturedCall[],
@@ -143,17 +325,20 @@ export function observedFixtureFacts(
   const selected = calls.filter((call) => presented.has(call.id));
   const facts: Expectations["facts"] = {};
   const evidence = new Set<string>();
-  const latest = selected.at(-1);
+  const latestTaskRead = calls.findLast((call) => call.name === "tasks.query");
+  const latestPeopleRead = calls.findLast(
+    (call) => call.name === "people.query"
+  );
   if (
     caseId.startsWith("regression-today") ||
     caseId === "regression-followup-priority" ||
     caseId === "regression-readable-copy"
   ) {
-    if (latest?.name === "tasks.query") {
-      const parsed = artifact.safeParse(latest.output);
+    if (latestTaskRead) {
+      const parsed = artifact.safeParse(latestTaskRead.output);
       if (parsed.success)
         Object.assign(facts, {
-          taskIds: resultIds(latest.output),
+          taskIds: resultIds(latestTaskRead.output),
           total: parsed.data.counts.matched,
         });
     }
@@ -162,12 +347,12 @@ export function observedFixtureFacts(
     ["regression-no-n-plus-one", "regression-attendance-not-rsvp"].includes(
       caseId
     ) &&
-    latest?.name === "people.query"
+    latestPeopleRead
   ) {
-    const parsed = artifact.safeParse(latest.output);
+    const parsed = artifact.safeParse(latestPeopleRead.output);
     if (parsed.success)
       Object.assign(facts, {
-        personIds: resultIds(latest.output),
+        personIds: resultIds(latestPeopleRead.output),
         ...(caseId === "regression-no-n-plus-one"
           ? { total: parsed.data.counts.matched }
           : {}),
@@ -181,7 +366,7 @@ export function observedFixtureFacts(
         evidence.add("completed-person-linked-task");
       if (path(cohort, "interview") === "not_recorded")
         evidence.add("interview-records");
-      if (caseId === "regression-separate-cohorts" && presented.has(call.id)) {
+      if (caseId === "regression-separate-cohorts") {
         if (path(cohort, "followUp") === "recorded")
           facts.followed = resultIds(call.output);
         if (path(cohort, "followUp") === "not_recorded")
@@ -220,15 +405,28 @@ export function observedFixtureFacts(
         evidence.add("incomplete-milestones");
       if (
         call.name === "teams.query" &&
-        path(call.input, "request", "resource") === "roles" &&
-        inputFilters(call.input, "request", "where").some(
-          (filter) => path(filter, "vacant") === true
-        )
+        ((path(call.input, "request", "resource") === "roles" &&
+          inputFilters(call.input, "request", "where").some(
+            (filter) => path(filter, "vacant") === true
+          )) ||
+          (path(call.input, "request", "resource") === "teams" &&
+            inputFilters(call.input, "request", "where").some(
+              (filter) => path(filter, "hasVacancies") === true
+            ) &&
+            parsed.data.items.some((item) =>
+              item.facts?.some(
+                (fact) =>
+                  fact.label === "Open role slots" &&
+                  /^\d+$/.test(fact.value) &&
+                  Number(fact.value) > 0
+              )
+            )))
       )
         evidence.add("open-roles");
       if (
         call.name === "meetings.query" &&
         inputFilters(call.input, "where").some((filter) => {
+          if (path(filter, "timing") === "upcoming") return true;
           const parsed = evryDateRangeSchema.safeParse(path(filter, "date"));
           return (
             parsed.success &&
@@ -241,12 +439,20 @@ export function observedFixtureFacts(
     }
   }
   if (caseId === "regression-orientation") Object.assign(facts, prepared);
-  const historical = observedHistoricalFacts(caseId, calls, presented);
-  Object.assign(facts, historical.facts);
-  for (const item of historical.evidence) evidence.add(item);
-  const relational = observedRelationalFacts(caseId, calls, presented);
-  Object.assign(facts, relational.facts);
-  for (const item of relational.evidence) evidence.add(item);
+  if (caseId === "regression-launch-overview") {
+    const staffing = calls
+      .map(observedLaunchStaffing)
+      .filter((value) => value !== null);
+    if (staffing.length) {
+      facts.openRoleTeams = [...new Set(staffing.flat())].sort();
+      evidence.add("open-roles");
+    }
+  }
+  for (const family of fixtureFamilies) {
+    const observed = family.observe(caseId, calls, presented);
+    Object.assign(facts, observed.facts);
+    for (const item of observed.evidence) evidence.add(item);
+  }
   return {
     facts,
     evidence: [...evidence],
@@ -293,12 +499,14 @@ function expectationsFor(
     assert.deepEqual(truth.attended, resolved.facts.personIds);
   if (scenario.id === "regression-orientation")
     assert.deepEqual(truth.core, resolved.facts.recipientIds);
-  if (scenario.id === "regression-launch-overview")
+  if (scenario.id === "regression-launch-overview") {
     assert.deepEqual(truth.launch, {
       target_date: "2026-10-11",
       open_milestones: 1,
       open_roles: 1,
     });
+    resolved.facts.openRoleTeams = truth.openRoleTeams;
+  }
   return resolved;
 }
 
@@ -307,6 +515,8 @@ export function createProductionEveEvalAdapter(options: {
   store: FixtureStore;
   buildSha: string;
   runProduction: ProductionEvalRunner;
+  /** Upload declared fixture bytes before DB metadata; caller configures the host's isolated endpoint. */
+  prepareDocumentFiles?: DocumentFixtureTransport;
   /** HTTP mode requires a private runtime host journal; in-process proofs use the observed registry. */
   captureMode?: "in_process" | "isolated_http";
   preparation?(context: {
@@ -319,35 +529,58 @@ export function createProductionEveEvalAdapter(options: {
   let repetition = 0;
   return {
     async prepare(scenario) {
-      const historical = historicalFixtureIds.some((id) => id === scenario.id);
-      const security = securityFixtureIds.some((id) => id === scenario.id);
-      const relational = relationalFixtureIds.some((id) => id === scenario.id);
+      if (scenario.id === "documents-04" && !options.prepareDocumentFiles)
+        return null;
       if (
-        !historical &&
-        !security &&
-        !relational &&
+        !familyCaseIds.includes(scenario.id) &&
         (!("fixture" in scenario) || !boundCases.has(scenario.id))
       )
         return null;
       const manifest = createFixtureManifest(scenario.id, repetition++);
       options.store.seed(manifest);
+      let cleanupFiles: (() => Promise<void>) | undefined;
       try {
-        seedHistoricalFixture(manifest, options.store);
-        seedRelationalFixture(manifest, options.store);
+        if (scenario.id === "documents-04")
+          cleanupFiles = await options.prepareDocumentFiles!(
+            documentReviewFiles(manifest)
+          );
+        for (const family of fixtureFamilies)
+          family.seed(manifest, options.store);
         const securityFixture = seedSecurityFixture(manifest, options.store);
         const boundScenario =
+          scenario.id === "documents-04"
+            ? {
+                ...scenario,
+                turns: bindDocumentReviewTurns(manifest, scenario.turns),
+              }
+            : securityFixture && "fixture" in scenario
+              ? bindSecurityScenario(scenario, securityFixture)
+              : scenario.id === "intelligence-04"
+                ? {
+                    ...scenario,
+                    // The original question is ambiguous without page context.
+                    // Supply a visible user clarification, not hidden domain metadata.
+                    turns: [
+                      ...scenario.turns,
+                      "The Plant Intelligence reports for our church.",
+                    ],
+                  }
+                : {
+                    ...scenario,
+                    turns: bindContentTurns(manifest, scenario.turns),
+                  };
+        let expectations =
           securityFixture && "fixture" in scenario
-            ? bindSecurityScenario(scenario, securityFixture)
-            : scenario;
-        const expectations =
-          (securityFixture && "fixture" in scenario
             ? securityExpectations(scenario, securityFixture)
-            : null) ??
-          historicalExpectations(manifest, options.store) ??
-          relationalExpectations(manifest, options.store) ??
-          ("fixture" in scenario
+            : null;
+        for (const family of fixtureFamilies) {
+          if (expectations) break;
+          expectations = family.expectations(manifest, options.store);
+        }
+        expectations ??=
+          "fixture" in scenario
             ? expectationsFor(scenario, manifest, options.store.truth(manifest))
-            : null);
+            : null;
         assert.ok(
           expectations,
           "Fixture must declare independently checked expectations"
@@ -503,11 +736,7 @@ export function createProductionEveEvalAdapter(options: {
                       })
                     : undefined
               );
-              const foreignIds = [
-                manifest.ids["person-foreign"],
-                manifest.ids["task-foreign"],
-                manifest.ids["wiki-foreign"],
-              ];
+              const foreignIds = options.store.foreignRecordIds(manifest);
               const securityObserved = securityFixture
                 ? observeSecurityFixture(securityFixture, calls, result.answer)
                 : null;
@@ -570,13 +799,23 @@ export function createProductionEveEvalAdapter(options: {
             }
           },
           async cleanup() {
-            cleanupHistoricalFixture(manifest, options.store);
-            options.store.revoke(manifest);
+            try {
+              await cleanupFiles?.();
+            } finally {
+              cleanupHistoricalFixture(manifest, options.store);
+              cleanupContentFixture(manifest, options.store);
+              options.store.revoke(manifest);
+            }
           },
         };
       } catch (error) {
-        cleanupHistoricalFixture(manifest, options.store);
-        options.store.revoke(manifest);
+        try {
+          await cleanupFiles?.();
+        } finally {
+          cleanupHistoricalFixture(manifest, options.store);
+          cleanupContentFixture(manifest, options.store);
+          options.store.revoke(manifest);
+        }
         throw error;
       }
     },

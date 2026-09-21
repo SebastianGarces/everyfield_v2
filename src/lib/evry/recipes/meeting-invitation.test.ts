@@ -25,7 +25,12 @@ import {
   type MeetingInvitationReferenceRequest,
 } from "./meeting-invitation";
 import { trustedReviewForEvryPlanDocument } from "@/lib/evry/artifacts/trusted-plan-review";
-import { storedEvryClarificationArtifactDocument } from "@/lib/evry/conversations/artifacts";
+import { confirmationMatchesTrustedPlan } from "@/lib/evry/artifacts/lifecycle";
+import { publicEvryArtifact } from "@/lib/evry/artifacts/public";
+import {
+  hydrateStoredEvryConversationArtifact,
+  storedEvryClarificationArtifactDocument,
+} from "@/lib/evry/conversations/artifacts";
 import {
   createMeetingInvitationConversationContinuation,
   meetingInvitationRequestForConversation,
@@ -267,6 +272,44 @@ test("ordinary recipe continuation denies missing and stale read sessions before
   }
 });
 
+test("unresolved guest selection is recoverable without persisting a partial plan", async () => {
+  const continuation = createMeetingInvitationConversationContinuation(
+    {
+      async findPlan() {
+        return null;
+      },
+      async authorizeRead() {
+        return {
+          actor: ACTOR,
+          registration: { identity: "people.crm.people.load-more-people" },
+        } as unknown as EvryReadCapabilityAuthorization;
+      },
+      async resolveAuthorized() {
+        return { kind: "unavailable", reason: "unresolved_guests" };
+      },
+      async createPlan() {
+        throw new Error("A partial guest selection must not be persisted");
+      },
+    },
+    () => BASE_REQUEST
+  );
+  const result = await continuation.continue({
+    actor: ACTOR,
+    conversation: { id: "30000000-0000-4000-8000-000000000001" } as never,
+    userRequestKey: "missing-guest",
+    literalUserText: "Two hours; use the saved template.",
+    pageContext: null,
+    requestPageContext: null,
+    now: new Date("2026-08-30T12:00:00.000Z"),
+  });
+  assert.deepEqual(result, {
+    status: "needs_resolution",
+    reason: "unresolved_guests",
+    body: "Some selected guests could not be found in the current church records. Refresh the people lookup and reuse the exact returned IDs, or use the named audience the user requested. Do not guess IDs or omit anyone. No meeting was created and nothing was sent.",
+    artifacts: [],
+  });
+});
+
 test("focused duration and year replies continue the original immutable recipe request", () => {
   const request = meetingInvitationRequestForConversation({
     actor: ACTOR,
@@ -391,6 +434,34 @@ test("structured orientation resolves core-team guests and church location witho
   ]);
 });
 
+test("named core-team preparation retains launch-team members and leaders but excludes prospects", async () => {
+  const { resolve } = resolver({
+    facts: facts({
+      people: PEOPLE.map((entry) =>
+        entry.status === "leader"
+          ? { ...entry, email: "leader@example.test" }
+          : entry
+      ),
+    }),
+  });
+  const result = await resolve({
+    actor: ACTOR,
+    request: {
+      ...BASE_REQUEST,
+      audience: "core_team",
+      meetingType: "orientation",
+    },
+  });
+  assert.equal(result.kind, "resolved");
+  if (result.kind !== "resolved") return;
+  assert.deepEqual(
+    result.guests.map((guest) => guest.personId).sort(),
+    PEOPLE.slice(0, 3)
+      .map((person) => person.id)
+      .sort()
+  );
+});
+
 test("structured audience rejects conflicting selectors and does not exclude prior-attending prospects", async () => {
   const resolve = resolver({}).resolve;
   const conflict = await resolve({
@@ -461,7 +532,10 @@ test("explicit missing and foreign guest IDs return the same neutral unavailable
         guestPersonIds: [PEOPLE[0]!.id, unavailableId],
       },
     });
-    assert.deepEqual(result, { kind: "unavailable" });
+    assert.deepEqual(result, {
+      kind: "unavailable",
+      reason: "unresolved_guests",
+    });
   }
   const foreignPlant = facts({
     church: { ...facts().church, id: "90000000-0000-4000-8000-000000000003" },
@@ -1017,19 +1091,86 @@ test("the exact planner reviews the 100-recipient and 511-character-name boundar
     ["create-meeting", "add-guests", "send-invitations"]
   );
   assert.equal(artifact.steps[1]?.counts[0]?.count, 3);
+  assert.deepEqual(
+    artifact.steps[1]?.audience?.people.map(({ name, email, sourceLink }) => ({
+      name,
+      email,
+      href: sourceLink.href,
+    })),
+    snapshot.guests.targets.map(({ label, email, personId }) => ({
+      name: label,
+      email,
+      href: `/people/${personId}`,
+    }))
+  );
+  assert.deepEqual(
+    artifact.steps[2]?.audience?.people.map(({ name, email, sourceLink }) => ({
+      recipient: `${name} <${email}>`,
+      href: sourceLink.href,
+    })),
+    snapshot.communication.audience.recipients.map(
+      ({ label, email, personId }) => ({
+        recipient: `${label} <${email}>`,
+        href: `/people/${personId}`,
+      })
+    )
+  );
   assert.deepEqual(artifact.steps[1]?.exclusions, [
     { reason: "Missing email address", count: 1 },
     { reason: "Prior Vision Meeting attendance", count: 1 },
     { reason: "Duplicate email address", count: 1 },
     { reason: "Suppressed email address", count: 1 },
   ]);
-  assert.ok(
-    trustedReviewForEvryPlanDocument({
-      plan: planIdentity,
-      document: compiled.document,
-      reviewRegistry: MEETING_INVITATION_REVIEW_REGISTRY,
-    })
+  const trustedReview = trustedReviewForEvryPlanDocument({
+    plan: planIdentity,
+    document: compiled.document,
+    reviewRegistry: MEETING_INVITATION_REVIEW_REGISTRY,
+  });
+  assert.ok(trustedReview);
+  assert.deepEqual(trustedReview.confirmation, artifact);
+  assert.deepEqual(
+    publicEvryArtifact(hydrateStoredEvryConversationArtifact(artifact)),
+    artifact
   );
+  assert.equal(confirmationMatchesTrustedPlan(artifact, trustedReview), true);
+  for (const change of ["name", "email", "sourceLink", "membership"] as const) {
+    const tampered = {
+      ...artifact,
+      steps: artifact.steps.map((step) => ({
+        ...step,
+        ...(step.audience
+          ? {
+              audience: {
+                ...step.audience,
+                people:
+                  change === "membership"
+                    ? step.audience.people.slice(1)
+                    : step.audience.people.map((person) => ({
+                        ...person,
+                        ...(change === "name" ? { name: "Someone else" } : {}),
+                        ...(change === "email"
+                          ? { email: "other@example.test" }
+                          : {}),
+                        ...(change === "sourceLink"
+                          ? {
+                              sourceLink: {
+                                ...person.sourceLink,
+                                href: "/people/other",
+                              },
+                            }
+                          : {}),
+                      })),
+              },
+            }
+          : {}),
+      })),
+    };
+    assert.equal(
+      confirmationMatchesTrustedPlan(tampered, trustedReview),
+      false,
+      `rejects audience ${change} tampering`
+    );
+  }
 
   const maxPersonLabel = `${"F".repeat(255)} ${"L".repeat(255)}`;
   const peopleBoundary = Array.from({ length: 100 }, (_, index) => {
@@ -1110,6 +1251,22 @@ test("the exact planner reviews the 100-recipient and 511-character-name boundar
     document: boundaryCompiled.document,
   });
   assert.equal(boundaryArtifact.steps[1]?.counts[0]?.count, 100);
+  assert.deepEqual(
+    boundaryArtifact.steps[1]?.audience?.people.map(({ name }) => name),
+    peopleBoundary.map(({ label }) => label)
+  );
+  assert.deepEqual(
+    boundaryArtifact.steps[2]?.audience?.people.map(
+      ({ name, email, sourceLink }) => ({
+        recipient: `${name} <${email}>`,
+        href: sourceLink.href,
+      })
+    ),
+    peopleBoundary.map(({ label, email, personId }) => ({
+      recipient: `${label} <${email}>`,
+      href: `/people/${personId}`,
+    }))
+  );
   assert.deepEqual(boundaryArtifact.steps[1]?.contentPreviews, []);
   assert.deepEqual(boundaryArtifact.steps[2]?.contentPreviews, [
     {

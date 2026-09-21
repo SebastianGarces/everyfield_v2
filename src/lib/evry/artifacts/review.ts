@@ -134,6 +134,26 @@ const confirmationStepSchema = z
     // boundary. A hidden artifact cap made those otherwise valid plans
     // impossible to review after they had already been stored.
     resolvedTargets: z.array(resolvedTargetSchema).min(1).readonly(),
+    /** Display-only audience derived by the trusted review builder from the frozen plan. */
+    audience: z
+      .strictObject({
+        kind: z.enum(["guests", "email_recipients"]),
+        people: z
+          .array(
+            z
+              .strictObject({
+                name: exactDisplayTextSchema,
+                email: z.email().max(255).nullable(),
+                sourceLink: evryReviewSourceLinkSchema,
+              })
+              .readonly()
+          )
+          .min(1)
+          .max(1_000)
+          .readonly(),
+      })
+      .readonly()
+      .optional(),
     counts: z.array(reviewCountSchema).min(1).max(16).readonly(),
     exclusions: z.array(reviewExclusionSchema).max(32).readonly(),
     dateTime: evryConfirmationDateTimeRangeSchema.nullable(),

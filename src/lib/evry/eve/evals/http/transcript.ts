@@ -70,6 +70,14 @@ const textPart = z.object({
 export const fixtureMessageSchema = z.object({
   id: z.string(),
   role: z.enum(["assistant", "user"]),
+  metadata: z
+    .object({
+      turnId: z.string().optional(),
+      status: z
+        .enum(["complete", "failed", "streaming", "submitted"])
+        .optional(),
+    })
+    .optional(),
   parts: z.array(
     z.union([
       textPart,
@@ -93,6 +101,7 @@ export function fixtureTranscript(messages: readonly EveMessage[]) {
     fixtureMessageSchema.parse({
       id: message.id,
       role: message.role,
+      metadata: message.metadata,
       parts: message.parts.filter((part) => part.type !== "authorization"),
     })
   );

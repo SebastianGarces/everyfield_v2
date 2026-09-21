@@ -309,6 +309,49 @@ test(
         async (helperTest) => {
           const manifest = createFixtureManifest("helper-proof", 0);
           store.seed(manifest);
+          await helperTest.test(
+            "foreign-record observation discovers scenario rows without classifying own distractors as foreign",
+            async () => {
+              const extraId = "f2edc64b-977f-4ce5-a81b-11fc01f41c93";
+              store.sql(
+                `insert into tags(id,church_id,name) values ('${extraId}','${manifest.ids["foreign-plant"]}','Foreign-only tag');`
+              );
+              const foreign = store.foreignRecordIds(manifest);
+              assert.ok(foreign.includes(extraId));
+              assert.ok(foreign.includes(manifest.ids["person-foreign"]));
+              assert.ok(!foreign.includes(manifest.ids["task-other-actor"]));
+              const { hasForeignFixtureRecords } =
+                await import("@/lib/evry/eve/evals/fixtures/adapter");
+              assert.equal(
+                hasForeignFixtureRecords(
+                  [
+                    {
+                      id: "unpresented-leak",
+                      name: "people.query",
+                      input: {},
+                      output: {
+                        kind: "read",
+                        counts: { matched: 1 },
+                        items: [{ id: extraId, label: "Foreign-only tag" }],
+                      },
+                    },
+                    {
+                      id: "clean-final",
+                      name: "people.query",
+                      input: {},
+                      output: {
+                        kind: "read",
+                        counts: { matched: 0 },
+                        items: [],
+                      },
+                    },
+                  ],
+                  foreign
+                ),
+                true
+              );
+            }
+          );
           const actor = await requireEvryPlantViewerForSession(
             manifest.sessionId
           );
@@ -352,7 +395,7 @@ test(
             }
           );
           await helperTest.test(
-            "unpresented or wrong records cannot become correct facts from answer prose",
+            "retrieved facts remain independent of card display and cannot be rewritten by answer prose",
             async () => {
               const { observedFixtureFacts } =
                 await import("@/lib/evry/eve/evals/fixtures/adapter");
@@ -368,11 +411,16 @@ test(
                   },
                 },
               ];
-              assert.deepEqual(
-                observedFixtureFacts("regression-today", calls, new Set())
-                  .facts,
-                {}
+              const textOnly = observedFixtureFacts(
+                "regression-today",
+                calls,
+                new Set()
               );
+              assert.deepEqual(textOnly.facts, {
+                taskIds: ["task-overdue"],
+                total: 22,
+              });
+              assert.deepEqual(textOnly.exposedRecordIds, []);
               assert.deepEqual(
                 observedFixtureFacts(
                   "regression-today",

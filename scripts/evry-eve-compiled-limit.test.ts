@@ -12,14 +12,19 @@ import { projectEveMessage } from "@/components/evry/eve-message-projection";
 
 test(
   "compiled usage limit pauses visibly and resumes only with an explicit continuation",
-  { skip: process.env.EVRY_EVE_HTTP_PROOF !== "1", timeout: 180_000 },
+  { skip: process.env.EVRY_EVE_HTTP_PROOF !== "1", timeout: 900_000 },
   async () => {
     const stack = await startFixtureStack(process.cwd());
     try {
       const store = createFixtureStore(stack.container);
       for (const decision of [null, "continue", "stop"] as const) {
+        process.stdout.write(`Lifetime guard proof: ${decision}\n`);
         const manifest = createFixtureManifest(`usage-limit-${decision}`, 0);
         store.seed(manifest);
+        const primeTurns = Array.from(
+          { length: 80 },
+          (_, index) => `Recorded context turn ${index + 1}`
+        );
         const outcome = await runCompiledEveFixture(
           {
             compiledEntry: resolve(".output/server/index.mjs"),
@@ -28,38 +33,33 @@ test(
             sessionToken: manifest.sessionToken,
             actor: { userId: manifest.ids.actor, plantId: manifest.ids.plant },
             turns: decision
-              ? ["Show my tasks", { optionId: decision }]
-              : ["Show my tasks"],
+              ? [...primeTurns, "Show my tasks", { optionId: decision }]
+              : [...primeTurns, "Show my tasks"],
             now: FIXTURE_NOW.toISOString(),
-            maxCostUsd: 1,
+            maxCostUsd: 100, // Scripted usage only; this test never permits paid calls.
             prices: {
               inputUsdPerMillion: 1,
               outputUsdPerMillion: 2,
               maxInputBytes: 500_000,
               maxOutputTokens: 1000,
             },
+            timeoutMs: 280_000,
             model: {
               mode: "scripted",
               responses: [
-                {
-                  toolCalls: [
-                    {
-                      id: "load-tasks",
-                      name: "load_tools",
-                      input: { names: ["tasks.query"] },
-                    },
-                  ],
-                  usage: { inputTokens: 300001, outputTokens: 1 },
-                },
+                ...primeTurns.map(() => ({
+                  text: "Recorded context checked.",
+                  usage: { inputTokens: 500_000, outputTokens: 1 },
+                })),
                 { text: "Processing resumed after your approval." },
               ],
             },
           },
-          AbortSignal.timeout(120_000)
+          AbortSignal.timeout(280_000)
         );
         assert.equal(
           outcome.runtimeProof?.modelCalls,
-          decision === "continue" ? 2 : 1
+          decision === "continue" ? 81 : 80
         );
         assert.equal(outcome.hostCapture.outboundMessages, 0);
         if (decision === "continue")

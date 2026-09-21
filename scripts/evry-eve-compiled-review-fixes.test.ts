@@ -112,20 +112,35 @@ test(
           ],
         },
         {
-          toolCalls: [
-            {
-              id: "show-tasks",
-              name: "present_result",
-              input: { reference: "read-tasks" },
-            },
-            {
-              id: "show-meetings",
-              name: "present_result",
-              input: { reference: "read-meetings" },
-            },
-          ],
+          text: "Start with these tasks.\n\n[[evry-result:read-tasks]]\n\nThen prepare for these meetings.\n\n[[evry-result:read-meetings]]\n\nNothing has been changed.",
         },
-        { text: "Here are the tasks and meetings." },
+      ]);
+      assert.equal(parallel.runtimeProof?.modelCalls, 3);
+      assert.equal(
+        parallel.runtimeProof?.availableTools.includes("present_result"),
+        false
+      );
+      const visible = parallel.messages
+        .filter((message) => message.role === "assistant")
+        .flatMap(projectEveMessage);
+      assert.deepEqual(
+        visible.map((part) => part.kind),
+        ["text", "artifact", "text", "artifact", "text"],
+        "A single streamed answer must preserve prose/card/prose/card/prose order"
+      );
+      assert.deepEqual(
+        visible.flatMap((part) =>
+          part.kind === "text" ? [part.text.trim()] : []
+        ),
+        [
+          "Start with these tasks.",
+          "Then prepare for these meetings.",
+          "Nothing has been changed.",
+        ]
+      );
+      assert.deepEqual(parallel.hostCapture.presented, [
+        "read-tasks",
+        "read-meetings",
       ]);
       const cards = parallel.messages
         .flatMap(projectEveMessage)

@@ -4,6 +4,7 @@ import { z } from "zod";
 import { runEvryComposition } from "../../src/lib/evry/eve/composition/runner";
 import { createBoundEveRegistry } from "../../src/lib/evry/eve/runtime/registry";
 import { withEveRuntimeScope } from "../../src/lib/evry/eve/runtime/scope";
+import { withResultPresentation } from "../../src/lib/evry/eve/runtime/results";
 
 const budgetState = defineState("evry.composition-budget", () => ({
   turnId: "",
@@ -11,7 +12,7 @@ const budgetState = defineState("evry.composition-budget", () => ({
 }));
 export default defineTool({
   description:
-    "Compose authorized reads and preparation in isolated JavaScript. Call await tools[canonicalName](input), for example await tools['people.query']({}). Return your result. No filesystem, imports, network, secrets, execution, or confirmation. Read the capability schemas from the direct tools; dotted canonical names appear in their descriptions. Results include resultReference for present_result.",
+    "Compose authorized reads and preparation in isolated JavaScript. Call await tools[canonicalName](input), for example await tools['people.query']({}). Return your result. No filesystem, imports, network, secrets, execution, or confirmation. Read the capability schemas from the direct tools; dotted canonical names appear in their descriptions. Results include resultReference for optional inline result cards in your response.",
   inputSchema: z.object({ js: z.string().min(1).max(32_768) }).strict(),
   execute: ({ js }, ctx) =>
     withEveRuntimeScope(ctx, async (scope) => {
@@ -29,12 +30,18 @@ export default defineTool({
           return state.turnId === scope.turnId ? state.used : 0;
         },
       };
-      return runEvryComposition({
+      const references = new Set<string>();
+      const result = await runEvryComposition({
         js,
         registry: createBoundEveRegistry(scope, { singlePreparation: true }),
         callId: ctx.callId,
         budget,
         signal: ctx.abortSignal,
+        onCall: (event) => {
+          references.add(event.callId);
+        },
       });
+      return withResultPresentation(result, scope.turnId, [...references]);
     }),
+  toModelOutput: ({ data }) => ({ type: "json", value: data }),
 });

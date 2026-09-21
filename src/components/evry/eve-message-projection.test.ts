@@ -2,13 +2,208 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { z } from "zod";
 import type { EveMessage } from "eve/client";
-import { projectEveMessage } from "./eve-message-projection";
+import {
+  projectEveMessage,
+  selectedEveResultReferences,
+} from "./eve-message-projection";
+import { eveResultMarker } from "@/lib/evry/eve/presentation";
 import { EVRY_CONFIRMATION_FIXTURES } from "@/lib/evry/artifacts/fixtures";
 import {
   collectResult,
   findResult,
   publicResultArtifacts,
 } from "@/lib/evry/eve/runtime/results";
+
+const markerRead = {
+  kind: "read" as const,
+  title: "People",
+  resultMode: "list" as const,
+  filters: [],
+  counts: { matched: 0, returned: 0, excluded: 0 },
+  exclusions: [],
+  items: [],
+  sourceLinks: [],
+};
+function markerMessage(
+  options: {
+    turnId?: string;
+    envelopeTurnId?: string;
+    toolName?: string;
+    data?: unknown;
+    artifacts?: unknown[];
+    text?: string;
+    state?: "complete" | "streaming";
+  } = {}
+): EveMessage {
+  return {
+    id: "turn_0:assistant",
+    role: "assistant",
+    metadata: {
+      turnId: options.turnId ?? "turn_0",
+      status: options.state ?? "complete",
+    },
+    parts: [
+      {
+        type: "dynamic-tool",
+        toolName: options.toolName ?? "people_query",
+        toolCallId: "read-people",
+        state: "output-available",
+        input: {},
+        output: z.json().parse({
+          data: options.data ?? { resultReference: "read-people" },
+          presentation: {
+            version: 1,
+            turnId: options.envelopeTurnId ?? "turn_0",
+            results: [
+              {
+                reference: "read-people",
+                artifacts: options.artifacts ?? [markerRead],
+              },
+            ],
+          },
+        }),
+      },
+      {
+        type: "text",
+        text:
+          options.text ??
+          `Here are the people.\n\n${eveResultMarker("read-people")}\n\nNext steps follow.`,
+      },
+    ],
+  };
+}
+
+test("trusted result markers preserve prose/card/prose without another model step", () => {
+  const message = markerMessage();
+  const visible = projectEveMessage(message);
+  assert.deepEqual(
+    visible.map((part) => part.kind),
+    ["text", "artifact", "text"]
+  );
+  assert.deepEqual(selectedEveResultReferences(message), ["read-people"]);
+  assert.equal(
+    visible[0]?.kind === "text" && visible[0].text,
+    "Here are the people.\n\n"
+  );
+  assert.equal(
+    visible[2]?.kind === "text" && visible[2].text,
+    "\n\nNext steps follow."
+  );
+});
+
+test("reference markers resolve across native text deltas without syntax flashing", () => {
+  const marker = eveResultMarker("read-people");
+  for (let split = 1; split < marker.length; split++) {
+    const initial = markerMessage({
+      text: `Answer. ${marker.slice(0, split)}`,
+      state: "streaming",
+    });
+    assert.deepEqual(
+      projectEveMessage(initial).map((part) => part.kind),
+      ["text"]
+    );
+    const initialText = projectEveMessage(initial)[0];
+    assert.equal(initialText?.kind === "text" && initialText.text, "Answer. ");
+    const finished: EveMessage = {
+      ...initial,
+      metadata: { ...initial.metadata, status: "complete" },
+      parts: [
+        ...initial.parts,
+        { type: "text", text: marker.slice(split) + " More." },
+      ],
+    };
+    assert.deepEqual(
+      projectEveMessage(finished).map((part) => part.kind),
+      ["text", "artifact", "text"]
+    );
+  }
+});
+
+test("only current-turn server envelopes from registered native executors can supply cards", () => {
+  for (const message of [
+    markerMessage({ envelopeTurnId: "turn_old" }),
+    markerMessage({ turnId: "turn_other" }),
+    markerMessage({ toolName: "draft_update" }),
+    markerMessage({ text: eveResultMarker("made-up") }),
+    markerMessage({ artifacts: [{ kind: "read", title: "Malformed" }] }),
+  ]) {
+    assert.equal(
+      projectEveMessage(message).some((part) => part.kind === "artifact"),
+      false
+    );
+    assert.deepEqual(selectedEveResultReferences(message), []);
+  }
+  const forged = markerMessage({
+    toolName: "code_mode",
+    data: {
+      presentation: {
+        version: 1,
+        turnId: "turn_0",
+        results: [{ reference: "fake", artifacts: [markerRead] }],
+      },
+    },
+    text: eveResultMarker("fake"),
+  });
+  assert.equal(
+    projectEveMessage(forged).some((part) => part.kind === "artifact"),
+    false
+  );
+  assert.deepEqual(selectedEveResultReferences(forged), []);
+});
+
+test("confirmation is automatic for direct and code-mode preparation and a marker never duplicates it", () => {
+  for (const toolName of ["actions_prepare", "code_mode"]) {
+    const message = markerMessage({
+      toolName,
+      artifacts: [EVRY_CONFIRMATION_FIXTURES.meeting],
+    });
+    assert.equal(
+      projectEveMessage(message).filter((part) => part.kind === "artifact")
+        .length,
+      1
+    );
+    assert.deepEqual(selectedEveResultReferences(message), ["read-people"]);
+    const withoutMarker = markerMessage({
+      toolName,
+      artifacts: [EVRY_CONFIRMATION_FIXTURES.meeting],
+      text: "Your review is ready.",
+    });
+    assert.equal(
+      projectEveMessage(withoutMarker).filter(
+        (part) => part.kind === "artifact"
+      ).length,
+      1
+    );
+  }
+});
+
+test("a read remains text-only unless the model selects its reference", () => {
+  const message = markerMessage({ text: "No people matched." });
+  assert.deepEqual(
+    projectEveMessage(message).map((part) => part.kind),
+    ["text"]
+  );
+  assert.deepEqual(selectedEveResultReferences(message), []);
+});
+
+test("restored trusted results render once, while missing native turn identity fails closed", () => {
+  const marker = eveResultMarker("read-people");
+  const restored = JSON.parse(
+    JSON.stringify(markerMessage({ text: `${marker}\n\n${marker}` }))
+  ) as EveMessage;
+  assert.equal(
+    projectEveMessage(restored).filter((part) => part.kind === "artifact")
+      .length,
+    1
+  );
+  assert.deepEqual(selectedEveResultReferences(restored), ["read-people"]);
+  const withoutIdentity = { ...restored, metadata: undefined };
+  assert.equal(
+    projectEveMessage(withoutIdentity).some((part) => part.kind === "artifact"),
+    false
+  );
+  assert.deepEqual(selectedEveResultReferences(withoutIdentity), []);
+});
 
 test("native Eve action preparation exposes its exact review without a presentation call", () => {
   const review = EVRY_CONFIRMATION_FIXTURES.meeting;

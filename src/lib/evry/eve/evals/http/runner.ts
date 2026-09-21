@@ -14,6 +14,10 @@ import {
 } from "./host";
 import { fixtureTranscript } from "./transcript";
 import { isDeepStrictEqual } from "node:util";
+import {
+  projectEveMessage,
+  selectedEveResultReferences,
+} from "@/components/evry/eve-message-projection";
 
 type FixtureHost = ReturnType<typeof installIsolatedFixtureHost>;
 export type HttpEvalOutcome = {
@@ -50,6 +54,10 @@ export function createHttpEveEvalRunner(config: {
   prices: EvalPriceCeiling;
   timeoutMs?: number;
   verifyReplay?: boolean;
+  expectedTurnFailureMessage?:
+    | "EVRY_PROCESSING_LIMIT_REACHED"
+    | "EVRY_SCRIPTED_STREAM_FAILURE"
+    | "EVRY_SCRIPTED_COMPACTION_FAILURE";
   /** Fixture-only restart path: attach and read, never create or submit. */
   replaySessionId?: string;
   onEvent?: (event: MessageStreamEvent) => void;
@@ -104,7 +112,6 @@ export function createHttpEveEvalRunner(config: {
     let acknowledgementMs = 0;
     let firstTextMs: number | null = null;
     let clarificationCount = 0;
-    const messages: string[] = [];
     const events: MessageStreamEvent[] = [];
     let pendingQuestions: readonly InputRequest[] = [];
     try {
@@ -175,7 +182,6 @@ export function createHttpEveEvalRunner(config: {
             firstTextMs = performance.now() - started;
           if (event.type === "message.completed" && event.data.message) {
             if (firstTextMs === null) firstTextMs = performance.now() - started;
-            messages.push(event.data.message);
           }
           if (event.type === "input.requested") {
             clarificationCount++;
@@ -193,7 +199,16 @@ export function createHttpEveEvalRunner(config: {
             );
           }
           if (
-            event.type === "turn.failed" ||
+            (event.type === "turn.failed" &&
+              !(
+                config.expectedTurnFailureMessage &&
+                [
+                  "MODEL_CALL_FAILED",
+                  "EVENT_HANDLER_FAILED",
+                  "COMPACTION_FAILED",
+                ].includes(event.data.code) &&
+                event.data.message === config.expectedTurnFailureMessage
+              )) ||
             event.type === "session.failed" ||
             (event.type === "turn.cancelled" && !explicitUsageStop)
           )
@@ -210,15 +225,21 @@ export function createHttpEveEvalRunner(config: {
             "Evaluation stream ended before a durable turn boundary"
           );
       }
-      const hostCapture = fixture.snapshot();
-      if (hostCapture.costUsd > input.maxCostUsd)
-        throw new Error("Evaluation exceeded its reserved budget");
       const transcript = fixtureTranscript(
         new EveAgentStore({
           reducer: defaultMessageReducer(),
           initialEvents: events,
         }).snapshot.data.messages
       );
+      // Selection comes from the same trusted native envelopes rendered in chat.
+      // The private host journal independently rejects any unobserved reference.
+      if (!config.replaySessionId)
+        for (const message of transcript)
+          for (const reference of selectedEveResultReferences(message))
+            fixture.present(reference);
+      const hostCapture = fixture.snapshot();
+      if (hostCapture.costUsd > input.maxCostUsd)
+        throw new Error("Evaluation exceeded its reserved budget");
       let replay: HttpEvalOutcome["replay"];
       if (config.verifyReplay || config.replaySessionId) {
         const before = fixture.activity();
@@ -254,7 +275,13 @@ export function createHttpEveEvalRunner(config: {
       return {
         messages: transcript,
         ...(replay ? { replay } : {}),
-        answer: messages.join("\n\n"),
+        answer: transcript
+          .filter((message) => message.role === "assistant")
+          .flatMap(projectEveMessage)
+          .filter((part) => part.kind === "text")
+          .map((part) => part.text.trim())
+          .filter(Boolean)
+          .join("\n\n"),
         latency: {
           acknowledgementMs,
           firstTextMs,

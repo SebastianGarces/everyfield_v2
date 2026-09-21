@@ -2,6 +2,10 @@ import { wrapLanguageModel, type LanguageModelMiddleware } from "ai";
 import { openai } from "eve/models/openai";
 import { currentFixtureRun } from "./fixture-bridge";
 import {
+  evryInitialWorkingSet,
+  initialSkillGuidance,
+} from "./initial-working-set";
+import {
   evryProcessingBudget,
   processingBudgetMiddleware,
 } from "./processing-budget";
@@ -14,6 +18,18 @@ export const evryToolSchemaMiddleware: LanguageModelMiddleware = {
       tool.type === "function" ? { ...tool, strict: false } : tool
     ),
   }),
+};
+
+const initialSkillMiddleware: LanguageModelMiddleware = {
+  transformParams: async ({ params }) => {
+    const guidance = initialSkillGuidance(evryInitialWorkingSet.get().skills);
+    return guidance
+      ? {
+          ...params,
+          prompt: [{ role: "system", content: guidance }, ...params.prompt],
+        }
+      : params;
+  },
 };
 
 const fixtureBudgetMiddleware: LanguageModelMiddleware = {
@@ -85,6 +101,7 @@ export const evryLunaModel = wrapLanguageModel({
   model: directLuna,
   middleware: [
     evryToolSchemaMiddleware,
+    initialSkillMiddleware,
     processingBudgetMiddleware(evryProcessingBudget),
     fixtureBudgetMiddleware,
   ],

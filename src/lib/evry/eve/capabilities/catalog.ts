@@ -22,7 +22,7 @@ export const EVE_CAPABILITY_CATALOG = [
   ],
   [
     "tasks.query",
-    "Find, count or group tasks by assignment, dates, priority, status and related records. My tasks means the authenticated account; today excludes overdue. Use resource templates for available checklist template keys, or phase_prompt for the current transition and suggested templates, without task filters.",
+    "Find, count or group tasks by assignment, dates, priority, status and related records. My tasks means the authenticated account; today excludes overdue. Use resource templates for the church's current phase and available checklist template keys, or phase_prompt for the current transition and suggested templates, without task filters.",
     ["tasks"],
   ],
   [
@@ -137,6 +137,7 @@ export const EVE_WORKFLOW_COVERAGE = [
   },
   {
     name: "meeting-invite",
+    preparationOperations: ["recipe.meeting-invite"],
     tools: [
       "people.query",
       "calendar.resolve",
@@ -161,6 +162,7 @@ export const EVE_WORKFLOW_COVERAGE = [
     name: "staffing-review",
     tools: [
       "teams.query",
+      "teams.get_many",
       "people.get_many",
       "training.query",
       "actions.prepare",

@@ -96,7 +96,23 @@ test("host reserves before generation, retains failed-call exposure, and never b
       maxCostUsd: 0.02,
     });
     const hooks = globalThis.__everyfieldIsolatedEveFixtureHost!.run(identity);
-    const reservation = hooks.reserve({ prompt: [], maxOutputTokens: 1_000 });
+    const reservation = hooks.reserve({
+      prompt: [
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "text",
+              text: "Private fixture prose",
+              providerOptions: {
+                openai: { phase: "commentary", itemId: "private-provider-id" },
+              },
+            },
+          ],
+        },
+      ],
+      maxOutputTokens: 1_000,
+    });
     assert.equal(fixture.snapshot().costUsd, 0.016096);
     assert.throws(
       () => hooks.reserve({ prompt: [], maxOutputTokens: 1_000 }),
@@ -104,6 +120,14 @@ test("host reserves before generation, retains failed-call exposure, and never b
     );
     assert.equal(fixture.snapshot().costBasis, "reserved_upper_bound");
     reservation.finish(100, 100);
+    const captured = fixture.snapshot().modelCalls[0];
+    assert.ok(captured.startedMs >= 0);
+    assert.ok(captured.durationMs !== null && captured.durationMs >= 0);
+    assert.deepEqual(captured.assistantTextHistory, [
+      { phase: "commentary", hasItemId: true },
+    ]);
+    assert.ok(!JSON.stringify(captured).includes("private-provider-id"));
+    assert.ok(!JSON.stringify(captured).includes("Private fixture prose"));
     assert.ok(Math.abs(fixture.snapshot().costUsd - 0.0003) < 0.0000001);
     assert.equal(fixture.snapshot().costBasis, "provider_usage");
     fixture.stop();

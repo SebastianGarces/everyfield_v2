@@ -61,15 +61,8 @@ test(
             ],
           },
           {
-            toolCalls: [
-              {
-                id: "adapter-today-present",
-                name: "present_result",
-                input: { reference: "adapter-today" },
-              },
-            ],
+            text: "Here are your tasks due today.\n\n[[evry-result:adapter-today]]",
           },
-          { text: "Here are your tasks due today." },
           {
             toolCalls: [
               {
@@ -85,15 +78,8 @@ test(
             ],
           },
           {
-            toolCalls: [
-              {
-                id: "adapter-priority-present",
-                name: "present_result",
-                input: { reference: "adapter-priority" },
-              },
-            ],
+            text: "Here is the high-priority task.\n\n[[evry-result:adapter-priority]]",
           },
-          { text: "Here is the high-priority task." },
         ],
       });
       const adapter = createProductionEveEvalAdapter({
@@ -113,7 +99,12 @@ test(
           model,
           onOutcome(outcome) {
             executed++;
-            assert.equal(outcome.runtimeProof?.modelCalls, 7);
+            assert.equal(outcome.runtimeProof?.modelCalls, 5);
+            assert.equal(
+              outcome.runtimeProof?.availableTools.includes("present_result"),
+              false,
+              "Result placement must not require a presentation-only model round trip"
+            );
             const requests = outcome.runtimeProof?.modelRequests;
             assert.ok(requests?.length);
             assert.ok(requests[0]!.tools.includes("load_tools"));

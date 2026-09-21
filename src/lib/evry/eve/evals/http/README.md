@@ -91,5 +91,13 @@ prices before each call, rather than relying on the usual prompt-byte estimate.
 It stops if a case cannot return usage evidence and retains that case's entire
 allocation. Successful cases share one $1 total allowance; cache discounts are
 ignored, so reported cost is a conservative estimate, not an invoice. The
+runner also requires `EVRY_REVIEW_LEDGER` to point to an existing local JSON file
+with `{ "approvedUsd": <user-approved total>, "allocations": [] }`. Create it
+once for a new approval; never reset it for a rerun. The ledger locks one writer,
+reserves the run's allocation before dispatch, settles known usage, and retains
+the whole allocation after an interrupted or failed run. A stale lock requires
+checking that the previous process has exited before recovering it. Per-call
+timing and assistant phase/item-ID presence (not their content or IDs) help
+diagnose latency and history retention. The
 runner checks actual database state and renders the native transcript for human
 review; it does not claim that deterministic assertions establish answer quality.

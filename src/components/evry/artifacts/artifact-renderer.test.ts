@@ -326,6 +326,68 @@ test("all confirmation families render the evidence their effect requires", () =
   assert.doesNotMatch(meetingMarkup, /Before and after|Sent immediately/);
 });
 
+function namedAudienceConfirmation(count: number) {
+  const fixture = EVRY_CONFIRMATION_FIXTURES.meeting;
+  return evryPublicArtifactSchema.parse({
+    ...fixture,
+    steps: fixture.steps.slice(0, 3).map((step) => {
+      if (step.stepId === "create-meeting") return step;
+      const recipients = step.effectKind === "communication";
+      return {
+        ...step,
+        resolvedTargets: [
+          { label: "mode", value: "batch-after-create", sourceLink: null },
+        ],
+        audience: {
+          kind: recipients ? "email_recipients" : "guests",
+          people: Array.from({ length: count }, (_, index) => ({
+            name: `Person ${index + 1}`,
+            email: `person-${index + 1}@example.test`,
+            sourceLink: {
+              label: "Open person",
+              href: `/people/person-${index + 1}`,
+            },
+          })),
+        },
+        counts: [
+          {
+            label: recipients ? "Invitation emails to send" : "Guests to add",
+            count,
+          },
+        ],
+      };
+    }),
+  });
+}
+
+test("meeting confirmation exposes the named guests and exact email recipients beside one template", () => {
+  const markup = render(renderableEvryArtifact(namedAudienceConfirmation(2)));
+  assert.match(markup, />Guests</);
+  assert.match(markup, />Email recipients</);
+  for (const number of [1, 2]) {
+    assert.match(
+      markup,
+      new RegExp(`Person ${number} &lt;person-${number}@example.test&gt;`)
+    );
+    assert.match(markup, new RegExp(`href="/people/person-${number}"`));
+  }
+  assert.equal((markup.match(/>Subject</g) ?? []).length, 1);
+  assert.equal((markup.match(/>Message</g) ?? []).length, 1);
+  assert.doesNotMatch(
+    markup,
+    /View all|recipientSource|personId|>Guest<|>Email recipient</
+  );
+});
+
+test("large confirmation audiences show five names per group with explicit full-list dialogs", () => {
+  const markup = render(renderableEvryArtifact(namedAudienceConfirmation(100)));
+  assert.match(markup, /View all 100 guests/);
+  assert.match(markup, /View all 100 recipients/);
+  assert.equal((markup.match(/aria-haspopup="dialog"/g) ?? []).length, 2);
+  assert.match(markup, /Person 5 &lt;person-5@example.test&gt;/);
+  assert.doesNotMatch(markup, /Person 6|person-100@example.test/);
+});
+
 test("progress and a terminal receipt expose every step state without a second execute control", async () => {
   const confirmation = await editedMeetingConfirmation(
     "Jamie Patel · jamie@example.test"
