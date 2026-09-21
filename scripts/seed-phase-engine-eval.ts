@@ -1729,6 +1729,7 @@ async function seedChurch(
         name: ROLE_TEAM_NAMES[t].teamName,
         type: "predefined",
         leaderId,
+        leaderSource: leaderId ? "explicit" : null,
         status: "active",
         createdBy: ownerUserId,
       });
@@ -1864,11 +1865,13 @@ async function seedChurch(
     // canonical name here would silently move `rolesFilled` and change what the
     // profile is testing.
     if (profile.disengagement.includesLeader) {
+      const leaderId = disengagedPersonIds[disengagedPersonIds.length - 1];
       await db.insert(ministryTeams).values({
         churchId,
         name: "Hospitality Crew",
         type: "custom",
-        leaderId: disengagedPersonIds[disengagedPersonIds.length - 1],
+        leaderId,
+        leaderSource: leaderId ? "explicit" : null,
         status: "active",
         createdBy: ownerUserId,
       });
