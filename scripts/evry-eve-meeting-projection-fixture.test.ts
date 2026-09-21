@@ -10,7 +10,7 @@ import {
 } from "@/lib/evry/eve/evals/fixtures/manifest";
 
 test(
-  "meeting SQL omits absent optional ministry and keeps local date evidence model-only",
+  "meeting SQL preserves optional ministry, local date evidence and complete checklist status",
   {
     skip: process.env.EVRY_EVE_MEETING_PROJECTION_PROOF !== "1",
     timeout: 120_000,
@@ -64,6 +64,24 @@ test(
           ('${id(name)}','${m.ids.plant}','${type}','Projection ${name}','2026-11-01 01:30:00',${teamId ? `'${teamId}'` : "null"},'${m.ids.actor}');`);
       store.sql(`insert into church_meetings(id,church_id,type,title,datetime,team_id,created_by) values
         ('${id("foreign-meeting")}','${m.ids["foreign-plant"]}','team_meeting','Projection Foreign secret meeting','2026-11-01 01:30:00','${foreignTeam}','${m.ids["foreign-actor"]}');`);
+      // A complete first page is not a complete checklist. Foreign rows must
+      // neither create a checklist for this plant nor change its status.
+      const checklists = [
+        ["complete-one", "vision-optional", m.ids.plant, true],
+        ["complete-two", "vision-optional", m.ids.plant, true],
+        ["partial-one", "team-required", m.ids.plant, false],
+        ["partial-two", "team-required", m.ids.plant, true],
+        ["foreign-only", "orientation-optional", m.ids["foreign-plant"], false],
+        [
+          "foreign-incomplete",
+          "vision-optional",
+          m.ids["foreign-plant"],
+          false,
+        ],
+      ] as const;
+      for (const [name, meeting, church, checked] of checklists)
+        store.sql(`insert into meeting_checklist_items(id,church_id,meeting_id,item_name,category,is_checked) values
+          ('${id(name)}','${church}','${id(meeting)}','${name}','essential',${checked});`);
 
       // The product requires a team only for team meetings, not orientations.
       for (const type of ["orientation", "vision_meeting"])
@@ -101,18 +119,40 @@ test(
         meetingsGetManyStatement(
           {
             ids: [...cases.map(([name]) => id(name)), id("foreign-meeting")],
-            sections: ["details"],
-            relatedLimit: 10,
+            sections: ["details", "checklist"],
+            relatedLimit: 1,
           },
           m.ids.plant,
           m.timeZone
         )
       );
       assert.equal(detail.total, cases.length);
+      const partial = detail.rows.find((row) => row.id === id("team-required"));
+      assert.ok(partial);
+      assert.equal(
+        partial.facts.find((fact) => fact.label === "Checklist total")?.value,
+        "2"
+      );
+      const partialPage = partial.facts.filter(
+        (fact) => fact.label === "Preparation item"
+      );
+      assert.equal(partialPage.length, 1);
+      assert.match(partialPage[0]!.value, /partial-two · Complete/);
       for (const result of [list, detail]) {
         assert.ok(!JSON.stringify(result).includes("Foreign secret"));
+        assert.ok(!JSON.stringify(result).includes("foreign-only"));
+        assert.ok(!JSON.stringify(result).includes("foreign-incomplete"));
         assert.ok(!result.rows.some((row) => row.id === id("foreign-meeting")));
         for (const row of result.rows) {
+          assert.equal(
+            row.facts.find((fact) => fact.label === "Preparation checklist")
+              ?.value,
+            row.id === id("vision-optional")
+              ? "Complete"
+              : row.id === id("team-required")
+                ? "Incomplete"
+                : "No checklist recorded"
+          );
           assert.deepEqual(
             row.facts.find((fact) => fact.label === "Local start"),
             {
@@ -159,8 +199,36 @@ test(
           );
         }
       }
+      for (const [checklist, expected] of [
+        ["complete", [id("vision-optional")]],
+        ["incomplete", [id("team-required")]],
+        [
+          "none",
+          cases
+            .filter(
+              ([name]) => name !== "vision-optional" && name !== "team-required"
+            )
+            .map(([name]) => id(name)),
+        ],
+      ] as const) {
+        const filtered = await executeOperations(
+          meetingsQueryStatement(
+            z.strictObject(meetingsQueryShape).parse({
+              where: { all: [{ search: "Projection", checklist }] },
+              query: { mode: "list", limit: 50 },
+            }),
+            m.ids.plant,
+            new Date(m.now),
+            m.timeZone
+          )
+        );
+        assert.deepEqual(
+          filtered.rows.map((row) => row.id).sort(),
+          [...expected].sort()
+        );
+      }
       assert.deepEqual(store.writesSince(before, m), []);
-      assert.equal(outbound, 2, "Only the two isolated SQL queries ran");
+      assert.equal(outbound, 5, "Only the five isolated SQL queries ran");
     } finally {
       globalThis.fetch = originalFetch;
       neonConfig.fetchEndpoint = previousEndpoint;

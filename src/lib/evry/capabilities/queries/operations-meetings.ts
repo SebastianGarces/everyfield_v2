@@ -59,6 +59,13 @@ function checklistPredicate(
       : sql`${any} and not ${incomplete}`;
 }
 
+function preparationChecklistFact(plantId: string) {
+  return fact(
+    "Preparation checklist",
+    sql`case when ${checklistPredicate(plantId, "none")} then 'No checklist recorded' when ${checklistPredicate(plantId, "incomplete")} then 'Incomplete' else 'Complete' end`
+  );
+}
+
 export function meetingsQueryStatement(
   input: z.infer<z.ZodObject<typeof meetingsQueryShape>>,
   plantId: string,
@@ -96,6 +103,7 @@ export function meetingsQueryStatement(
   });
   const source = sql`select m.id::text as id, coalesce(m.title, ${displayLabel(sql`m.type`, "meeting_type")}) as label, '/meetings/' || m.id as href,
     ${facts(fact("When", sql`m.datetime`, { format: "meeting_time" }), fact("Local start", sql`m.datetime`, { modelOnly: true }), fact("Timezone", sql`${timeZone}`, { modelOnly: true }), fact("Type", sql`m.type`, { format: "meeting_type" }), fact("Status", sql`m.status`, { format: "meeting_status" }), fact("Location", sql`coalesce(l.name, m.location_name)`), fact("Actual attendance", sql`m.actual_attendance`), fact("Unchecked preparation items", sql`(select count(*) from meeting_checklist_items c where c.church_id = ${plantId} and c.meeting_id = m.id and not c.is_checked)`))}
+      || ${facts(preparationChecklistFact(plantId))}
       || case when mt.id is not null or m.type = 'team_meeting' then ${facts(fact("Ministry", sql`mt.name`))} else '[]'::jsonb end as facts,
     m.datetime as date, m.title, m.type, m.status, coalesce(mt.name || ' [' || mt.id::text || ']', 'No linked ministry') as team,
     to_char(m.datetime, 'YYYY-MM') as month, coalesce(l.name, m.location_name, 'No location') as location
@@ -153,6 +161,7 @@ export function meetingsGetManyStatement(
     fact("Location", sql`coalesce(l.name, m.location_name)`),
     fact("Address", sql`m.location_address`),
     fact("Duration in minutes", sql`m.duration_minutes`),
+    preparationChecklistFact(plantId),
   ];
   if (input.sections.includes("details"))
     detail.push(
