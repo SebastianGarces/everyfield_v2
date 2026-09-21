@@ -62,6 +62,7 @@ function expectedEffectIdentity(
 ): string | null {
   switch (selection?.kind) {
     case "send":
+    case "retry_failed":
       return COMMUNICATION_MESSAGE_SEND_IDENTITY;
     case "resend":
       return COMMUNICATION_RESEND_NON_OPENERS_IDENTITY;
@@ -155,12 +156,14 @@ export function createCommunicationEvryConversationContinuation(
 
       const templateSelection = preparedSelection
         ? preparedSelection.kind === "send" ||
+          preparedSelection.kind === "retry_failed" ||
           preparedSelection.kind === "resend"
           ? null
           : preparedSelection
         : selectCommunicationEvryTemplateEffect(input.literalUserText);
       const messageSelection = preparedSelection
         ? preparedSelection.kind === "send" ||
+          preparedSelection.kind === "retry_failed" ||
           preparedSelection.kind === "resend"
           ? preparedSelection
           : null

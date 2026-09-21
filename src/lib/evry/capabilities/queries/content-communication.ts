@@ -132,7 +132,7 @@ function communicationSourceQuery(plantId: string, input: Query) {
         : input.groupBy === "template"
           ? sql`c.template_id::text`
           : sql`r.status`;
-  return sql`select r.id::text as id, p.first_name || ' ' || p.last_name as label, jsonb_build_object('Person ID', p.id, 'Message ID', c.id, 'Subject', c.subject, 'Delivery status', r.status, 'Delivered at', r.delivered_at, 'Opened at', r.opened_at, 'Failure', r.error_message, 'Meeting ID', c.meeting_id) as facts, '/communication/' || c.id as href, ${group}::text as group_key, c.created_at::text as sort_key from communications c join communication_recipients r on r.communication_id = c.id and r.church_id = ${plantId} join persons p on p.id = r.person_id and p.church_id = ${plantId} and p.deleted_at is null where ${messageFilter} and ${recipientFilter}`;
+  return sql`select r.id::text as id, p.first_name || ' ' || p.last_name as label, jsonb_build_object('Person ID', p.id, 'Message ID', c.id, 'Subject', c.subject, 'Delivery status', r.status, 'Delivered at', r.delivered_at, 'Opened at', r.opened_at, 'Failure', r.error_message, 'Delivery failure confirmed', r.failure_origin = 'provider_delivery_failed', 'Retry already prepared', exists (select 1 from communication_failed_retries f where f.source_recipient_id = r.id and f.church_id = ${plantId}), 'Meeting ID', c.meeting_id) as facts, '/communication/' || c.id as href, ${group}::text as group_key, c.created_at::text as sort_key from communications c join communication_recipients r on r.communication_id = c.id and r.church_id = ${plantId} join persons p on p.id = r.person_id and p.church_id = ${plantId} and p.deleted_at is null where ${messageFilter} and ${recipientFilter}`;
 }
 
 const validatedCommunicationQuery = communicationQuerySchema.superRefine(
@@ -176,6 +176,7 @@ export const COMMUNICATION_QUERY = defineEvryReadRegistration({
       timeZone: await readEvryPlantTimeZone(authorization.actor.plantId),
       notes: [
         "Sent/provider acceptance, delivery, opens, RSVP and personal follow-up are different evidence.",
+        "A confirmed failure alone does not establish retry eligibility. communication.retry_failed rechecks the source, current address, suppression and prior retry claim before review and execution. Unknown delivery must use its original execution recovery, never an ordinary send.",
       ],
     });
   },

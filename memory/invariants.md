@@ -454,6 +454,8 @@ The guard is `ops/tests/requirement-ids.test.mjs`. Applies to every requirement 
 
 ## Evry — Plant Route and Action Parity
 
+- Failed-delivery retries require signed provider failure evidence and a separately confirmed, source-bound review. An uncertain send keeps its original frozen payload and provider key; after the safe recovery window it remains unresolved, because a new key or expired deduplication window can deliver a duplicate email. Successful delivery evidence always excludes a recipient from failed-delivery retries.
+
 - ⚖ Evry's concise voice removes technical chatter, not useful substance. Model-selected overviews review fresh evidence after retrieval and may gather other relevant evidence within the existing authorization and work budget; focused lookups retain the short path. A missing metric must not erase supported findings from other areas, and cards support rather than replace an overview's explanation (Sebastian, 2026-09-18).
 
 - ⚖ Opening or switching an existing Evry conversation lands at the bottom. A new response leaves an already-visible beginning in place; an offscreen beginning is revealed once with minimal movement, unless the reader moved while waiting. Streaming text, cards, and saving never follow downward; no artificial response-height spacer is reserved, and "Jump to latest" appears only for actual content below the reading area and never enables automatic following (Sebastian, 2026-09-18).

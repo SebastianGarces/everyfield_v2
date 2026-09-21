@@ -44,6 +44,12 @@ import {
   communicationEvryEffectUuid,
 } from "./evry-effect";
 import { storedTemplateContent } from "./templates";
+import {
+  acquireFailedRetryProviderAttempt,
+  prepareFailedCommunicationRetry,
+  storedFailedRetryOutbound,
+  type FailedCommunicationSource,
+} from "./failed-retry";
 
 export const EVRY_COMMUNICATION_TRANSIENT_PREFIX = "evry-transient:";
 export const EVRY_COMMUNICATION_PERMANENT_PREFIX = "evry-permanent:";
@@ -350,6 +356,7 @@ export type EvryCommunicationMailResult =
 
 export type EvryCommunicationMailer = Readonly<{
   send(input: {
+    from?: string;
     to: string;
     subject: string;
     html: string;
@@ -377,7 +384,10 @@ export function classifyEvryCommunicationProviderError(
     typeof record.message === "string" && record.message.trim()
       ? record.message.slice(0, 500)
       : "Email provider request failed";
-  return statusCode === null || statusCode === 429 || statusCode >= 500
+  return statusCode === null ||
+    statusCode === 429 ||
+    statusCode >= 500 ||
+    (statusCode === 409 && record.name === "concurrent_idempotent_requests")
     ? { status: "retryable", reason }
     : { status: "permanent", reason };
 }
@@ -387,7 +397,7 @@ const productionMailer: EvryCommunicationMailer = Object.freeze({
     try {
       const { data, error } = await resend.emails.send(
         {
-          from: EMAIL_FROM,
+          from: input.from ?? EMAIL_FROM,
           to: [input.to],
           subject: input.subject,
           html: input.html,
@@ -459,6 +469,8 @@ async function exactFrozenCommunication(input: {
       email: communicationRecipients.email,
       status: communicationRecipients.status,
       errorMessage: communicationRecipients.errorMessage,
+      failureOrigin: communicationRecipients.failureOrigin,
+      externalId: communicationRecipients.externalId,
     })
     .from(communicationRecipients)
     .where(
@@ -490,6 +502,7 @@ export async function frozenEvryCommunicationState(input: {
   effect: EvryClaimedEffectInput;
   communicationId: string;
   audience: EvryCommunicationAudienceSnapshot;
+  failedSource?: FailedCommunicationSource;
 }): Promise<EvryFrozenCommunicationState> {
   const rows = await exactFrozenCommunication(input);
   if (!rows) return "absent";
@@ -498,6 +511,10 @@ export async function frozenEvryCommunicationState(input: {
       ["sent", "delivered", "opened", "clicked", "bounced"].includes(
         row.status
       ) ||
+      (input.failedSource &&
+        row.status === "failed" &&
+        row.failureOrigin === "provider_delivery_failed" &&
+        row.externalId !== null) ||
       [
         EVRY_COMMUNICATION_ATTEMPTED_PREFIX,
         EVRY_COMMUNICATION_TRANSIENT_PREFIX,
@@ -518,6 +535,7 @@ export async function reconcileFrozenEvryCommunication(input: {
   effect: EvryClaimedEffectInput;
   communicationId: string;
   audience: EvryCommunicationAudienceSnapshot;
+  failedSource?: FailedCommunicationSource;
 }): Promise<EvryEffectReconciliation | null> {
   const claimed = await findExactEvryDatabaseEffectClaim(input.effect);
   if (claimed) return claimed;
@@ -709,6 +727,8 @@ async function renderedOutbound(input: {
     text: await render(
       CommunicationEmailText({
         body: input.recipient.bodyText,
+        confirmUrl,
+        declineUrl,
         churchName: input.churchName,
       }),
       { plainText: true }
@@ -727,6 +747,7 @@ export async function sendFrozenEvryCommunication(input: {
   audience: EvryCommunicationAudienceSnapshot;
   /** Exact resend eligibility set resolved again immediately before writes. */
   eligiblePersonIds?: ReadonlySet<string>;
+  failedSource?: FailedCommunicationSource;
   mailer?: EvryCommunicationMailer;
 }): Promise<EvryEffectResult> {
   const actor = input.effect.authorization.actor;
@@ -778,7 +799,13 @@ export async function sendFrozenEvryCommunication(input: {
   ) {
     return { status: "refused", excludedCount: 1 };
   }
-  if (!(await prepareFrozenCommunication(input))) {
+  const prepared = input.failedSource
+    ? (await prepareFailedCommunicationRetry({
+        ...input,
+        source: input.failedSource,
+      })) && (await exactFrozenCommunication(input)) !== null
+    : await prepareFrozenCommunication(input);
+  if (!prepared) {
     return (await exactFrozenCommunication({
       effect: input.effect,
       communicationId: input.communicationId,
@@ -829,6 +856,10 @@ export async function sendFrozenEvryCommunication(input: {
     }
     if (
       row.status === "bounced" ||
+      (input.failedSource &&
+        row.status === "failed" &&
+        row.failureOrigin === "provider_delivery_failed" &&
+        row.externalId !== null) ||
       row.errorMessage?.startsWith(EVRY_COMMUNICATION_PERMANENT_PREFIX) ||
       row.errorMessage?.startsWith(EVRY_COMMUNICATION_LOCAL_PREFIX)
     ) {
@@ -888,17 +919,46 @@ export async function sendFrozenEvryCommunication(input: {
       }
       continue;
     }
-    const outbound = await renderedOutbound({
-      churchName: church.name,
-      churchId: actor.plantId,
-      meetingId: input.audience.meetingId,
-      recipient,
-    });
+    const storedOutbound = input.failedSource
+      ? await storedFailedRetryOutbound(input.effect, row.id)
+      : null;
+    const outbound = storedOutbound?.success
+      ? storedOutbound.data
+      : await renderedOutbound({
+          churchName: church.name,
+          churchId: actor.plantId,
+          meetingId: input.audience.meetingId,
+          recipient,
+        });
+    const failedAttempt = input.failedSource
+      ? await acquireFailedRetryProviderAttempt({
+          effect: input.effect,
+          source: input.failedSource,
+          recipientId: row.id,
+          outbound: storedOutbound?.success
+            ? storedOutbound.data
+            : {
+                from: EMAIL_FROM,
+                to: recipient.email,
+                subject: recipient.subject,
+                ...outbound,
+              },
+        })
+      : null;
+    if (failedAttempt?.status === "excluded") {
+      permanentProviderFailures += 1;
+      excludedCount += 1;
+      continue;
+    }
+    const failedOutbound =
+      failedAttempt?.status === "ready" ? failedAttempt.outbound : null;
     if (
-      !(await acquireCommunicationProviderAttempt({
-        execution: input.effect.execution,
-        recipientId: row.id,
-      }))
+      input.failedSource
+        ? !failedOutbound
+        : !(await acquireCommunicationProviderAttempt({
+            execution: input.effect.execution,
+            recipientId: row.id,
+          }))
     ) {
       const outcome = storedRecipientOutcome(
         await exactStoredCommunicationRecipient({
@@ -917,6 +977,7 @@ export async function sendFrozenEvryCommunication(input: {
       subject: recipient.subject,
       html: outbound.html,
       text: outbound.text,
+      ...(failedOutbound ?? {}),
       idempotencyKey: `evry-${input.effect.effectKey}-${row.id}`,
     });
     if (result.status === "accepted") {

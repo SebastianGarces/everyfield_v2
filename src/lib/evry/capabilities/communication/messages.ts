@@ -10,6 +10,13 @@ import {
   sendFrozenEvryCommunication,
 } from "@/lib/communication/evry-send";
 import { communicationEvryEffectUuid } from "@/lib/communication/evry-effect";
+import { freezeChurchMergeFields } from "@/lib/communication/merge";
+import { toRichTextHtml } from "@/lib/rich-text/format";
+import {
+  failedCommunicationSourceSchema,
+  failedCommunicationSourceIsCurrent,
+  resolveFailedCommunicationSource,
+} from "@/lib/communication/failed-retry";
 import {
   getGroupRecipients,
   isRecipientGroupSelector,
@@ -92,6 +99,11 @@ const audienceSchema = z.strictObject({
 
 const resolvedRecipientSourceSchema = z.discriminatedUnion("kind", [
   z.strictObject({
+    kind: z.literal("failed_recipients"),
+    source: failedCommunicationSourceSchema,
+    excludedCount: z.number().int().nonnegative(),
+  }),
+  z.strictObject({
     kind: z.literal("page_person"),
     personId: z.string().uuid(),
   }),
@@ -158,7 +170,12 @@ export type CommunicationEvryMessageSelection =
       draft: CommunicationEvryDraftSelection;
       meetingId: string | null;
     }>
-  | Readonly<{ kind: "resend"; communicationId: string }>;
+  | Readonly<{ kind: "resend"; communicationId: string }>
+  | Readonly<{
+      kind: "retry_failed";
+      communicationId: string;
+      recipientIds?: readonly string[];
+    }>;
 
 type CommunicationEvrySendSelection = Extract<
   CommunicationEvryMessageSelection,
@@ -409,6 +426,8 @@ async function recipientIdsForSource(
 ) {
   if (source.kind === "people") return source.recipientIds;
   if (source.kind === "page_person") return [source.personId];
+  if (source.kind === "failed_recipients")
+    return source.source.recipients.map((r) => r.personId);
   return (await getGroupRecipients(plantId, source.selector)).map(
     ({ id }) => id
   );
@@ -419,6 +438,14 @@ async function sendAudienceIsCurrent(input: {
   recipientSource: z.infer<typeof resolvedRecipientSourceSchema>;
   audience: EvryCommunicationAudienceSnapshot;
 }) {
+  if (
+    input.recipientSource.kind === "failed_recipients" &&
+    !(await failedCommunicationSourceIsCurrent(
+      input.actor.plantId,
+      input.recipientSource.source
+    ))
+  )
+    return false;
   const recipientIds = await recipientIdsForSource(
     input.actor.plantId,
     input.recipientSource
@@ -485,6 +512,10 @@ export function createCommunicationEvryMessageExecutions(
             effect: input,
             communicationId: parsed.data.communicationId,
             audience: parsed.data.audience,
+            failedSource:
+              parsed.data.recipientSource.kind === "failed_recipients"
+                ? parsed.data.recipientSource.source
+                : undefined,
           })
         : null;
     },
@@ -501,6 +532,10 @@ export function createCommunicationEvryMessageExecutions(
           effect: input,
           communicationId: parsed.data.communicationId,
           audience: parsed.data.audience,
+          failedSource:
+            parsed.data.recipientSource.kind === "failed_recipients"
+              ? parsed.data.recipientSource.source
+              : undefined,
         });
         if (
           frozenState !== "started" &&
@@ -518,6 +553,10 @@ export function createCommunicationEvryMessageExecutions(
           communicationId: parsed.data.communicationId,
           audience: parsed.data.audience,
           mailer: dependencies.mailer,
+          failedSource:
+            parsed.data.recipientSource.kind === "failed_recipients"
+              ? parsed.data.recipientSource.source
+              : undefined,
         });
       } catch {
         return { status: "retryable" };
@@ -674,16 +713,46 @@ export const COMMUNICATION_MESSAGE_REVIEWS = [
     build({ plan, document }) {
       const step = document.steps[0]!;
       const parsed = sendArgumentsSchema.parse(step.arguments);
+      const failedSource =
+        parsed.recipientSource.kind === "failed_recipients"
+          ? parsed.recipientSource
+          : null;
+      const review = reviewStep(step, parsed.audience, {
+        resend: failedSource !== null,
+      });
+      if (failedSource) {
+        review.title = "Retry failed emails";
+        review.resolvedTargets.unshift({
+          label: "Original message",
+          value: failedSource.source.subject ?? "Message",
+          sourceLink: {
+            label: "Open original message",
+            href: `/communication/${failedSource.source.id}`,
+          },
+        });
+        if (failedSource.excludedCount)
+          review.exclusions = [
+            ...review.exclusions,
+            {
+              reason: "Not eligible for a failed-delivery retry",
+              count: failedSource.excludedCount,
+            },
+          ];
+      }
       return buildEvryConfirmationArtifact({
         kind: "confirmation",
         artifactVersion: 1,
         plan,
-        title: `Send email to ${parsed.audience.recipients.length}`,
-        actionLabel: `Send to ${parsed.audience.recipients.length}`,
+        title: failedSource
+          ? `Retry ${parsed.audience.recipients.length} failed email${parsed.audience.recipients.length === 1 ? "" : "s"}`
+          : `Send email to ${parsed.audience.recipients.length}`,
+        actionLabel: failedSource
+          ? "Retry failed emails"
+          : `Send to ${parsed.audience.recipients.length}`,
         consequences: [
           `This immediately sends ${parsed.audience.recipients.length} email${parsed.audience.recipients.length === 1 ? "" : "s"}; delivery cannot be undone.`,
         ],
-        steps: [reviewStep(step, parsed.audience, { resend: false })],
+        steps: [review],
       });
     },
   }),
@@ -812,11 +881,63 @@ export async function proposeCommunicationEvryMessageEffect(input: {
   now: Date;
 }) {
   const identity =
-    input.selection.kind === "send"
-      ? COMMUNICATION_MESSAGE_SEND_IDENTITY
-      : COMMUNICATION_RESEND_NON_OPENERS_IDENTITY;
+    input.selection.kind === "resend"
+      ? COMMUNICATION_RESEND_NON_OPENERS_IDENTITY
+      : COMMUNICATION_MESSAGE_SEND_IDENTITY;
   const actor = await authorizeExactActor(input.actor, identity);
   if (!actor) return communicationEvryUnavailable("Communication change");
+
+  if (input.selection.kind === "retry_failed") {
+    const resolved = await resolveFailedCommunicationSource({
+      churchId: actor.plantId,
+      communicationId: input.selection.communicationId,
+      recipientIds: input.selection.recipientIds,
+    });
+    if (!resolved)
+      return communicationEvryRefusal({
+        title: "I couldn't prepare this retry",
+        body: "Choose up to 100 confirmed failed deliveries whose recipients can still receive email. If a send is still uncertain, retry that original send instead.",
+      });
+    // Match native historical resend semantics: unresolved legacy plant tokens
+    // did not carry today's owner/launch facts. Preserve literals; clear only those tokens.
+    const preserved = freezeChurchMergeFields(
+      {
+        subject: resolved.source.subject ?? "",
+        bodyHtml: toRichTextHtml(
+          resolved.source.bodyHtml ?? resolved.source.body
+        ),
+      },
+      { pastor_name: "", launch_date: "" }
+    );
+    const audience = await resolveEvryCommunicationAudience({
+      churchId: actor.plantId,
+      recipientIds: resolved.source.recipients.map((r) => r.personId),
+      subject: preserved.subject,
+      body: preserved.bodyHtml,
+      channel: "email",
+      templateId: resolved.source.templateId,
+      meetingId: resolved.source.meetingId,
+    });
+    if (
+      !audience ||
+      audience.recipients.length !== resolved.source.recipients.length
+    )
+      return communicationEvryUnavailable("Original message recipients");
+    return storePlan({
+      actor,
+      identity,
+      requestKey: input.requestKey,
+      stepId: "retry-failed-message",
+      arguments: sendArgumentsSchema.parse({
+        communicationId: communicationEvryEffectUuid(
+          input.requestKey,
+          "failed-retry-communication"
+        ),
+        recipientSource: { kind: "failed_recipients", ...resolved },
+        audience,
+      }),
+    });
+  }
 
   if (input.selection.kind === "send") {
     const audience = await resolveCommunicationEvrySendAudience({

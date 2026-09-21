@@ -51,6 +51,28 @@ const checkin = z.enum(planterCheckinLevels);
 /** Model arguments carry requested edits only; existing proposers mint every snapshot. */
 export const CONTENT_MODEL_PREPARATIONS = [
   defineEvryModelPreparation({
+    id: "communication.retry_failed",
+    capabilityIdentities: [COMMUNICATION_MESSAGE_SEND_IDENTITY],
+    inputSchema: z.strictObject({
+      communicationId: id.describe(
+        "Original message ID. The server selects only provider-confirmed failures and preserves the original message."
+      ),
+      recipientIds: z
+        .array(id)
+        .min(1)
+        .max(100)
+        .optional()
+        .describe(
+          "Optional subset of original recipient delivery row IDs, not person IDs. Omit for all eligible failures."
+        ),
+    }),
+    run: (context, args) =>
+      createCommunicationEvryConversationContinuation(undefined, {
+        kind: "retry_failed",
+        ...args,
+      }).continue(context),
+  }),
+  defineEvryModelPreparation({
     id: "communication.send",
     capabilityIdentities: [COMMUNICATION_MESSAGE_SEND_IDENTITY],
     inputSchema: z.strictObject({

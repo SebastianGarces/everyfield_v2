@@ -228,6 +228,8 @@ export async function sendCommunication(
       text: await render(
         CommunicationEmailText({
           body: p.bodyText,
+          confirmUrl: p.confirmUrl,
+          declineUrl: p.declineUrl,
           churchName: churchMergeData.church_name,
         }),
         { plainText: true }

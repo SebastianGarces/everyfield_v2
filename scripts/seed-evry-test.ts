@@ -13,6 +13,11 @@ import assert from "node:assert/strict";
 import { eq, sql } from "drizzle-orm";
 import { hashPassword } from "../src/lib/auth/password";
 import * as schema from "../src/db/schema";
+import {
+  EVRY_TEST_EXECUTION_RESET_GUARD,
+  EVRY_TEST_OPERATIONAL_RESET_TABLES,
+  evryTestOperationalResetStatements,
+} from "./evry-test-reset";
 
 async function main() {
   config({ path: ".env.local", quiet: true });
@@ -76,17 +81,7 @@ async function main() {
     AND NOT (id = '${account.id}' AND email = '${account.email}' AND church_id = '${churchId}' AND sending_church_id IS NULL AND sending_network_id IS NULL)) THEN
     RAISE EXCEPTION 'Evry QA account identity collision; reset refused'; END IF;`
   ).join("\n")}
-  IF EXISTS (SELECT 1 FROM evry_active_runs WHERE church_id = '${churchId}' AND status = 'active' AND expires_at > now()) THEN
-    RAISE EXCEPTION 'Evry request is running; wait for it to finish before resetting';
-  END IF;
-  IF EXISTS (SELECT 1 FROM evry_action_plans p JOIN evry_action_plan_states s ON s.plan_id = p.id
-    WHERE p.church_id = '${churchId}' AND (s.status = 'executing' OR (p.expires_at > now() AND s.status IN ('awaiting_confirmation','approved')))) THEN
-    RAISE EXCEPTION 'Evry plan is still actionable; finish or recover execution, or let an unconfirmed plan expire before resetting';
-  END IF;
-  IF EXISTS (SELECT 1 FROM evry_execution_effect_claims c WHERE c.church_id = '${churchId}' AND NOT EXISTS
-    (SELECT 1 FROM evry_execution_outcomes o WHERE o.church_id = c.church_id AND o.effect_key = c.effect_key AND o.subject = 'step' AND o.status = 'completed')) THEN
-    RAISE EXCEPTION 'Evry has an unreconciled execution effect; recover it before resetting';
-  END IF;
+  ${EVRY_TEST_EXECUTION_RESET_GUARD}
   IF EXISTS (SELECT 1 FROM generated_documents WHERE id IN (${schema.generatedDocumentFormats.map((format) => `'${fixtureId(`document:${format}`)}'`).join(",")})
     AND (church_id IS DISTINCT FROM '${churchId}'::uuid OR user_id IS DISTINCT FROM '${owner}'::uuid)) THEN
     RAISE EXCEPTION 'Evry QA document identity collision; reset refused';
@@ -119,13 +114,7 @@ END $$`;
   JOIN pg_attribute pa ON pa.attrelid = parent.oid AND pa.attnum = fk.confkey[1]
   WHERE fk.contype = 'f' AND ns.nspname = 'public' AND array_length(fk.conkey,1) = 1 AND parent.relname = ANY($1::text[])`,
     [
-      [
-        ...resetTables,
-        "plant_assessments",
-        "plant_insights",
-        "insight_feedback",
-        "meeting_confirmation_tokens",
-      ].filter(
+      [...resetTables, ...EVRY_TEST_OPERATIONAL_RESET_TABLES].filter(
         (table) => !userScoped.has(table) && table !== "notification_deliveries"
       ),
     ]
@@ -328,7 +317,10 @@ END $$`;
           churchId,
           today: fixture.today,
           timeZone,
-          replaceOperationalTables: resetTables,
+          replaceOperationalTables: [
+            ...EVRY_TEST_OPERATIONAL_RESET_TABLES,
+            ...resetTables,
+          ],
           preserve: [
             "users and login identities",
             "Evry conversations, plans, confirmations and audit history",
@@ -497,19 +489,9 @@ END $$`;
         return client.query(query.sql, query.params);
       }),
       // Extra operational dependents that may have been created during QA.
-      client.query(
-        "DELETE FROM meeting_confirmation_tokens WHERE church_id = $1",
-        [churchId]
+      ...evryTestOperationalResetStatements().map((statement) =>
+        client.query(statement.sql, statement.params)
       ),
-      client.query("DELETE FROM insight_feedback WHERE church_id = $1", [
-        churchId,
-      ]),
-      client.query("DELETE FROM plant_insights WHERE church_id = $1", [
-        churchId,
-      ]),
-      client.query("DELETE FROM plant_assessments WHERE church_id = $1", [
-        churchId,
-      ]),
       ...[...resetTables]
         .reverse()
         .map((table) =>
@@ -535,9 +517,7 @@ END $$`;
         ...resetTables,
         "churches",
         "users",
-        "plant_assessments",
-        "plant_insights",
-        "insight_feedback",
+        ...EVRY_TEST_OPERATIONAL_RESET_TABLES,
         "generated_documents",
       ];
       const census = () =>
@@ -545,7 +525,7 @@ END $$`;
           censusTables
             .map(
               (table) =>
-                `SELECT '${table}' AS name, md5(coalesce(jsonb_agg(to_jsonb(t) ORDER BY t.id)::text, 'null')) AS digest FROM "${table}" t WHERE ${table === "churches" ? `id = '${churchId}'` : scope(table)}`
+                `SELECT '${table}' AS name, md5(coalesce(jsonb_agg(to_jsonb(t) ORDER BY ${table === "communication_failed_retries" ? "t.source_recipient_id" : "t.id"})::text, 'null')) AS digest FROM "${table}" t WHERE ${table === "churches" ? `id = '${churchId}'` : scope(table)}`
             )
             .join(" UNION ALL ")
         );

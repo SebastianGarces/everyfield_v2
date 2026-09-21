@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   boolean,
+  check,
   index,
   integer,
   jsonb,
@@ -15,6 +16,7 @@ import { churches } from "./church";
 import { churchMeetings } from "./meetings";
 import { persons } from "./people";
 import { users } from "./user";
+import { evryActionPlans } from "./evry";
 
 // ============================================================================
 // Enums
@@ -215,6 +217,10 @@ export const communicationRecipients = pgTable(
     clickedAt: timestamp("clicked_at"),
     externalId: varchar("external_id", { length: 255 }),
     errorMessage: text("error_message"),
+    // Null legacy/local failures are deliberately not evidence for a new send.
+    failureOrigin: varchar("failure_origin", {
+      length: 40,
+    }).$type<"provider_delivery_failed">(),
   },
   (table) => [
     index("comm_recipients_church_id_idx").on(table.churchId),
@@ -222,6 +228,10 @@ export const communicationRecipients = pgTable(
     index("comm_recipients_person_id_idx").on(table.personId),
     index("comm_recipients_external_id_idx").on(table.externalId),
     index("comm_recipients_status_idx").on(table.status),
+    check(
+      "comm_recipients_failure_origin_check",
+      sql`${table.failureOrigin} is null or ${table.failureOrigin} = 'provider_delivery_failed'`
+    ),
   ]
 );
 
@@ -229,6 +239,52 @@ export type CommunicationRecipient =
   typeof communicationRecipients.$inferSelect;
 export type NewCommunicationRecipient =
   typeof communicationRecipients.$inferInsert;
+
+/** One failed delivery can produce one new attempt, never two competing retries. */
+export const communicationFailedRetries = pgTable(
+  "communication_failed_retries",
+  {
+    sourceRecipientId: uuid("source_recipient_id")
+      .primaryKey()
+      .references(() => communicationRecipients.id, { onDelete: "restrict" }),
+    retryRecipientId: uuid("retry_recipient_id")
+      .notNull()
+      .references(() => communicationRecipients.id, { onDelete: "restrict" }),
+    churchId: uuid("church_id")
+      .notNull()
+      .references(() => churches.id),
+    planId: uuid("plan_id")
+      .notNull()
+      .references(() => evryActionPlans.id),
+    effectKey: text("effect_key").notNull(),
+    // Frozen at the first provider boundary, including RSVP links and branding.
+    outbound: jsonb("outbound").$type<{
+      from: string;
+      to: string;
+      subject: string;
+      html: string;
+      text: string;
+    }>(),
+    firstAttemptAt: timestamp("first_attempt_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("comm_failed_retries_child_unique_idx").on(
+      table.retryRecipientId
+    ),
+    index("comm_failed_retries_church_idx").on(table.churchId),
+    check(
+      "comm_failed_retries_distinct_check",
+      sql`${table.sourceRecipientId} <> ${table.retryRecipientId}`
+    ),
+    check(
+      "comm_failed_retries_attempt_check",
+      sql`(${table.outbound} is null) = (${table.firstAttemptAt} is null)`
+    ),
+  ]
+);
 
 // ----------------------------------------------------------------------------
 // Meeting Confirmation Tokens - Token-based RSVP for meetings

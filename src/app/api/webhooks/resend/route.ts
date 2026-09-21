@@ -223,6 +223,7 @@ export async function POST(req: NextRequest) {
       case "email.failed":
         newStatus = "failed";
         updates.errorMessage = "Email delivery failed";
+        updates.failureOrigin = "provider_delivery_failed";
         break;
       default:
         // Ignore other event types (delivery_delayed, domain events, etc.)
