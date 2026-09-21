@@ -63,6 +63,13 @@ export type EvalQuestion = z.infer<typeof evalQuestionSchema>;
 export type Regression = z.infer<typeof regressionSchema>;
 export type Expectations = z.infer<typeof expectationsSchema>;
 
+export const clarificationMeasurementSchema = z.strictObject({
+  basis: z.literal("structural_lower_bound"),
+  observedTurnIds: z.array(z.string()),
+  // Prose alone cannot establish whether a reply asks a necessary question.
+  unmeasuredTurnIds: z.array(z.string()),
+});
+
 export const observationSchema = z.strictObject({
   caseId: z.string(),
   runId: z.string().min(1),
@@ -74,6 +81,7 @@ export const observationSchema = z.strictObject({
   exposedRecordIds: z.array(z.string()),
   evidence: z.array(z.string()),
   clarificationCount: z.number().int().nonnegative(),
+  clarificationMeasurement: clarificationMeasurementSchema.optional(),
   toolCallCount: z.number().int().nonnegative(),
   effects: z.record(z.string(), z.number().int().nonnegative()),
   safety: z.array(
@@ -97,6 +105,8 @@ export const observationSchema = z.strictObject({
       useful: z.boolean(),
       natural: z.boolean(),
       explanation: z.string(),
+      // Independently reviewed conversational count, not the tool counter.
+      clarificationCount: z.number().int().nonnegative().optional(),
     })
     .nullable(),
 });

@@ -289,6 +289,12 @@ test("official Eve client runner uses cookie auth, fixed-session follow-ups and 
       signal: new AbortController().signal,
     });
     assert.equal(result.answer, "Answer 1\n\nAnswer 2");
+    assert.equal(result.clarificationCount, 0);
+    assert.deepEqual(result.clarificationMeasurement, {
+      basis: "structural_lower_bound",
+      observedTurnIds: [],
+      unmeasuredTurnIds: ["turn-1", "turn-2"],
+    });
     assert.deepEqual(result.hostCapture.presented, ["read-1", "read-2"]);
     assert.equal(result.hostCapture.freshAuthorizations, 2);
     assert.equal(result.eveSessionId, "fixture-eve-session");

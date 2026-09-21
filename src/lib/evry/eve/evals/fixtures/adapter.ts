@@ -126,7 +126,11 @@ import { observedLaunchStaffing } from "./launch-staffing";
 type Scenario = EvalQuestion | Regression;
 type ProductionOutcome = Pick<
   Observation,
-  "answer" | "latency" | "clarificationCount" | "judge"
+  | "answer"
+  | "latency"
+  | "clarificationCount"
+  | "clarificationMeasurement"
+  | "judge"
 > & {
   /** Include every generation and judge request. */
   costUsd: number;
@@ -767,6 +771,7 @@ export function createProductionEveEvalAdapter(options: {
                 answer: result.answer,
                 latency: result.latency,
                 clarificationCount: result.clarificationCount,
+                clarificationMeasurement: result.clarificationMeasurement,
                 costUsd: result.costUsd,
                 judge: result.judge,
                 toolCallCount: calls.length,

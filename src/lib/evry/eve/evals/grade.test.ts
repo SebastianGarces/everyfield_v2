@@ -36,6 +36,61 @@ function observed(): Observation {
   };
 }
 
+test("structural clarification counts need independent review, not a prose heuristic", () => {
+  const observation = observed();
+  observation.clarificationMeasurement = {
+    basis: "structural_lower_bound",
+    observedTurnIds: [],
+    unmeasuredTurnIds: ["turn-0"],
+  };
+  assert.ok(
+    gradeObservation(
+      scenario.id,
+      scenario.expectations,
+      observation
+    ).failures.includes("quality:clarifications_not_reviewed")
+  );
+  observation.judge = { ...observation.judge!, clarificationCount: 0 };
+  assert.equal(
+    gradeObservation(scenario.id, scenario.expectations, observation).status,
+    "passed"
+  );
+  observation.judge.clarificationCount = 1;
+  assert.ok(
+    gradeObservation(
+      scenario.id,
+      scenario.expectations,
+      observation
+    ).failures.includes("excess_clarifications")
+  );
+});
+
+test("a reviewer cannot erase observed clarification turns and unreviewed quality stays explicit", () => {
+  const observation = observed();
+  observation.clarificationCount = 1;
+  observation.clarificationMeasurement = {
+    basis: "structural_lower_bound",
+    observedTurnIds: ["turn-0"],
+    unmeasuredTurnIds: [],
+  };
+  observation.judge = { ...observation.judge!, clarificationCount: 0 };
+  assert.ok(
+    gradeObservation(
+      scenario.id,
+      scenario.expectations,
+      observation
+    ).failures.includes("excess_clarifications")
+  );
+  observation.judge = null;
+  const failures = gradeObservation(
+    scenario.id,
+    scenario.expectations,
+    observation
+  ).failures;
+  assert.ok(failures.includes("quality_not_reviewed"));
+  assert.ok(!failures.includes("quality:clarifications_not_reviewed"));
+});
+
 test("a successful judge cannot hide wrong task filtering", () => {
   const observation = observed();
   observation.facts.taskIds = ["task-today", "task-overdue"];

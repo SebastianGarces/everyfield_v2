@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { fixtureMessageSchema } from "./transcript";
 import { processingSnapshotSchema } from "./processing-snapshot";
+import { clarificationMeasurementSchema } from "../contract";
 
 export const compiledFixtureRequest = z
   .strictObject({
@@ -178,6 +179,7 @@ export const httpEvalOutcomeSchema = z.object({
     totalMs: z.number(),
   }),
   clarificationCount: z.number(),
+  clarificationMeasurement: clarificationMeasurementSchema.optional(),
   judge: z.null(),
   costUsd: z.number(),
   hostCapture: z.object({

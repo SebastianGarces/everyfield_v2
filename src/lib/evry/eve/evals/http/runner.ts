@@ -13,6 +13,8 @@ import {
   type installIsolatedFixtureHost,
 } from "./host";
 import { fixtureTranscript } from "./transcript";
+import { observeClarifications } from "./clarifications";
+import type { Observation } from "../contract";
 import { isDeepStrictEqual } from "node:util";
 import {
   projectEveMessage,
@@ -28,6 +30,7 @@ export type HttpEvalOutcome = {
     totalMs: number;
   };
   clarificationCount: number;
+  clarificationMeasurement: Observation["clarificationMeasurement"];
   judge: null;
   costUsd: number;
   hostCapture: HostCapture;
@@ -111,7 +114,6 @@ export function createHttpEveEvalRunner(config: {
     const started = performance.now();
     let acknowledgementMs = 0;
     let firstTextMs: number | null = null;
-    let clarificationCount = 0;
     const events: MessageStreamEvent[] = [];
     let pendingQuestions: readonly InputRequest[] = [];
     try {
@@ -184,7 +186,6 @@ export function createHttpEveEvalRunner(config: {
             if (firstTextMs === null) firstTextMs = performance.now() - started;
           }
           if (event.type === "input.requested") {
-            clarificationCount++;
             pendingQuestions = event.data.requests.filter(
               (request) =>
                 request.kind === "question" || request.kind === "session-limit"
@@ -287,7 +288,7 @@ export function createHttpEveEvalRunner(config: {
           firstTextMs,
           totalMs: performance.now() - started,
         },
-        clarificationCount,
+        ...observeClarifications(transcript),
         judge: null,
         costUsd: hostCapture.costUsd,
         hostCapture,

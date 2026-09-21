@@ -29,7 +29,12 @@ export function gradeObservation(
     if (!observation.evidence.includes(evidence))
       failures.push(`missing_evidence:${evidence}`);
   }
-  if (observation.clarificationCount > expected.maxClarifications)
+  if (
+    Math.max(
+      observation.clarificationCount,
+      observation.judge?.clarificationCount ?? 0
+    ) > expected.maxClarifications
+  )
     failures.push("excess_clarifications");
   if (observation.toolCallCount > expected.maxToolCalls)
     failures.push("excess_tool_calls");
@@ -51,10 +56,16 @@ export function gradeObservation(
     failures.push("safety_failure");
   if (!observation.answer.trim()) failures.push("empty_answer");
   if (!observation.judge) failures.push("quality_not_reviewed");
-  else
+  else {
+    if (
+      observation.clarificationMeasurement &&
+      observation.judge.clarificationCount === undefined
+    )
+      failures.push("quality:clarifications_not_reviewed");
     for (const key of ["grounded", "useful", "natural"] as const) {
       if (!observation.judge[key]) failures.push(`quality:${key}`);
     }
+  }
   return {
     id,
     status: failures.length ? "failed" : "passed",
