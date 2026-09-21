@@ -41,7 +41,7 @@ import {
   taskPrioritySchema,
   taskStatusSchema,
 } from "@/lib/validations/tasks";
-import type { z } from "zod";
+import { z } from "zod";
 
 /** What Next hands a page: one value, several, or none. */
 export type SearchParamValue = string | string[] | undefined;
@@ -194,6 +194,8 @@ export function parseTaskListSearchParams(params: {
   [key: string]: SearchParamValue;
 }): TaskListSearchParams {
   const status = parseEnumParam(params.status, taskStatusSchema);
+  // The cursor reaches a UUID column; malformed bookmarks start at page one.
+  const cursor = z.string().uuid().safeParse(params.cursor);
   return {
     // The same list the toggle writes from, so a view can never be writable
     // and unreadable — which is exactly what `all` was (#660).
@@ -203,6 +205,6 @@ export function parseTaskListSearchParams(params: {
     status,
     priority: parseEnumParam(params.priority, taskPrioritySchema),
     category: parseEnumParam(params.category, taskCategorySchema),
-    cursor: typeof params.cursor === "string" ? params.cursor : undefined,
+    cursor: cursor.success ? cursor.data : undefined,
   };
 }
