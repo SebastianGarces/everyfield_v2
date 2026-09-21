@@ -1,2 +1,0 @@
-patchedDependencies:
-  eve@0.63.0: patches/eve@0.63.0.patch

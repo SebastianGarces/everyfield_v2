@@ -2,6 +2,12 @@
   "name": "everyfield",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "pnpm@9.15.9",
+  "pnpm": {
+    "patchedDependencies": {
+      "eve@0.63.0": "patches/eve@0.63.0.patch"
+    }
+  },
   "engines": {
     "node": "24.x"
   },
