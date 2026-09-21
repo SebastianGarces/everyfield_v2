@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { z } from "zod";
 import { isDeepStrictEqual } from "node:util";
 import { readFixtureProcessingSnapshots } from "./processing-snapshot";
@@ -84,6 +84,7 @@ async function runWorker(
     // Explicit fixture-owned disk storage survives the replacement process.
     WORKFLOW_TARGET_WORLD: "local",
     WORKFLOW_LOCAL_DATA_DIR: join(directory, ".eve/.workflow-data"),
+    EVRY_EVE_COMPILED_SERVER_DIRECTORY: dirname(resolve(request.compiledEntry)),
   };
   if (request.model.mode === "scripted")
     env.OPENAI_API_KEY = "isolated-scripted-no-provider";
@@ -92,6 +93,8 @@ async function runWorker(
     [
       "--import",
       createRequire(__filename).resolve("tsx"),
+      "--import",
+      join(__dirname, "../../../../../../scripts/evry-eve-http-bootstrap.mjs"),
       join(__dirname, "../../../../../../scripts/evry-eve-http-worker.ts"),
     ],
     { cwd: directory, env, stdio: ["ignore", "ignore", "ignore", "ipc"] }

@@ -18,6 +18,12 @@ import {
 } from "../src/lib/evry/eve/evals/http/attachment-script";
 
 const controller = new AbortController();
+let unhandledRejections = 0;
+// Nitro logs these itself, but a completed transcript must not hide them from
+// evaluation. Retain only a count, never a provider error or message content.
+process.on("unhandledRejection", () => {
+  unhandledRejections += 1;
+});
 let used = false;
 async function freePort() {
   const server = createServer();
@@ -390,6 +396,8 @@ process.on("message", async (message) => {
       signal: controller.signal,
       maxCostUsd: request.maxCostUsd,
     });
+    if (unhandledRejections > 0)
+      throw new Error("Compiled runtime had an unhandled rejection");
     const result = {
       type: "result",
       outcome: {
@@ -437,6 +445,7 @@ process.on("message", async (message) => {
       error instanceof Error &&
       [
         "Evaluation runtime ended with turn.failed",
+        "Compiled runtime had an unhandled rejection",
         "Evaluation runtime ended with session.failed",
         "Evaluation stream ended before a durable turn boundary",
         "Evaluation exceeded its reserved budget",
