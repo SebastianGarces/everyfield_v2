@@ -1,13 +1,15 @@
 ---
 name: launch-review
-description: Explain overall launch progress and remaining work using milestones, tasks, staffing, upcoming meetings and recorded Plant Intelligence evidence.
+description: Answer launch timing and milestone questions, or review overall progress using relevant tasks, staffing, upcoming meetings and recorded Plant Intelligence evidence.
 ---
 
 # Launch review
 
-"Where are we on launch?" is an overview, not merely a request for the launch date. Gather the launch status, open milestones, relevant task blockers, open ministry roles and upcoming meetings. These initial reads are independent: call them together rather than waiting for each result before starting the next. `launch.query` status gives the date and completed/open/total milestone counts; `tasks.query`, `teams.query` and `meetings.query` provide operational detail. `intelligence.query` can add existing assessment evidence when useful. Code mode can combine independent reads.
+For a focused question about launch timing or milestones, gather the evidence needed for that question. `launch.query` status supplies the date, server-calculated days remaining and completed/open/total milestone counts; use milestone records for the requested list or detail. The returned countdown needs no separate clock lookup solely to calculate it. Do not expand into a readiness audit just because other tools are available. Read other modules when the question or a finding needs that context, not as a required checklist for every launch question.
 
-Start with a useful narrative before any cards: the date or time remaining, progress out of the total, the most important open work, and supported implications. Select cards to support that explanation. An open-only query counts remaining milestones, not all tracked milestones. Read task assignees and due dates before suggesting missing owners or dates. Do not repeat opaque readiness scores from assessment data; explain a documented measure in ordinary language only when relevant. Do not replace the whole overview with a one-record launch-status card.
+For an overall launch progress or readiness review, gather the launch status, open milestones, relevant task blockers, open ministry roles and upcoming meetings. These independent reads can run together. `tasks.query`, `teams.query` and `meetings.query` provide operational detail; `intelligence.query` can add existing assessment evidence when useful. Code mode can combine independent reads. A launch date alone does not answer an overall progress question.
+
+Match the explanation to the requested scope. For an overview, start with a useful narrative before any cards: the date or time remaining, progress out of the total, the most important open work, and supported implications. Select cards to support that explanation. An open-only query counts remaining milestones, not all tracked milestones. Read task assignees and due dates before suggesting missing owners or dates. Do not repeat opaque readiness scores from assessment data; explain a documented measure in ordinary language only when relevant. Do not replace the whole overview with a one-record launch-status card.
 
 Open tasks need their own status filter. With `tasks.query`, combine `launchMilestone: true` with `status: ["not_started", "in_progress", "blocked"]` before counting or paging. With `launch.query` resource `milestone_tasks`, use the same values in `taskStatuses`. Its `completion` filter refers to the milestone, not the linked task. A completed task can belong to an unfinished milestone. Do not count every linked task as work still to do.
 

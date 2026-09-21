@@ -14,6 +14,49 @@ const invitation = readFileSync(
 );
 
 // Protect the authored contract; live evaluations must still judge actual prose.
+test("focused launch questions use relevant evidence without requiring a readiness audit", () => {
+  const focused = launch
+    .split("\n\n")
+    .find((paragraph) => paragraph.startsWith("For a focused question"));
+  assert.ok(focused, "Focused questions have their own investigation scope");
+  assert.match(focused, /launch timing or milestones/);
+  assert.match(focused, /server-calculated days remaining/);
+  assert.match(focused, /completed\/open\/total milestone counts/);
+  assert.match(focused, /milestone records for the requested list or detail/);
+  assert.match(focused, /no separate clock lookup solely to calculate/);
+  assert.match(focused, /Do not expand into a readiness audit/);
+  assert.match(
+    focused,
+    /Read other modules when the question or a finding needs/
+  );
+});
+
+test("overall launch reviews retain broad evidence and a substantive narrative", () => {
+  const overview = launch
+    .split("\n\n")
+    .find((paragraph) => paragraph.startsWith("For an overall launch"));
+  assert.ok(overview, "Broad investigation is tied to an overall review");
+  assert.match(overview, /progress or readiness review/);
+  assert.match(
+    overview,
+    /launch status, open milestones, relevant task blockers, open ministry roles and upcoming meetings/
+  );
+  assert.match(overview, /independent reads can run together/);
+  assert.match(overview, /existing assessment evidence when useful/);
+  assert.match(launch, /For an overview, start with a useful narrative/);
+  assert.match(
+    launch,
+    /progress out of the total, the most important open work, and supported implications/
+  );
+  assert.match(
+    launch,
+    /An open-only query counts remaining milestones, not all/
+  );
+  assert.match(launch, /Missing post-event results before launch are expected/);
+  assert.match(launch, /Read further pages or counts before claiming complete/);
+  assert.match(launch, /Investigate further when a finding needs it/);
+});
+
 test("simple missing input can be requested without discovery or an empty draft while preserving accumulated choices", () => {
   assert.match(
     instructions,
