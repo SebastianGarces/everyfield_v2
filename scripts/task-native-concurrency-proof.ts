@@ -43,7 +43,10 @@ async function main() {
   let afterResponse:
     | ((body: { query?: string; queries?: unknown[] }) => Promise<void>)
     | undefined;
-  neonConfig.fetchFunction = async (input, init) => {
+  neonConfig.fetchFunction = async (
+    input: Parameters<typeof fetch>[0],
+    init?: RequestInit
+  ) => {
     const response = await fetch(input, {
       ...init,
       signal: AbortSignal.timeout(20000),
