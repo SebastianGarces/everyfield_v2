@@ -4,6 +4,7 @@ import {
   notificationCategories,
   notificationEntityTypes,
   phaseTransitionKinds,
+  taskStatuses,
 } from "@/db/schema";
 import { defineEvryReadRegistration } from "@/lib/evry/reads/contract";
 import { readEvryPlantTimeZone } from "@/lib/evry/reads/plant-time-zone";
@@ -20,6 +21,7 @@ import {
   readPeopleImportPreviewArtifact,
 } from "../people/file-reads";
 import { EVRY_PEOPLE_ATTACHMENT_REFERENCE_MAX_LENGTH } from "../people/attachment-contract";
+import { projectLaunchStatus } from "./launch-projection";
 import {
   contentPage,
   contentMode,
@@ -34,7 +36,19 @@ export const launchQuerySchema = z.strictObject({
   resource: z.enum(["status", "milestones", "milestone_tasks", "journal"]),
   mode: contentMode,
   ...contentPage,
-  completion: z.enum(["any", "complete", "open"]).default("any"),
+  completion: z
+    .enum(["any", "complete", "open"])
+    .default("any")
+    .describe(
+      "Milestone completion, including when listing linked tasks. It does not filter task status."
+    ),
+  taskStatuses: z
+    .array(z.enum(taskStatuses))
+    .min(1)
+    .optional()
+    .describe(
+      "For milestone_tasks only: filter the linked task's own status. Use not_started, in_progress and blocked for remaining work."
+    ),
   area: z.enum(["operations", "launch_team", "promotion"]).optional(),
   milestoneIds: contentIds.optional(),
   taskIds: contentIds.optional(),
@@ -66,7 +80,7 @@ function launchSourceQuery(
   input: z.infer<typeof launchQuerySchema>
 ) {
   if (input.resource === "status")
-    return sql`select l.id::text as id, 'Launch Sunday'::text as label, jsonb_build_object('Status', l.status, 'Launch date', l.target_date, 'Days until launch', l.target_date - ${today}::date, 'Milestones total', progress.total, 'Milestones complete', progress.complete, 'Milestones remaining', progress.remaining, 'Attendance', l.attendance_count, 'Decisions', l.decisions_count, 'Outcome recorded at', l.outcome_recorded_at, 'Outcome notes', l.outcome_notes, 'Capture the day', l.capture_the_day) as facts, '/launch'::text as href, l.status::text as group_key, l.updated_at::text as sort_key from launches l cross join lateral (select count(*)::int as total, count(*) filter (where m.completed_at is not null)::int as complete, count(*) filter (where m.completed_at is null)::int as remaining from launch_milestones m where m.church_id = ${plantId} and m.launch_id = l.id) progress where l.church_id = ${plantId}`;
+    return sql`select l.id::text as id, 'Launch Sunday'::text as label, jsonb_build_object('Status', l.status, 'Launch date', l.target_date, 'Days until launch', l.target_date - ${today}::date, 'Milestones total', progress.total, 'Milestones complete', progress.complete, 'Milestones remaining', progress.remaining) || case when l.target_date > ${today}::date then jsonb_build_object('Launch-day results', 'After launch: attendance, decisions, outcome notes and memories. These are not preparation requirements.') || jsonb_strip_nulls(jsonb_build_object('Attendance', l.attendance_count, 'Decisions', l.decisions_count, 'Outcome recorded at', l.outcome_recorded_at, 'Outcome notes', l.outcome_notes, 'Launch-day memories', l.capture_the_day)) else jsonb_build_object('Attendance', l.attendance_count, 'Decisions', l.decisions_count, 'Outcome recorded at', l.outcome_recorded_at, 'Outcome notes', l.outcome_notes, 'Launch-day memories', l.capture_the_day) end as facts, '/launch'::text as href, l.status::text as group_key, l.updated_at::text as sort_key from launches l cross join lateral (select count(*)::int as total, count(*) filter (where m.completed_at is not null)::int as complete, count(*) filter (where m.completed_at is null)::int as remaining from launch_milestones m where m.church_id = ${plantId} and m.launch_id = l.id) progress where l.church_id = ${plantId}`;
   if (input.resource === "journal")
     return sql`select id::text as id, event as label, jsonb_build_object('Previous date', previous_target_date, 'Date', target_date, 'Previous status', previous_status, 'Status', status, 'Note', note, 'Recorded at', created_at) as facts, '/launch'::text as href, status::text as group_key, created_at::text as sort_key from launch_events where church_id = ${plantId} and ${contentRange(sql`created_at`, input.window)}`;
   const complete =
@@ -78,7 +92,14 @@ function launchSourceQuery(
   const blocked = sql`exists (select 1 from launch_milestone_tasks link join tasks t on t.id = link.task_id and t.church_id = ${plantId} and t.deleted_at is null join task_dependencies dep on dep.task_id = t.id and dep.church_id = ${plantId} join tasks prerequisite on prerequisite.id = dep.prerequisite_task_id and prerequisite.church_id = ${plantId} and prerequisite.deleted_at is null where link.church_id = ${plantId} and link.milestone_id = m.id and t.status <> 'complete' and prerequisite.status <> 'complete' and prerequisite.due_date < ${today}::date)`;
   const filter = sql`m.church_id = ${plantId} and ${complete} and ${input.area ? sql`m.area = ${input.area}` : sql`true`} and ${contentIn(sql`m.id`, input.milestoneIds)} and ${contentRange(sql`m.completed_at`, input.window)} and ${input.blockedByOverdueTask ? blocked : sql`true`}`;
   if (input.resource === "milestone_tasks")
-    return sql`select link.id::text as id, t.title as label, jsonb_build_object('Task ID', t.id, 'Milestone ID', m.id, 'Milestone', m.title, 'Status', t.status, 'Due date', t.due_date, 'Assigned', t.assigned_to_id is not null, 'Assignee', (select u.name from users u where u.id = t.assigned_to_id and u.church_id = ${plantId}), 'Assignee account ID', t.assigned_to_id) as facts, '/tasks/' || t.id as href, ${input.groupBy === "area" ? sql`m.area` : sql`t.status`}::text as group_key, coalesce(t.due_date::text, '') as sort_key from launch_milestones m join launch_milestone_tasks link on link.milestone_id = m.id and link.church_id = ${plantId} join tasks t on t.id = link.task_id and t.church_id = ${plantId} and t.deleted_at is null where ${filter} and ${contentIn(sql`t.id`, input.taskIds)}`;
+    return sql`select link.id::text as id, t.title as label, jsonb_build_object('Task ID', t.id, 'Milestone ID', m.id, 'Milestone', m.title, 'Status', t.status, 'Due date', t.due_date, 'Assigned', t.assigned_to_id is not null, 'Assignee', (select u.name from users u where u.id = t.assigned_to_id and u.church_id = ${plantId}), 'Assignee account ID', t.assigned_to_id) as facts, '/tasks/' || t.id as href, ${input.groupBy === "area" ? sql`m.area` : sql`t.status`}::text as group_key, coalesce(t.due_date::text, '') as sort_key from launch_milestones m join launch_milestone_tasks link on link.milestone_id = m.id and link.church_id = ${plantId} join tasks t on t.id = link.task_id and t.church_id = ${plantId} and t.deleted_at is null where ${filter} and ${contentIn(sql`t.id`, input.taskIds)} and ${
+      input.taskStatuses
+        ? sql`t.status in (${sql.join(
+            input.taskStatuses.map((status) => sql`${status}`),
+            sql`, `
+          )})`
+        : sql`true`
+    }`;
   return sql`select m.id::text as id, m.title as label, jsonb_build_object('Area', m.area, 'Description', m.description, 'Completed at', m.completed_at, 'Blocked by overdue prerequisite', ${blocked}, 'Linked tasks', (select count(*)::int from launch_milestone_tasks link join tasks t on t.id = link.task_id and t.church_id = ${plantId} and t.deleted_at is null where link.church_id = ${plantId} and link.milestone_id = m.id)) as facts, '/launch'::text as href, ${input.groupBy === "area" ? sql`m.area` : sql`case when m.completed_at is null then 'Open' else 'Complete' end`} as group_key, m.sort_order::text as sort_key from launch_milestones m where ${filter} and ${input.taskIds ? sql`exists (select 1 from launch_milestone_tasks link where link.church_id = ${plantId} and link.milestone_id = m.id and ${contentIn(sql`link.task_id`, input.taskIds)})` : sql`true`}`;
 }
 export const LAUNCH_QUERY = defineEvryReadRegistration({
@@ -88,6 +109,11 @@ export const LAUNCH_QUERY = defineEvryReadRegistration({
   capabilityIdentity: "launch.read.readiness",
   inputShape: {
     query: launchQuerySchema.superRefine((v, ctx) => {
+      if (v.taskStatuses && v.resource !== "milestone_tasks")
+        ctx.addIssue({
+          code: "custom",
+          message: "Task statuses apply only to linked tasks",
+        });
       if (
         (v.resource === "status" || v.resource === "journal") &&
         (v.area ||
@@ -108,7 +134,7 @@ export const LAUNCH_QUERY = defineEvryReadRegistration({
   async run({ authorization, now }, { query: input }) {
     const instant = now ?? new Date();
     const zone = await readEvryPlantTimeZone(authorization.actor.plantId);
-    return runContentQuery({
+    const artifact = await runContentQuery({
       title: `Launch ${input.resource.replaceAll("_", " ")}`,
       href: "/launch",
       filtered: launchFilteredQuery(
@@ -125,6 +151,9 @@ export const LAUNCH_QUERY = defineEvryReadRegistration({
         "Current milestones are not historical readiness snapshots. The journal records date/status events only. Team coverage must be read through teams.query; no milestone-to-team relationship is recorded.",
       ],
     });
+    return input.resource === "status" && input.mode === "list"
+      ? projectLaunchStatus(artifact)
+      : artifact;
   },
 });
 

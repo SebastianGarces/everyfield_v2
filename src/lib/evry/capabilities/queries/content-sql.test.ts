@@ -17,7 +17,9 @@ import {
   intelligenceQuerySchema,
   launchFilteredQuery,
   launchQuerySchema,
+  LAUNCH_QUERY,
 } from "./content-platform";
+import { projectLaunchStatus } from "./launch-projection";
 import { wikiSearchQuery, wikiSearchSchema } from "./content-wiki";
 import {
   contentPageQuery,
@@ -125,12 +127,138 @@ before(() => {
     insert into launch_milestones (id,church_id,launch_id,title,area,sort_order) values (gen_random_uuid(),'${other}','${message}','Foreign','operations',1), (gen_random_uuid(),'${plant}','${other}','Other launch','operations',1);
     insert into tasks(id,church_id,title,status,assigned_to_id,due_date) values ('${message}','${plant}','Prepare launch','not_started','${account}','2026-09-19');
     insert into launch_milestone_tasks(id,church_id,milestone_id,task_id) values ('${message}','${plant}','${message}','${message}');
+    insert into tasks(id,church_id,title,status,assigned_to_id,due_date) values ('${person}','${plant}','Completed launch preparation','complete','${account}','2026-09-18');
+    insert into launch_milestone_tasks(id,church_id,milestone_id,task_id) values ('${person}','${plant}','${message}','${person}');
     insert into plant_assessments (id,church_id,status,generated_at,phase,rubric_version) values ('${message}','${plant}','complete','2026-09-09',2,'v1'), ('${other}','${other}','complete','2026-09-09',2,'v1');
   `);
 });
 after(() => {
   if (container) postgres(`drop database if exists ${database};`, "postgres");
 });
+test(
+  "launch task completion is distinct from milestone completion before pagination and aggregation",
+  { skip: !container },
+  () => {
+    for (const mode of ["list", "count", "group"] as const) {
+      const run = (taskStatuses?: string[]) =>
+        execute(
+          contentPageQuery(
+            launchFilteredQuery(
+              plant,
+              "2026-09-10",
+              launchQuerySchema.parse({
+                resource: "milestone_tasks",
+                completion: "open",
+                ...(taskStatuses ? { taskStatuses } : {}),
+              })
+            ),
+            mode,
+            1,
+            0
+          )
+        )[0];
+      assert.equal(
+        run().total,
+        2,
+        "An open milestone includes its completed task unless task status is filtered"
+      );
+      const open = run(["not_started", "in_progress", "blocked"]);
+      assert.equal(open.total, 1);
+      if (mode === "list") assert.equal(open.rows[0].facts["Task ID"], message);
+      assert.equal(run(["complete"]).total, 1);
+    }
+    assert.equal(
+      LAUNCH_QUERY.inputSchema.safeParse({
+        query: {
+          resource: "milestones",
+          taskStatuses: ["complete"],
+        },
+      }).success,
+      false
+    );
+  }
+);
+
+test(
+  "launch status separates future preparation from post-event outcomes without losing recorded values",
+  { skip: !container },
+  async () => {
+    const read = (today: string) =>
+      execute(
+        contentPageQuery(
+          launchFilteredQuery(
+            plant,
+            today,
+            launchQuerySchema.parse({ resource: "status" })
+          ),
+          "list",
+          1,
+          0
+        )
+      )[0].rows[0].facts;
+    const future = read("2026-09-10");
+    assert.equal(future.Attendance, undefined);
+    assert.equal(future.Decisions, undefined);
+    assert.equal(future["Outcome notes"], undefined);
+    assert.match(future["Launch-day results"], /not preparation requirements/);
+    const past = read("2026-09-21");
+    assert.equal(
+      past.Attendance,
+      null,
+      "No record after launch is not zero attendance"
+    );
+    assert.equal(past["Launch-day memories"], null);
+    assert.equal(past["Launch-day results"], undefined);
+    postgres(
+      `update launches set attendance_count=0,capture_the_day='Our launch-day memories' where id='${message}' and church_id='${plant}';`
+    );
+    try {
+      assert.equal(
+        read("2026-09-10").Attendance,
+        0,
+        "A recorded value remains visible even if the target date changes"
+      );
+      assert.equal(
+        read("2026-09-21")["Launch-day memories"],
+        "Our launch-day memories"
+      );
+    } finally {
+      postgres(
+        `update launches set attendance_count=null,capture_the_day=null where id='${message}' and church_id='${plant}';`
+      );
+    }
+    const reader = mock.method(db, "execute", async (statement: SQL) => ({
+      rows: execute(statement),
+    }));
+    try {
+      const artifact = projectLaunchStatus(
+        await runContentQuery({
+          title: "Launch status",
+          href: "/launch",
+          filtered: launchFilteredQuery(
+            plant,
+            "2026-09-10",
+            launchQuerySchema.parse({ resource: "status" })
+          ),
+          mode: "list",
+          limit: 1,
+          offset: 0,
+          now: new Date("2026-09-10T16:00:00Z"),
+          timeZone: "America/New_York",
+        })
+      );
+      const visible = publicReadArtifactSchema.parse(
+        publicEvryArtifact(artifact)
+      );
+      assert.deepEqual(visible.items[0].facts.slice(0, 2), [
+        { label: "Launch date", value: "Sep 20, 2026" },
+        { label: "Milestone progress", value: "4 of 9 complete" },
+      ]);
+    } finally {
+      reader.mock.restore();
+    }
+  }
+);
 test(
   "SQL-backed document cards project canonical titles, scoped creator groups and local dates",
   { skip: !container },
@@ -336,7 +464,7 @@ test(
         0
       )
     )[0];
-    assert.equal(launchTasks.rows.length, 1);
+    assert.equal(launchTasks.rows.length, 2);
     assert.equal(launchTasks.rows[0].facts.Assigned, true);
     assert.equal(launchTasks.rows[0].facts.Assignee, "Alex");
     assert.equal(launchTasks.rows[0].facts["Due date"], "2026-09-19");
