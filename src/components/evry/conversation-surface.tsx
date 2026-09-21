@@ -73,6 +73,7 @@ export function ConversationSurface({ className }: { className?: string }) {
     isSending,
     isWatchingDetached,
     resumeWatching,
+    recoveryLabel,
     sendMessage,
     setDraft,
     stopWatching,
@@ -378,7 +379,7 @@ export function ConversationSurface({ className }: { className?: string }) {
                       resumeWatching();
                     }}
                   >
-                    Reconnect
+                    {recoveryLabel}
                   </Button>
                   <Button
                     type="button"

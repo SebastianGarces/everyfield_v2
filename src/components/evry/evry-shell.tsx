@@ -34,6 +34,11 @@ import {
 } from "./eve-client/session";
 import { stagePeopleFile } from "./eve-client/files";
 import type { PreparedEvryPeopleFile } from "./people-file-state";
+import {
+  EVE_RETRY_MESSAGE,
+  EVE_TURN_FAILURE_MESSAGE,
+  latestEveTurnFailure,
+} from "./eve-client/turn-failure";
 
 const EvryPanel = dynamic(() =>
   import("./evry-panel").then((module) => module.EvryPanel)
@@ -103,6 +108,7 @@ type EvryShellValue = {
   workRequestId: string | null;
   canStopWatching: boolean;
   isWatchingDetached: boolean;
+  recoveryLabel: "Try again" | "Reconnect";
   setDraft(value: string): void;
   clearContext(): void;
   closePanel(): void;
@@ -183,6 +189,13 @@ export function EvryShell({
   const launcherRef = useRef<HTMLButtonElement | null>(null);
   const previousPath = useRef(pathname);
   const messages = client?.data.messages ?? EMPTY_MESSAGES;
+  const turnFailure =
+    client?.status === "submitted"
+      ? null
+      : latestEveTurnFailure(client?.events ?? []);
+  const visibleError =
+    error ??
+    (!dismissedFailure && turnFailure ? EVE_TURN_FAILURE_MESSAGE : null);
   const isSending = client?.status === "submitted";
   const isWorking =
     isSending || client?.status === "streaming" || executing || uploading;
@@ -198,7 +211,7 @@ export function EvryShell({
         requestId: failedTurn.operationId,
         savedMessageId: lastUser?.id ?? "",
       }
-    : lastUser?.metadata?.status === "failed"
+    : lastUser && (lastUser.metadata?.status === "failed" || turnFailure)
       ? {
           body: lastUser.parts
             .filter((part) => part.type === "text")
@@ -213,11 +226,11 @@ export function EvryShell({
   const workRequestId =
     acknowledgement?.requestId ?? messages.at(-1)?.metadata?.turnId ?? null;
   const workState: EvryWorkState =
-    error || client?.error
+    visibleError || client?.error
       ? {
           phase: "failed",
           message:
-            error ??
+            visibleError ??
             "The response was interrupted. Reconnect to pick up where you left off.",
         }
       : uploading
@@ -444,6 +457,16 @@ export function EvryShell({
         const settled = readFinishedSnapshot();
         if (!settled || settled.status === "error")
           throw new Error("delivery failed");
+        if (
+          latestEveTurnFailure(settled.events.slice(request.eventStartIndex))
+        ) {
+          // Delivery succeeded, but generation failed. Replaying cannot retry it.
+          if (bindingRef.current.key === request.bindingKey) {
+            pendingTurn.current = null;
+            setFailedTurn(null);
+          }
+          return false;
+        }
         if (reconnect && current.session) {
           const received = settled.events
             .slice(request.eventStartIndex)
@@ -599,6 +622,31 @@ export function EvryShell({
   );
   const resumeWatching = useCallback(() => {
     setError(null);
+    const current = clientRef.current;
+    if (
+      current?.session &&
+      latestEveTurnFailure(current.events) &&
+      !pendingTurn.current
+    ) {
+      if (sendingTurn.current || current.status === "resuming") return;
+      // Eve has no retry-turn API. A user-requested continuation is a new turn
+      // on the same saved conversation, not a duplicate of the original input.
+      const request: PendingTurn = {
+        bindingKey: bindingRef.current.key,
+        operationId: crypto.randomUUID(),
+        text: EVE_RETRY_MESSAGE,
+        clientContext: contextForTurn(),
+        eventStartIndex: current.events.length,
+        retry: "replay",
+      };
+      pendingTurn.current = request;
+      setAcknowledgement({
+        requestId: request.operationId,
+        submittedAt: performance.now(),
+      });
+      void deliver(request);
+      return;
+    }
     if (pendingTurn.current) {
       void deliver(pendingTurn.current, true);
       return;
@@ -615,7 +663,7 @@ export function EvryShell({
           setError("Unable to reconnect. Try again.");
       })
       .catch(() => setError("Unable to reconnect. Try again."));
-  }, [deliver, readFinishedSnapshot, replaySession]);
+  }, [contextForTurn, deliver, readFinishedSnapshot, replaySession]);
   const stopWatching = useCallback(() => {
     void clientRef.current
       ?.cancel()
@@ -755,7 +803,7 @@ export function EvryShell({
     messages,
     sessionId: metadata?.id ?? client?.session?.sessionId ?? null,
     draft,
-    error,
+    error: visibleError,
     pendingMessage,
     isEnabled: enabled,
     isPanelOpen,
@@ -788,6 +836,7 @@ export function EvryShell({
     },
     canStopWatching: isSending || client?.status === "streaming",
     isWatchingDetached: client?.status === "error",
+    recoveryLabel: turnFailure ? "Try again" : "Reconnect",
     canSyncWorkspaceHistory,
     submitPeopleFile,
     updatePlan,

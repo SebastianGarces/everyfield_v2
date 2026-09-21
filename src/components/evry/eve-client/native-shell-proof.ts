@@ -16,6 +16,204 @@ mock.module("@/components/header/header-context", {
   namedExports: { useHeader: () => ({ breadcrumbs: [] }) },
 });
 
+for (const reload of [false, true]) {
+  test(`a parked model failure stays visible ${reload ? "after history replay" : "after send"} and explicit retry starts one same-session turn`, async (t) => {
+    Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+    t.mock.method(console, "error", () => {});
+    const posts: { url: string; body: Record<string, unknown> }[] = [];
+    const metadata = {
+      id: "failed-eve-session",
+      conversationId: "10000000-0000-4000-8000-000000000007",
+      title: "Launch status",
+      createdAt: "2026-09-20T12:00:00.000Z",
+      updatedAt: "2026-09-20T12:00:00.000Z",
+    };
+    const text = "Where are we on launch?";
+    let stream!: ReadableStreamDefaultController<Uint8Array>;
+    let index = 0;
+    const emit = (type: string, data: object) =>
+      stream.enqueue(
+        new TextEncoder().encode(
+          JSON.stringify({
+            type,
+            data,
+            meta: {
+              id: `model-failure-${index++}`,
+              at: "2026-09-20T12:00:00.000Z",
+              deliveryIds: [`delivery-${posts.length}`],
+            },
+          }) + "\n"
+        )
+      );
+    const fail = () => {
+      emit("session.started", {});
+      emit("turn.started", { sequence: 1, turnId: "failed-turn" });
+      emit("message.received", {
+        sequence: 1,
+        turnId: "failed-turn",
+        message: text,
+      });
+      emit("step.started", {
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "failed-turn",
+        modelId: "fixture",
+      });
+      emit("step.failed", {
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "failed-turn",
+        code: "MODEL_CALL_FAILED",
+        message: "Provider secret must not be displayed",
+      });
+      emit("turn.failed", {
+        sequence: 1,
+        turnId: "failed-turn",
+        code: "MODEL_CALL_FAILED",
+        message: "Provider secret must not be displayed",
+      });
+      emit("session.waiting", {
+        continuationToken: "fixture",
+        wait: "next-user-message",
+      });
+    };
+    t.mock.method(
+      globalThis,
+      "fetch",
+      async (input: string | URL | Request, init?: RequestInit) => {
+        if (String(input).startsWith("/api/evry/eve/sessions"))
+          return Response.json({ session: metadata });
+        if (init?.method === "POST") {
+          posts.push({
+            url: String(input),
+            body: JSON.parse(String(init.body)),
+          });
+          return Response.json({
+            ok: true,
+            status: "accepted",
+            sessionId: metadata.id,
+            deliveryId: `delivery-${posts.length}`,
+          });
+        }
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              stream = controller;
+              if (reload) fail();
+            },
+          }),
+          {
+            headers: {
+              "content-type": "application/x-ndjson",
+              "x-eve-stream-version": "25",
+              "x-eve-stream-tail-index": reload ? "6" : "-1",
+            },
+          }
+        );
+      }
+    );
+    const { EvryShell, useEvryShell } = await import("../evry-shell");
+    let shell!: ReturnType<typeof useEvryShell>;
+    function Probe() {
+      const value = useEvryShell();
+      useEffect(() => {
+        shell = value;
+      }, [value]);
+      return createElement("p", { role: "alert" }, value.error);
+    }
+    let renderer!: ReactTestRenderer;
+    await act(() => {
+      renderer = create(
+        createElement(EvryShell, {
+          enabled: true,
+          children: createElement(Probe),
+        })
+      );
+    });
+    t.after(async () => {
+      await act(() => renderer.unmount());
+    });
+    if (reload) {
+      await act(async () => {
+        await shell.loadConversation(metadata.conversationId);
+      });
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      });
+    } else {
+      let sending!: Promise<void>;
+      await act(async () => {
+        sending = shell.sendMessageText(text);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      });
+      await act(async () => {
+        fail();
+        await sending;
+      });
+    }
+    assert.match(shell.error ?? "", /couldn't finish this response/);
+    assert.doesNotMatch(JSON.stringify(renderer.toJSON()), /Provider secret/);
+    assert.equal(shell.workState.phase, "failed");
+    assert.equal(shell.isWorking, false);
+    assert.equal(shell.pendingMessage?.body, text);
+    assert.equal(shell.recoveryLabel, "Try again");
+    assert.equal(
+      posts.length,
+      reload ? 0 : 1,
+      "failure and replay must not trigger an automatic retry"
+    );
+    const before = posts.length;
+    await act(() => shell.setDraft("A separate unsent question"));
+    await act(async () => {
+      shell.resumeWatching();
+      shell.resumeWatching();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+    assert.equal(
+      posts.length,
+      before + 1,
+      "double clicking retry must not duplicate delivery"
+    );
+    assert.equal(posts.at(-1)?.url, `/eve/v1/session/${metadata.id}`);
+    assert.equal(
+      posts.at(-1)?.body.message,
+      "Please try my last request again."
+    );
+    assert.equal(shell.draft, "A separate unsent question");
+    await act(async () => {
+      emit("turn.started", { sequence: 2, turnId: "retry-turn" });
+      emit("message.received", {
+        sequence: 2,
+        turnId: "retry-turn",
+        message: "Please try my last request again.",
+      });
+      emit("message.appended", {
+        sequence: 2,
+        stepIndex: 0,
+        turnId: "retry-turn",
+        messageDelta: "Five milestones remain.",
+      });
+      emit("turn.completed", { sequence: 2, turnId: "retry-turn" });
+      emit("session.waiting", { inputRequests: [] });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+    assert.equal(shell.error, null);
+    assert.equal(shell.pendingMessage, null);
+    assert.equal(shell.sessionId, metadata.id);
+    assert.equal(shell.draft, "A separate unsent question");
+    assert.equal(
+      shell.messages.filter(
+        (message) =>
+          message.role === "user" &&
+          message.parts.some(
+            (part) => part.type === "text" && part.text === text
+          )
+      ).length,
+      1
+    );
+  });
+}
+
 for (const file of [false, true]) {
   test(`a lost first POST keeps ${file ? "the staged file" : "the draft"} and retries the same creation operation`, async (t) => {
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
