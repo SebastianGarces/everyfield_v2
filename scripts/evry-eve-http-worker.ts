@@ -16,6 +16,11 @@ import {
   fixtureAttachmentReferencesHidden,
   resolveScriptedAttachmentInput,
 } from "../src/lib/evry/eve/evals/http/attachment-script";
+import {
+  assertObservedTask,
+  isScriptedCompactionRequest,
+  preparationFromObservedTask,
+} from "../src/lib/evry/eve/evals/http/task-state-script";
 
 const controller = new AbortController();
 let unhandledRejections = 0;
@@ -46,6 +51,13 @@ process.on("message", async (message) => {
   let phase = "configuration";
   const failures: string[] = [];
   const eventTypes: string[] = [];
+  // Appended by onEvent in client arrival order; sequence is a turn-step
+  // identity shared by requested/completed, not a monotonic event index.
+  const compactions: Array<{
+    type: "compaction.requested" | "compaction.completed";
+    turnId: string;
+    sequence: number;
+  }> = [];
   const scriptedDiagnostics: string[] = [];
   const attachmentBindings: Array<{
     turnIndex: number;
@@ -92,6 +104,7 @@ process.on("message", async (message) => {
     sourceNeonConfig.useSecureWebSocket = false;
     phase = "scripted provider configuration";
     let responseIndex = 0;
+    let responseFlags: { failStream?: boolean; failGenerate?: boolean } = {};
     const availableTools = new Set<string>();
     const originalRequest =
       typeof request.turns[0] === "string" ? request.turns[0] : undefined;
@@ -99,6 +112,12 @@ process.on("message", async (message) => {
       tools: string[];
       inputBytes: number;
       retainedOriginalRequest?: boolean;
+      compaction?: boolean;
+      observedTask?: {
+        draftCallId: string;
+        revision: number;
+        factKeys: string[];
+      };
       toolSchemas?: Array<{
         name: string;
         inputSchema: z.infer<ReturnType<typeof z.json>>;
@@ -115,6 +134,34 @@ process.on("message", async (message) => {
         ? mockModel({
             modelId: "isolated-runtime-script",
             respond: (modelRequest) => {
+              if (request.model.mode !== "scripted")
+                throw new Error("Invalid fixture model");
+              const compaction = isScriptedCompactionRequest(modelRequest);
+              const response:
+                | (typeof request.model.responses)[number]
+                | undefined =
+                compaction && request.model.compactionSummary !== undefined
+                  ? {
+                      text: request.model.compactionSummary,
+                      usage: { inputTokens: 12_000, outputTokens: 100 },
+                    }
+                  : request.model.responses[responseIndex++];
+              if (!response)
+                throw new Error("Scripted model responses exhausted");
+              responseFlags = response;
+              const taskPreparation =
+                "taskPreparation" in response && response.taskPreparation
+                  ? preparationFromObservedTask(
+                      response.taskPreparation,
+                      modelRequest.toolResults
+                    )
+                  : null;
+              const assertedTask = response.assertTaskState
+                ? assertObservedTask(
+                    response.assertTaskState,
+                    modelRequest.toolResults
+                  )
+                : null;
               for (const binding of attachmentBindings) {
                 binding.modelSawBinding =
                   binding.modelSawBinding === true ||
@@ -130,6 +177,13 @@ process.on("message", async (message) => {
                   throw new Error("Fixture attachment disclosure refused");
               }
               modelRequests.push({
+                compaction,
+                ...(taskPreparation
+                  ? { observedTask: taskPreparation.observed }
+                  : {}),
+                ...(assertedTask
+                  ? { observedTask: assertedTask.observed }
+                  : {}),
                 retainedOriginalRequest:
                   originalRequest !== undefined &&
                   modelRequest.messages.some((message) =>
@@ -193,13 +247,11 @@ process.on("message", async (message) => {
                 if (systemText.includes(skill.name))
                   availableSkills.add(skill.name);
               }
-              if (request.model.mode !== "scripted")
-                throw new Error("Invalid fixture model");
-              const response = request.model.responses[responseIndex++];
-              if (!response)
-                throw new Error("Scripted model responses exhausted");
               return {
                 ...response,
+                ...(taskPreparation
+                  ? { toolCalls: [taskPreparation.toolCall] }
+                  : {}),
                 ...(response.toolCalls
                   ? {
                       toolCalls: response.toolCalls.map((call) => ({
@@ -245,7 +297,7 @@ process.on("message", async (message) => {
               );
               if (
                 request.model.mode === "scripted" &&
-                request.model.responses[responseIndex - 1]?.failGenerate
+                responseFlags.failGenerate
               )
                 throw new Error("EVRY_SCRIPTED_COMPACTION_FAILURE");
               return response;
@@ -256,7 +308,7 @@ process.on("message", async (message) => {
               );
               if (
                 request.model.mode !== "scripted" ||
-                !request.model.responses[responseIndex - 1]?.failStream
+                !responseFlags.failStream
               )
                 return response;
               return {
@@ -375,6 +427,15 @@ process.on("message", async (message) => {
         };
       },
       onEvent(event) {
+        if (
+          event.type === "compaction.requested" ||
+          event.type === "compaction.completed"
+        )
+          compactions.push({
+            type: event.type,
+            turnId: event.data.turnId,
+            sequence: event.data.sequence,
+          });
         eventTypes.push(event.type);
         if (event.type === "turn.failed")
           failures.push(
@@ -420,6 +481,7 @@ process.on("message", async (message) => {
           modelCalls: outcome.hostCapture.modelCalls.length,
           failures,
           eventTypes,
+          compactions,
           attachments: attachmentBindings.map(
             ({ reference: _reference, ...binding }) => ({
               ...binding,

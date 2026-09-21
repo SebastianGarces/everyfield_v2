@@ -2,6 +2,7 @@ import { z } from "zod";
 import { fixtureMessageSchema } from "./transcript";
 import { processingSnapshotSchema } from "./processing-snapshot";
 import { clarificationMeasurementSchema } from "../contract";
+import { taskPreparationAssertionSchema } from "./task-state-script";
 
 export const compiledFixtureRequest = z
   .strictObject({
@@ -73,28 +74,46 @@ export const compiledFixtureRequest = z
     model: z.discriminatedUnion("mode", [
       z.strictObject({
         mode: z.literal("scripted"),
+        /** Neutral summary for actual framework compaction calls, not an extra user turn. */
+        compactionSummary: z.string().min(1).max(4_000).optional(),
         responses: z
           .array(
-            z.strictObject({
-              text: z.string().optional(),
-              failStream: z.boolean().optional(),
-              failGenerate: z.boolean().optional(),
-              usage: z
-                .strictObject({
-                  inputTokens: z.number().int().nonnegative(),
-                  outputTokens: z.number().int().nonnegative(),
-                })
-                .optional(),
-              toolCalls: z
-                .array(
-                  z.strictObject({
-                    name: z.string(),
-                    input: z.json().optional(),
-                    id: z.string().optional(),
+            z
+              .strictObject({
+                text: z.string().optional(),
+                failStream: z.boolean().optional(),
+                failGenerate: z.boolean().optional(),
+                taskPreparation: taskPreparationAssertionSchema.optional(),
+                assertTaskState: taskPreparationAssertionSchema
+                  .omit({ callId: true })
+                  .optional(),
+                usage: z
+                  .strictObject({
+                    inputTokens: z.number().int().nonnegative(),
+                    outputTokens: z.number().int().nonnegative(),
                   })
-                )
-                .optional(),
-            })
+                  .optional(),
+                toolCalls: z
+                  .array(
+                    z.strictObject({
+                      name: z.string(),
+                      input: z.json().optional(),
+                      id: z.string().optional(),
+                    })
+                  )
+                  .optional(),
+              })
+              .refine(
+                (response) =>
+                  !response.taskPreparation ||
+                  (response.toolCalls === undefined &&
+                    !response.assertTaskState),
+                {
+                  message:
+                    "Observed task preparation supplies its own tool call",
+                  path: ["taskPreparation"],
+                }
+              )
           )
           .min(1),
       }),
@@ -189,6 +208,14 @@ export const httpEvalOutcomeSchema = z.object({
             tools: z.array(z.string()),
             inputBytes: z.number().int().nonnegative(),
             retainedOriginalRequest: z.boolean().optional(),
+            compaction: z.boolean().optional(),
+            observedTask: z
+              .object({
+                draftCallId: z.string(),
+                revision: z.number().int(),
+                factKeys: z.array(z.string()),
+              })
+              .optional(),
             authoredSkills: z
               .array(z.object({ name: z.string(), sha256: z.string() }))
               .optional(),
@@ -213,6 +240,15 @@ export const httpEvalOutcomeSchema = z.object({
       modelCalls: z.number(),
       failures: z.array(z.string()),
       eventTypes: z.array(z.string()),
+      compactions: z
+        .array(
+          z.object({
+            type: z.enum(["compaction.requested", "compaction.completed"]),
+            turnId: z.string(),
+            sequence: z.number().int(),
+          })
+        )
+        .optional(),
     })
     .optional(),
   answer: z.string(),
