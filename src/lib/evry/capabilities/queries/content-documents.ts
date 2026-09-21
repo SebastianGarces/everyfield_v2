@@ -270,6 +270,9 @@ export async function extractGeneratedDocument(
       limitation: "File exceeds the 8 MiB extraction limit",
     };
   if (format === "pdf") {
+    // A literal import makes the Node text worker part of the deployment. The
+    // module registers PDF.js's in-process handler; no browser worker is used.
+    await import("pdfjs-dist/legacy/build/pdf.worker.mjs");
     const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
     const task = getDocument({
       data: new Uint8Array(bytes),
