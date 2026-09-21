@@ -1,6 +1,10 @@
 import { wrapLanguageModel, type LanguageModelMiddleware } from "ai";
 import { openai } from "eve/models/openai";
 import { currentFixtureRun } from "./fixture-bridge";
+import {
+  evryProcessingBudget,
+  processingBudgetMiddleware,
+} from "./processing-budget";
 
 /** Eve does not expose per-tool strictness; our Zod registry owns validation. */
 export const evryToolSchemaMiddleware: LanguageModelMiddleware = {
@@ -79,5 +83,9 @@ if (typeof directLuna === "string")
   );
 export const evryLunaModel = wrapLanguageModel({
   model: directLuna,
-  middleware: [evryToolSchemaMiddleware, fixtureBudgetMiddleware],
+  middleware: [
+    evryToolSchemaMiddleware,
+    processingBudgetMiddleware(evryProcessingBudget),
+    fixtureBudgetMiddleware,
+  ],
 });

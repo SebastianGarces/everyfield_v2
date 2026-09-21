@@ -7,8 +7,8 @@ export default defineAgent({
   defaultTools: false,
   tool: false,
   limits: {
-    maxInputTokensPerSession: 300_000,
-    maxOutputTokensPerSession: 30_000,
+    maxInputTokensPerSession: 40_000_000,
+    maxOutputTokensPerSession: 1_000_000,
   },
   build: { externalDependencies: ["@neondatabase/serverless"] },
 });
