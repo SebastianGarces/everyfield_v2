@@ -26,6 +26,9 @@ const technicalFactLabels = new Set([
   "Revision",
   "Citation slug",
   "Next offset",
+  "Fact snapshot",
+  "Cited facts",
+  "Snapshot note",
 ]);
 const instantFactLabels = new Set([
   "Generated at",

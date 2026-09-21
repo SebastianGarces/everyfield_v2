@@ -117,6 +117,69 @@ test("public content cards use plant-local clocks, readable states and hidden mo
   assert.ok(!facts.some((f) => /ID|offset|Internal reference/.test(f.label)));
 });
 
+test("stored intelligence evidence remains complete for reasoning without exposing raw JSON in cards", () => {
+  const snapshot = JSON.stringify({
+    corePeople: 8,
+    explanation: "x".repeat(900),
+  });
+  const citations = JSON.stringify({ "people.core.count": 8 });
+  const item = contentItem(
+    {
+      id: plant,
+      label: "Stored assessment",
+      href: "/phase",
+      group_key: null,
+      facts: {
+        "Fact snapshot": snapshot,
+        "Cited facts": citations,
+        "Snapshot note": "Stored report-time facts",
+        "Generated at": "2026-09-19T14:00:00Z",
+        "Rubric version": "v2",
+        Phase: 2,
+      },
+    },
+    "America/New_York"
+  );
+  const artifact = buildEvryReadArtifact({
+    title: "Stored Plant Intelligence assessments",
+    filters: [],
+    exclusions: [],
+    items: [item],
+    sourceLinks: [],
+  });
+  const hydrated = hydrateStoredEvryConversationArtifact(
+    JSON.parse(JSON.stringify(storedEvryReadArtifactDocument(artifact)))
+  );
+  assert.equal(hydrated.kind, "read");
+  if (hydrated.kind !== "read") throw new Error("Expected read artifact");
+  const modelFacts = hydrated.items[0]!.facts;
+  assert.equal(
+    modelFacts
+      .filter((f) => f.label.startsWith("Fact snapshot"))
+      .map((f) => f.value)
+      .join(""),
+    snapshot
+  );
+  assert.equal(
+    modelFacts.find((f) => f.label === "Cited facts")!.value,
+    citations
+  );
+  assert.ok(
+    modelFacts
+      .filter((f) => /^(Fact snapshot|Cited facts|Snapshot note)/.test(f.label))
+      .every((f) => f.modelOnly)
+  );
+  const publicArtifact = publicReadArtifactSchema.parse(
+    publicEvryArtifact(hydrated)
+  );
+  assert.deepEqual(publicArtifact.items[0]!.facts.map((f) => f.label).sort(), [
+    "Generated at",
+    "Phase",
+    "Rubric version",
+  ]);
+  assert.ok(!JSON.stringify(publicArtifact).includes("corePeople"));
+});
+
 test("all ten content contracts exist, authorize existing reads and reject forged scope", () => {
   assert.equal(CONTENT_QUERY_READS.length, 10);
   assert.equal(new Set(CONTENT_QUERY_READS.map((r) => r.id)).size, 10);
