@@ -31,6 +31,7 @@ const authority = (identity: string, overrides: Partial<typeof actor> = {}) =>
   }) as EvryReadCapabilityAuthorization;
 const helpers: EveHelperDependencies = {
   readTimeZone: async () => "America/New_York",
+  readCurrentPhase: async () => 2,
   listLocations: async () => [
     {
       id: "40000000-0000-4000-8000-000000000001",
@@ -226,6 +227,7 @@ test("helpers expose valid inventory-backed reads and minimal scoped operational
     referenceInstant: "2026-09-20T14:00:00.000Z",
     today: "2026-09-20",
     timeZone: "America/New_York",
+    currentPhase: 2,
   });
   assert.deepEqual(
     await registry.invoke("locations.get", {
@@ -242,6 +244,63 @@ test("helpers expose valid inventory-backed reads and minimal scoped operational
     meetingType: "orientation",
   });
   assert.match(JSON.stringify(template), /Orientation/);
+});
+
+test("context phase is freshly read only for the reauthorized current church", async () => {
+  const plantIds: string[] = [];
+  let currentPhase = 0;
+  let allowed = true;
+  const registry = createEveToolRegistry({
+    context,
+    reads: [],
+    helperDependencies: {
+      ...helpers,
+      readCurrentPhase: async (plantId) => {
+        plantIds.push(plantId);
+        return currentPhase;
+      },
+    },
+    authorizeRead: async (identity) => (allowed ? authority(identity) : null),
+  });
+  const phase = async () =>
+    z
+      .object({ currentPhase: z.number() })
+      .parse(await registry.invoke("context.get", {})).currentPhase;
+  assert.equal(await phase(), 0);
+  currentPhase = 3;
+  assert.equal(await phase(), 3);
+  assert.deepEqual(plantIds, [actor.plantId, actor.plantId]);
+  const malformed = await registry.invoke("context.get", {
+    plantId: "foreign",
+    currentPhase: 5,
+  });
+  assert.equal(
+    z.object({ status: z.string() }).parse(malformed).status,
+    "invalid_input"
+  );
+  allowed = false;
+  assert.deepEqual(await registry.invoke("context.get", {}), {
+    status: "unavailable",
+    reason: "not_authorized",
+  });
+  assert.equal(plantIds.length, 2);
+  for (const wrong of [{ plantId: "foreign" }, { userId: "another-account" }]) {
+    const switched = createEveToolRegistry({
+      context,
+      reads: [],
+      helperDependencies: {
+        ...helpers,
+        readCurrentPhase: async () => {
+          throw new Error("must not read phase");
+        },
+      },
+      authorizeRead: async (identity) => authority(identity, wrong),
+    });
+    assert.deepEqual(await switched.invoke("context.get", {}), {
+      status: "unavailable",
+      reason: "not_authorized",
+    });
+  }
 });
 
 test("orientation gets its full template and a renamed church override wins by source identity", () => {

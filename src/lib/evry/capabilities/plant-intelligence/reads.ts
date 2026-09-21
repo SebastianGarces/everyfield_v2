@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { formatDateTimeWithZone, formatDate } from "@/lib/datetime";
 import { readEvryPlantTimeZone } from "@/lib/evry/reads/plant-time-zone";
+import { meetingReadDateTime } from "@/lib/evry/reads/meeting-date-time";
 import { formatCitedFacts } from "@/lib/phase-engine/fact-format";
 import { toWords } from "@/lib/phase-engine/fact-phrases";
 import type { EvryReadArtifact } from "@/lib/evry/artifacts/types";
@@ -31,7 +32,10 @@ import {
 import { listRecentCheckins } from "@/lib/phase-engine/planter-checkin-db";
 import { getLatestAssessment } from "@/lib/phase-engine/assessment";
 import { listManualSignals } from "@/lib/phase-engine/signals/attestation-service";
-import { getMilestoneTimeline } from "@/lib/phase-engine/signals/milestones";
+import {
+  getMilestoneTimeline,
+  type MilestoneEvent,
+} from "@/lib/phase-engine/signals/milestones";
 import { getPlantTrends } from "@/lib/phase-engine/signals/trends";
 import { getPhaseReadiness } from "@/lib/phase-engine/transitions";
 import { getPublishedArticleRefs } from "@/lib/wiki/get-articles";
@@ -581,6 +585,25 @@ export async function readPlantIntelligenceDeclarationsForPlant(input: {
   });
 }
 
+export function plantIntelligenceMilestoneDate(
+  event: Pick<MilestoneEvent, "kind" | "at">,
+  timeZone: string
+): string {
+  switch (event.kind) {
+    case "launch_day":
+      // Timeline launch days encode a calendar date at UTC midnight, not an instant.
+      return formatDate(event.at, "long", "UTC");
+    case "first_vision_meeting":
+      // The timeline carries the meeting row's UTC-pinned local wall clock unchanged.
+      return meetingReadDateTime(event.at, timeZone);
+    case "phase_declared":
+    case "phase_change":
+    case "launch_readiness":
+    case "launch_recorded":
+      return formatDateTimeWithZone(event.at, timeZone);
+  }
+}
+
 export async function readPlantIntelligenceSignalsForPlant(input: {
   plantId: string;
   cursor: Cursor | null;
@@ -646,7 +669,10 @@ export async function readPlantIntelligenceSignalsForPlant(input: {
         id: `milestone:${event.id}`,
         label: event.label,
         facts: [
-          { label: "When", value: formatDateTimeWithZone(event.at, timeZone) },
+          {
+            label: "When",
+            value: plantIntelligenceMilestoneDate(event, timeZone),
+          },
           { label: "Status", value: toWords(event.state) },
           ...textFacts("Details", event.detail),
           ...textFacts("Related insight", event.alert.insightTitle),

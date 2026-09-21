@@ -26,6 +26,7 @@ export type EveInvitationTemplate = Readonly<{
 }>;
 export type EveHelperDependencies = Readonly<{
   readTimeZone(plantId: string): Promise<string>;
+  readCurrentPhase(plantId: string): Promise<number>;
   listLocations(plantId: string): Promise<readonly EveOperationalLocation[]>;
   getLocation(
     plantId: string,
@@ -105,22 +106,26 @@ export function createEveHelperTools(
     helper({
       name: "context.get",
       description:
-        "Get the server reference time, church-local day and timezone for this request. This is minimal operational context, not a settings reader. Actor identity and timezone cannot be supplied as arguments.",
+        "Get the server reference time, church-local day, timezone and authoritative currentPhase for this church. Use currentPhase for current-phase wiki or task questions; do not infer it from readiness or a scheduled launch. This is minimal operational context, not a settings reader. Actor identity and timezone cannot be supplied as arguments.",
       inputSchema: z.strictObject({}),
       capabilityIdentity: "tasks.read.list",
       async run({ actor }) {
-        const timeZone = await dependencies.readTimeZone(actor.plantId);
+        const [timeZone, currentPhase] = await Promise.all([
+          dependencies.readTimeZone(actor.plantId),
+          dependencies.readCurrentPhase(actor.plantId),
+        ]);
         return {
           referenceInstant: now.toISOString(),
           today: toCalendarDate(now, timeZone),
           timeZone,
+          currentPhase,
         };
       },
     }),
     helper({
       name: "calendar.resolve",
       description:
-        "Resolve interpreted calendar constraints against the server clock and church timezone. Use weekday/upcoming for next Sunday; infer omitted year with month_day. Returns exact date/time and DST ambiguity. Retain its result in the draft rather than recomputing on later turns.",
+        "Resolve interpreted calendar constraints against the server clock and church timezone. Use weekday/upcoming for next Sunday; infer omitted year with month_day. Use period for this_month, last_month, this_week or last_week: dateWindow has inclusive local dates and timestampWindow has an inclusive from and exclusive until across timezone/DST boundaries. Use trailing_days for past/last N days of date-only history: dateWindow contains exactly N inclusive local dates, ending today by default. Pass the returned window unchanged to the matching date-only or timestamp query. Returns exact date/time and DST ambiguity for meetings. Retain its result rather than recomputing on later turns.",
       inputSchema: eveCalendarInputSchema,
       capabilityIdentity: "tasks.read.list",
       async run({ actor }, input) {
@@ -188,6 +193,10 @@ export function createEveHelperTools(
 }
 
 export const productionEveHelperDependencies: EveHelperDependencies = {
+  async readCurrentPhase(plantId) {
+    const { readEvryPlantPhase } = await import("@/lib/evry/reads/plant-phase");
+    return readEvryPlantPhase(plantId);
+  },
   async readTimeZone(plantId) {
     const { readEvryPlantTimeZone } =
       await import("@/lib/evry/reads/plant-time-zone");
