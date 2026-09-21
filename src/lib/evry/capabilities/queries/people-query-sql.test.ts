@@ -581,6 +581,11 @@ test("history kinds keep their own outcome vocabularies", () => {
     /left join users u on u\.id = h\.author_id and u\.church_id =/
   );
   assert.doesNotMatch(query.sql, /persons\.id = h\.author_id/);
+  assert.match(
+    query.sql,
+    /to_char\(created_at, 'YYYY-MM-DD"T"HH24:MI:SS\.US"Z"'\) as created_at/
+  );
+  assert.doesNotMatch(query.sql, /created_at::timestamptz/);
 });
 
 test("attendance keeps RSVP separate, scopes both relations, and counts distinct people", () => {

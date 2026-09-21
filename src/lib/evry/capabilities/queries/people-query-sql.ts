@@ -597,7 +597,10 @@ export function buildPeopleHistoryQuery(
     ...(input.text ? [sql`h.content ilike ${`%${input.text}%`}`] : []),
   ]);
   const offset = input.contentOffset ?? 0;
-  const base = sql`select id, person_id, household_id, label, author_id, author, date, created_at, outcome,
+  // Stored history timestamps are UTC without a timezone. Format only the
+  // returned field; ranking still compares the original timestamp precision.
+  const base = sql`select id, person_id, household_id, label, author_id, author, date,
+    to_char(created_at, 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as created_at, outcome,
     ${input.resource.kind === "activities" ? sql`old_stage, new_stage,` : sql``}
     substring(content from ${offset + 1} for 240) as content,
     char_length(content) as content_length, ${offset}::int as content_offset,
