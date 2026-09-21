@@ -191,7 +191,6 @@ const HANDLES_MINUS_ONE: ReadonlyMap<string, readonly string[]> = new Map([
       // The repo-wide SESSION-FIRST walker. An action that takes no argument
       // has no `.safeParse(`, so -1 is a real answer — the `if (parse >= 0)`
       // below it is the branch, and `mint` gets its own `assert.ok(mint >= 0)`.
-      'const mint = scoped.indexOf("requireSeat(");',
       'const parse = scoped.indexOf(".safeParse(");',
       // `returning()` is optional on an UPDATE; -1 means "no returning", and
       // the next line hands back the whole tail.
@@ -203,8 +202,8 @@ const HANDLES_MINUS_ONE: ReadonlyMap<string, readonly string[]> = new Map([
 // THIS file is outside `GUARDED`, which is what lets it write down the shape it
 // forbids — the reason `register-path.test.ts` §4 excludes `resend.ts` from the
 // prose guard. §1 above demonstrates the vacuous comparison in order to prove
-// `assertInOrder` refuses it, and the allowlist quotes four lines verbatim. A
-// guard that could not name what it forbids would forbid itself.
+// `assertInOrder` refuses it, and the allowlist quotes each exception verbatim.
+// A guard that could not name what it forbids would forbid itself.
 
 test("no suite in a converted directory slices or orders with a bare indexOf", () => {
   const offenders: string[] = [];

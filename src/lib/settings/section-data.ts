@@ -1,3 +1,8 @@
+import { hasDiscoveryProfile } from "@/lib/discovery/profile";
+import {
+  getDiscoveryAssociations,
+  getPendingDiscoveryInvitations,
+} from "@/lib/discovery/associations";
 import { getChurchPrivacySettings, privacyColumnFor } from "@/lib/auth/access";
 import type { PrivacyFeatureKey } from "@/lib/auth/access";
 import { holdsSeatFor } from "@/lib/auth/seat-rules";
@@ -99,7 +104,12 @@ export async function loadSettingsSection(
   const session = await verifySession();
 
   if (!isSettingsSectionId(sectionId)) return { ok: false, reason: "refused" };
-  if (!settingsSectionsFor(session.user).some((s) => s.id === sectionId)) {
+  if (
+    !settingsSectionsFor(
+      session.user,
+      await hasDiscoveryProfile(session.user.id)
+    ).some((s) => s.id === sectionId)
+  ) {
     return { ok: false, reason: "refused" };
   }
 
@@ -219,6 +229,7 @@ async function readChurch({
             financials: isOn("financials"),
             ministry_teams: isOn("ministry_teams"),
             facilities: isOn("facilities"),
+            wiki: isOn("wiki"),
             oversight_activity: isOn("oversight_activity"),
           } satisfies Record<PrivacyFeatureKey, boolean>,
         }
@@ -322,6 +333,45 @@ async function readTeam(
 async function readAssociation({
   user,
 }: SessionValidationResult): Promise<SettingsSectionView | null> {
+  const actor = invitationActorFromSession({ user });
+  const discovery = await getDiscoveryAssociations(actor);
+  if (discovery) {
+    const pending = await getPendingDiscoveryInvitations(actor);
+    return {
+      section: "association",
+      answerer: "discovery",
+      associations: [
+        ...(discovery.sendingChurch
+          ? [
+              {
+                orgType: "sending_church" as const,
+                orgId: discovery.sendingChurch.id,
+                orgName: discovery.sendingChurch.name,
+              },
+            ]
+          : []),
+        ...(discovery.network
+          ? [
+              {
+                orgType: "network" as const,
+                orgId: discovery.network.id,
+                orgName: discovery.network.name,
+              },
+            ]
+          : []),
+      ],
+      consent: null,
+      pending: pending.map((invitation) =>
+        toPendingInvitationRow({
+          ...invitation,
+          orgType:
+            invitation.type === "discovery_to_sending_church"
+              ? "sending_church"
+              : "network",
+        })
+      ),
+    };
+  }
   if (isPlantOwner(user) && user.churchId) {
     const [pending, associations] = await Promise.all([
       getPendingInvitationsForPlant(user.churchId),

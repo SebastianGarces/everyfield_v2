@@ -7,7 +7,12 @@ export const loginSchema = z.object({
 
 export type LoginInput = z.infer<typeof loginSchema>;
 
-export const accountTypes = ["planter", "sending_church", "network"] as const;
+export const accountTypes = [
+  "discovery",
+  "planter",
+  "sending_church",
+  "network",
+] as const;
 export type AccountType = (typeof accountTypes)[number];
 
 export const registerSchema = z
@@ -27,6 +32,7 @@ export const registerSchema = z
   .refine(
     (data) =>
       data.accountType === "planter" ||
+      data.accountType === "discovery" ||
       (data.organizationName && data.organizationName.length > 0),
     {
       message: "Please enter a name for your organization",

@@ -225,8 +225,17 @@ function mayAnswer(
  * type's answerer. The table is checked against `organizationInvitationTypes`
  * below, so it cannot fall behind the enum either.
  */
-const ANSWER_CONTRACT: Record<
+const DISCOVERY_TYPES = [
+  "discovery_to_sending_church",
+  "discovery_to_network",
+] as const satisfies readonly OrganizationInvitationType[];
+type TenantedInvitationType = Exclude<
   OrganizationInvitationType,
+  (typeof DISCOVERY_TYPES)[number]
+>;
+
+const ANSWER_CONTRACT: Record<
+  TenantedInvitationType,
   {
     answeredBy: AccountShape;
     /** The actor the rule must ACCEPT. */
@@ -396,7 +405,7 @@ const ANSWER_CONTRACT: Record<
 
 test("every invitation type the schema declares has an entry here", () => {
   assert.deepEqual(
-    Object.keys(ANSWER_CONTRACT).sort(),
+    [...Object.keys(ANSWER_CONTRACT), ...DISCOVERY_TYPES].sort(),
     [...organizationInvitationTypes].sort()
   );
 });
@@ -435,8 +444,8 @@ test("every account shape that can be targeted is an answerer", () => {
 // ----------------------------------------------------------------------------
 
 for (const [type, contract] of Object.entries(ANSWER_CONTRACT) as [
-  OrganizationInvitationType,
-  (typeof ANSWER_CONTRACT)[OrganizationInvitationType],
+  TenantedInvitationType,
+  (typeof ANSWER_CONTRACT)[TenantedInvitationType],
 ][]) {
   test(`${type}: exactly one account may answer it, server-side`, () => {
     assert.equal(
@@ -456,8 +465,8 @@ for (const [type, contract] of Object.entries(ANSWER_CONTRACT) as [
 // ----------------------------------------------------------------------------
 
 for (const [type, contract] of Object.entries(ANSWER_CONTRACT) as [
-  OrganizationInvitationType,
-  (typeof ANSWER_CONTRACT)[OrganizationInvitationType],
+  TenantedInvitationType,
+  (typeof ANSWER_CONTRACT)[TenantedInvitationType],
 ][]) {
   test(`${type}: the account that answers it has an in-app surface`, () => {
     // The association area reads a pending list for this account…
@@ -525,8 +534,8 @@ test("the dashboard reminder stays the plant Owner's, and says so", () => {
 const ASSOCIATION_ACTIONS = read("settings", "association", "actions.ts");
 
 for (const [type, contract] of Object.entries(ANSWER_CONTRACT) as [
-  OrganizationInvitationType,
-  (typeof ANSWER_CONTRACT)[OrganizationInvitationType],
+  TenantedInvitationType,
+  (typeof ANSWER_CONTRACT)[TenantedInvitationType],
 ][]) {
   test(`${type}: the account that answers it can also leave, behind a type-to-confirm`, () => {
     // The answering surface renders the control…
@@ -582,3 +591,38 @@ test("neither leave action accepts an id — the entity is the session's", () =>
   // No uuid parameter anywhere in the module's leave surface.
   assert.doesNotMatch(ASSOCIATION_ACTIONS, /leaveNetwork\([^)]+\)/);
 });
+
+for (const type of DISCOVERY_TYPES) {
+  test(`${type}: own account authority and the discovery answer/leave surface`, () => {
+    const invitation = {
+      type,
+      targetUserId: USER,
+      targetChurchId: null,
+      targetSendingChurchId: null,
+    };
+    const own = actor({ seat: null });
+    assert.doesNotThrow(() => verifyInvitationAuthority(invitation, own));
+    for (const refused of [
+      actor({ seat: null, id: PLANT }),
+      actor({ seat: "owner" }),
+      actor({ seat: null, churchId: PLANT }),
+    ]) {
+      assert.throws(() => verifyInvitationAuthority(invitation, refused), {
+        message: NOT_AUTHORIZED_MESSAGE,
+      });
+    }
+    assert.ok(ASSOCIATION_READ.includes("getPendingDiscoveryInvitations"));
+    assert.ok(ASSOCIATION_READ.includes('answerer: "discovery"'));
+    assert.ok(
+      SETTINGS_PAGE.includes('discovery && section.id === "association"')
+    );
+    assert.ok(ASSOCIATION_PAGE.includes("discovery={discovery}"));
+    const dialog = read("settings", "association", "leave-org-dialog.tsx");
+    assert.ok(dialog.includes("leaveDiscoveryOrg(orgType, confirmation)"));
+    assert.ok(
+      ASSOCIATION_ACTIONS.includes(
+        "leaveDiscoveryOrgAs(actor, parsed.data, confirmation)"
+      )
+    );
+  });
+}

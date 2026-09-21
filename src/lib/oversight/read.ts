@@ -406,6 +406,22 @@ async function readSection(
   if (!allowed) return { key: section.key, state: "withheld" };
 
   switch (section.key) {
+    case "wiki": {
+      const { readWikiProgressAggregate } = await import("./wiki-progress");
+      const aggregate = await readWikiProgressAggregate(churchId);
+      return {
+        key: section.key,
+        state: "shared",
+        stats: [
+          { label: "Article completions", value: String(aggregate.completed) },
+          {
+            label: "Readings in progress",
+            value: String(aggregate.inProgress),
+          },
+        ],
+        isEmpty: aggregate.completed + aggregate.inProgress === 0,
+      };
+    }
     case "people": {
       const aggregate = await readPeopleAggregate(churchId);
       return {

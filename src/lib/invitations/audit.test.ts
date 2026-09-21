@@ -311,11 +311,13 @@ test("the table gives the code nothing to mutate", () => {
     subjectType: "church",
     churchId: CHURCH,
     subjectSendingChurchId: null,
+    discoveryUserId: null,
   });
   assert.deepEqual(toSubjectColumns(sendingChurchSubject(SENDING_CHURCH)), {
     subjectType: "sending_church",
     churchId: null,
     subjectSendingChurchId: SENDING_CHURCH,
+    discoveryUserId: null,
   });
 });
 

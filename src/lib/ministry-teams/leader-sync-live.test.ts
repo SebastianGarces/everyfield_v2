@@ -509,8 +509,17 @@ test(
     const plant = await createScratchPlant(SCRATCH_NAME);
     const team = await scratchTeam(plant);
     const stranger = await createScratchPerson(plant, "Stranger");
+    const role = await createRole(plant.churchId, team.id, plant.actorId, {
+      name: "Leadership",
+      isLeadershipRole: true,
+    });
 
-    const filled = await syncLeaderOnFill(plant.churchId, team.id, stranger);
+    const filled = await syncLeaderOnFill(
+      plant.churchId,
+      team.id,
+      stranger,
+      role.id
+    );
 
     assert.equal(filled, false, "the write matched nothing");
     assert.equal(await leaderOf(team.id), null);
@@ -542,5 +551,79 @@ test(
       .from(teamRoles)
       .where(eq(teamRoles.id, role.id));
     assert.equal(survivor.name, "Scratch Role");
+  }
+);
+
+for (const door of ["remove", "unmark", "delete"] as const) {
+  test(
+    `explicit appointment survives ${door} of its former source role (#830)`,
+    { skip },
+    async (t: TestContext) => {
+      if (!(await databaseReachable())) return t.skip(UNREACHABLE);
+      await sweepScratch(SCRATCH_NAME);
+      const plant = await createScratchPlant(SCRATCH_NAME);
+      const { team, role } = await teamWithRole(plant, true);
+      const personId = await createScratchPerson(plant, "Explicit");
+      const membership = await assignMember(
+        plant.churchId,
+        team.id,
+        role.id,
+        personId,
+        plant.actorId
+      );
+      await assignTeamLeader(plant.churchId, team.id, personId, plant.actorId);
+      if (door === "remove")
+        await removeMember(plant.churchId, membership.id, plant.actorId);
+      else if (door === "unmark")
+        await updateRole(plant.churchId, role.id, plant.actorId, {
+          isLeadershipRole: false,
+        });
+      else await deleteRole(plant.churchId, role.id, plant.actorId);
+      const [stored] = await db
+        .select()
+        .from(ministryTeams)
+        .where(eq(ministryTeams.id, team.id));
+      assert.equal(stored.leaderId, personId);
+      assert.equal(stored.leaderSource, "explicit");
+      assert.equal(stored.leaderRoleId, null);
+    }
+  );
+}
+
+test(
+  "vacating another leadership role held by the same person preserves the source appointment (#830)",
+  { skip },
+  async (t: TestContext) => {
+    if (!(await databaseReachable())) return t.skip(UNREACHABLE);
+    await sweepScratch(SCRATCH_NAME);
+    const plant = await createScratchPlant(SCRATCH_NAME);
+    const { team, role } = await teamWithRole(plant, true);
+    const personId = await createScratchPerson(plant, "Two roles");
+    await assignMember(
+      plant.churchId,
+      team.id,
+      role.id,
+      personId,
+      plant.actorId
+    );
+    const otherRole = await createRole(plant.churchId, team.id, plant.actorId, {
+      name: "Other",
+      isLeadershipRole: true,
+    });
+    const other = await assignMember(
+      plant.churchId,
+      team.id,
+      otherRole.id,
+      personId,
+      plant.actorId
+    );
+    await removeMember(plant.churchId, other.id, plant.actorId);
+    const [stored] = await db
+      .select()
+      .from(ministryTeams)
+      .where(eq(ministryTeams.id, team.id));
+    assert.equal(stored.leaderId, personId);
+    assert.equal(stored.leaderSource, "role");
+    assert.equal(stored.leaderRoleId, role.id);
   }
 );

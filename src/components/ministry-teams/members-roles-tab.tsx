@@ -40,10 +40,10 @@ export function MembersRolesTab({
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-lg font-semibold">Roles ({team.roles.length})</h2>
         {canWrite && (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {canImportTemplates && team.type === "predefined" && (
               <RoleTemplateImport teamId={team.id} teamName={team.name} />
             )}
@@ -75,7 +75,7 @@ export function MembersRolesTab({
         <div className="space-y-2">
           {team.roles.map((role) => (
             <Card key={role.id} className="py-0">
-              <CardContent className="flex items-center gap-4 p-4">
+              <CardContent className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-3 p-4 lg:grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)_auto] lg:items-center">
                 <div
                   className={cn(
                     "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg",
@@ -92,8 +92,10 @@ export function MembersRolesTab({
                 </div>
 
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium">{role.name}</span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="min-w-0 text-sm font-medium break-words">
+                      {role.name}
+                    </span>
                     {role.isLeadershipRole && (
                       <Badge variant="outline" className="text-xs">
                         Leadership
@@ -113,27 +115,27 @@ export function MembersRolesTab({
                 </div>
 
                 {role.assignedPerson ? (
-                  <div className="flex items-center gap-3">
+                  <div className="col-span-2 flex min-w-0 flex-wrap items-center gap-3 lg:col-span-1">
                     <Avatar className="h-8 w-8">
                       <AvatarFallback className="text-xs">
                         {`${role.assignedPerson.firstName[0]}${role.assignedPerson.lastName[0]}`.toUpperCase()}
                       </AvatarFallback>
                     </Avatar>
-                    <div className="text-sm">
+                    <div className="min-w-0 flex-1 text-sm break-words">
                       <p className="font-medium">
                         {role.assignedPerson.firstName}{" "}
                         {role.assignedPerson.lastName}
                       </p>
-                      <div className="text-muted-foreground flex items-center gap-2 text-xs">
+                      <div className="text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
                         {role.assignedPerson.email && (
-                          <span className="flex items-center gap-1">
-                            <Mail className="h-3 w-3" />
+                          <span className="flex min-w-0 items-center gap-1 break-all">
+                            <Mail className="h-3 w-3 shrink-0" />
                             {role.assignedPerson.email}
                           </span>
                         )}
                         {role.assignedPerson.phone && (
-                          <span className="flex items-center gap-1">
-                            <Phone className="h-3 w-3" />
+                          <span className="flex min-w-0 items-center gap-1 break-all">
+                            <Phone className="h-3 w-3 shrink-0" />
                             {role.assignedPerson.phone}
                           </span>
                         )}
@@ -162,7 +164,7 @@ export function MembersRolesTab({
                     )}
                   </div>
                 ) : (
-                  <div className="flex items-center gap-2">
+                  <div className="col-span-2 flex flex-wrap items-center gap-2 lg:col-span-1">
                     <Badge variant="outline" className="text-orange-600">
                       Open
                     </Badge>
@@ -190,7 +192,7 @@ export function MembersRolesTab({
                     buttons: a divider with nothing behind it draws a boundary
                     around an empty space. */}
                 {canWrite && (
-                  <div className="ml-1 flex items-center gap-1 border-l pl-2">
+                  <div className="col-span-2 flex items-center justify-end gap-1 border-t pt-2 lg:col-span-1 lg:border-t-0 lg:border-l lg:pt-0 lg:pl-2">
                     <RoleFormDialog teamId={team.id} role={role} />
                     <RoleRemoveButton
                       roleId={role.id}

@@ -89,6 +89,12 @@ export const SHARING_PULL_TOGGLES = [
     summary:
       "Lets them see how much space and equipment you have booked. Never an address, a contract or a cost.",
   },
+  {
+    feature: "wiki",
+    label: "Wiki progress",
+    summary:
+      "Lets them see combined reading progress for current plant members. Never who read an article or their reading history.",
+  },
 ] as const satisfies readonly SharingPullToggle[];
 
 /**

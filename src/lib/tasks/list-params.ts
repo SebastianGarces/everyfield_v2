@@ -41,7 +41,7 @@ import {
   taskPrioritySchema,
   taskStatusSchema,
 } from "@/lib/validations/tasks";
-import type { z } from "zod";
+import { z } from "zod";
 
 /** What Next hands a page: one value, several, or none. */
 export type SearchParamValue = string | string[] | undefined;
@@ -94,9 +94,16 @@ export function taskListParamsWith(
 
   if (value === null) params.delete(key);
   else params.set(key, value);
+  // Turning completed rows off also removes any explicit completed-status filter.
+  if (key === "completed" && value !== "true") {
+    const statuses = params
+      .getAll("status")
+      .filter((status) => status !== "complete");
+    params.delete("status");
+    for (const status of statuses) params.append("status", status);
+  }
 
-  params.delete("cursor");
-  return params;
+  return canonicalTaskListParams(params);
 }
 
 /**
@@ -110,15 +117,34 @@ export function taskListParamsWith(
 export function taskListParamsCleared(
   current: URLSearchParams | string
 ): URLSearchParams {
-  const params = new URLSearchParams(current);
+  const { view, showCompleted } = parseTaskListQuery(current);
   const kept = new URLSearchParams();
-
-  for (const key of ["view", "completed"] as const) {
-    const value = params.get(key);
-    if (value !== null) kept.set(key, value);
-  }
-
+  if (view !== "my_tasks") kept.set("view", view);
+  if (showCompleted) kept.set("completed", "true");
   return kept;
+}
+
+/** Preserve Next's distinction between scalar and repeated query values. */
+export function parseTaskListQuery(current: URLSearchParams | string) {
+  const params = new URLSearchParams(current);
+  return parseTaskListSearchParams(
+    Object.fromEntries(
+      [...new Set(params.keys())].map((key) => {
+        const values = params.getAll(key);
+        return [key, values.length === 1 ? values[0] : values];
+      })
+    )
+  );
+}
+
+/** Rebuild from the shared reader; unknown keys and pagination never survive a filter edit. */
+function canonicalTaskListParams(current: URLSearchParams): URLSearchParams {
+  const parsed = parseTaskListQuery(current);
+  const result = taskListParamsCleared(current);
+  for (const key of ["status", "priority", "category"] as const) {
+    for (const value of parsed[key] ?? []) result.append(key, value);
+  }
+  return result;
 }
 
 export interface TaskListSearchParams {
@@ -167,14 +193,18 @@ function parseEnumParam<T extends string>(
 export function parseTaskListSearchParams(params: {
   [key: string]: SearchParamValue;
 }): TaskListSearchParams {
+  const status = parseEnumParam(params.status, taskStatusSchema);
+  // The cursor reaches a UUID column; malformed bookmarks start at page one.
+  const cursor = z.string().uuid().safeParse(params.cursor);
   return {
     // The same list the toggle writes from, so a view can never be writable
     // and unreadable — which is exactly what `all` was (#660).
     view: isTaskListView(params.view) ? params.view : "my_tasks",
-    showCompleted: params.completed === "true",
-    status: parseEnumParam(params.status, taskStatusSchema),
+    showCompleted:
+      params.completed === "true" || !!status?.includes("complete"),
+    status,
     priority: parseEnumParam(params.priority, taskPrioritySchema),
     category: parseEnumParam(params.category, taskCategorySchema),
-    cursor: typeof params.cursor === "string" ? params.cursor : undefined,
+    cursor: cursor.success ? cursor.data : undefined,
   };
 }

@@ -192,7 +192,8 @@ export type OversightSectionKey =
   | "people"
   | "meetings"
   | "tasks"
-  | "ministry_teams";
+  | "ministry_teams"
+  | "wiki";
 
 /** Everything `/oversight/plants/[id]` renders. */
 export interface OversightPlantDetail {

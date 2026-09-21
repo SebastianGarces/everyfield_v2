@@ -278,10 +278,15 @@ test("setTaskPrerequisites writes in db.batch and never calls db.transaction", (
   );
 
   assertBatchedWrites(body, "setTaskPrerequisites");
-  assert.equal(
-    (body.match(/await db\.batch\(/g) ?? []).length,
-    1,
-    "setTaskPrerequisites: exactly one batched write — a second batch can throw after inserts have committed"
+  assert.match(
+    body,
+    /if \(uniqueIds\.length === 0\) \{\s*await db\.batch\([^;]+;\s*return;/,
+    "clearing prerequisites returns after its own batch"
+  );
+  assert.match(
+    body,
+    /const \[, , , stored\] = await db\.batch\(\[[\s\S]*dropStale,\s*readStored,/,
+    "replacement success is read in the same batch as its write"
   );
   assert.match(
     body,

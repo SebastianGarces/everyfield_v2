@@ -259,6 +259,10 @@ export function invitationOrgKinds(
       return { inviting: "network", invitee: "church plant" };
     case "sending_church_to_network":
       return { inviting: "network", invitee: "sending church" };
+    case "discovery_to_sending_church":
+      return { inviting: "sending church", invitee: "discovery account" };
+    case "discovery_to_network":
+      return { inviting: "network", invitee: "discovery account" };
     default:
       return null;
   }
@@ -294,7 +298,11 @@ export async function buildInvitationEmail(
     invitingOrgKind: kinds.inviting,
     inviteeOrgKind: kinds.invitee,
     inviteeEmail: to,
-    inviteUrl: invitationRegisterUrl(facts.invitationId, baseUrl),
+    // Targeted discovery invitations are answered in authenticated settings.
+    inviteUrl:
+      kinds.invitee === "discovery account"
+        ? `${baseUrl ?? appBaseUrl()}/dashboard#settings/association`
+        : invitationRegisterUrl(facts.invitationId, baseUrl),
     // Formatted HERE, through `@/lib/datetime`, so the date the invitee reads is
     // the one every surface shows (memory/invariants.md → Date & Time
     // Rendering — an unpinned formatter states the sending process's calendar

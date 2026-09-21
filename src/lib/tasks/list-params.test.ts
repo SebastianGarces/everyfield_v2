@@ -6,6 +6,7 @@ import { taskCategories, taskPriorities, taskStatuses } from "@/db/schema";
 import {
   TASK_LIST_VIEWS,
   parseTaskListSearchParams,
+  parseTaskListQuery,
   taskListParamsCleared,
   taskListParamsWith,
 } from "./list-params";
@@ -38,7 +39,7 @@ test("a legal filter survives, in the order the URL gave it", () => {
     status: ["blocked", "not_started"],
     priority: "urgent",
     category: ["follow_up"],
-    cursor: "cursor-id",
+    cursor: "d435a320-7b16-4f99-b4cd-b496ea28c665",
   });
 
   assert.equal(parsed.view, "all");
@@ -46,7 +47,7 @@ test("a legal filter survives, in the order the URL gave it", () => {
   assert.deepEqual(parsed.status, ["blocked", "not_started"]);
   assert.deepEqual(parsed.priority, ["urgent"]);
   assert.deepEqual(parsed.category, ["follow_up"]);
-  assert.equal(parsed.cursor, "cursor-id");
+  assert.equal(parsed.cursor, "d435a320-7b16-4f99-b4cd-b496ea28c665");
 });
 
 test("a value the column would refuse never reaches the query", () => {
@@ -107,13 +108,40 @@ test("only the literal `all` and `true` switch a mode", () => {
   );
 });
 
-test("a repeated cursor is no cursor", () => {
-  // `?cursor=a&cursor=b` arrives as an array; there is one page position, so
-  // the honest reading of two is none.
-  assert.equal(
-    parseTaskListSearchParams({ cursor: ["a", "b"] }).cursor,
-    undefined
-  );
+test("malformed task cursor bookmarks start at page one without losing filters", () => {
+  for (const cursor of [
+    "stale",
+    "",
+    "null",
+    "not-a-uuid",
+    "d435a320-7b16-4f99-b4cd-b496ea28c66z",
+  ]) {
+    const parsed = parseTaskListQuery(
+      new URLSearchParams({ view: "all", status: "blocked", cursor })
+    );
+    assert.equal(parsed.cursor, undefined);
+    assert.equal(parsed.view, "all");
+    assert.deepEqual(parsed.status, ["blocked"]);
+  }
+});
+
+test("valid UUID cursors survive while repeated cursors start at page one", () => {
+  const first = "d435a320-7b16-4f99-b4cd-b496ea28c665";
+  const second = "019956b2-00c0-7000-8000-000000000001";
+  for (const cursor of [first, second, first.toUpperCase()]) {
+    assert.equal(
+      parseTaskListQuery(new URLSearchParams({ cursor })).cursor,
+      cursor
+    );
+  }
+  for (const repeated of [
+    [first, second],
+    [first, first],
+  ]) {
+    const query = new URLSearchParams();
+    for (const cursor of repeated) query.append("cursor", cursor);
+    assert.equal(parseTaskListQuery(query).cursor, undefined);
+  }
 });
 
 // ----------------------------------------------------------------------------
@@ -182,4 +210,70 @@ test("changing a view or a filter drops the cursor", () => {
     "a cursor names a position in the list being left"
   );
   assert.equal(next.get("view"), "all");
+});
+
+test("writes discard malformed siblings, duplicate enums and unknown parameters", () => {
+  const result = taskListParamsWith(
+    "view=all&status=bogus&status=blocked&status=blocked&priority=urgent&cursor=stale&unknown=x",
+    "category",
+    "general"
+  );
+  assert.equal(
+    result.toString(),
+    "view=all&status=blocked&priority=urgent&category=general"
+  );
+  assert.equal(
+    taskListParamsWith(result, "status", "bogus").has("status"),
+    false
+  );
+});
+
+test("scalar repetitions retain the page parser's default semantics", () => {
+  assert.equal(
+    taskListParamsCleared(
+      "view=all&view=assignments&completed=true&completed=true&status=blocked"
+    ).toString(),
+    ""
+  );
+  assert.equal(
+    taskListParamsCleared("view=invalid&completed=bogus").toString(),
+    ""
+  );
+});
+
+test("choosing Complete also enables completed rows in the same navigation", () => {
+  const written = taskListParamsWith(
+    "view=all&priority=high",
+    "status",
+    "complete"
+  );
+  const parsed = parseTaskListSearchParams(Object.fromEntries(written));
+  assert.deepEqual(parsed.status, ["complete"]);
+  assert.equal(parsed.showCompleted, true);
+  assert.equal(written.get("priority"), "high");
+});
+
+test("a completed-status bookmark includes completed rows before and after sibling edits", () => {
+  assert.equal(
+    parseTaskListSearchParams({ status: "complete" }).showCompleted,
+    true
+  );
+  const written = taskListParamsWith("status=complete", "priority", "high");
+  assert.equal(
+    written.toString(),
+    "completed=true&status=complete&priority=high"
+  );
+});
+
+test("turning completed rows off removes complete but preserves other statuses and siblings", () => {
+  const written = taskListParamsWith(
+    "view=all&completed=true&status=complete&status=blocked&priority=high",
+    "completed",
+    null
+  );
+  assert.equal(written.toString(), "view=all&status=blocked&priority=high");
+  assert.equal(
+    taskListParamsWith("status=complete", "completed", null).toString(),
+    ""
+  );
 });

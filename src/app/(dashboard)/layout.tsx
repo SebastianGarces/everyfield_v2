@@ -30,6 +30,7 @@ import {
 } from "@/lib/notifications/feed";
 import { resolveTenancyShell } from "@/lib/navigation";
 import { evryPlantStandingOf } from "@/lib/evry/eligibility/viewer";
+import { discoveryIdentityForShell } from "./discovery-identity";
 
 import { assignedPlantsSafely } from "./assigned-plants";
 import { loadUnreadBadgeCountSafely } from "./notification-badge";
@@ -164,6 +165,9 @@ export default async function DashboardLayout({
   const capabilities = heldCapabilities(user);
   const evryEnabled = evryPlantStandingOf(user).status === "eligible";
   const evrySuggestions = evrySuggestionsForActor(evryEnabled, capabilities);
+  // Only unseated, untenanted accounts need the profile lookup. Identity is
+  // required to choose navigation and settings; a failed read must not guess.
+  const isDiscovery = await discoveryIdentityForShell(user);
 
   return (
     <ViewerCapabilitiesProvider capabilities={capabilities}>
@@ -203,6 +207,7 @@ export default async function DashboardLayout({
                 user={sidebarUser}
                 orgType={org?.type ?? null}
                 hasChurch={!!user.churchId}
+                isDiscovery={isDiscovery}
                 assignedPlants={assignedPlants}
                 isPlatformAdmin={userIsPlatformAdmin}
               />
@@ -242,7 +247,7 @@ export default async function DashboardLayout({
               the next account to sign in on this tab was shown the previous
               one's settings while its own read was in flight (#673). */}
                 <SettingsModal
-                  visibleIds={settingsSectionsFor(user).map(
+                  visibleIds={settingsSectionsFor(user, isDiscovery).map(
                     (section) => section.id
                   )}
                   serverRenderId={crypto.randomUUID()}
