@@ -182,6 +182,18 @@ import {
   communicationRetryExpectations,
   readPreparedCommunicationRetryFacts,
 } from "./communication-retry";
+import {
+  taskCleanupFixtureIds,
+  seedTaskCleanupFixture,
+  taskCleanupExpectations,
+  readPreparedTaskCleanupFacts,
+} from "./task-cleanup";
+import {
+  weeklyBriefFixtureIds,
+  seedWeeklyBriefFixture,
+  weeklyBriefExpectations,
+  observedWeeklyBriefFacts,
+} from "./weekly-brief";
 
 type FixtureTransports = {
   prepareDocumentFiles?: DocumentFixtureTransport;
@@ -387,12 +399,19 @@ const fixtureFamilies: readonly FixtureFamily[] = [
     expectations: communicationDeliveryExpectations,
     observe: observedCommunicationDeliveryFacts,
   },
+  {
+    ids: weeklyBriefFixtureIds,
+    seed: seedWeeklyBriefFixture,
+    expectations: weeklyBriefExpectations,
+    observe: observedWeeklyBriefFacts,
+  },
 ];
 const familyCaseIds = [
   ...fixtureFamilies.flatMap((family) => family.ids),
   ...securityFixtureIds,
   ...contentActionFixtureIds,
   ...communicationRetryFixtureIds,
+  ...taskCleanupFixtureIds,
 ];
 
 /** Bound means a runnable fixture, not a passed model-quality evaluation. */
@@ -704,6 +723,8 @@ export function createProductionEveEvalAdapter(
         seedContentActionFixture(manifest, options.store);
         if (scenario.id === "communication-06")
           seedCommunicationRetryFixture(manifest, options.store);
+        if (scenario.id === "tasks-07")
+          seedTaskCleanupFixture(manifest, options.store);
         const securityFixture = seedSecurityFixture(manifest, options.store);
         const boundScenario =
           scenario.id === "communication-06"
@@ -738,11 +759,13 @@ export function createProductionEveEvalAdapter(
                         turns: bindContentTurns(manifest, scenario.turns),
                       };
         let expectations =
-          scenario.id === "communication-06"
-            ? communicationRetryExpectations(manifest, options.store)
-            : securityFixture && "fixture" in scenario
-              ? securityExpectations(scenario, securityFixture)
-              : contentActionExpectations(manifest, options.store);
+          scenario.id === "tasks-07"
+            ? taskCleanupExpectations(manifest, options.store)
+            : scenario.id === "communication-06"
+              ? communicationRetryExpectations(manifest, options.store)
+              : securityFixture && "fixture" in scenario
+                ? securityExpectations(scenario, securityFixture)
+                : contentActionExpectations(manifest, options.store);
         for (const family of fixtureFamilies) {
           if (expectations) break;
           expectations = family.expectations(manifest, options.store);
@@ -800,6 +823,7 @@ export function createProductionEveEvalAdapter(
                 options.preparation?.({ actor, manifest }) ??
                 (scenario.id === "regression-orientation" ||
                 scenario.id === "communication-06" ||
+                scenario.id === "tasks-07" ||
                 scenario.id === "wiki-06"
                   ? createEvePreparation({
                       actor,
@@ -920,29 +944,36 @@ export function createProductionEveEvalAdapter(
               );
               const foreignIds = options.store.foreignRecordIds(manifest);
               const contentAction =
-                scenario.id === "communication-06"
-                  ? await readPreparedCommunicationRetryFacts({
+                scenario.id === "tasks-07"
+                  ? await readPreparedTaskCleanupFacts({
                       manifest,
                       store: options.store,
                       calls,
                       presented,
                     })
-                  : scenario.id === "wiki-06"
-                    ? await observedBookmarkPlanFacts(
+                  : scenario.id === "communication-06"
+                    ? await readPreparedCommunicationRetryFacts({
                         manifest,
-                        options.store,
+                        store: options.store,
                         calls,
-                        presented
-                      )
-                    : peopleCsv && result.eveSessionId
-                      ? observedBoundPeopleCsvFacts(
+                        presented,
+                      })
+                    : scenario.id === "wiki-06"
+                      ? await observedBookmarkPlanFacts(
                           manifest,
                           options.store,
                           calls,
-                          result.eveSessionId,
-                          peopleCsv.bytesBase64
+                          presented
                         )
-                      : null;
+                      : peopleCsv && result.eveSessionId
+                        ? observedBoundPeopleCsvFacts(
+                            manifest,
+                            options.store,
+                            calls,
+                            result.eveSessionId,
+                            peopleCsv.bytesBase64
+                          )
+                        : null;
               if (contentAction) {
                 Object.assign(captured.facts, contentAction.facts);
                 captured.evidence.push(...contentAction.evidence);

@@ -107,6 +107,7 @@ const expectedOriginals = [
   "communication-03",
   "communication-04",
   "communication-06",
+  "tasks-07",
 ].sort();
 const expectedRegressions = [
   "regression-today",
@@ -123,16 +124,17 @@ const expectedRegressions = [
   "regression-multi-assignee",
   "regression-today-midnight",
   "regression-template-placeholders",
+  "regression-partial-outage",
 ].sort();
 
-test("default production fixture coverage has 96 bindings and does not claim the remaining 62 pass", () => {
+test("default production fixture coverage has 98 bindings and does not claim the remaining 60 pass", () => {
   const coverage = productionFixtureCoverage();
   const corpus = [...questions, ...regressions];
   assert.deepEqual(coverage.counts, {
-    runnable: 96,
-    originals: 82,
-    regressions: 14,
-    unbound: 62,
+    runnable: 98,
+    originals: 83,
+    regressions: 15,
+    unbound: 60,
     corpus: 158,
   });
   assert.deepEqual([...coverage.originalIds].sort(), expectedOriginals);
@@ -213,10 +215,10 @@ test("document comparison is opt-in only after a file transport is supplied", as
     };
   };
   assert.deepEqual(productionFixtureCoverage({ prepareDocumentFiles }).counts, {
-    runnable: 97,
-    originals: 83,
-    regressions: 14,
-    unbound: 61,
+    runnable: 99,
+    originals: 84,
+    regressions: 15,
+    unbound: 59,
     corpus: 158,
   });
   assert.ok(productionFixtureCoverage().unboundIds.includes("documents-04"));
@@ -382,10 +384,10 @@ test("CSV review requires its signed attachment transport and revokes a failed s
     throw provisionError;
   };
   assert.deepEqual(productionFixtureCoverage({ preparePeopleCsv }).counts, {
-    runnable: 97,
-    originals: 83,
-    regressions: 14,
-    unbound: 61,
+    runnable: 99,
+    originals: 84,
+    regressions: 15,
+    unbound: 59,
     corpus: 158,
   });
   assert.deepEqual(
@@ -394,10 +396,10 @@ test("CSV review requires its signed attachment transport and revokes a failed s
       prepareDocumentFiles: async () => async () => {},
     }).counts,
     {
-      runnable: 98,
-      originals: 84,
-      regressions: 14,
-      unbound: 60,
+      runnable: 100,
+      originals: 85,
+      regressions: 15,
+      unbound: 58,
       corpus: 158,
     }
   );
