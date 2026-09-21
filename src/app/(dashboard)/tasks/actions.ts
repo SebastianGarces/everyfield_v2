@@ -12,6 +12,7 @@ import {
   assertMayActOnTask,
   getTask,
   reopenTask,
+  ActiveTaskOccurrenceError,
   updateTask,
   SUBTASK_DEPTH_ERROR,
   SUBTASK_HAS_CHILDREN_ERROR,
@@ -424,6 +425,9 @@ export async function reopenTaskAction(
 
     return { success: true, data: task };
   } catch (error) {
+    if (error instanceof ActiveTaskOccurrenceError) {
+      return { success: false, error: error.message };
+    }
     console.error("reopenTaskAction error:", error);
 
     if (error instanceof SeatRefusalError) {
@@ -659,6 +663,9 @@ export async function setSubtaskCompletionAction(
 
     return { success: true, data: task };
   } catch (error) {
+    if (error instanceof ActiveTaskOccurrenceError) {
+      return { success: false, error: error.message };
+    }
     console.error("setSubtaskCompletionAction error:", error);
 
     if (error instanceof SeatRefusalError) {

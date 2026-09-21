@@ -49,7 +49,11 @@ import {
   updateLaunchOutcome,
   type LaunchOutcomeInput,
 } from "@/lib/launch/outcome";
-import { completeTask, reopenTask } from "@/lib/tasks/service";
+import {
+  ActiveTaskOccurrenceError,
+  completeTask,
+  reopenTask,
+} from "@/lib/tasks/service";
 import type { ActionResult } from "@/lib/tasks/types";
 
 // ----------------------------------------------------------------------------
@@ -323,7 +327,10 @@ export async function setLaunchTaskCompleteAction(
     // "Task is already complete" is the task service's own message and is a
     // true statement about the world, so it is passed through rather than
     // flattened into "something went wrong".
-    if (error instanceof Error && error.message.startsWith("Task ")) {
+    if (
+      error instanceof ActiveTaskOccurrenceError ||
+      (error instanceof Error && error.message.startsWith("Task "))
+    ) {
       return { success: false, error: error.message };
     }
     return toActionError(error, "update this task");
