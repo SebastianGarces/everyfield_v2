@@ -14,7 +14,7 @@ export async function DiscoveryHome() {
   return (
     <PageCanvas context="none" contentFocusTarget scrollLayout="flow">
       <WorkspacePanel className="p-6 sm:p-10">
-        <div className="max-w-xl space-y-5">
+        <div className="flex max-w-xl flex-col items-start gap-5">
           <h1 className="text-2xl font-semibold tracking-tight">
             Explore church planting
           </h1>
