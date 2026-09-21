@@ -95,7 +95,8 @@ export function meetingsQueryStatement(
     return clauses.length ? sql`(${sql.join(clauses, sql` and `)})` : sql`true`;
   });
   const source = sql`select m.id::text as id, coalesce(m.title, ${displayLabel(sql`m.type`, "meeting_type")}) as label, '/meetings/' || m.id as href,
-    ${facts(fact("When", sql`m.datetime`, { format: "meeting_time" }), fact("Type", sql`m.type`, { format: "meeting_type" }), fact("Status", sql`m.status`, { format: "meeting_status" }), fact("Location", sql`coalesce(l.name, m.location_name)`), fact("Ministry", sql`mt.name`), fact("Actual attendance", sql`m.actual_attendance`), fact("Unchecked preparation items", sql`(select count(*) from meeting_checklist_items c where c.church_id = ${plantId} and c.meeting_id = m.id and not c.is_checked)`))} as facts,
+    ${facts(fact("When", sql`m.datetime`, { format: "meeting_time" }), fact("Local start", sql`m.datetime`, { modelOnly: true }), fact("Timezone", sql`${timeZone}`, { modelOnly: true }), fact("Type", sql`m.type`, { format: "meeting_type" }), fact("Status", sql`m.status`, { format: "meeting_status" }), fact("Location", sql`coalesce(l.name, m.location_name)`), fact("Actual attendance", sql`m.actual_attendance`), fact("Unchecked preparation items", sql`(select count(*) from meeting_checklist_items c where c.church_id = ${plantId} and c.meeting_id = m.id and not c.is_checked)`))}
+      || case when mt.id is not null or m.type = 'team_meeting' then ${facts(fact("Ministry", sql`mt.name`))} else '[]'::jsonb end as facts,
     m.datetime as date, m.title, m.type, m.status, coalesce(mt.name || ' [' || mt.id::text || ']', 'No linked ministry') as team,
     to_char(m.datetime, 'YYYY-MM') as month, coalesce(l.name, m.location_name, 'No location') as location
     from church_meetings m left join ministry_teams mt on mt.id = m.team_id and mt.church_id = ${plantId} left join locations l on l.id = m.location_id and l.church_id = ${plantId}
@@ -142,10 +143,12 @@ const getShape = {
 export function meetingsGetManyStatement(
   input: z.infer<z.ZodObject<typeof getShape>>,
   plantId: string,
-  _timeZone: string
+  timeZone: string
 ) {
   const detail = [
     fact("When", sql`m.datetime`, { format: "meeting_time" }),
+    fact("Local start", sql`m.datetime`, { modelOnly: true }),
+    fact("Timezone", sql`${timeZone}`, { modelOnly: true }),
     fact("Status", sql`m.status`, { format: "meeting_status" }),
     fact("Location", sql`coalesce(l.name, m.location_name)`),
     fact("Address", sql`m.location_address`),
