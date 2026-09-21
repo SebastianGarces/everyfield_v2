@@ -52,7 +52,7 @@ export default async function TasksPage({ searchParams }: TasksPageProps) {
   // (`src/lib/tasks/list-params.ts`).
   const params = await searchParams;
   const parsed = parseTaskListSearchParams(params);
-  const { view, showCompleted } = parsed;
+  const { view } = parsed;
 
   // AS-020: creating a task and importing a checklist are `tasks.write`, so a
   // Member is not OFFERED either — the server refuses both anyway. Asked here
@@ -231,7 +231,7 @@ export default async function TasksPage({ searchParams }: TasksPageProps) {
             )}
 
             {/* Filters */}
-            <TaskFilters currentView={view} showCompleted={showCompleted} />
+            <TaskFilters />
           </div>
 
           {/* Task list */}

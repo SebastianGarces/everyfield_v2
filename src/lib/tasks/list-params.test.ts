@@ -183,3 +183,69 @@ test("changing a view or a filter drops the cursor", () => {
   );
   assert.equal(next.get("view"), "all");
 });
+
+test("writes discard malformed siblings, duplicate enums and unknown parameters", () => {
+  const result = taskListParamsWith(
+    "view=all&status=bogus&status=blocked&status=blocked&priority=urgent&cursor=stale&unknown=x",
+    "category",
+    "general"
+  );
+  assert.equal(
+    result.toString(),
+    "view=all&status=blocked&priority=urgent&category=general"
+  );
+  assert.equal(
+    taskListParamsWith(result, "status", "bogus").has("status"),
+    false
+  );
+});
+
+test("scalar repetitions retain the page parser's default semantics", () => {
+  assert.equal(
+    taskListParamsCleared(
+      "view=all&view=assignments&completed=true&completed=true&status=blocked"
+    ).toString(),
+    ""
+  );
+  assert.equal(
+    taskListParamsCleared("view=invalid&completed=bogus").toString(),
+    ""
+  );
+});
+
+test("choosing Complete also enables completed rows in the same navigation", () => {
+  const written = taskListParamsWith(
+    "view=all&priority=high",
+    "status",
+    "complete"
+  );
+  const parsed = parseTaskListSearchParams(Object.fromEntries(written));
+  assert.deepEqual(parsed.status, ["complete"]);
+  assert.equal(parsed.showCompleted, true);
+  assert.equal(written.get("priority"), "high");
+});
+
+test("a completed-status bookmark includes completed rows before and after sibling edits", () => {
+  assert.equal(
+    parseTaskListSearchParams({ status: "complete" }).showCompleted,
+    true
+  );
+  const written = taskListParamsWith("status=complete", "priority", "high");
+  assert.equal(
+    written.toString(),
+    "completed=true&status=complete&priority=high"
+  );
+});
+
+test("turning completed rows off removes complete but preserves other statuses and siblings", () => {
+  const written = taskListParamsWith(
+    "view=all&completed=true&status=complete&status=blocked&priority=high",
+    "completed",
+    null
+  );
+  assert.equal(written.toString(), "view=all&status=blocked&priority=high");
+  assert.equal(
+    taskListParamsWith("status=complete", "completed", null).toString(),
+    ""
+  );
+});
