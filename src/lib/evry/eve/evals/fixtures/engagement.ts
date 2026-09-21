@@ -323,6 +323,142 @@ export function observedEngagementFacts(
         group.every((r) => r.artifact.counts.matched === ids.length),
     };
   };
+  const orientationComposition = () => {
+    const emptyCohort = z.strictObject({
+      all: z.strictObject({}).optional(),
+      anyOf: z.array(z.never()).optional(),
+    });
+    const attendanceInput = z.strictObject({
+      cohort: emptyCohort.optional(),
+      meetingTypes: z.tuple([z.literal("orientation")]),
+      statuses: z.tuple([z.literal("attended")]),
+      result: paginationSchema.strict(),
+    });
+    const assignmentInput = z.strictObject({
+      request: z.strictObject({
+        resource: z.literal("assignments"),
+        where: z
+          .strictObject({
+            all: z
+              .array(
+                z.strictObject({ statuses: z.tuple([z.literal("active")]) })
+              )
+              .optional(),
+            any: z.array(z.never()).optional(),
+          })
+          .optional(),
+        query: paginationSchema.strict(),
+      }),
+    });
+    // Include unsuccessful calls: a failed refresh must not resurrect an older
+    // complete read. Only the final coherent pagination run supplies evidence.
+    const completeRows = (name: "attendance.query" | "teams.query") => {
+      const keyset = name === "attendance.query";
+      const pages = calls
+        .filter((call) => call.name === name)
+        .map((call) => {
+          const attendance = attendanceInput.safeParse(call.input);
+          const assignments = assignmentInput.safeParse(call.input);
+          const input = keyset
+            ? attendance.success
+              ? attendance.data
+              : null
+            : assignments.success
+              ? assignments.data.request
+              : null;
+          const parsed = capturedReadArtifactSchema.safeParse(call.output);
+          if (!input) return null;
+          const page = "result" in input ? input.result : input.query;
+          if (keyset ? page.cursor !== undefined : page.afterId !== undefined)
+            return null;
+          const {
+            result: _result,
+            query: _query,
+            ...filters
+          } = { result: undefined, query: undefined, ...input };
+          return {
+            scope: canonical({
+              filters,
+              sort: page.sort,
+              direction: page.direction,
+            }),
+            cursor: keyset
+              ? (page.afterId ?? null)
+              : page.cursor == null || page.cursor === "0"
+                ? null
+                : page.cursor,
+            limit: page.limit ?? (keyset ? 20 : 25),
+            artifact: parsed.success ? parsed.data : null,
+          };
+        });
+      const last = pages.at(-1);
+      if (!last) return null;
+      const start = pages.findLastIndex(
+        (page) => page?.scope === last.scope && page.cursor === null
+      );
+      if (start < 0) return null;
+      const rows: z.infer<typeof capturedReadArtifactSchema>["items"] = [];
+      let total: number | undefined;
+      for (const page of pages.slice(start)) {
+        if (!page?.artifact || page.scope !== last.scope) return null;
+        const expected =
+          rows.length === 0
+            ? null
+            : keyset
+              ? rows.at(-1)!.id
+              : String(rows.length);
+        if (
+          page.cursor !== expected ||
+          (total !== undefined &&
+            (total !== page.artifact.counts.matched || rows.length >= total)) ||
+          page.artifact.items.length > page.limit
+        )
+          return null;
+        total = page.artifact.counts.matched;
+        if (!page.artifact.items.length && total !== 0) return null;
+        rows.push(...page.artifact.items);
+      }
+      if (
+        total !== rows.length ||
+        new Set(rows.map((row) => row.id)).size !== rows.length
+      )
+        return null;
+      return rows;
+    };
+    const attendance = completeRows("attendance.query");
+    const assignments = completeRows("teams.query");
+    if (!attendance || !assignments) return null;
+    const personId = (row: (typeof attendance)[number], label: string) => {
+      const values = row.facts?.filter((fact) => fact.label === label) ?? [];
+      return values.length === 1 && z.uuid().safeParse(values[0]!.value).success
+        ? values[0]!.value
+        : null;
+    };
+    if (
+      attendance.some(
+        (row) =>
+          !personId(row, "person_id") || field(row, "Attendance") !== "Attended"
+      ) ||
+      assignments.some(
+        (row) =>
+          !personId(row, "Person ID") ||
+          !["Active", "Inactive"].includes(String(field(row, "Status")))
+      )
+    )
+      return null;
+    const active = new Set(
+      assignments
+        .filter((row) => field(row, "Status") === "Active")
+        .map((row) => personId(row, "Person ID"))
+    );
+    return [
+      ...new Set(
+        attendance
+          .map((row) => personId(row, "person_id")!)
+          .filter((id) => !active.has(id))
+      ),
+    ].sort();
+  };
   if (id.startsWith("people-") || id === "orientations-03") {
     const result = queryRows("people.query", "cohort");
     if (result) {
@@ -336,6 +472,12 @@ export function observedEngagementFacts(
             ? "actual-orientation-without-current-membership"
             : "complete-tagged-prospect-window"
         );
+    } else if (id === "orientations-03") {
+      const ids = orientationComposition();
+      if (ids) {
+        facts.peopleIds = ids;
+        evidence.push("actual-orientation-without-current-membership");
+      }
     }
   } else {
     const result = queryRows("meetings.query", "where");

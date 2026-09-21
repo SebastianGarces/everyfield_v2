@@ -108,15 +108,19 @@ export function ConversationSurface({ className }: { className?: string }) {
     latestMessage?.role === "assistant"
       ? (latestMessage.metadata?.turnId ?? latestMessage.id)
       : null;
-  useEffect(() => {
+  useLayoutEffect(() => {
     const composer = composerRef.current;
     if (!composer) return;
-    const observer = new ResizeObserver(() => {
+    const measureComposer = () => {
       surfaceRef.current?.style.setProperty(
         "--evry-composer-height",
         `${composer.offsetHeight}px`
       );
-    });
+    };
+    // Initial scroll positioning must include the real composer clearance.
+    // Later resize notifications update clearance without following content.
+    measureComposer();
+    const observer = new ResizeObserver(measureComposer);
     observer.observe(composer);
     return () => observer.disconnect();
   }, []);

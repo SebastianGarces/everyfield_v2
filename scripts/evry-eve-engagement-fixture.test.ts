@@ -286,7 +286,107 @@ test(
                 sections: ["evaluation"],
               });
           }
-          if (scenario.id === "orientations-03")
+          if (
+            scenario.id === "orientations-03" &&
+            mistake.startsWith("composition")
+          ) {
+            const assignmentRows = [];
+            let cursor: string | undefined;
+            for (let page = 0; page < 10; page++) {
+              const output = await invoke("teams.query", {
+                request: {
+                  resource: "assignments",
+                  where: {
+                    all:
+                      mistake === "composition-all-statuses"
+                        ? []
+                        : [
+                            {
+                              statuses: [
+                                mistake === "composition-inactive"
+                                  ? "inactive"
+                                  : "active",
+                              ],
+                            },
+                          ],
+                    any: [],
+                  },
+                  query: {
+                    mode: "list",
+                    limit: 1,
+                    sort: "name",
+                    direction: "asc",
+                    ...(cursor ? { cursor } : {}),
+                  },
+                },
+              });
+              assignmentRows.push(...output.items);
+              const next = output.filters.find(
+                (field) => field.label === "Next page cursor"
+              )?.value;
+              if (!next || next === "End of results") break;
+              cursor = next;
+            }
+            const attendanceRows = [];
+            let afterId: string | undefined;
+            for (let page = 0; page < 10; page++) {
+              const output = await invoke("attendance.query", {
+                cohort: {},
+                meetingTypes: [
+                  mistake === "composition-wrong-meeting"
+                    ? "vision_meeting"
+                    : "orientation",
+                ],
+                statuses: ["attended"],
+                result: {
+                  mode: "list",
+                  limit: 2,
+                  ...(afterId ? { afterId } : {}),
+                },
+              });
+              attendanceRows.push(...output.items);
+              const next = output.filters.find(
+                (field) => field.label === "Next page cursor"
+              )?.value;
+              if (
+                !next ||
+                next === "End of results" ||
+                mistake === "composition-missing-page"
+              )
+                break;
+              afterId = next;
+            }
+            const activeIds = new Set(
+              assignmentRows
+                .filter((row) =>
+                  row.facts?.some(
+                    (field) =>
+                      field.label === "Status" && field.value === "Active"
+                  )
+                )
+                .map(
+                  (row) =>
+                    row.facts?.find((field) => field.label === "Person ID")
+                      ?.value
+                )
+            );
+            const ids = [
+              ...new Set(
+                attendanceRows.flatMap((row) => {
+                  const personId = row.facts?.find(
+                    (field) => field.label === "person_id"
+                  )?.value;
+                  return personId && !activeIds.has(personId) ? [personId] : [];
+                })
+              ),
+            ];
+            if (ids.length)
+              await invoke("people.get_many", {
+                resource: "person",
+                ids,
+                fields: ["contact", "stage", "household"],
+              });
+          } else if (scenario.id === "orientations-03")
             await people({
               attendance: {
                 minimumMeetings: 1,
@@ -340,6 +440,24 @@ test(
               outboundMessages: 0,
             });
             assert.equal(good.costUsd, 0);
+            if (id === "orientations-03") {
+              for (const mode of [
+                "composition-active",
+                "composition-all-statuses",
+              ]) {
+                mistake = mode;
+                const composed = await run();
+                assert.deepEqual(
+                  gradeObservation(id, fixture.expectations, composed).failures,
+                  ["quality_not_reviewed"],
+                  JSON.stringify(composed)
+                );
+                assert.deepEqual(composed.effects, {
+                  domainWrites: 0,
+                  outboundMessages: 0,
+                });
+              }
+            }
             const negatives =
               id === "people-02"
                 ? ["drop-tag", "drop-stage", "shift-start", "shift-end"]
@@ -367,6 +485,9 @@ test(
                             "any-meeting",
                             "include-assigned",
                             "stage-is-attendance",
+                            "composition-inactive",
+                            "composition-wrong-meeting",
+                            "composition-missing-page",
                           ];
             for (const negative of negatives)
               await t.test(`rejects ${negative}`, async () => {

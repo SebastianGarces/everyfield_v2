@@ -112,19 +112,27 @@ const jumpButtons = (renderer: ReactTestRenderer) =>
     (node) => node.type === "button" && node.children.includes("Jump to latest")
   );
 
-async function mount(t: TestContext) {
+async function mount(
+  t: TestContext,
+  initial?: {
+    shell: Partial<ReturnType<typeof emptyShell>>;
+    height: number;
+    composerMeasuredGrowth: number;
+  }
+) {
   const { ConversationSurface } = await import("./conversation-surface");
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   t.mock.method(console, "error", (...args: unknown[]) => {
     if (!String(args[0]).includes("react-test-renderer is deprecated"))
       process.stderr.write(`${args.join(" ")}\n`);
   });
-  shell = emptyShell();
-  let height = 631,
+  shell = { ...emptyShell(), ...initial?.shell };
+  let height = initial?.height ?? 631,
     responseTop = 200,
     responseHeight = 40,
     composerHeight = 100,
     top = 0;
+  let composerMeasured = false;
   const positions: number[] = [];
   const resizeCallbacks = new Set<() => void>();
   t.mock.method(globalThis, "fetch", async () => {
@@ -193,7 +201,14 @@ async function mount(t: TestContext) {
               rect(responseTop - top, responseHeight),
           };
         return {
-          style: { setProperty() {} },
+          style: {
+            setProperty(name: string) {
+              if (name === "--evry-composer-height" && !composerMeasured) {
+                composerMeasured = true;
+                height += initial?.composerMeasuredGrowth ?? 0;
+              }
+            },
+          },
           getBoundingClientRect: () => rect(0, height),
         };
       },
@@ -261,6 +276,29 @@ test("saved metadata before replay must not consume initial bottom positioning",
     "Open saved history at its bottom, not the final answer's beginning"
   );
   assert.equal(jumpButtons(view.renderer).length, 0);
+});
+
+test("expanding a loaded chat measures composer clearance before initial positioning", async (t) => {
+  const view = await mount(t, {
+    shell: {
+      conversation: conversation("expanded"),
+      messages: [message("assistant", "saved", "Saved launch progress")],
+      workRequestId: "saved",
+    },
+    height: 3309,
+    // The task-context chip makes the actual composer taller than the CSS fallback.
+    composerMeasuredGrowth: 32,
+  });
+  // ResizeObserver delivers its initial notification after layout effects.
+  await view.render({});
+  assert.equal(view.transcript.scrollTop, 3341 - 631);
+  const positioned = view.transcript.scrollTop;
+  await view.render({}, { height: 3700 });
+  assert.equal(
+    view.transcript.scrollTop,
+    positioned,
+    "Later growth must not follow"
+  );
 });
 
 test("switching saved conversations resets initial positioning even after reading older messages", async (t) => {

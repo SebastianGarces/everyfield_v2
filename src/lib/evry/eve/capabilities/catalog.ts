@@ -173,6 +173,7 @@ export const EVE_WORKFLOW_COVERAGE = [
     name: "launch-review",
     tools: [
       "launch.query",
+      "context.get",
       "tasks.query",
       "teams.query",
       "meetings.query",

@@ -9,6 +9,348 @@ import {
   observedEngagementFacts,
 } from "./engagement";
 
+const orientationPeople = [
+  "a4880ddb-cecc-4807-8c3f-086d5e0a5706",
+  "2a40604d-0031-4257-86c0-d6c2ab53401c",
+  "6e4d6988-634d-4460-8702-d8e26ed31dc8",
+];
+function orientationReads(): CapturedCall[] {
+  const attendance: CapturedCall = {
+    id: "attendance",
+    name: "attendance.query",
+    input: {
+      cohort: {},
+      meetingTypes: ["orientation"],
+      statuses: ["attended"],
+      result: { mode: "list", limit: 50 },
+    },
+    output: {
+      kind: "read",
+      counts: { matched: 3 },
+      items: orientationPeople.map((person, i) => ({
+        id: `attendance-${i}`,
+        label: person,
+        facts: [
+          { label: "person_id", value: person, modelOnly: true },
+          { label: "Attendance", value: "Attended" },
+        ],
+      })),
+    },
+  };
+  const assignments = (activeOnly: boolean): CapturedCall => ({
+    id: activeOnly ? "active" : "all",
+    name: "teams.query",
+    input: {
+      request: {
+        resource: "assignments",
+        where: { all: activeOnly ? [{ statuses: ["active"] }] : [], any: [] },
+        query: { mode: "list", limit: 50, sort: "name", direction: "asc" },
+      },
+    },
+    output: {
+      kind: "read",
+      counts: { matched: activeOnly ? 1 : 2 },
+      items: (activeOnly ? [0] : [0, 2]).map((index) => ({
+        id: `assignment-${index}`,
+        label: orientationPeople[index]!,
+        facts: [
+          {
+            label: "Person ID",
+            value: orientationPeople[index]!,
+            modelOnly: true,
+          },
+          { label: "Status", value: index === 0 ? "Active" : "Inactive" },
+        ],
+      })),
+    },
+  });
+  return [
+    assignments(false),
+    assignments(true),
+    attendance,
+    {
+      id: "details",
+      name: "people.get_many",
+      input: {
+        resource: "person",
+        ids: orientationPeople.slice(1),
+        fields: ["contact", "stage", "household"],
+      },
+      output: {
+        kind: "read",
+        counts: { matched: 2 },
+        items: orientationPeople.slice(1).map((id) => ({ id, label: id })),
+      },
+    },
+  ];
+}
+
+test("orientation composition accepts the exact live call structure, deriving identities from attendance minus active assignments", () => {
+  for (const calls of [
+    orientationReads(),
+    orientationReads().filter((call) => call.id !== "active"),
+    orientationReads().filter((call) => call.id !== "details"),
+  ]) {
+    assert.deepEqual(
+      observedEngagementFacts("orientations-03", calls, new Set()),
+      {
+        facts: { peopleIds: orientationPeople.slice(1).sort() },
+        evidence: ["actual-orientation-without-current-membership"],
+      }
+    );
+  }
+});
+
+test("orientation composition cannot use failed, incomplete, malformed or differently scoped refreshes", () => {
+  for (const name of ["attendance.query", "teams.query"]) {
+    const base = orientationReads();
+    const original = base.findLast((call) => call.name === name)!;
+    for (const output of [
+      { kind: "unavailable", reason: "query failed" },
+      { kind: "read", counts: { matched: 3 }, items: [] },
+      {
+        kind: "read",
+        counts: { matched: 1 },
+        items: [
+          {
+            id: "missing-identity",
+            label: "Someone",
+            facts: [
+              { label: "Status", value: "Active" },
+              { label: "Attendance", value: "Attended" },
+            ],
+          },
+        ],
+      },
+    ])
+      assert.deepEqual(
+        observedEngagementFacts(
+          "orientations-03",
+          [...base, { ...original, id: "refresh", output }],
+          new Set()
+        ).evidence,
+        []
+      );
+  }
+  const invalidAttendance = [
+    { cohort: { all: { stages: ["core_group"] } } },
+    { meetingTypes: ["vision_meeting"] },
+    { statuses: ["invited"] },
+    { dates: { from: "2026-09-01", through: "2026-09-20" } },
+    { result: { mode: "list", limit: 50, afterId: "missing-first" } },
+  ];
+  for (const change of invalidAttendance) {
+    const calls = orientationReads();
+    const original = calls.find((call) => call.name === "attendance.query")!;
+    original.input = {
+      ...(original.input as Record<string, unknown>),
+      ...change,
+    };
+    assert.deepEqual(
+      observedEngagementFacts("orientations-03", calls, new Set()).evidence,
+      []
+    );
+  }
+  for (const all of [
+    [{ statuses: ["inactive"] }],
+    [{ teamIds: ["one-team"] }],
+  ]) {
+    const calls = orientationReads();
+    calls.push({
+      ...calls[1]!,
+      input: {
+        request: {
+          resource: "assignments",
+          where: { all },
+          query: { mode: "list", limit: 50 },
+        },
+      },
+    });
+    assert.deepEqual(
+      observedEngagementFacts("orientations-03", calls, new Set()).evidence,
+      []
+    );
+  }
+  assert.deepEqual(
+    observedEngagementFacts(
+      "orientations-03",
+      orientationReads().filter((call) => call.name === "people.get_many"),
+      new Set()
+    ).evidence,
+    []
+  );
+});
+
+test("orientation composition requires complete non-overlapping pages and accepts legitimate repeated attendance by one person", () => {
+  const base = orientationReads();
+  const attendance = base.find((call) => call.name === "attendance.query")!;
+  const output = attendance.output as {
+    kind: string;
+    counts: { matched: number };
+    items: Array<{ id: string }>;
+  };
+  const first = {
+    ...attendance,
+    input: {
+      ...(attendance.input as object),
+      result: { mode: "list", limit: 2 },
+    },
+    output: { ...output, items: output.items.slice(0, 2) },
+  };
+  const last = {
+    ...attendance,
+    id: "attendance-next",
+    input: {
+      ...(attendance.input as object),
+      result: { mode: "list", limit: 2, afterId: output.items[1]!.id },
+    },
+    output: { ...output, items: output.items.slice(2) },
+  };
+  const prefix = base.filter((call) => call.name !== "attendance.query");
+  assert.deepEqual(
+    observedEngagementFacts(
+      "orientations-03",
+      [...prefix, first, last],
+      new Set()
+    ).facts.peopleIds,
+    orientationPeople.slice(1).sort()
+  );
+  for (const pages of [
+    [first],
+    [last],
+    [first, last, last],
+    [first, { ...last, output: first.output }],
+  ])
+    assert.deepEqual(
+      observedEngagementFacts(
+        "orientations-03",
+        [...prefix, ...pages],
+        new Set()
+      ).evidence,
+      []
+    );
+  const repeatedPerson = {
+    ...attendance,
+    output: {
+      ...output,
+      counts: { matched: 4 },
+      items: [
+        ...output.items,
+        { ...output.items[1]!, id: "different-orientation-same-person" },
+      ],
+    },
+  };
+  assert.deepEqual(
+    observedEngagementFacts(
+      "orientations-03",
+      [...prefix, repeatedPerson],
+      new Set()
+    ).facts.peopleIds,
+    orientationPeople.slice(1).sort()
+  );
+});
+
+test("orientation assignment pages preserve active status and empty populations are factual only after a successful complete read", () => {
+  const base = orientationReads();
+  const assignment = base[0]!;
+  const output = assignment.output as {
+    kind: string;
+    counts: { matched: number };
+    items: Array<{
+      id: string;
+      label: string;
+      facts: Array<{ label: string; value: string }>;
+    }>;
+  };
+  const request = (cursor?: string) => ({
+    request: {
+      resource: "assignments",
+      where: { all: [], any: [] },
+      query: {
+        mode: "list",
+        limit: 1,
+        sort: "name",
+        direction: "asc",
+        ...(cursor ? { cursor } : {}),
+      },
+    },
+  });
+  const first = {
+    ...assignment,
+    input: request(),
+    output: { ...output, items: output.items.slice(0, 1) },
+  };
+  const next = {
+    ...assignment,
+    id: "assignment-next",
+    input: request("1"),
+    output: { ...output, items: output.items.slice(1) },
+  };
+  const rest = base.filter((call) => call.name !== "teams.query");
+  assert.deepEqual(
+    observedEngagementFacts(
+      "orientations-03",
+      [...rest, first, next],
+      new Set()
+    ).facts.peopleIds,
+    orientationPeople.slice(1).sort()
+  );
+  for (const pages of [
+    [first],
+    [next],
+    [first, next, next],
+    [first, { ...next, input: request("2") }],
+  ])
+    assert.deepEqual(
+      observedEngagementFacts("orientations-03", [...rest, ...pages], new Set())
+        .evidence,
+      []
+    );
+  for (const missing of ["Person ID", "Status"]) {
+    const malformed = {
+      ...assignment,
+      output: {
+        ...output,
+        items: output.items.map((row) => ({
+          ...row,
+          facts: row.facts.filter((fact) => fact.label !== missing),
+        })),
+      },
+    };
+    assert.deepEqual(
+      observedEngagementFacts(
+        "orientations-03",
+        [...rest, malformed],
+        new Set()
+      ).evidence,
+      []
+    );
+  }
+  const empty = {
+    ...assignment,
+    output: { kind: "read", counts: { matched: 0 }, items: [] },
+  };
+  assert.deepEqual(
+    observedEngagementFacts("orientations-03", [...rest, empty], new Set())
+      .facts.peopleIds,
+    [...orientationPeople].sort()
+  );
+  const noAttendees = rest.map((call) =>
+    call.name === "attendance.query" ? { ...call, output: empty.output } : call
+  );
+  assert.deepEqual(
+    observedEngagementFacts(
+      "orientations-03",
+      [...noAttendees, empty],
+      new Set()
+    ),
+    {
+      facts: { peopleIds: [] },
+      evidence: ["actual-orientation-without-current-membership"],
+    }
+  );
+});
+
 test("six engagement bindings retain the original questions and follow-up", () => {
   assert.deepEqual(
     engagementFixtureIds.map((id) => questions.find((q) => q.id === id)?.turns),

@@ -4,6 +4,7 @@ import type { ModelMessage } from "ai";
 import { latestWorkingSetLoad } from "./skill-tools";
 import { EVE_WORKFLOW_COVERAGE } from "../capabilities/catalog";
 import { selectedEvePreparationSchema } from "../preparation";
+import { createEveToolRegistry } from "../capabilities/registry";
 
 const catalog = EVE_WORKFLOW_COVERAGE.flatMap((skill) =>
   skill.tools.map((name) => ({ name }))
@@ -108,6 +109,62 @@ test("completed meeting skill loads only its exact preparation and reads", () =>
   assert.throws(
     () => selectedEvePreparationSchema(["unknown.operation"]),
     /Unknown preparation/
+  );
+});
+
+test("one launch skill load exposes registered context and launch reads without executing them", async () => {
+  const authorizations: string[] = [];
+  const registry = createEveToolRegistry({
+    context: {
+      actor: { userId: "fixture-actor", plantId: "fixture-plant" },
+      literalUserText: "Review launch progress",
+      pageContext: null,
+      now: new Date("2026-09-20T16:00:00Z"),
+    },
+    authorizeRead: async (identity) => {
+      authorizations.push(identity);
+      return null;
+    },
+  });
+  const registered = registry.describe();
+  const messages = load("launch-review");
+  const selection = selectionFromLatestLoadedSkill(messages, registered);
+  assert.deepEqual(selection, {
+    names: [
+      "launch.query",
+      "context.get",
+      "tasks.query",
+      "teams.query",
+      "meetings.query",
+      "intelligence.query",
+    ],
+    preparationOperations: [],
+  });
+  assert.deepEqual(authorizations, [], "Loading definitions performs no reads");
+  assert.deepEqual(
+    selectionFromLatestLoadedSkill(
+      messages,
+      registered.filter(({ name }) => name === "launch.query")
+    ),
+    { names: ["launch.query"], preparationOperations: [] }
+  );
+  for (const [name, input] of [
+    ["context.get", {}],
+    ["launch.query", { query: { resource: "status" } }],
+  ] as const) {
+    assert.equal(
+      registered.find((entry) => entry.name === name)?.effect,
+      "read"
+    );
+    assert.deepEqual(await registry.invoke(name, input), {
+      status: "unavailable",
+      reason: "not_authorized",
+    });
+  }
+  assert.equal(
+    authorizations.length,
+    2,
+    "Loading never bypasses authorization"
   );
 });
 
