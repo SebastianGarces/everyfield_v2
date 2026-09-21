@@ -23,6 +23,12 @@ import {
 
 const filterSchema = z.strictObject({
   date: evryDateRangeSchema.optional(),
+  timing: z
+    .enum(["upcoming", "past"])
+    .optional()
+    .describe(
+      "Compare the meeting start with the current server time in the church timezone. Upcoming includes starts exactly now; past means already started. Combine with statuses to exclude cancelled or completed meetings."
+    ),
   types: z.array(z.enum(meetingTypes)).min(1).optional(),
   statuses: z.array(z.enum(meetingStatuses)).min(1).optional(),
   teamIds: operationIds.optional(),
@@ -64,6 +70,14 @@ export function meetingsQueryStatement(
     // Meeting datetime is the stored church wall clock, not a UTC instant.
     if (f.date)
       clauses.push(datePredicate(sql`m.datetime::date`, f.date, now, timeZone));
+    if (f.timing) {
+      const churchNow = sql`(${now.toISOString()}::timestamptz at time zone ${timeZone})`;
+      clauses.push(
+        f.timing === "upcoming"
+          ? sql`m.datetime >= ${churchNow}`
+          : sql`m.datetime < ${churchNow}`
+      );
+    }
     if (f.types) clauses.push(inValues(sql`m.type`, f.types));
     if (f.statuses) clauses.push(inValues(sql`m.status`, f.statuses));
     if (f.teamIds) clauses.push(inValues(sql`mt.id::text`, f.teamIds));
