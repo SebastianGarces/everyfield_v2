@@ -454,3 +454,12 @@ Sebastian ruled in alpha programme task `01a0876e-ceb0-7f32-a6f8-8806b1400213` t
 | # | Decision | Consequence |
 |---|----------|-------------|
 | 568 | AS-010 permits a seat invitation when an account holds no seat and names no tenancy. Any seat or tenancy FK remains a refusal. | A coach-only account can join a plant, sending church or network without losing valid coaching assignments. Signed-in acceptance grants the first tenancy atomically, binds the token to the current account email, and refuses competing grants and tenancy moves. Discovery-tier work remains scoped to #294. |
+
+
+## 2026-09-11 — Explicit ministry-team appointments survive role vacancy
+
+| # | Decision | Consequence |
+|---|----------|-------------|
+| 830 | An explicit team leader is appointed independently of role membership. Role removal, deletion or unmarking preserves that appointment, including removal of the person's last role. | Derived leadership records its source role and clears only for that source. Explicit appointment of the same person replaces provenance. Account-seat removal retains AS-016's unconditional leadership cleanup. |
+| 830 (1) | Historical provenance is unknown; a matching role does not prove a leader was derived. Preserve historical leaders as `legacy`. | Role changes do not clear a legacy appointment. A deliberate explicit replacement or account-seat removal ends it. |
+| 830 (2) | Removing a plant seat must not be undone by a concurrent or delayed team appointment for that linked account. A linked person must regain a seat in the same plant before receiving team leadership again. | Apply the rule to explicit appointments, membership-derived fills, role enabling and direct synchronization. Keep the person and roster membership. Unlinked CRM people remain eligible without a login. |

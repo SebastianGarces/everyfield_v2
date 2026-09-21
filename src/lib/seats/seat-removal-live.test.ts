@@ -392,6 +392,7 @@ test(
         name: `${SCRATCH_NAME} team`,
         type: "custom",
         leaderId: person.id,
+        leaderSource: "explicit",
         createdBy: ownerId,
       })
       .returning({ id: ministryTeams.id });
@@ -440,6 +441,7 @@ test(
         name: `${SCRATCH_NAME} other team`,
         type: "custom",
         leaderId: bystander.id,
+        leaderSource: "explicit",
         createdBy: ownerId,
       })
       .returning({ id: ministryTeams.id });
