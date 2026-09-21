@@ -141,6 +141,105 @@ test("pagination preserves stage in the prospect-specific original regression", 
   );
 });
 
+test("twice can mean exactly two but cannot admit a different ceiling or hidden filter", () => {
+  for (const caseId of ["cross-04", "regression-pagination"]) {
+    for (const maximumMeetings of [2, 1, 3]) {
+      const cohort = {
+        interview: "not_recorded",
+        attendance: { minimumMeetings: 2, maximumMeetings },
+        ...(caseId === "regression-pagination" ? { stages: ["prospect"] } : {}),
+      };
+      const result = observedReadinessCohortFacts(
+        caseId,
+        [
+          page("one", ["a", "b"], undefined, cohort),
+          page("two", ["c", "d"], "b", cohort),
+        ],
+        new Set()
+      );
+      assert.equal(result.facts.filtersPreserved, maximumMeetings === 2);
+    }
+  }
+});
+
+test("completed empty readiness reads are evidence, not missing lookups", () => {
+  const absent = read(
+    "absent",
+    "people.query",
+    {
+      cohort: { all: { interview: "not_recorded", followUp: "recorded" } },
+      result: { mode: "list" },
+    },
+    []
+  );
+  const attendance = read(
+    "attendance",
+    "attendance.query",
+    { result: { mode: "list" } },
+    [item("attendance-a", { Attendance: "Attended" })]
+  );
+  const observed = observedReadinessCohortFacts(
+    "interviews-06",
+    [absent, attendance],
+    new Set()
+  );
+  assert.deepEqual(observed.facts, {
+    interviewAbsenceChecked: true,
+    actualAttendanceReviewed: true,
+    completedFollowUpReviewed: true,
+  });
+  assert.deepEqual(observed.evidence, ["recorded-readiness-dimensions"]);
+});
+
+test("all follow-up history proves whether completion exists; open-only or partial history does not", () => {
+  for (const state of ["any", "completed", "open"]) {
+    for (const matched of [0, 1]) {
+      const history = read(
+        "history",
+        "people.history.query",
+        {
+          resource: { kind: "follow_up", state },
+          result: { mode: "list" },
+        },
+        [],
+        matched
+      );
+      const observed = observedReadinessCohortFacts(
+        "interviews-06",
+        [history],
+        new Set()
+      );
+      assert.equal(
+        observed.facts.completedFollowUpReviewed,
+        state !== "open" && matched === 0
+      );
+      assert.deepEqual(
+        observed.evidence,
+        [],
+        "Other readiness dimensions remain required"
+      );
+    }
+  }
+});
+
+test("latest open follow-up cannot stand in for a complete person's history", () => {
+  const latest = read(
+    "latest",
+    "people.history.query",
+    {
+      resource: { kind: "follow_up", state: "any" },
+      latestPerPerson: true,
+      result: { mode: "list" },
+    },
+    [item("new-open", { "Recorded outcome": "Not started" })]
+  );
+  assert.equal(
+    observedReadinessCohortFacts("interviews-06", [latest], new Set()).facts
+      .completedFollowUpReviewed,
+    false
+  );
+});
+
 test("a fresh read replaces old pages and equivalent object key order is coherent", () => {
   const calls = [
     page("old-one", ["a", "b"]),
@@ -495,8 +594,12 @@ test("RSVP-only, empty and incomplete reads do not establish factual synthesis d
     {
       interviewAbsenceChecked: false,
       actualAttendanceReviewed: false,
-      completedFollowUpReviewed: false,
+      completedFollowUpReviewed: true,
     }
+  );
+  assert.deepEqual(
+    observedReadinessCohortFacts("interviews-06", calls, new Set()).evidence,
+    []
   );
   assert.equal(
     observedReadinessCohortFacts("cross-02", calls, new Set()).facts

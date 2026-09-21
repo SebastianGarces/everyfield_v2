@@ -7,12 +7,13 @@ confirmation, replay and session isolation. These are 158 scenarios, not 158
 passing results. `catalog.test.ts` proves coverage only; `grade.test.ts` proves
 the grader, not the agent.
 
-The [production fixture registry](fixtures/README.md) currently binds 69 scenarios
-by default: 58 original questions and 11 regressions. Supplying both isolated
-document and signed CSV transports enables two more, leaving 87 of 158 unbound.
-These counts describe runnable fixtures, not passing live answers. Readiness
-cohorts and unread notifications retain the separate factual, safety and
-independent answer-quality gates.
+The [production fixture registry](fixtures/README.md) currently binds 80 scenarios
+by default: 67 original questions and 13 regressions. Supplying both isolated
+document and signed CSV transports enables two more, leaving 76 of 158 unbound.
+These counts describe runnable fixtures, not passing live answers. Readiness,
+notifications, task calendars and staffing keep separate factual, safety and
+independent answer-quality gates. A correct query can still produce a poor
+conversation, such as repeating an already displayed page.
 
 ## Run without spending
 

@@ -300,12 +300,25 @@ export function observedReadinessCohortFacts(
     if (people) {
       facts.total = people.total;
       facts.duplicateIds = people.duplicateIds;
+      // Both original prompts say "twice"/"two attendances", not "at least".
+      // An explicit exactly-two interpretation is valid; unrelated restrictions
+      // still fail the complete cohort comparison below.
+      const maximum = at(
+        people.input,
+        "cohort",
+        "all",
+        "attendance",
+        "maximumMeetings"
+      );
       facts.filtersPreserved =
         canonical(at(people.input, "cohort")) ===
         canonical({
           all: {
             interview: "not_recorded",
-            attendance: { minimumMeetings: 2 },
+            attendance: {
+              minimumMeetings: 2,
+              ...(maximum === 2 ? { maximumMeetings: 2 } : {}),
+            },
             ...(caseId === "regression-pagination"
               ? { stages: ["prospect"] }
               : {}),
@@ -328,19 +341,21 @@ export function observedReadinessCohortFacts(
           "number" &&
         Number(at(i, "cohort", "all", "attendance", "minimumMeetings")) > 0
     );
-    const followed = pages(
-      "people.history.query",
-      (i) =>
+    const followed = pages("people.history.query", (i) => {
+      const state = at(i, "resource", "state") ?? "completed";
+      return (
         at(i, "resource", "kind") === "follow_up" &&
-        (at(i, "resource", "state") ?? "completed") === "completed"
-    );
+        (state === "completed" ||
+          (state === "any" && at(i, "latestPerPerson") !== true))
+      );
+    });
     const followedPeople = pages(
       "people.query",
       (i) => at(i, "cohort", "all", "followUp") === "recorded"
     );
-    facts.interviewAbsenceChecked = Boolean(
-      absent?.complete && absent.items.length
-    );
+    // A complete empty read is evidence too. Requiring a positive candidate
+    // falsely rejects an agent that checked a cohort and found none.
+    facts.interviewAbsenceChecked = Boolean(absent?.complete);
     if (caseId === "interviews-06")
       facts.actualAttendanceReviewed = Boolean(
         (attended?.complete &&
@@ -349,11 +364,7 @@ export function observedReadinessCohortFacts(
       );
     if (caseId === "interviews-06")
       facts.completedFollowUpReviewed = Boolean(
-        (followed?.complete &&
-          followed.items.some(
-            (i) => field(i, "Recorded outcome") === "Complete"
-          )) ||
-        (followedPeople?.complete && followedPeople.items.length)
+        followed?.complete || followedPeople?.complete
       );
     if (caseId === "cross-02") {
       const orientation = pages(
@@ -363,9 +374,7 @@ export function observedReadinessCohortFacts(
           canonical(at(i, "cohort", "all", "attendance", "meetingTypes")) ===
             canonical(["orientation"])
       );
-      facts.orientationAbsenceChecked = Boolean(
-        orientation?.complete && orientation.items.length
-      );
+      facts.orientationAbsenceChecked = Boolean(orientation?.complete);
     }
     if (Object.values(facts).every((v) => v === true))
       evidence.push("recorded-readiness-dimensions");

@@ -56,3 +56,27 @@ test("failed full-source reads require exact identifier recovery and an honest s
   );
   assert.match(instructions, /distinguish any snippet-based information/);
 });
+
+test("list pagination follows displayed pages without sacrificing complete calculations", () => {
+  assert.match(
+    instructions,
+    /show one useful page unless the user asks for the entire list/
+  );
+  assert.match(
+    instructions,
+    /exact total without fetching every page just to count/
+  );
+  assert.match(
+    instructions,
+    /Fetch all necessary pages when calculating a result across records/
+  );
+  assert.match(
+    instructions,
+    /last page shown to the user, keeping the same filters/
+  );
+  assert.match(instructions, /Do not repeat a page already displayed/);
+  assert.match(
+    instructions,
+    /result reference from an earlier turn cannot render a new card/
+  );
+});

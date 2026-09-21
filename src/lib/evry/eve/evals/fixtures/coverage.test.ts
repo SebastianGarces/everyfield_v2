@@ -6,6 +6,23 @@ import {
   productionFixtureCoverage,
 } from "./adapter";
 import { createFixtureStore } from "./store";
+import { createFixtureManifest, FIXTURE_NOW } from "./manifest";
+import { taskCalendarReferenceInstant } from "./task-calendar";
+
+test("calendar fixture clock is part of the reproducible manifest digest", () => {
+  const id = "regression-today-midnight";
+  const reference = taskCalendarReferenceInstant(id);
+  const current = createFixtureManifest(id, 0, reference);
+  assert.equal(current.now, "2026-09-20T00:30:00.000Z");
+  assert.notEqual(
+    current.digest,
+    createFixtureManifest(id, 0, FIXTURE_NOW).digest
+  );
+  assert.equal(
+    current.digest,
+    createFixtureManifest(id, 0, new Date(reference)).digest
+  );
+});
 
 const expectedOriginals = [
   "tasks-01",
@@ -66,6 +83,15 @@ const expectedOriginals = [
   "cross-02",
   "cross-04",
   "notifications-01",
+  "edges-02",
+  "teams-01",
+  "teams-02",
+  "teams-03",
+  "teams-04",
+  "teams-05",
+  "roles-02",
+  "training-04",
+  "cross-03",
 ].sort();
 const expectedRegressions = [
   "regression-today",
@@ -79,16 +105,18 @@ const expectedRegressions = [
   "regression-cross-tenant",
   "regression-wiki-injection",
   "regression-pagination",
+  "regression-multi-assignee",
+  "regression-today-midnight",
 ].sort();
 
-test("default production fixture coverage has 69 bindings and does not claim the remaining 89 pass", () => {
+test("default production fixture coverage has 80 bindings and does not claim the remaining 78 pass", () => {
   const coverage = productionFixtureCoverage();
   const corpus = [...questions, ...regressions];
   assert.deepEqual(coverage.counts, {
-    runnable: 69,
-    originals: 58,
-    regressions: 11,
-    unbound: 89,
+    runnable: 80,
+    originals: 67,
+    regressions: 13,
+    unbound: 78,
     corpus: 158,
   });
   assert.deepEqual([...coverage.originalIds].sort(), expectedOriginals);
@@ -137,7 +165,7 @@ test("adapter eligibility agrees with coverage before any storage or runtime wor
       await assert.rejects(adapter.prepare(scenario), reachedSeed);
     else assert.equal(await adapter.prepare(scenario), null, scenario.id);
   }
-  assert.equal(seeds, 69);
+  assert.equal(seeds, 80);
   assert.equal(
     await adapter.prepare({ ...questions[0]!, id: "unknown-case" }),
     null
@@ -148,7 +176,7 @@ test("adapter eligibility agrees with coverage before any storage or runtime wor
     await adapter.prepare({ ...questions[0]!, id: "regression-today" }),
     null
   );
-  assert.equal(seeds, 69);
+  assert.equal(seeds, 80);
 });
 
 test("document comparison is opt-in only after a file transport is supplied", async () => {
@@ -169,10 +197,10 @@ test("document comparison is opt-in only after a file transport is supplied", as
     };
   };
   assert.deepEqual(productionFixtureCoverage({ prepareDocumentFiles }).counts, {
-    runnable: 70,
-    originals: 59,
-    regressions: 11,
-    unbound: 88,
+    runnable: 81,
+    originals: 68,
+    regressions: 13,
+    unbound: 77,
     corpus: 158,
   });
   assert.ok(productionFixtureCoverage().unboundIds.includes("documents-04"));
@@ -338,10 +366,10 @@ test("CSV review requires its signed attachment transport and revokes a failed s
     throw provisionError;
   };
   assert.deepEqual(productionFixtureCoverage({ preparePeopleCsv }).counts, {
-    runnable: 70,
-    originals: 59,
-    regressions: 11,
-    unbound: 88,
+    runnable: 81,
+    originals: 68,
+    regressions: 13,
+    unbound: 77,
     corpus: 158,
   });
   assert.deepEqual(
@@ -350,10 +378,10 @@ test("CSV review requires its signed attachment transport and revokes a failed s
       prepareDocumentFiles: async () => async () => {},
     }).counts,
     {
-      runnable: 71,
-      originals: 60,
-      regressions: 11,
-      unbound: 87,
+      runnable: 82,
+      originals: 69,
+      regressions: 13,
+      unbound: 76,
       corpus: 158,
     }
   );

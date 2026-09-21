@@ -52,7 +52,11 @@ export function fixtureId(caseId: string, symbol: string): string {
     .digest("hex");
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
 }
-export function createFixtureManifest(caseId: string, repetition: number) {
+export function createFixtureManifest(
+  caseId: string,
+  repetition: number,
+  now = FIXTURE_NOW
+) {
   const namespace = `${caseId}:${repetition}`;
   const ids = Object.fromEntries(
     fixtureSymbols.map((symbol) => [symbol, fixtureId(namespace, symbol)])
@@ -63,7 +67,7 @@ export function createFixtureManifest(caseId: string, repetition: number) {
     version: 1,
     caseId,
     repetition,
-    now: FIXTURE_NOW.toISOString(),
+    now: now.toISOString(),
     timeZone: FIXTURE_ZONE,
     ids,
   };

@@ -144,6 +144,19 @@ import {
   notificationFeedExpectations,
   observedNotificationFeedFacts,
 } from "./notification-feed";
+import {
+  taskCalendarFixtureIds,
+  seedTaskCalendarFixture,
+  taskCalendarExpectations,
+  observedTaskCalendarFacts,
+  taskCalendarReferenceInstant,
+} from "./task-calendar";
+import {
+  staffingOverviewFixtureIds,
+  seedStaffingOverviewFixture,
+  staffingOverviewExpectations,
+  observedStaffingOverviewFacts,
+} from "./staffing-overview";
 
 type FixtureTransports = {
   prepareDocumentFiles?: DocumentFixtureTransport;
@@ -284,6 +297,18 @@ const fixtureFamilies: readonly FixtureFamily[] = [
     seed: seedNotificationFeedFixture,
     expectations: notificationFeedExpectations,
     observe: observedNotificationFeedFacts,
+  },
+  {
+    ids: taskCalendarFixtureIds,
+    seed: seedTaskCalendarFixture,
+    expectations: taskCalendarExpectations,
+    observe: observedTaskCalendarFacts,
+  },
+  {
+    ids: staffingOverviewFixtureIds,
+    seed: seedStaffingOverviewFixture,
+    expectations: staffingOverviewExpectations,
+    observe: observedStaffingOverviewFacts,
   },
 ];
 const familyCaseIds = [
@@ -583,7 +608,8 @@ export function createProductionEveEvalAdapter(
         (!("fixture" in scenario) || !boundCases.has(scenario.id))
       )
         return null;
-      const manifest = createFixtureManifest(scenario.id, repetition++);
+      const now = taskCalendarReferenceInstant(scenario.id);
+      const manifest = createFixtureManifest(scenario.id, repetition++, now);
       options.store.seed(manifest);
       let cleanupFiles: (() => Promise<void>) | undefined;
       try {
@@ -667,7 +693,7 @@ export function createProductionEveEvalAdapter(
                 actor,
                 literalUserText: boundScenario.turns.join("\n"),
                 pageContext: null,
-                now: FIXTURE_NOW,
+                now,
               },
               async authorizeRead(identity) {
                 const auth = await authorizeEvryReadCapabilityForSession(
@@ -688,7 +714,7 @@ export function createProductionEveEvalAdapter(
                       userRequestKey: randomUUID(),
                       literalUserText: scenario.turns.join("\n"),
                       pageContext: null,
-                      now: FIXTURE_NOW,
+                      now,
                       authorizeRead: (identity) =>
                         authorizeEvryReadCapabilityForSession(
                           identity,
@@ -736,7 +762,7 @@ export function createProductionEveEvalAdapter(
                     actor,
                     sessionId: manifest.sessionId,
                     sessionToken: manifest.sessionToken,
-                    now: new Date(FIXTURE_NOW),
+                    now: new Date(now),
                     signal,
                     maxCostUsd,
                     onPresentResult(id) {
