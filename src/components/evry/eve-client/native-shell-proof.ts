@@ -156,12 +156,22 @@ for (const reload of [false, true]) {
     assert.equal(shell.workState.phase, "failed");
     assert.equal(shell.isWorking, false);
     assert.equal(shell.pendingMessage?.body, text);
+    assert.equal(shell.pendingMessage?.delivery, "saved");
     assert.equal(shell.recoveryLabel, "Try again");
     assert.equal(
       posts.length,
       reload ? 0 : 1,
       "failure and replay must not trigger an automatic retry"
     );
+    if (reload) {
+      await act(() => shell.discardPendingMessage());
+      assert.equal(
+        shell.draft,
+        "",
+        "dismissing a saved failure must not copy the original request into the composer"
+      );
+      assert.equal(shell.pendingMessage, null);
+    }
     const before = posts.length;
     await act(() => shell.setDraft("A separate unsent question"));
     await act(async () => {
@@ -318,6 +328,7 @@ for (const file of [false, true]) {
     assert.equal(shell.sessionId, null);
     assert.equal(shell.draft, text);
     assert.equal(shell.pendingMessage?.body, text);
+    assert.equal(shell.pendingMessage?.delivery, "uncertain");
     assert.match(shell.error ?? "", /message is kept/);
     assert.match(posts[0]!.operationId ?? "", /^[a-f0-9-]{36}$/);
     // A draft written after the failure must survive successful recovery.
@@ -502,6 +513,7 @@ for (const accepted of [true, false]) {
     assert.equal(posts, 1);
     assert.equal(shell.draft, text);
     assert(shell.pendingMessage);
+    assert.equal(shell.pendingMessage.delivery, "uncertain");
     await act(async () => {
       shell.resumeWatching();
       await new Promise((resolve) => setTimeout(resolve, 10));

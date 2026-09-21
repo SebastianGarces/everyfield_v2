@@ -51,6 +51,8 @@ test("a stale checkpoint offers rebuild and never an active confirm control", ()
 });
 
 test("conversation changes are blocked while send, load, or direct selection owns the workspace", () => {
+  assert.match(workspace, /pendingMessage\?\.delivery === "uncertain"/);
+  assert.doesNotMatch(workspace, /pendingMessage\?\.status === "failed"/);
   assert.match(
     workspace,
     /const blocked =[\s\S]*isLoading \|\|[\s\S]*isSending \|\|[\s\S]*isConversationNavigationPending \|\|[\s\S]*isNewComposerResetPending/

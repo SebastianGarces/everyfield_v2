@@ -97,6 +97,7 @@ type EvryShellValue = {
     status: "failed";
     requestId: string;
     savedMessageId: string;
+    delivery: "saved" | "uncertain";
   } | null;
   isEnabled: boolean;
   isPanelOpen: boolean;
@@ -210,6 +211,7 @@ export function EvryShell({
         status: "failed" as const,
         requestId: failedTurn.operationId,
         savedMessageId: lastUser?.id ?? "",
+        delivery: "uncertain" as const,
       }
     : lastUser && (lastUser.metadata?.status === "failed" || turnFailure)
       ? {
@@ -220,6 +222,7 @@ export function EvryShell({
           status: "failed" as const,
           requestId: lastUser.id,
           savedMessageId: lastUser.id,
+          delivery: turnFailure ? ("saved" as const) : ("uncertain" as const),
         }
       : null;
   const pendingMessage = dismissedFailure ? null : interruptedMessage;
@@ -831,7 +834,8 @@ export function EvryShell({
     discardPendingMessage: () => {
       setError(null);
       setDismissedFailure(true);
-      setDraft((value) => value || pendingMessage?.body || "");
+      if (pendingMessage?.delivery === "uncertain")
+        setDraft((value) => value || pendingMessage.body);
       if (pendingTurn.current?.retry === "resubmit") pendingTurn.current = null;
     },
     canStopWatching: isSending || client?.status === "streaming",

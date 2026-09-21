@@ -187,7 +187,17 @@ function streamedConversation(value: PublicEvryConversation): Response {
       type: "message.received",
       data: { sequence: 1, turnId: value.id, message: value.messages[0]!.body },
     },
-    { type: "turn.completed", data: { sequence: 1, turnId: value.id } },
+    value.id === CONVERSATION_A_ID
+      ? {
+          type: "turn.failed",
+          data: {
+            sequence: 1,
+            turnId: value.id,
+            code: "MODEL_CALL_FAILED",
+            message: "Provider unavailable",
+          },
+        }
+      : { type: "turn.completed", data: { sequence: 1, turnId: value.id } },
     { type: "session.waiting", data: { inputRequests: [] } },
   ];
   return new Response(
@@ -493,6 +503,33 @@ test("real shell state survives stale route remounts for first and repeated New 
   const mountedRenderer = renderer as ReactTestRenderer;
   assert.equal(conversationLoads, 1);
   assert.equal(renderedText(mountedRenderer, "First request"), true);
+  assert.equal(
+    renderedText(
+      mountedRenderer,
+      "Evry couldn't finish this response. Your message is saved. Try again."
+    ),
+    true
+  );
+  assert.equal(
+    newLink(mountedRenderer).props["aria-disabled"],
+    undefined,
+    "a saved failed response must not lock New"
+  );
+  assert.equal(
+    mountedRenderer.root.findByProps({ id: "evry-history-search" }).props
+      .disabled,
+    false,
+    "a saved failed response must not lock search"
+  );
+  assert.equal(
+    mountedRenderer.root.find(
+      (node) =>
+        node.type === "a" &&
+        node.props["data-testid"] === `evry-history-row-${CONVERSATION_A_ID}`
+    ).props["aria-disabled"],
+    undefined,
+    "a saved failed response must not lock history links"
+  );
 
   const initialForm = composerForm(mountedRenderer);
   await act(async () => {

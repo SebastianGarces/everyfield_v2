@@ -111,7 +111,7 @@ export function ConversationHistoryWorkspace({
   const hasDetail = selectedConversationId !== null || ownsNewConversation;
   const blocked =
     isRefreshingHistory ||
-    pendingMessage?.status === "failed" ||
+    pendingMessage?.delivery === "uncertain" ||
     isLoading ||
     isSending ||
     isWorking ||
