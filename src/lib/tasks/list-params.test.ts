@@ -108,10 +108,11 @@ test("only the literal `all` and `true` switch a mode", () => {
   );
 });
 
-test("malformed task cursor bookmarks start at page one without losing filters", () => {
+test("malformed task cursors retain unavailable-page intent without losing filters", () => {
   for (const cursor of [
     "stale",
     "",
+    "   ",
     "null",
     "not-a-uuid",
     "d435a320-7b16-4f99-b4cd-b496ea28c66z",
@@ -119,13 +120,13 @@ test("malformed task cursor bookmarks start at page one without losing filters",
     const parsed = parseTaskListQuery(
       new URLSearchParams({ view: "all", status: "blocked", cursor })
     );
-    assert.equal(parsed.cursor, undefined);
+    assert.equal(parsed.cursor, "");
     assert.equal(parsed.view, "all");
     assert.deepEqual(parsed.status, ["blocked"]);
   }
 });
 
-test("valid UUID cursors survive while repeated cursors start at page one", () => {
+test("valid UUID cursors survive while repeated cursors are unavailable", () => {
   const first = "d435a320-7b16-4f99-b4cd-b496ea28c665";
   const second = "019956b2-00c0-7000-8000-000000000001";
   for (const cursor of [first, second, first.toUpperCase()]) {
@@ -140,7 +141,7 @@ test("valid UUID cursors survive while repeated cursors start at page one", () =
   ]) {
     const query = new URLSearchParams();
     for (const cursor of repeated) query.append("cursor", cursor);
-    assert.equal(parseTaskListQuery(query).cursor, undefined);
+    assert.equal(parseTaskListQuery(query).cursor, "");
   }
 });
 

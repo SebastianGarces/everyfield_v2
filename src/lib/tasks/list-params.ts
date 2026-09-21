@@ -213,7 +213,9 @@ export function parseTaskListSearchParams(params: {
   [key: string]: SearchParamValue;
 }): TaskListSearchParams {
   const status = parseEnumParam(params.status, taskStatusSchema);
-  // The cursor reaches a UUID column; malformed bookmarks start at page one.
+  // Omission means page one; supplied but invalid means unavailable. The
+  // service rejects an empty cursor before querying its UUID column, so an
+  // invalid or ambiguous bookmark cannot silently repeat the first page.
   const cursor = z.string().uuid().safeParse(params.cursor);
   return {
     // The same list the toggle writes from, so a view can never be writable
@@ -224,7 +226,12 @@ export function parseTaskListSearchParams(params: {
     status,
     priority: parseEnumParam(params.priority, taskPrioritySchema),
     category: parseEnumParam(params.category, taskCategorySchema),
-    cursor: cursor.success ? cursor.data : undefined,
+    cursor:
+      params.cursor === undefined
+        ? undefined
+        : cursor.success
+          ? cursor.data
+          : "",
     ...(z.string().date().safeParse(params.dueDateFrom).success
       ? { dueDateFrom: z.string().date().parse(params.dueDateFrom) }
       : {}),

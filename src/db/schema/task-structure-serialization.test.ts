@@ -68,7 +68,6 @@ test("Evry and owning Task writers acquire the lock before mutating", () => {
   for (const name of [
     "updateTask",
     "completeTask",
-    "reopenTask",
     "deleteTask",
     "completeMany",
     "rescheduleMany",
@@ -93,5 +92,27 @@ test("Evry and owning Task writers acquire the lock before mutating", () => {
   assert.match(
     evry,
     /taskStructureLockStatement\(input\.execution\.plantId\)[\s\S]*db\.execute<CompletedEffectRow>\(statement\)/
+  );
+});
+
+test("reopen checks the current recurrence after locking and before its guarded update", () => {
+  const start = service.indexOf("export async function reopenTask(");
+  assert.ok(start >= 0);
+  const body = service
+    .slice(start)
+    .split("export async function deleteTask(")[0];
+  assert.match(
+    body,
+    /await db\.batch\(\[\s*taskStructureLockStatement\(churchId\),\s*activeOccurrence,\s*db\s*\.update\(tasks\)/,
+    "reopen must lock first, read the current active occurrence second, then update"
+  );
+  assert.match(
+    body,
+    /eq\(tasks\.status, "complete"\),\s*taskAssigneeIsAvailable\(churchId, tasks\.assignedToId\),\s*notExists\(activeOccurrence\)/,
+    "the update must retain the native completion/recurrence CAS and Evry's assignee guard"
+  );
+  assert.match(
+    body,
+    /if \(openOccurrence\) throw new ActiveTaskOccurrenceError\(openOccurrence\)/
   );
 });
