@@ -2,6 +2,7 @@ import { db } from "@/db";
 import { taskDependencies, tasks, type TaskStatus } from "@/db/schema";
 import { and, eq, inArray, isNull, ne, notInArray, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
+import { taskStructureLockStatement } from "./structure-lock";
 
 // ============================================================================
 // Task dependencies (T-015)
@@ -284,19 +285,12 @@ export async function setTaskPrerequisites(
           : undefined
       )
     );
-  await db.batch([
-    ...(uniqueIds.length > 0
-      ? [buildAddDependencyStatement(churchId, taskId, uniqueIds)]
-      : []),
-    dropStale,
-  ] as unknown as [typeof dropStale, ...(typeof dropStale)[]]);
+  if (uniqueIds.length === 0) {
+    await db.batch([taskStructureLockStatement(churchId), dropStale]);
+    return;
+  }
 
-  // A refused replace leaves the stored set unchanged. Throw only after
-  // reading it — never from a mid-write rowcount, which would mean the
-  // inserts had already committed.
-  if (uniqueIds.length === 0) return;
-
-  const stored = await db
+  const readStored = db
     .select({ id: prerequisiteTask.id })
     .from(taskDependencies)
     .innerJoin(
@@ -314,6 +308,15 @@ export async function setTaskPrerequisites(
         isNull(prerequisiteTask.parentTaskId)
       )
     );
+  // Read our result while the structure lock is still held. A later writer
+  // may replace the set after commit without turning this success into a
+  // cross-church refusal.
+  const [, , , stored] = await db.batch([
+    taskStructureLockStatement(churchId),
+    buildAddDependencyStatement(churchId, taskId, uniqueIds),
+    dropStale,
+    readStored,
+  ]);
   const storedIds = new Set(stored.map((row) => row.id));
   if (
     storedIds.size !== uniqueIds.length ||

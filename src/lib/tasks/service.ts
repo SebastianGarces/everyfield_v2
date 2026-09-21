@@ -1,3 +1,4 @@
+import { taskStructureLockStatement } from "./structure-lock";
 import { db } from "@/db";
 import {
   tasks,
@@ -828,7 +829,10 @@ export async function createTask(
     recurrence
   );
 
-  const [task] = await db.insert(tasks).values(values).returning();
+  const [, [task]] = await db.batch([
+    taskStructureLockStatement(churchId),
+    db.insert(tasks).values(values).returning(),
+  ]);
 
   // The row exists before anything is announced about it (T-018). A task with
   // no assignee or no due date enqueues nothing — the plan says so, not this
@@ -913,17 +917,20 @@ export async function updateTask(
   if (data.parentTaskId !== undefined)
     updateData.parentTaskId = data.parentTaskId ?? null;
 
-  const [updated] = await db
-    .update(tasks)
-    .set(updateData)
-    .where(
-      and(
-        eq(tasks.churchId, churchId),
-        eq(tasks.id, taskId),
-        isNull(tasks.deletedAt)
+  const [, [updated]] = await db.batch([
+    taskStructureLockStatement(churchId),
+    db
+      .update(tasks)
+      .set(updateData)
+      .where(
+        and(
+          eq(tasks.churchId, churchId),
+          eq(tasks.id, taskId),
+          isNull(tasks.deletedAt)
+        )
       )
-    )
-    .returning();
+      .returning(),
+  ]);
 
   if (!updated) {
     throw new Error("Failed to update task");
@@ -1047,7 +1054,10 @@ export const defaultRecurrenceDeps: RecurrenceDeps = {
   },
 
   async insertSuccessor(values) {
-    const [next] = await db.insert(tasks).values(values).returning();
+    const [, [next]] = await db.batch([
+      taskStructureLockStatement(values.churchId),
+      db.insert(tasks).values(values).returning(),
+    ]);
     return next ?? null;
   },
 
@@ -1076,7 +1086,10 @@ export const defaultRecurrenceDeps: RecurrenceDeps = {
 
   async insertChildren(values) {
     if (values.length === 0) return;
-    await db.insert(tasks).values(values);
+    await db.batch([
+      taskStructureLockStatement(values[0]!.churchId),
+      db.insert(tasks).values(values),
+    ]);
   },
 };
 
@@ -1268,23 +1281,26 @@ export async function completeTask(
   // it, but only one gets a row back here. Everything downstream — the event,
   // and the next recurrence instance — happens exactly once because it hangs
   // off this rowcount.
-  const [completed] = await db
-    .update(tasks)
-    .set({
-      status: "complete",
-      completedAt,
-      completedById: actor.id,
-      updatedAt: completedAt,
-    })
-    .where(
-      and(
-        eq(tasks.churchId, churchId),
-        eq(tasks.id, taskId),
-        isNull(tasks.deletedAt),
-        ne(tasks.status, "complete")
+  const [, [completed]] = await db.batch([
+    taskStructureLockStatement(churchId),
+    db
+      .update(tasks)
+      .set({
+        status: "complete",
+        completedAt,
+        completedById: actor.id,
+        updatedAt: completedAt,
+      })
+      .where(
+        and(
+          eq(tasks.churchId, churchId),
+          eq(tasks.id, taskId),
+          isNull(tasks.deletedAt),
+          ne(tasks.status, "complete")
+        )
       )
-    )
-    .returning();
+      .returning(),
+  ]);
 
   if (!completed) {
     // The CAS lost: somebody else completed it between the read and the write.
@@ -1344,22 +1360,25 @@ export async function reopenTask(
     throw new Error("Task is not complete");
   }
 
-  const [reopened] = await db
-    .update(tasks)
-    .set({
-      status: "not_started",
-      completedAt: null,
-      completedById: null,
-      updatedAt: new Date(),
-    })
-    .where(
-      and(
-        eq(tasks.churchId, churchId),
-        eq(tasks.id, taskId),
-        isNull(tasks.deletedAt)
+  const [, [reopened]] = await db.batch([
+    taskStructureLockStatement(churchId),
+    db
+      .update(tasks)
+      .set({
+        status: "not_started",
+        completedAt: null,
+        completedById: null,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(tasks.churchId, churchId),
+          eq(tasks.id, taskId),
+          isNull(tasks.deletedAt)
+        )
       )
-    )
-    .returning();
+      .returning(),
+  ]);
 
   if (!reopened) {
     throw new Error("Failed to reopen task");
@@ -1406,17 +1425,20 @@ export async function deleteTask(
 
   const now = new Date();
 
-  const deleted = await db
-    .update(tasks)
-    .set({ deletedAt: now, updatedAt: now })
-    .where(
-      and(
-        eq(tasks.churchId, churchId),
-        or(eq(tasks.id, taskId), eq(tasks.parentTaskId, taskId)),
-        isNull(tasks.deletedAt)
+  const [, deleted] = await db.batch([
+    taskStructureLockStatement(churchId),
+    db
+      .update(tasks)
+      .set({ deletedAt: now, updatedAt: now })
+      .where(
+        and(
+          eq(tasks.churchId, churchId),
+          or(eq(tasks.id, taskId), eq(tasks.parentTaskId, taskId)),
+          isNull(tasks.deletedAt)
+        )
       )
-    )
-    .returning({ id: tasks.id });
+      .returning({ id: tasks.id }),
+  ]);
 
   // Every row the statement actually touched — the parent AND its checklist
   // items, which are tasks with due dates of their own. The ids come from the
@@ -1662,43 +1684,49 @@ export const defaultBulkTaskDeps: BulkTaskDeps = {
   async completeMany(churchId, taskIds, userId) {
     const now = new Date();
 
-    const updated = await db
-      .update(tasks)
-      .set({
-        status: "complete",
-        completedAt: now,
-        completedById: userId,
-        updatedAt: now,
-      })
-      .where(
-        and(
-          eq(tasks.churchId, churchId),
-          inArray(tasks.id, taskIds),
-          isNull(tasks.deletedAt),
-          ne(tasks.status, "complete")
+    const [, updated] = await db.batch([
+      taskStructureLockStatement(churchId),
+      db
+        .update(tasks)
+        .set({
+          status: "complete",
+          completedAt: now,
+          completedById: userId,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(tasks.churchId, churchId),
+            inArray(tasks.id, taskIds),
+            isNull(tasks.deletedAt),
+            ne(tasks.status, "complete")
+          )
         )
-      )
-      .returning({ id: tasks.id });
+        .returning({ id: tasks.id }),
+    ]);
 
     return updated.map((row) => row.id);
   },
 
   async rescheduleMany(churchId, taskIds, dueDate) {
-    const updated = await db
-      .update(tasks)
-      .set({ dueDate, updatedAt: new Date() })
-      .where(
-        and(
-          eq(tasks.churchId, churchId),
-          inArray(tasks.id, taskIds),
-          isNull(tasks.deletedAt),
-          // Mirrors the planner's rejectCompleted guard. Belt and braces: if a
-          // task is completed between the load and this write, it is reported
-          // as a failure rather than quietly given a new due date.
-          ne(tasks.status, "complete")
+    const [, updated] = await db.batch([
+      taskStructureLockStatement(churchId),
+      db
+        .update(tasks)
+        .set({ dueDate, updatedAt: new Date() })
+        .where(
+          and(
+            eq(tasks.churchId, churchId),
+            inArray(tasks.id, taskIds),
+            isNull(tasks.deletedAt),
+            // Mirrors the planner's rejectCompleted guard. Belt and braces: if a
+            // task is completed between the load and this write, it is reported
+            // as a failure rather than quietly given a new due date.
+            ne(tasks.status, "complete")
+          )
         )
-      )
-      .returning({ id: tasks.id });
+        .returning({ id: tasks.id }),
+    ]);
 
     return updated.map((row) => row.id);
   },
