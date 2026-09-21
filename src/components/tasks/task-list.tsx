@@ -224,7 +224,7 @@ export function TaskList({
         <div className="bg-muted flex h-20 w-20 items-center justify-center rounded-full">
           <ListChecks className="text-muted-foreground h-10 w-10" />
         </div>
-        <h3 className="mt-4 text-lg font-medium">No tasks found</h3>
+        <h2 className="mt-4 text-lg font-medium">No tasks found</h2>
         <p className="text-muted-foreground mt-2 max-w-sm text-sm">
           {canWrite
             ? "No tasks match your current filters. Add a new task to get started."
@@ -258,11 +258,11 @@ export function TaskList({
                 label={group.label}
                 disabled={group.variant === "completed"}
               />
-              <h3
+              <h2
                 className={`text-sm font-semibold ${GROUP_STYLES[group.variant] ?? ""}`}
               >
                 {group.label}
-              </h3>
+              </h2>
             </div>
             <div className="space-y-2">
               {group.tasks.map((task) => (

@@ -45,31 +45,7 @@ import Link from "next/link";
 // Config
 // ============================================================================
 
-export const PRIORITY_CONFIG: Record<
-  string,
-  { label: string; color: string; icon: string }
-> = {
-  urgent: {
-    label: "Urgent",
-    color: "text-red-600 bg-red-50 border-red-200",
-    icon: "!",
-  },
-  high: {
-    label: "High",
-    color: "text-orange-600 bg-orange-50 border-orange-200",
-    icon: "!",
-  },
-  medium: {
-    label: "Medium",
-    color: "text-blue-600 bg-blue-50 border-blue-200",
-    icon: "",
-  },
-  low: {
-    label: "Low",
-    color: "text-slate-500 bg-slate-50 border-slate-200",
-    icon: "",
-  },
-};
+import { PRIORITY_CONFIG } from "@/lib/tasks/presentation";
 
 export const CATEGORY_CONFIG: Record<string, { label: string }> = {
   vision_meeting: { label: "Vision Meeting" },
