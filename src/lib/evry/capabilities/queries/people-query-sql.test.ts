@@ -28,6 +28,108 @@ const plant = "10000000-0000-4000-8000-000000000001";
 const id = "20000000-0000-4000-8000-000000000001";
 const dialect = new PgDialect();
 
+test("person creation timestamp windows preserve exact half-open instants and existing local-date filters", () => {
+  const createdWindow = {
+    from: "2026-09-01T00:00:00-04:00",
+    until: "2026-09-20T16:00:00Z",
+  };
+  const query = dialect.sqlToQuery(
+    buildPeopleQuery(
+      plant,
+      peopleQuerySchema.parse({
+        cohort: { all: { createdWindow } },
+        result: { mode: "list" },
+      })
+    )
+  );
+  assert.match(
+    query.sql,
+    /persons\.created_at >= \(\$\d+::timestamptz at time zone 'UTC'\)/
+  );
+  assert.match(
+    query.sql,
+    /persons\.created_at < \(\$\d+::timestamptz at time zone 'UTC'\)/
+  );
+  assert.ok(query.params.includes(createdWindow.from));
+  assert.ok(query.params.includes(createdWindow.until));
+  assert.doesNotMatch(
+    query.sql,
+    /persons\.created_at at time zone 'UTC' at time zone/
+  );
+  const both = dialect.sqlToQuery(
+    buildPeopleQuery(
+      plant,
+      peopleQuerySchema.parse({
+        cohort: {
+          all: {
+            createdWindow,
+            created: { from: "2026-09-01", through: "2026-09-20" },
+          },
+        },
+        result: { mode: "count" },
+      })
+    )
+  );
+  assert.match(both.sql, /persons\.created_at at time zone 'UTC' at time zone/);
+  assert.match(both.sql, /persons\.created_at < \(\$\d+::timestamptz/);
+});
+
+test("person timestamp windows reject ambiguous clocks and reversed or empty ranges", () => {
+  for (const createdWindow of [
+    { from: "2026-09-01T00:00:00", until: "2026-09-20T16:00:00Z" },
+    { from: "2026-09-20T16:00:00Z", until: "2026-09-20T16:00:00Z" },
+    { from: "2026-09-20T16:00:01Z", until: "2026-09-20T16:00:00Z" },
+    {
+      from: "2026-09-01T00:00:00Z",
+      until: "2026-09-20T16:00:00Z",
+      churchId: plant,
+    },
+  ])
+    assert.equal(
+      peopleQuerySchema.safeParse({
+        cohort: { all: { createdWindow } },
+        result: { mode: "list" },
+      }).success,
+      false
+    );
+});
+
+test("named core-team reads include advanced Core Group statuses without changing exact stage filters", () => {
+  const named = dialect.sqlToQuery(
+    buildPeopleQuery(
+      plant,
+      peopleQuerySchema.parse({
+        cohort: { all: { audience: "core_team" } },
+        result: { mode: "list" },
+      })
+    )
+  );
+  for (const status of ["core_group", "launch_team", "leader"])
+    assert.ok(named.params.includes(status));
+  assert.match(named.sql, /persons.church_id/);
+  assert.match(named.sql, /persons.deleted_at is null/);
+  assert.doesNotMatch(named.sql, /from commitments/);
+  const exact = dialect.sqlToQuery(
+    buildPeopleQuery(
+      plant,
+      peopleQuerySchema.parse({
+        cohort: { all: { stages: ["core_group"] } },
+        result: { mode: "list" },
+      })
+    )
+  );
+  assert.ok(exact.params.includes("core_group"));
+  assert.ok(!exact.params.includes("launch_team"));
+  assert.ok(!exact.params.includes("leader"));
+  assert.equal(
+    peopleQuerySchema.safeParse({
+      cohort: { all: { audience: "all_accounts" } },
+      result: { mode: "list" },
+    }).success,
+    false
+  );
+});
+
 test("named tags remain exact parameterized plant-scoped matches and bulk details include skills", () => {
   const query = dialect.sqlToQuery(
     buildPeopleQuery(
@@ -213,6 +315,60 @@ test("People public projection uses domain labels and calendar dates without rew
     projected.filters.find((filter) => filter.label === "Read at")?.value ?? "",
     /September 9, 2026.*11:30 PM EDT/
   );
+});
+
+test("stage history has typed previous/new stages and preserves the reason verbatim", () => {
+  const content = "Asked for follow_up, not an inferred current_status.";
+  const artifact = peopleQueryArtifact(
+    "Recorded people history",
+    {
+      total: 1,
+      people: 1,
+      households: 0,
+      without_household: 1,
+      rows: [
+        {
+          id,
+          label: "Alex",
+          person_id: id,
+          outcome: "status_changed",
+          old_stage: "prospect",
+          new_stage: "following_up",
+          content,
+        },
+      ],
+      groups: [],
+      group_total: 0,
+      has_more: false,
+    },
+    "list",
+    "people",
+    {},
+    new Date("2026-09-20T16:00:00Z")
+  );
+  assert.deepEqual(
+    artifact.items[0].facts.filter((f) =>
+      ["Previous stage", "New stage", "Change reason"].includes(f.label)
+    ),
+    [
+      { label: "Previous stage", value: "Prospect" },
+      { label: "New stage", value: "Following Up" },
+      { label: "Change reason", value: content },
+    ]
+  );
+  const query = new PgDialect().sqlToQuery(
+    buildPeopleHistoryQuery(
+      plant,
+      peopleHistoryQuerySchema.parse({
+        resource: { kind: "activities" },
+        result: { mode: "list" },
+      })
+    )
+  );
+  assert.match(query.sql, /jsonb_typeof\(a\.metadata->'reason'\) = 'string'/);
+  assert.match(query.sql, /a\.activity_type = 'status_changed'/);
+  assert.doesNotMatch(query.sql, /a\.metadata\s+as/);
+  for (const value of personStatuses) assert.ok(query.params.includes(value));
 });
 
 test("attendance public projection retains the wall-clock date and hides group IDs", () => {

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { personStatuses } from "@/db/schema/people";
 import { db } from "@/db";
 import {
   APP_TIME_ZONE,
@@ -44,6 +45,8 @@ const factValues = {
   author: "Recorded by",
   date: "Date",
   outcome: "Recorded outcome",
+  old_stage: "Previous stage",
+  new_stage: "New stage",
   content: "Recorded notes",
   meeting: "Meeting",
   status: "Attendance",
@@ -74,6 +77,8 @@ const rowSchema = z.object({
   author: z.string().optional(),
   date: z.string().nullable().optional(),
   outcome: z.string().nullable().optional(),
+  old_stage: z.enum(personStatuses).nullable().optional(),
+  new_stage: z.enum(personStatuses).nullable().optional(),
   content: z.string().nullable().optional(),
   created_at: z.string().optional(),
   content_length: z.number().int().nonnegative().nullable().optional(),
@@ -177,6 +182,8 @@ function displayFact(key: string, value: string): string {
   if (key === "response_card") return responseCardLabel(value);
   return [
     "stage",
+    "old_stage",
+    "new_stage",
     "source",
     "outcome",
     "status",
@@ -268,7 +275,10 @@ function rowItem(
           ? []
           : [
               {
-                label,
+                label:
+                  key === "content" && row.outcome === "status_changed"
+                    ? "Change reason"
+                    : label,
                 value:
                   typeof value === "boolean"
                     ? value

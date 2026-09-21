@@ -17,6 +17,8 @@ import {
   responseCardTypes,
 } from "@/db/schema/meetings";
 import { peopleTextSearch } from "@/lib/people/service";
+import { CORE_GROUP_STATUSES } from "@/lib/people/core-group";
+import { contentRange, contentWindow } from "./content-core";
 
 const ids = z.array(z.string().uuid()).min(1).max(50);
 const tagNames = z.array(z.string().trim().min(1).max(100)).min(1).max(50);
@@ -50,11 +52,20 @@ const attendanceCondition = z
 const peopleCondition = z.strictObject({
   search: z.string().trim().min(1).max(160).optional(),
   personIds: ids.optional(),
+  audience: z
+    .literal("core_team")
+    .optional()
+    .describe(
+      "The current Core Group / core-team audience, including people who advanced to the launch team or leadership. Matches the meeting-invitation core_team audience; not account seats or recorded commitment history."
+    ),
   stages: z
     .array(z.enum(personStatuses))
     .min(1)
     .max(personStatuses.length)
-    .optional(),
+    .optional()
+    .describe(
+      "Exact current person statuses. Use audience: core_team for the full Core Group, including launch-team members and leaders."
+    ),
   sources: z
     .array(z.enum(personSources))
     .min(1)
@@ -83,6 +94,11 @@ const peopleCondition = z.strictObject({
     })
     .optional(),
   created: dateRange.optional(),
+  createdWindow: contentWindow
+    .optional()
+    .describe(
+      "Creation timestamp window: inclusive from, exclusive until. For people added this month so far, use calendar.resolve's month-start timestamp and referenceInstant as until. Unlike created calendar dates, this excludes later-today timestamps."
+    ),
   householdIds: ids.optional(),
   household: z.enum(["assigned", "unassigned"]).optional(),
   hasEmail: z.boolean().optional(),
@@ -103,7 +119,10 @@ const peopleCondition = z.strictObject({
       existence,
       types: z.array(z.enum(commitmentTypes)).min(1).max(2).optional(),
     })
-    .optional(),
+    .optional()
+    .describe(
+      "Recorded commitment history, not current membership of the Core Group. Use audience: core_team for that current audience."
+    ),
   followUp: existence
     .optional()
     .describe(
@@ -325,6 +344,8 @@ function conditionSql(
     clauses.push(inValues(sql`persons.id`, condition.personIds));
   if (condition.stages)
     clauses.push(inValues(sql`persons.status`, condition.stages));
+  if (condition.audience === "core_team")
+    clauses.push(inValues(sql`persons.status`, CORE_GROUP_STATUSES));
   if (condition.sources)
     clauses.push(inValues(sql`persons.source`, condition.sources));
   if (condition.householdIds)
@@ -347,6 +368,10 @@ function conditionSql(
       condition.created
     )
   );
+  if (condition.createdWindow)
+    clauses.push(
+      contentRange(sql`persons.created_at`, condition.createdWindow)
+    );
   if (condition.tags) {
     const tagExists = (values: string[]) =>
       sql`select 1 from person_tags pt join tags tag on tag.id = pt.tag_id and tag.church_id = ${plantId}::uuid where pt.church_id = ${plantId}::uuid and pt.person_id = persons.id and ${inValues(sql`pt.tag_id`, values)}`;
@@ -543,7 +568,13 @@ function historySource(
     case "notes":
       return sql`select a.id, a.person_id, a.performed_by as author_id, ${localDate(sql`a.created_at`, plantId)} as date, a.created_at, a.activity_type::text as outcome, a.metadata->>'note' as content from person_activities a where a.church_id = ${plantId}::uuid and a.activity_type = 'note_added'`;
     case "activities":
-      return sql`select a.id, a.person_id, a.performed_by as author_id, ${localDate(sql`a.created_at`, plantId)} as date, a.created_at, a.activity_type::text as outcome, coalesce(a.metadata->>'note', a.metadata->>'description') as content from person_activities a where a.church_id = ${plantId}::uuid and ${resource.types ? inValues(sql`a.activity_type`, resource.types) : sql`true`}`;
+      return sql`select a.id, a.person_id, a.performed_by as author_id, ${localDate(sql`a.created_at`, plantId)} as date, a.created_at, a.activity_type::text as outcome,
+        case when a.activity_type = 'status_changed' and ${inValues(sql`a.metadata->>'oldStatus'`, personStatuses)} then a.metadata->>'oldStatus' end as old_stage,
+        case when a.activity_type = 'status_changed' and ${inValues(sql`a.metadata->>'newStatus'`, personStatuses)} then a.metadata->>'newStatus' end as new_stage,
+        case when a.activity_type = 'status_changed' then
+          case when jsonb_typeof(a.metadata->'reason') = 'string' then a.metadata->>'reason' end
+          else coalesce(a.metadata->>'note', a.metadata->>'description') end as content
+        from person_activities a where a.church_id = ${plantId}::uuid and ${resource.types ? inValues(sql`a.activity_type`, resource.types) : sql`true`}`;
     case "follow_up":
       return sql`select t.id, t.related_id as person_id, coalesce(t.completed_by_id, t.assigned_to_id) as author_id, ${localDate(sql`coalesce(t.completed_at, t.created_at)`, plantId)} as date, t.created_at, t.status::text as outcome, concat_ws(E'\n', t.title, t.description) as content from tasks t where t.church_id = ${plantId}::uuid and t.related_type = 'person' and t.category = 'follow_up' and t.deleted_at is null and t.parent_task_id is null and ${resource.state === "completed" ? sql`t.status = 'complete'` : resource.state === "open" ? sql`t.status <> 'complete'` : sql`true`}`;
   }
@@ -567,6 +598,7 @@ export function buildPeopleHistoryQuery(
   ]);
   const offset = input.contentOffset ?? 0;
   const base = sql`select id, person_id, household_id, label, author_id, author, date, created_at, outcome,
+    ${input.resource.kind === "activities" ? sql`old_stage, new_stage,` : sql``}
     substring(content from ${offset + 1} for 240) as content,
     char_length(content) as content_length, ${offset}::int as content_offset,
     case when char_length(content) > ${offset + 240} then ${offset + 240}::int else null end as content_next_offset from (
