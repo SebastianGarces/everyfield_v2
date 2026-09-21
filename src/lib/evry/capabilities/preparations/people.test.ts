@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { z } from "zod";
-import { PEOPLE_MODEL_PREPARATIONS } from "./people";
+import {
+  PEOPLE_MODEL_PREPARATIONS,
+  peoplePreparationRequestNamespace,
+} from "./people";
 import {
   applyPeopleCoreFields,
   PEOPLE_CORE_IDENTITIES,
@@ -19,6 +22,7 @@ import {
 } from "../people/households";
 import {
   parseEvryActionPlanCandidate,
+  deriveEvryPlanRequestKey,
   type EvryPlanCapabilityRegistry,
 } from "@/lib/evry/plans";
 import {
@@ -29,6 +33,33 @@ import { evryConversationPlanIdentitySchema } from "@/lib/evry/conversations/con
 import type { EvryPersonPayload } from "@/lib/people/evry-core";
 
 const personId = "20000000-0000-4000-8000-000000000001";
+test("all People preparation namespaces are valid, distinct, stable and preserve previously valid keys", () => {
+  const keys = new Set<string>();
+  for (const operation of PEOPLE_MODEL_PREPARATIONS) {
+    const namespace = peoplePreparationRequestNamespace(operation.id);
+    const parts: readonly [string, ...string[]] = [
+      "actor",
+      "plant",
+      "conversation",
+      "request",
+    ];
+    const key = deriveEvryPlanRequestKey(namespace, parts);
+    assert.equal(deriveEvryPlanRequestKey(namespace, parts), key);
+    assert.ok(!keys.has(key), operation.id);
+    keys.add(key);
+    if (!operation.id.includes("_"))
+      assert.equal(
+        key,
+        deriveEvryPlanRequestKey(`model-${operation.id}`, parts)
+      );
+    else
+      assert.throws(
+        () => deriveEvryPlanRequestKey(`model-${operation.id}`, parts),
+        /Invalid Evry plan request-key namespace/
+      );
+  }
+  assert.equal(keys.size, PEOPLE_MODEL_PREPARATIONS.length);
+});
 const basePerson: EvryPersonPayload = {
   firstName: "Ada",
   lastName: "Lovelace",

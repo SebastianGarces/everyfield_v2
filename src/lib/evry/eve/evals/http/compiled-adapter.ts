@@ -15,7 +15,15 @@ export function createCompiledEveEvalRunner(options: {
   timeoutMs?: number;
   onOutcome?(outcome: Awaited<ReturnType<typeof runCompiledEveFixture>>): void;
 }): ProductionEvalRunner {
-  return async ({ scenario, actor, sessionToken, now, signal, maxCostUsd }) => {
+  return async ({
+    scenario,
+    actor,
+    sessionToken,
+    now,
+    signal,
+    maxCostUsd,
+    attachments,
+  }) => {
     const outcome = await runCompiledEveFixture(
       {
         compiledEntry: options.compiledEntry,
@@ -24,6 +32,7 @@ export function createCompiledEveEvalRunner(options: {
         sessionToken,
         actor: { userId: actor.userId, plantId: actor.plantId },
         turns: scenario.turns,
+        attachments,
         now: now.toISOString(),
         maxCostUsd,
         prices: options.prices,

@@ -8,12 +8,14 @@ import {
   evePreparationInputSchema,
   selectedEvePreparationSchema,
 } from "../preparation";
+import { eveAttachmentInputSchema } from "./attachment-contract";
 
 /** Eve replays this schema factory from a canonical name, never a captured Zod object or identity. */
 export function eveRuntimeToolSchema(
   name: string,
   preparationOperations?: readonly string[]
 ) {
+  if (name === "files.inspect") return eveAttachmentInputSchema;
   if (name === "actions.prepare")
     return preparationOperations
       ? selectedEvePreparationSchema(preparationOperations)

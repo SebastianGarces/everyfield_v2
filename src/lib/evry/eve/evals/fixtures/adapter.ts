@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { authorizeEvryReadCapabilityForSession } from "@/lib/evry/eligibility/capabilities";
 import {
@@ -130,8 +130,8 @@ import {
   bindContentActionTurns,
   observedPeopleCsvFacts,
   observedBookmarkPlanFacts,
-  type PeopleReviewAttachment,
 } from "./content-actions";
+import type { CompiledFixtureRequest } from "../http/process-contract";
 import {
   readinessCohortFixtureIds,
   seedReadinessCohortFixture,
@@ -160,8 +160,10 @@ import {
 
 type FixtureTransports = {
   prepareDocumentFiles?: DocumentFixtureTransport;
-  /** Caller configures the production host with the same attachment signing key. */
-  preparePeopleCsv?(manifest: FixtureManifest): Promise<PeopleReviewAttachment>;
+  /** Native staging runs after the host creates the owned chat session. */
+  preparePeopleCsv?(
+    manifest: FixtureManifest
+  ): Promise<NonNullable<CompiledFixtureRequest["attachments"]>[number]>;
 };
 
 type Scenario = EvalQuestion | Regression;
@@ -177,6 +179,7 @@ type ProductionOutcome = Pick<
   costUsd: number;
   /** Trusted server-side observation journal. Never populate this from model or browser data. */
   hostCapture?: FixtureHostCapture;
+  eveSessionId?: string;
 };
 export type ProductionEvalRunner = (input: {
   scenario: Scenario;
@@ -185,6 +188,7 @@ export type ProductionEvalRunner = (input: {
   sessionId: string;
   /** Disposable fixture cookie token, not the stored hash. Never log it. */
   sessionToken: string;
+  attachments?: CompiledFixtureRequest["attachments"];
   now: Date;
   signal: AbortSignal;
   maxCostUsd: number;
@@ -192,6 +196,36 @@ export type ProductionEvalRunner = (input: {
   onPresentResult(callId: string): void;
 }) => Promise<ProductionOutcome>;
 const record = z.record(z.string(), z.unknown());
+
+/** Resolve observed IDs against stored ownership and independent fixture byte truth. */
+function observedBoundPeopleCsvFacts(
+  manifest: FixtureManifest,
+  store: FixtureStore,
+  calls: readonly CapturedCall[],
+  sessionId: string,
+  bytesBase64: string
+) {
+  const call = calls.findLast((entry) => entry.name === "files.inspect");
+  const input = z
+    .strictObject({ attachmentId: z.string().uuid() })
+    .safeParse(call?.input);
+  if (!input.success) return null;
+  const digest = createHash("sha256")
+    .update(Buffer.from(bytesBase64, "base64"))
+    .digest("hex");
+  const quote = (value: string) => `'${value.replaceAll("'", "''")}'`;
+  const rows = store.query(`select a.id from evry_eve_attachments a
+    join evry_eve_sessions s on s.id=a.session_id
+    where a.id=${quote(input.data.attachmentId)}::uuid and a.session_id=${quote(sessionId)}
+      and a.church_id='${manifest.ids.plant}' and a.user_id='${manifest.ids.actor}'
+      and s.church_id=a.church_id and s.user_id=a.user_id and s.archived_at is null
+      and a.kind='people_csv' and a.digest=${quote(digest)} and a.expires_at>now()`);
+  if (rows.length !== 1) return null;
+  return observedPeopleCsvFacts(calls, {
+    attachmentId: input.data.attachmentId,
+    attachmentDigest: digest,
+  });
+}
 const boundCases = new Set([
   "regression-today",
   "regression-followup-priority",
@@ -629,11 +663,7 @@ export function createProductionEveEvalAdapter(
           scenario.id === "documents-06"
             ? {
                 ...scenario,
-                turns: bindContentActionTurns(
-                  manifest,
-                  scenario.turns,
-                  peopleCsv
-                ),
+                turns: bindContentActionTurns(manifest, scenario.turns),
               }
             : scenario.id === "documents-04"
               ? {
@@ -689,6 +719,15 @@ export function createProductionEveEvalAdapter(
             let refusedAuthorizations = 0;
             let outbound = 0;
             const registry = createEveToolRegistry({
+              async resolveAttachment(attachmentId, kind) {
+                const { eveAttachments } =
+                  await import("../../runtime/attachments");
+                return eveAttachments.resolve(
+                  { ...actor, sessionId: manifest.sessionId },
+                  attachmentId,
+                  kind
+                );
+              },
               context: {
                 actor,
                 literalUserText: boundScenario.turns.join("\n"),
@@ -762,6 +801,7 @@ export function createProductionEveEvalAdapter(
                     actor,
                     sessionId: manifest.sessionId,
                     sessionToken: manifest.sessionToken,
+                    attachments: peopleCsv ? [peopleCsv] : undefined,
                     now: new Date(now),
                     signal,
                     maxCostUsd,
@@ -833,8 +873,14 @@ export function createProductionEveEvalAdapter(
                       calls,
                       presented
                     )
-                  : peopleCsv
-                    ? observedPeopleCsvFacts(calls, peopleCsv)
+                  : peopleCsv && result.eveSessionId
+                    ? observedBoundPeopleCsvFacts(
+                        manifest,
+                        options.store,
+                        calls,
+                        result.eveSessionId,
+                        peopleCsv.bytesBase64
+                      )
                     : null;
               if (contentAction) {
                 Object.assign(captured.facts, contentAction.facts);

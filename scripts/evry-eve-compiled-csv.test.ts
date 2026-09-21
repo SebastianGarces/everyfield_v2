@@ -8,7 +8,7 @@ import { observationSchema } from "@/lib/evry/eve/evals/contract";
 import { startFixtureStack } from "@/lib/evry/eve/evals/fixtures/stack";
 import { createFixtureStore } from "@/lib/evry/eve/evals/fixtures/store";
 import { startDocumentFixtureStorage } from "@/lib/evry/eve/evals/fixtures/document-storage";
-import { createPeopleReviewAttachment } from "@/lib/evry/eve/evals/fixtures/content-actions";
+import { peopleReviewUpload } from "@/lib/evry/eve/evals/fixtures/content-actions";
 import { createCompiledEveEvalRunner } from "@/lib/evry/eve/evals/http/compiled-adapter";
 
 test(
@@ -17,7 +17,9 @@ test(
   async () => {
     const stack = await startFixtureStack(process.cwd());
     try {
-      const storage = await startDocumentFixtureStorage();
+      const storage = await startDocumentFixtureStorage({
+        allowNativeUploads: true,
+      });
       const previousEndpoint = neonConfig.fetchEndpoint;
       const environment = {
         ...storage.environment,
@@ -40,11 +42,7 @@ test(
           store: createFixtureStore(stack.container),
           buildSha: "0".repeat(40),
           captureMode: "isolated_http",
-          preparePeopleCsv: (manifest) =>
-            createPeopleReviewAttachment(
-              manifest,
-              storage.environment.AWS_SECRET_ACCESS_KEY
-            ),
+          preparePeopleCsv: async (manifest) => peopleReviewUpload(manifest),
           runProduction: createCompiledEveEvalRunner({
             compiledEntry: resolve(".output/server/index.mjs"),
             databaseUrl: stack.databaseUrl,
@@ -57,17 +55,22 @@ test(
             },
             model(bound) {
               assert.equal(bound.turns[0], scenario.turns[0]);
-              const supplied = bound.turns.at(-1)!;
-              const attachmentReference =
-                supplied.match(/Reference: (\S+)/)?.[1];
-              const attachmentDigest = supplied.match(
-                /SHA-256: ([a-f0-9]{64})/
-              )?.[1];
-              assert.ok(attachmentReference && attachmentDigest);
+              assert.ok(!bound.turns.join("\n").includes("Reference:"));
               return {
                 mode: "scripted",
                 responses: [
-                  { text: "Please attach the CSV you want reviewed." },
+                  {
+                    toolCalls: [
+                      {
+                        id: "ask-file",
+                        name: "ask_question",
+                        input: {
+                          prompt: "Please attach the CSV you want reviewed.",
+                          allowFreeform: true,
+                        },
+                      },
+                    ],
+                  },
                   {
                     toolCalls: [
                       {
@@ -82,7 +85,7 @@ test(
                       {
                         id: "review-csv",
                         name: "files_inspect",
-                        input: { attachmentReference, attachmentDigest },
+                        input: { attachmentId: "$attachment:0" },
                       },
                     ],
                   },
@@ -99,6 +102,11 @@ test(
                 ["files.inspect"]
               );
               assert.equal(outcome.hostCapture.outboundMessages, 0);
+              assert.equal(outcome.runtimeProof?.attachments?.length, 1);
+              const attachment = outcome.runtimeProof!.attachments![0]!;
+              assert.equal(attachment.modelSawBinding, true);
+              assert.equal(attachment.rawReferenceHiddenFromModel, true);
+              assert.equal(attachment.rawReferenceHiddenFromOutput, true);
             },
           }),
         });
@@ -120,10 +128,12 @@ test(
           domainWrites: 0,
           outboundMessages: 0,
         });
-        assert.deepEqual(
-          storage.requestedKeys,
-          [],
-          "The signed inline file needs no bucket access"
+        assert.ok(
+          storage.requestedKeys.length > 0,
+          "Native staging must read and write fixture storage"
+        );
+        assert.ok(
+          storage.requestedKeys.every((key) => key.startsWith("evry-inputs/"))
         );
       } finally {
         try {

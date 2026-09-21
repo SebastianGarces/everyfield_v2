@@ -12,6 +12,10 @@ import { CONTENT_QUERY_READS } from "@/lib/evry/capabilities/queries/content";
 import { COMMITMENT_DOWNLOAD_READ } from "@/lib/evry/capabilities/people/file-reads";
 import { EVE_CAPABILITY_CATALOG } from "./catalog";
 import {
+  eveAttachmentInputSchema,
+  type EveAttachmentResolver,
+} from "../runtime/attachment-contract";
+import {
   extendedEveReadSchema,
   extendedEveReadIdentities,
   resolveEveReadInvocation,
@@ -83,6 +87,7 @@ export function createEveToolRegistry(options: {
   helperDependencies?: EveHelperDependencies;
   /** Isolated adapters exercise the actual registry without a shared database. */
   reads?: readonly EvryReadRegistration[];
+  resolveAttachment?: EveAttachmentResolver;
 }): EveToolRegistry {
   const { context } = options;
   const reads = options.reads ?? EVE_READ_REGISTRATIONS;
@@ -97,7 +102,10 @@ export function createEveToolRegistry(options: {
       name: read.id,
       description:
         descriptions.get(read.id) ?? read.inputSchema.description ?? read.id,
-      inputSchema: extendedEveReadSchema(read),
+      inputSchema:
+        read.id === "files.inspect"
+          ? eveAttachmentInputSchema
+          : extendedEveReadSchema(read),
       effect: "read" as const,
       capabilityIdentities: extendedEveReadIdentities(read),
     })),
@@ -174,6 +182,20 @@ export function createEveToolRegistry(options: {
         )
           return { status: "unavailable", reason: "not_authorized" };
         invocation.signal?.throwIfAborted();
+        let readInput = resolved?.input;
+        if (name === "files.inspect") {
+          const { attachmentId } = eveAttachmentInputSchema.parse(parsed.data);
+          const attachment = await options.resolveAttachment?.(
+            attachmentId,
+            "people_csv"
+          );
+          if (!attachment)
+            return { status: "unavailable", reason: "attachment_unavailable" };
+          readInput = {
+            attachmentReference: attachment.reference,
+            attachmentDigest: attachment.digest,
+          };
+        }
         result = read
           ? await executeAuthorizedEvryRead(
               read,
@@ -183,7 +205,7 @@ export function createEveToolRegistry(options: {
                 pageContext: context.pageContext,
                 now: context.now,
               },
-              resolved?.input
+              readInput
             )
           : await helper!.run(authorization, parsed.data);
       }

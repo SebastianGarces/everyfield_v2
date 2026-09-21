@@ -7,6 +7,7 @@ import {
   EVE_APP_ROUTES,
   validateEveMessageRequest,
   scopeEveCreationRequest,
+  bindEveAttachmentContext,
 } from "./transport-policy";
 import { evePageHintMessage } from "./client-context";
 
@@ -64,13 +65,22 @@ export const evryEveChannel = {
               { ok: false, error: "Invalid message request." },
               { status: 400 }
             );
+          const attachmentRequest = await bindEveAttachmentContext(
+            request,
+            authenticatedSessionOf(principal)
+          );
+          if (!attachmentRequest)
+            return Response.json(
+              { ok: false, error: "Attachment unavailable." },
+              { status: 404 }
+            );
           const boundRequest =
             route.path === "/eve/v1/session"
               ? await scopeEveCreationRequest(
-                  request,
+                  attachmentRequest,
                   authenticatedSessionOf(principal)
                 )
-              : request;
+              : attachmentRequest;
           const response = await route.handler(boundRequest, args);
           if (response.ok && route.path === "/eve/v1/session") {
             const body = acceptedSession.parse(await response.clone().json());

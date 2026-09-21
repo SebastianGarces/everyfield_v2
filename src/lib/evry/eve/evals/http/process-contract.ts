@@ -19,6 +19,24 @@ export const compiledFixtureRequest = z
         ])
       )
       .min(1),
+    /** Fixture-owned bytes delivered by native staging, never pasted into a model turn. */
+    attachments: z
+      .array(
+        z.strictObject({
+          turnIndex: z.number().int().nonnegative(),
+          kind: z.enum(["people_csv", "person_photo", "commitment_document"]),
+          name: z.string().min(1).max(255),
+          contentType: z.string().min(1).max(100),
+          bytesBase64: z
+            .string()
+            .min(1)
+            .max(14_000_000)
+            .regex(/^[A-Za-z0-9+/]+={0,2}$/),
+          personId: z.string().uuid().nullable(),
+        })
+      )
+      .max(4)
+      .optional(),
     now: z.string().datetime(),
     maxCostUsd: z.number().positive(),
     prices: z.strictObject({
@@ -86,6 +104,19 @@ export const compiledFixtureRequest = z
       }),
     ]),
   })
+  .refine(
+    (request) =>
+      !request.attachments ||
+      (new Set(request.attachments.map((item) => item.turnIndex)).size ===
+        request.attachments.length &&
+        request.attachments.every(
+          (item) => item.turnIndex < request.turns.length
+        )),
+    {
+      message: "Attachments need distinct existing turn indices",
+      path: ["attachments"],
+    }
+  )
   .refine((request) => !request.routing || request.model.mode === "scripted", {
     message: "Injected routing requires a scripted fixture",
     path: ["routing"],
@@ -139,6 +170,18 @@ export const httpEvalOutcomeSchema = z.object({
   messages: z.array(fixtureMessageSchema),
   runtimeProof: z
     .object({
+      attachments: z
+        .array(
+          z.object({
+            turnIndex: z.number().int().nonnegative(),
+            attachmentId: z.string().uuid(),
+            digest: z.string().regex(/^[a-f0-9]{64}$/),
+            modelSawBinding: z.boolean().nullable(),
+            rawReferenceHiddenFromModel: z.boolean().nullable(),
+            rawReferenceHiddenFromOutput: z.boolean(),
+          })
+        )
+        .optional(),
       availableTools: z.array(z.string()),
       modelRequests: z
         .array(

@@ -19,6 +19,8 @@ import {
 } from "./review-state";
 import { withPreparationGate } from "./preparation-gate";
 import { fixtureRun } from "./fixture-bridge";
+import { eveAttachments } from "./attachments";
+import type { EveAttachmentResolver } from "./attachment-contract";
 
 export function describeEveRuntimeTools(identity: EveAuthenticatedSession) {
   return createEveToolRegistry({
@@ -63,9 +65,16 @@ export function createBoundEveRegistry(
     pageContext: turn.pageContext,
     now: fixture?.now ?? new Date(),
   };
+  const resolveAttachment: EveAttachmentResolver = (id, kind) =>
+    eveAttachments.resolve(
+      { ...scope.actor, sessionId: scope.eveSessionId },
+      id,
+      kind
+    );
   const registry = createEveToolRegistry({
     context,
     authorizeRead,
+    resolveAttachment,
     preparation: createEvePreparation({
       ...context,
       conversationId: scope.conversationId,
@@ -73,6 +82,7 @@ export function createBoundEveRegistry(
         .update(`${scope.eveSessionId}:${scope.turnId}`)
         .digest("hex"),
       authorizeRead,
+      resolveAttachment,
     }),
   });
   return {

@@ -8,11 +8,16 @@ export type DocumentFixtureTransport = (
 ) => Promise<() => Promise<void>>;
 
 /** Configure these env values before importing storage.ts or spawning the host. */
-export async function startDocumentFixtureStorage() {
+export async function startDocumentFixtureStorage(
+  options: { allowNativeUploads?: boolean } = {}
+) {
   const objects = new Map<string, Uint8Array>();
   const requestedKeys: string[] = [];
-  const server = createServer((request, response) => {
-    if (request.method !== "GET") {
+  const server = createServer(async (request, response) => {
+    if (
+      request.method !== "GET" &&
+      !(request.method === "PUT" && options.allowNativeUploads)
+    ) {
       response.writeHead(405).end();
       return;
     }
@@ -20,6 +25,35 @@ export async function startDocumentFixtureStorage() {
       new URL(request.url!, "http://fixture.invalid").pathname
     ).replace(/^\/evry-fixture\//, "");
     requestedKeys.push(key);
+    if (request.method === "PUT") {
+      if (
+        !/^evry-inputs\/[a-f0-9-]{36}\/[a-f0-9-]{36}\/[a-zA-Z0-9/._-]+$/.test(
+          key
+        ) ||
+        key.includes("..")
+      ) {
+        response.writeHead(403).end();
+        return;
+      }
+      const chunks: Buffer[] = [];
+      let size = 0;
+      for await (const chunk of request) {
+        const bytes = Buffer.from(chunk);
+        size += bytes.length;
+        if (size > 3 * 1024 * 1024) {
+          response.writeHead(413).end();
+          return;
+        }
+        chunks.push(bytes);
+      }
+      if (objects.has(key) && request.headers["if-none-match"] === "*") {
+        response.writeHead(412).end();
+        return;
+      }
+      objects.set(key, Buffer.concat(chunks));
+      response.writeHead(200).end();
+      return;
+    }
     const body = objects.get(key);
     if (!body) {
       response

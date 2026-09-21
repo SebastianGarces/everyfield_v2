@@ -22,10 +22,36 @@ import {
   seedContentActionFixture,
   cleanupContentActionFixture,
   contentActionExpectations,
-  createPeopleReviewAttachment,
+  peopleReviewUpload,
   observedPeopleCsvFacts,
   observedBookmarkPlanFacts,
 } from "@/lib/evry/eve/evals/fixtures/content-actions";
+import type { EvryPeopleFileStorage } from "@/lib/evry/capabilities/people/file-storage";
+
+function isolatedStorage(secret: string): EvryPeopleFileStorage {
+  const objects = new Map<string, { body: Buffer; contentType: string }>();
+  return {
+    signingSecret: () => secret,
+    store: async () => {
+      throw new Error("Review must not write permanent files");
+    },
+    create: async (key, body, contentType) => {
+      if (objects.has(key)) return "exists";
+      objects.set(key, { body, contentType });
+      return "created";
+    },
+    read: async (key) => objects.get(key) ?? null,
+    remove: async (key) => {
+      objects.delete(key);
+    },
+    listKeys: async (prefix) =>
+      [...objects.keys()].filter((key) => key.startsWith(prefix)),
+    listObjects: async (prefix) =>
+      [...objects.keys()]
+        .filter((key) => key.startsWith(prefix))
+        .map((key) => ({ key, lastModified: new Date() })),
+  };
+}
 
 test(
   "CSV review and bookmark preparation use isolated production reads and persisted plans",
@@ -62,6 +88,9 @@ test(
         { authorizeEvryReadCapabilityForSession },
         { withAuthenticatedSessionId },
         { withEvryPeopleLiveProofStorage },
+        { eveSessionStore },
+        { eveAttachments },
+        { stageEvryPeopleAttachment },
       ] = await Promise.all([
         import("@/lib/evry/eve/capabilities/registry"),
         import("@/lib/evry/eve/preparation"),
@@ -69,6 +98,9 @@ test(
         import("@/lib/evry/eligibility/capabilities"),
         import("@/lib/auth/session-scope"),
         import("@/lib/evry/capabilities/people/file-storage"),
+        import("@/lib/evry/eve/runtime/session-store"),
+        import("@/lib/evry/eve/runtime/attachments"),
+        import("@/lib/evry/capabilities/people/attachments"),
       ]);
       const store = createFixtureStore(stack.container);
       for (const caseId of ["documents-06", "wiki-06"]) {
@@ -78,6 +110,16 @@ test(
         try {
           const expected = contentActionExpectations(m, store)!;
           const actor = await requireEvryPlantViewerForSession(m.sessionId);
+          await eveSessionStore.register(m.sessionId, actor);
+          const resolveAttachment = (
+            attachmentId: string,
+            kind?: Parameters<typeof eveAttachments.resolve>[2]
+          ) =>
+            eveAttachments.resolve(
+              { ...actor, sessionId: m.sessionId },
+              attachmentId,
+              kind
+            );
           const authorizeRead = (identity: string) =>
             authorizeEvryReadCapabilityForSession(identity, m.sessionId);
           const registry = createEveToolRegistry({
@@ -91,6 +133,7 @@ test(
               now: FIXTURE_NOW,
             },
             authorizeRead,
+            resolveAttachment,
             preparation: createEvePreparation({
               actor,
               conversationId: randomUUID(),
@@ -99,6 +142,7 @@ test(
               pageContext: null,
               now: FIXTURE_NOW,
               authorizeRead,
+              resolveAttachment,
             }),
           });
           const calls: CapturedCall[] = [];
@@ -115,120 +159,135 @@ test(
               "all CSV rows, tenant-scoped duplicate, missing name and wrong attachment controls",
               async () => {
                 const secret = "isolated-content-action-fixture-secret";
-                const unavailable = async (): Promise<never> => {
-                  throw new Error("Inline CSV must not use external storage");
-                };
-                const storage = {
-                  signingSecret: () => secret,
-                  store: unavailable,
-                  create: unavailable,
-                  read: unavailable,
-                  remove: unavailable,
-                  listKeys: unavailable,
-                  listObjects: unavailable,
-                };
-                await withEvryPeopleLiveProofStorage(storage, async () => {
-                  const attachment = await createPeopleReviewAttachment(
-                    m,
-                    secret
-                  );
-                  const before = store.query(
-                    `select id,first_name,last_name,email,deleted_at from persons order by id`
-                  );
-                  const output = await invoke("files.inspect", attachment);
-                  const preview = capturedReadArtifactSchema
-                    .extend({
-                      counts: z.object({
-                        matched: z.number(),
-                        returned: z.number(),
-                        excluded: z.number(),
-                      }),
-                      exclusions: z.array(z.unknown()),
-                    })
-                    .parse(output);
-                  assert.deepEqual(preview.counts, {
-                    matched: 5,
-                    returned: 5,
-                    excluded: 0,
-                  });
-                  assert.deepEqual(preview.exclusions, []);
-                  assert.deepEqual(
-                    preview.items
-                      .find((item) => item.id === "csv-row-3")
-                      ?.facts?.find((fact) => fact.label === "Needs attention"),
-                    {
-                      label: "Needs attention",
-                      value: "Add a first name.",
-                    }
-                  );
-                  assert.deepEqual(
-                    observedPeopleCsvFacts(calls, attachment).facts,
-                    expected.facts
-                  );
-                  const partial = structuredClone(calls.at(-1)!);
-                  const value = z
-                    .object({ items: z.array(z.unknown()) })
-                    .passthrough()
-                    .parse(partial.output);
-                  partial.output = { ...value, items: value.items.slice(0, 4) };
-                  assert.notDeepEqual(
-                    observedPeopleCsvFacts([partial], attachment).facts,
-                    expected.facts
-                  );
-                  const wrong = await invoke("files.inspect", {
-                    ...attachment,
-                    attachmentDigest: "0".repeat(64),
-                  });
-                  assert.equal(
-                    capturedReadArtifactSchema.parse(wrong).items.length,
-                    0
-                  );
-                  assert.deepEqual(
-                    observedPeopleCsvFacts(calls, attachment).facts,
-                    {}
-                  );
-                  const foreign = await createPeopleReviewAttachment(
-                    {
-                      ...m,
-                      ids: {
-                        ...m.ids,
-                        actor: m.ids["foreign-actor"],
-                        plant: m.ids["foreign-plant"],
-                      },
-                    },
-                    secret
-                  );
-                  assert.equal(
-                    capturedReadArtifactSchema.parse(
-                      await invoke("files.inspect", foreign)
-                    ).items.length,
-                    0
-                  );
-                  const expired = await createPeopleReviewAttachment(
-                    m,
-                    secret,
-                    new Date("2020-01-01")
-                  );
-                  assert.equal(
-                    capturedReadArtifactSchema.parse(
-                      await invoke("files.inspect", expired)
-                    ).items.length,
-                    0
-                  );
-                  assert.deepEqual(
-                    store.query(
+                const storage = isolatedStorage(secret);
+                await withEvryPeopleLiveProofStorage(storage, () =>
+                  withAuthenticatedSessionId(m.sessionId, async () => {
+                    const upload = peopleReviewUpload(m);
+                    const staged = await stageEvryPeopleAttachment({
+                      actor,
+                      kind: "people_csv",
+                      personId: null,
+                      file: new File(
+                        [Buffer.from(upload.bytesBase64, "base64")],
+                        upload.name,
+                        { type: upload.contentType }
+                      ),
+                    });
+                    assert.ok(staged);
+                    const bound = await eveAttachments.bind(
+                      { ...actor, sessionId: m.sessionId },
+                      {
+                        kind: "people_csv",
+                        reference: staged.reference,
+                        digest: staged.metadata.digest,
+                      }
+                    );
+                    assert.ok(bound);
+                    const attachment = {
+                      attachmentId: bound.attachmentId,
+                      attachmentDigest: staged.metadata.digest,
+                    };
+                    const before = store.query(
                       `select id,first_name,last_name,email,deleted_at from persons order by id`
-                    ),
-                    before,
-                    "Review must never import or merge"
-                  );
-                  assert.ok(JSON.stringify(output).includes("Ada Existing"));
-                  assert.ok(
-                    !JSON.stringify(output).includes(
-                      contentActionId(m, "foreign-match")
-                    )
-                  );
-                });
+                    );
+                    const output = await invoke("files.inspect", {
+                      attachmentId: attachment.attachmentId,
+                    });
+                    const preview = capturedReadArtifactSchema
+                      .extend({
+                        counts: z.object({
+                          matched: z.number(),
+                          returned: z.number(),
+                          excluded: z.number(),
+                        }),
+                        exclusions: z.array(z.unknown()),
+                      })
+                      .parse(output);
+                    assert.deepEqual(preview.counts, {
+                      matched: 5,
+                      returned: 5,
+                      excluded: 0,
+                    });
+                    assert.deepEqual(preview.exclusions, []);
+                    assert.deepEqual(
+                      preview.items
+                        .find((item) => item.id === "csv-row-3")
+                        ?.facts?.find(
+                          (fact) => fact.label === "Needs attention"
+                        ),
+                      {
+                        label: "Needs attention",
+                        value: "Add a first name.",
+                      }
+                    );
+                    assert.deepEqual(
+                      observedPeopleCsvFacts(calls, attachment).facts,
+                      expected.facts
+                    );
+                    const partial = structuredClone(calls.at(-1)!);
+                    const value = z
+                      .object({ items: z.array(z.unknown()) })
+                      .passthrough()
+                      .parse(partial.output);
+                    partial.output = {
+                      ...value,
+                      items: value.items.slice(0, 4),
+                    };
+                    assert.notDeepEqual(
+                      observedPeopleCsvFacts([partial], attachment).facts,
+                      expected.facts
+                    );
+                    store.sql(
+                      `update evry_eve_attachments set digest='${"0".repeat(64)}' where id='${attachment.attachmentId}'`
+                    );
+                    const wrong = await invoke("files.inspect", {
+                      attachmentId: attachment.attachmentId,
+                    });
+                    assert.equal(
+                      z.object({ status: z.string() }).parse(wrong).status,
+                      "unavailable"
+                    );
+                    assert.deepEqual(
+                      observedPeopleCsvFacts(calls, attachment).facts,
+                      {}
+                    );
+                    store.sql(
+                      `update evry_eve_attachments set digest='${staged.metadata.digest}', church_id='${m.ids["foreign-plant"]}',user_id='${m.ids["foreign-actor"]}' where id='${attachment.attachmentId}'`
+                    );
+                    assert.equal(
+                      z.object({ status: z.string() }).parse(
+                        await invoke("files.inspect", {
+                          attachmentId: attachment.attachmentId,
+                        })
+                      ).status,
+                      "unavailable"
+                    );
+                    store.sql(
+                      `update evry_eve_attachments set church_id='${actor.plantId}',user_id='${actor.userId}',expires_at=now()-interval '1 second' where id='${attachment.attachmentId}'`
+                    );
+                    assert.equal(
+                      z.object({ status: z.string() }).parse(
+                        await invoke("files.inspect", {
+                          attachmentId: attachment.attachmentId,
+                        })
+                      ).status,
+                      "unavailable"
+                    );
+                    assert.deepEqual(
+                      store.query(
+                        `select id,first_name,last_name,email,deleted_at from persons order by id`
+                      ),
+                      before,
+                      "Review must never import or merge"
+                    );
+                    assert.ok(JSON.stringify(output).includes("Ada Existing"));
+                    assert.ok(
+                      !JSON.stringify(output).includes(
+                        contentActionId(m, "foreign-match")
+                      )
+                    );
+                  })
+                );
               }
             );
           } else {
@@ -345,18 +404,7 @@ test(
           const { collectResult, publicResultArtifacts } =
             await import("@/lib/evry/eve/runtime/results");
           const secret = "isolated-adapter-content-action-secret";
-          const unavailable = async (): Promise<never> => {
-            throw new Error("Inline CSV must not use external storage");
-          };
-          const storage = {
-            signingSecret: () => secret,
-            store: unavailable,
-            create: unavailable,
-            read: unavailable,
-            remove: unavailable,
-            listKeys: unavailable,
-            listObjects: unavailable,
-          };
+          const storage = isolatedStorage(secret);
           let variant: "correct" | "wrong-digest" | "unshown" = "correct";
           const boundSessions: string[] = [];
           const boundPlants: string[] = [];
@@ -381,35 +429,54 @@ test(
           const adapter = createProductionEveEvalAdapter({
             store,
             buildSha: "0".repeat(40),
-            preparePeopleCsv: (manifest) =>
-              createPeopleReviewAttachment(manifest, secret),
+            preparePeopleCsv: async (manifest) => peopleReviewUpload(manifest),
             async runProduction({
               scenario,
               registry,
               onPresentResult,
               sessionId,
               actor,
+              attachments,
             }) {
               boundSessions.push(sessionId);
               boundPlants.push(actor.plantId);
               if (scenario.id === "documents-06") {
                 assert.equal(scenario.turns[0], csvScenario.turns[0]);
                 assert.equal(scenario.turns.length, 2);
-                // Read the actual visible attachment turn, not hidden fixture IDs.
-                const supplied =
-                  /Reference: (\S+)\nSHA-256: ([a-f0-9]{64})/.exec(
-                    scenario.turns[1]!
+                assert.equal(
+                  scenario.turns[1],
+                  "Here is the People CSV. Review only. Do not import any rows."
+                );
+                const upload = attachments?.[0];
+                assert.ok(upload);
+                await eveSessionStore.register(sessionId, actor);
+                const staged = await stageEvryPeopleAttachment({
+                  actor,
+                  kind: "people_csv",
+                  personId: null,
+                  file: new File(
+                    [Buffer.from(upload.bytesBase64, "base64")],
+                    upload.name,
+                    { type: upload.contentType }
+                  ),
+                });
+                assert.ok(staged);
+                const bound = await eveAttachments.bind(
+                  { ...actor, sessionId },
+                  {
+                    kind: "people_csv",
+                    reference: staged.reference,
+                    digest: staged.metadata.digest,
+                  }
+                );
+                assert.ok(bound);
+                if (variant === "wrong-digest")
+                  store.sql(
+                    `update evry_eve_attachments set digest='${"0".repeat(64)}' where id='${bound.attachmentId}'`
                   );
-                assert.ok(supplied);
                 await registry.invoke(
                   "files.inspect",
-                  {
-                    attachmentReference: supplied[1]!,
-                    attachmentDigest:
-                      variant === "wrong-digest"
-                        ? "0".repeat(64)
-                        : supplied[2]!,
-                  },
+                  { attachmentId: bound.attachmentId },
                   { callId: "adapter-csv" }
                 );
               } else {
@@ -464,6 +531,7 @@ test(
                 if (variant !== "unshown") onPresentResult("adapter-bookmark");
               }
               return {
+                eveSessionId: sessionId,
                 answer:
                   "Scripted production-path proof; answer quality not reviewed.",
                 clarificationCount: scenario.id === "documents-06" ? 1 : 0,

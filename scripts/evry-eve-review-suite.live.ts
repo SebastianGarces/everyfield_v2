@@ -11,7 +11,7 @@ import { gradeObservation } from "@/lib/evry/eve/evals/grade";
 import { startFixtureStack } from "@/lib/evry/eve/evals/fixtures/stack";
 import { createFixtureStore } from "@/lib/evry/eve/evals/fixtures/store";
 import { startDocumentFixtureStorage } from "@/lib/evry/eve/evals/fixtures/document-storage";
-import { createPeopleReviewAttachment } from "@/lib/evry/eve/evals/fixtures/content-actions";
+import { peopleReviewUpload } from "@/lib/evry/eve/evals/fixtures/content-actions";
 import { createCompiledEveEvalRunner } from "@/lib/evry/eve/evals/http/compiled-adapter";
 import { withLiveReviewBudget } from "./evry-eve-live-budget";
 
@@ -56,7 +56,9 @@ async function main() {
   const previousStorageEnvironment = new Map<string, string | undefined>();
   try {
     if (ids.includes("documents-04") || ids.includes("documents-06")) {
-      documentStorage = await startDocumentFixtureStorage();
+      documentStorage = await startDocumentFixtureStorage({
+        allowNativeUploads: ids.includes("documents-06"),
+      });
       for (const [name, value] of Object.entries(documentStorage.environment)) {
         previousStorageEnvironment.set(name, process.env[name]);
         process.env[name] = value;
@@ -69,9 +71,6 @@ async function main() {
     neonConfig.fetchEndpoint = stack.proxyUrl;
     const { createProductionEveEvalAdapter } =
       await import("@/lib/evry/eve/evals/fixtures/adapter");
-    const csvSigningSecret = ids.includes("documents-06")
-      ? documentStorage?.environment.AWS_SECRET_ACCESS_KEY
-      : undefined;
     let currentCase = "";
     const compiled = createCompiledEveEvalRunner({
       compiledEntry: resolve(".output/server/index.mjs"),
@@ -92,8 +91,8 @@ async function main() {
       buildSha,
       captureMode: "isolated_http",
       prepareDocumentFiles: documentStorage?.prepareFiles,
-      preparePeopleCsv: csvSigningSecret
-        ? (manifest) => createPeopleReviewAttachment(manifest, csvSigningSecret)
+      preparePeopleCsv: ids.includes("documents-06")
+        ? async (manifest) => peopleReviewUpload(manifest)
         : undefined,
       runProduction: (input) =>
         withLiveReviewBudget(ledger, 1, async () => {

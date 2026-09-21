@@ -2,6 +2,15 @@ import assert from "node:assert/strict";
 import { mock, test } from "node:test";
 import { createElement, useEffect } from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
+import { z } from "zod";
+
+const fileDescriptor = {
+  attachmentId: "10000000-0000-4000-8000-000000000099",
+  kind: "people_csv",
+  name: "people.csv",
+  size: 9,
+  personId: null,
+};
 
 let pathname = "/dashboard";
 mock.module("next/navigation", {
@@ -401,8 +410,17 @@ for (const failure of [
     });
   }
 
-for (const file of [false, true]) {
-  test(`a lost first POST keeps ${file ? "the staged file" : "the draft"} and retries the same creation operation`, async (t) => {
+for (const failure of [
+  "message",
+  "prewarm",
+  "binding",
+  "expired-binding",
+  "expired-duplicates",
+] as const) {
+  const file = failure !== "message";
+  const expired =
+    failure === "expired-binding" || failure === "expired-duplicates";
+  test(`a failed ${failure} request keeps ${file ? "the staged file" : "the draft"} and does not duplicate chat creation`, async (t) => {
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
     t.mock.method(console, "error", () => {});
     const posts: {
@@ -410,6 +428,9 @@ for (const file of [false, true]) {
       operationId: string | null;
     }[] = [];
     let stream!: ReadableStreamDefaultController<Uint8Array>;
+    let bindings = 0;
+    let stages = 0;
+    const boundReferences: string[] = [];
     const metadata = {
       id: "recovered-eve-session",
       conversationId: "10000000-0000-4000-8000-000000000002",
@@ -423,13 +444,71 @@ for (const file of [false, true]) {
       async (input: string | URL | Request, init?: RequestInit) => {
         if (String(input).startsWith("/api/evry/eve/sessions"))
           return Response.json({ session: metadata });
+        if (String(input) === "/api/evry/eve/attachments") {
+          bindings++;
+          boundReferences.push(
+            z
+              .object({ reference: z.string() })
+              .parse(JSON.parse(String(init?.body))).reference
+          );
+          if (failure === "binding" && bindings === 1)
+            throw new TypeError("Binding response was lost");
+          if (expired && bindings === 1)
+            return Response.json({ status: "unavailable" }, { status: 404 });
+          return Response.json({ attachment: fileDescriptor });
+        }
+        if (String(input) === "/api/evry/people/attachments") {
+          stages++;
+          if (init?.body instanceof FormData)
+            return Response.json({ status: "stored" });
+          const body = z
+            .object({ action: z.string() })
+            .parse(JSON.parse(String(init?.body)));
+          return Response.json(
+            body.action === "prepare"
+              ? {
+                  status: "prepared",
+                  reference: "restaged-reference",
+                  chunkBytes: 3 * 1024 * 1024,
+                  chunkCount: 1,
+                }
+              : {
+                  status: "staged",
+                  reference: "restaged-reference",
+                  metadata: { digest: "a".repeat(64) },
+                  ...(failure === "expired-duplicates"
+                    ? {
+                        artifact: {
+                          kind: "read",
+                          items: [
+                            {
+                              id: "csv-row-2",
+                              label: "Alex Test",
+                              facts: [
+                                { label: "Status", value: "Duplicate review" },
+                                {
+                                  label: "Merge target",
+                                  value: "Alex Existing",
+                                },
+                              ],
+                            },
+                          ],
+                        },
+                      }
+                    : {}),
+                }
+          );
+        }
         if (init?.method === "POST") {
           posts.push({
-            body: JSON.parse(String(init.body)),
+            body: init.body ? JSON.parse(String(init.body)) : {},
             operationId: new Headers(init.headers).get("x-evry-operation-id"),
           });
-          if (posts.length === 1) {
-            if (file)
+          if (
+            posts.length === 1 &&
+            (failure === "message" || failure === "prewarm")
+          ) {
+            if (failure === "prewarm")
               return new Response("Service unavailable", { status: 503 });
             throw new TypeError("The accepted response was lost");
           }
@@ -437,6 +516,9 @@ for (const file of [false, true]) {
             ok: true,
             status: "accepted",
             sessionId: metadata.id,
+            ...(file && init.body
+              ? { deliveryId: "file-review-delivery" }
+              : {}),
           });
         }
         assert.match(
@@ -483,18 +565,19 @@ for (const file of [false, true]) {
     const text = file
       ? "Review importing people from people.csv."
       : "Where are we on launch?";
+    const fileInput = {
+      kind: "people_csv" as const,
+      file: new File(["name\nAlex"], "people.csv", { type: "text/csv" }),
+      prepared: {
+        reference: "signed-staged-reference",
+        digest: "digest",
+        duplicateRows: [],
+      },
+      duplicateResolutions: {},
+    };
     await act(async () => {
       if (file) {
-        const result = await shell.submitPeopleFile({
-          kind: "people_csv",
-          file: new File(["name\nAlex"], "people.csv", { type: "text/csv" }),
-          prepared: {
-            reference: "signed-staged-reference",
-            digest: "digest",
-            duplicateRows: [],
-          },
-          duplicateResolutions: {},
-        });
+        const result = await shell.submitPeopleFile(fileInput);
         assert.equal(
           result.status,
           "failed",
@@ -502,6 +585,131 @@ for (const file of [false, true]) {
         );
       } else await shell.sendMessageText(text);
     });
+    if (file) {
+      assert.equal(shell.sessionId, failure === "prewarm" ? null : metadata.id);
+      assert.equal(
+        shell.messages.length,
+        0,
+        "failed upload setup did not submit a turn"
+      );
+      const creationKey = posts[0]!.operationId;
+      assert.match(creationKey ?? "", /^[a-f0-9-]{36}$/);
+      let retry!: ReturnType<typeof shell.submitPeopleFile>;
+      await act(async () => {
+        retry = shell.submitPeopleFile(fileInput);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+      if (failure === "expired-duplicates") {
+        const refreshed = await retry;
+        assert.equal(refreshed.status, "needs_duplicate_resolution");
+        if (refreshed.status !== "needs_duplicate_resolution")
+          throw new Error("Expected refreshed duplicate choices");
+        assert.deepEqual(
+          refreshed.prepared.duplicateRows.map((row) => row.mergeTarget),
+          ["Alex Existing"]
+        );
+        assert.equal(
+          posts.length,
+          1,
+          "new duplicate results require review before submitting a chat turn"
+        );
+        await act(async () => {
+          retry = shell.submitPeopleFile({
+            ...fileInput,
+            prepared: refreshed.prepared,
+            duplicateResolutions: { "2": "skip" },
+          });
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        });
+      }
+      assert.equal(
+        posts.length,
+        failure === "prewarm" ? 3 : 2,
+        "binding retry reuses the created chat; prewarm retry retains its creation identity"
+      );
+      if (failure === "prewarm")
+        assert.equal(
+          posts[1]!.operationId,
+          creationKey,
+          "lost prewarm retains the same server creation identity"
+        );
+      assert.equal(posts[0]!.body.message, undefined);
+      if (failure === "prewarm")
+        assert.equal(posts[1]!.body.message, undefined);
+      const context = z
+        .object({ attachment: z.object({ attachmentId: z.string() }) })
+        .parse(posts.at(-1)!.body.clientContext);
+      assert.equal(
+        context.attachment.attachmentId,
+        fileDescriptor.attachmentId
+      );
+      assert.equal(
+        JSON.stringify(posts).includes("signed-staged-reference"),
+        false
+      );
+      assert.equal(
+        stages,
+        expired ? 3 : 0,
+        "only a definitive unavailable binding restages the selected File"
+      );
+      if (expired)
+        assert.deepEqual(boundReferences, [
+          "signed-staged-reference",
+          "restaged-reference",
+        ]);
+      if (failure === "binding")
+        assert.deepEqual(boundReferences, [
+          "signed-staged-reference",
+          "signed-staged-reference",
+        ]);
+      let index = 0;
+      const emit = (type: string, data: object) =>
+        stream.enqueue(
+          new TextEncoder().encode(
+            JSON.stringify({
+              type,
+              data,
+              meta: {
+                id: `file-retry-${index++}`,
+                deliveryIds: ["file-review-delivery"],
+              },
+            }) + "\n"
+          )
+        );
+      await act(async () => {
+        emit("session.started", {});
+        emit("turn.started", { sequence: 1, turnId: "file-review-turn" });
+        emit("message.received", {
+          sequence: 1,
+          turnId: "file-review-turn",
+          message: text,
+        });
+        emit("message.appended", {
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "file-review-turn",
+          messageDelta: "Here is the review.",
+        });
+        emit("turn.completed", { sequence: 1, turnId: "file-review-turn" });
+        emit("session.waiting", { inputRequests: [] });
+        const result = await retry;
+        assert.equal(
+          result.status,
+          "submitted",
+          JSON.stringify({
+            result,
+            error: shell.error,
+            pending: shell.pendingMessage,
+          })
+        );
+      });
+      assert.equal(shell.sessionId, metadata.id);
+      assert.equal(
+        shell.messages.filter((message) => message.role === "user").length,
+        1
+      );
+      return;
+    }
     assert.equal(shell.sessionId, null);
     assert.equal(shell.draft, text);
     assert.equal(shell.pendingMessage?.body, text);
@@ -520,11 +728,6 @@ for (const file of [false, true]) {
       posts[0],
       "retry must retain the exact message, attachment, context, and creation identity"
     );
-    if (file)
-      assert.equal(
-        JSON.parse(String(posts[1]!.body.clientContext)).attachment.reference,
-        "signed-staged-reference"
-      );
     let index = 0;
     const emit = (type: string, data: object) =>
       stream.enqueue(
@@ -586,6 +789,8 @@ for (const accepted of [true, false]) {
       async (input: string | URL | Request, init?: RequestInit) => {
         if (String(input).startsWith("/api/evry/eve/sessions"))
           return Response.json({ session: metadata });
+        if (String(input) === "/api/evry/eve/attachments")
+          return Response.json({ attachment: fileDescriptor });
         if (init?.method === "POST") {
           posts++;
           bodies.push(JSON.parse(String(init.body)));
@@ -717,8 +922,14 @@ for (const accepted of [true, false]) {
       );
       assert.deepEqual(bodies[1], bodies[0]);
       assert.equal(
-        JSON.parse(String(bodies[1]!.clientContext)).attachment.reference,
-        "known-session-staged-reference"
+        z
+          .object({ attachment: z.object({ attachmentId: z.string() }) })
+          .parse(bodies[1]!.clientContext).attachment.attachmentId,
+        fileDescriptor.attachmentId
+      );
+      assert.equal(
+        JSON.stringify(bodies).includes("known-session-staged-reference"),
+        false
       );
       return;
     }

@@ -9,7 +9,7 @@ the grader, not the agent.
 
 The [production fixture registry](fixtures/README.md) currently binds 80 scenarios
 by default: 67 original questions and 13 regressions. Supplying both isolated
-document and signed CSV transports enables two more, leaving 76 of 158 unbound.
+document and native staged CSV transports enables two more, leaving 76 of 158 unbound.
 These counts describe runnable fixtures, not passing live answers. Readiness,
 notifications, task calendars and staffing keep separate factual, safety and
 independent answer-quality gates. A correct query can still produce a poor

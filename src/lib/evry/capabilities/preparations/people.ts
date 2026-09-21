@@ -155,6 +155,10 @@ type PreparationContext = {
 };
 
 /** Recovery precedes record reads, so retrying cannot re-plan against changed data. */
+export function peoplePreparationRequestNamespace(operation: string): string {
+  return `model-${operation.replaceAll("_", "-")}`;
+}
+
 function preparation<S extends z.ZodType>(config: {
   id: string;
   identity: string;
@@ -169,12 +173,15 @@ function preparation<S extends z.ZodType>(config: {
     capabilityIdentities: [config.identity],
     inputSchema: config.inputSchema,
     async run(input, args): Promise<EvryCapabilityConversationResult | null> {
-      const requestKey = deriveEvryPlanRequestKey(`model-${config.id}`, [
-        input.actor.userId,
-        input.actor.plantId,
-        input.conversation.id,
-        input.userRequestKey,
-      ]);
+      const requestKey = deriveEvryPlanRequestKey(
+        peoplePreparationRequestNamespace(config.id),
+        [
+          input.actor.userId,
+          input.actor.plantId,
+          input.conversation.id,
+          input.userRequestKey,
+        ]
+      );
       const stored = await findEvryActionPlanByRequestKey({
         actorUserId: input.actor.userId,
         plantId: input.actor.plantId,

@@ -16,6 +16,7 @@ import { fixtureTranscript } from "./transcript";
 import { observeClarifications } from "./clarifications";
 import { splitEveResponse } from "../../presentation";
 import type { Observation } from "../contract";
+import type { EveJsonValue } from "../../capabilities/registry";
 import { isDeepStrictEqual } from "node:util";
 import {
   projectEveMessage,
@@ -104,6 +105,11 @@ export function createHttpEveEvalRunner(config: {
     | "EVRY_SCRIPTED_COMPACTION_FAILURE";
   /** Fixture-only restart path: attach and read, never create or submit. */
   replaySessionId?: string;
+  /** Isolated native-upload setup; returns only the normal model-safe client context. */
+  beforeTurn?(input: {
+    turnIndex: number;
+    sessionId: string;
+  }): Promise<Record<string, EveJsonValue> | undefined>;
   onEvent?: (event: MessageStreamEvent) => void;
 }) {
   assertIsolatedFixtureTarget(config.origin, config.databaseUrl);
@@ -196,9 +202,14 @@ export function createHttpEveEvalRunner(config: {
         const options = {
           signal,
           streamReconnectPolicy: { reconnect: false as const },
+          clientContext: await config.beforeTurn?.({
+            turnIndex: index,
+            sessionId: session.state.sessionId,
+          }),
         };
         const response =
-          typeof turn === "string" && !questionReply
+          typeof turn === "string" &&
+          (!questionReply || options.clientContext?.attachment)
             ? await session.send(turn, options)
             : await session.respond(
                 [

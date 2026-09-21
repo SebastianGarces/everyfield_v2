@@ -561,6 +561,13 @@
       "when": 1789939405248,
       "tag": "0080_communication_failed_retry",
       "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1790025710966,
+      "tag": "0081_evry_session_attachments",
+      "breakpoints": true
     }
   ]
 }

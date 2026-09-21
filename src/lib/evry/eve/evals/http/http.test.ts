@@ -24,6 +24,45 @@ const identity = {
   appSessionId: createHash("sha256").update(sessionToken).digest("hex"),
 };
 
+test("attachment fixture declarations require one bounded upload per existing turn", () => {
+  const request = {
+    compiledEntry: "/private/tmp/compiled/index.mjs",
+    databaseUrl,
+    proxyUrl: origin,
+    sessionToken,
+    actor,
+    turns: ["Review this file"],
+    now: now.toISOString(),
+    maxCostUsd: 1,
+    prices,
+    model: { mode: "scripted", responses: [{ text: "Fixture" }] },
+  };
+  const upload = {
+    turnIndex: 0,
+    kind: "people_csv",
+    name: "people.csv",
+    contentType: "text/csv",
+    bytesBase64: "YQ==",
+    personId: null,
+  };
+  assert.equal(
+    compiledFixtureRequest.safeParse({ ...request, attachments: [upload] })
+      .success,
+    true
+  );
+  for (const attachments of [
+    [upload, upload],
+    [{ ...upload, turnIndex: 1 }],
+    [{ ...upload, bytesBase64: "not base64" }],
+    [{ ...upload, reference: "signed-token" }],
+  ]) {
+    assert.equal(
+      compiledFixtureRequest.safeParse({ ...request, attachments }).success,
+      false
+    );
+  }
+});
+
 test("restart proof refuses a live model before spawning either server", () => {
   const request = {
     compiledEntry: "/private/tmp/compiled/index.mjs",

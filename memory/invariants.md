@@ -455,6 +455,7 @@ The guard is `ops/tests/requirement-ids.test.mjs`. Applies to every requirement 
 ## Evry — Plant Route and Action Parity
 
 - Failed-delivery retries require signed provider failure evidence and a separately confirmed, source-bound review. An uncertain send keeps its original frozen payload and provider key; after the safe recovery window it remains unresolved, because a new key or expired deduplication window can deliver a duplicate email. Successful delivery evidence always excludes a recipient from failed-delivery retries.
+- Eve receives session-bound attachment IDs, not signed upload references or file bodies. Every lookup rechecks the actor, plant, live conversation, file kind and original expiry; the native preparation still freezes the verified reference, digest and signed person target for exact confirmation. An unknown upload response reuses its staged file, while a definitive unavailable response requires fresh staging and renewed duplicate choices.
 
 - ⚖ Evry's concise voice removes technical chatter, not useful substance. Model-selected overviews review fresh evidence after retrieval and may gather other relevant evidence within the existing authorization and work budget; focused lookups retain the short path. A missing metric must not erase supported findings from other areas, and cards support rather than replace an overview's explanation (Sebastian, 2026-09-18).
 

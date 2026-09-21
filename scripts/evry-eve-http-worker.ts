@@ -6,10 +6,16 @@ import { access } from "node:fs/promises";
 import { mockModel } from "eve/evals";
 import { wrapLanguageModel } from "ai";
 import { z } from "zod";
+import { neonConfig as sourceNeonConfig } from "@neondatabase/serverless";
 import { installIsolatedFixtureHost } from "../src/lib/evry/eve/evals/http/host";
 import { createHttpEveEvalRunner } from "../src/lib/evry/eve/evals/http/runner";
 import { compiledFixtureRequest } from "../src/lib/evry/eve/evals/http/process-contract";
 import { EVE_WORKFLOW_COVERAGE } from "../src/lib/evry/eve/capabilities/catalog";
+import { bindFixtureUpload } from "../src/lib/evry/eve/evals/http/attachments";
+import {
+  fixtureAttachmentReferencesHidden,
+  resolveScriptedAttachmentInput,
+} from "../src/lib/evry/eve/evals/http/attachment-script";
 
 const controller = new AbortController();
 let used = false;
@@ -35,6 +41,14 @@ process.on("message", async (message) => {
   const failures: string[] = [];
   const eventTypes: string[] = [];
   const scriptedDiagnostics: string[] = [];
+  const attachmentBindings: Array<{
+    turnIndex: number;
+    attachmentId: string;
+    digest: string;
+    reference: string;
+    modelSawBinding: boolean | null;
+    rawReferenceHiddenFromModel: boolean | null;
+  }> = [];
   let host: ReturnType<typeof installIsolatedFixtureHost> | undefined;
   try {
     const { request, replaySessionId } = z
@@ -66,6 +80,10 @@ process.on("message", async (message) => {
     const neon = await import(pathToFileURL(neonPath).href);
     neon.neonConfig.fetchEndpoint = () => request.proxyUrl;
     neon.neonConfig.useSecureWebSocket = false;
+    // Native source staging/auth uses the source package, not Nitro's external copy.
+    // Configure both before bindFixtureUpload dynamically imports any source DB/auth.
+    sourceNeonConfig.fetchEndpoint = () => request.proxyUrl;
+    sourceNeonConfig.useSecureWebSocket = false;
     phase = "scripted provider configuration";
     let responseIndex = 0;
     const availableTools = new Set<string>();
@@ -91,6 +109,20 @@ process.on("message", async (message) => {
         ? mockModel({
             modelId: "isolated-runtime-script",
             respond: (modelRequest) => {
+              for (const binding of attachmentBindings) {
+                binding.modelSawBinding =
+                  binding.modelSawBinding === true ||
+                  modelRequest.messages.some(({ text }) =>
+                    text.includes(binding.attachmentId)
+                  );
+                binding.rawReferenceHiddenFromModel =
+                  binding.rawReferenceHiddenFromModel !== false &&
+                  fixtureAttachmentReferencesHidden(modelRequest, [
+                    binding.reference,
+                  ]);
+                if (!binding.rawReferenceHiddenFromModel)
+                  throw new Error("Fixture attachment disclosure refused");
+              }
               modelRequests.push({
                 retainedOriginalRequest:
                   originalRequest !== undefined &&
@@ -162,6 +194,22 @@ process.on("message", async (message) => {
                 throw new Error("Scripted model responses exhausted");
               return {
                 ...response,
+                ...(response.toolCalls
+                  ? {
+                      toolCalls: response.toolCalls.map((call) => ({
+                        ...call,
+                        input: resolveScriptedAttachmentInput(
+                          call.input,
+                          attachmentBindings.find(
+                            (binding) =>
+                              binding.turnIndex ===
+                              request.attachments?.[0]?.turnIndex
+                          )?.attachmentId,
+                          modelRequest.messages
+                        ),
+                      })),
+                    }
+                  : {}),
                 usage: response.usage ?? { inputTokens: 0, outputTokens: 0 },
               };
             },
@@ -287,6 +335,39 @@ process.on("message", async (message) => {
       verifyReplay: request.verifyReplay,
       expectedTurnFailureMessage: request.expectedTurnFailureMessage,
       replaySessionId,
+      async beforeTurn({ turnIndex, sessionId }) {
+        const upload = request.attachments?.find(
+          (item) => item.turnIndex === turnIndex
+        );
+        if (!upload) return undefined;
+        if (
+          attachmentBindings.some((binding) => binding.turnIndex === turnIndex)
+        )
+          throw new Error("Fixture attachment turn was bound more than once");
+        const binding = await bindFixtureUpload({
+          upload,
+          sessionId,
+          sessionToken: request.sessionToken,
+          actor: request.actor,
+          origin,
+          onStage(stage) {
+            phase = `attachment ${stage}`;
+          },
+        });
+        phase = "authenticated runtime conversation";
+        attachmentBindings.push({
+          turnIndex,
+          attachmentId: binding.descriptor.attachmentId,
+          digest: binding.digest,
+          reference: binding.reference,
+          modelSawBinding: request.model.mode === "scripted" ? false : null,
+          rawReferenceHiddenFromModel:
+            request.model.mode === "scripted" ? true : null,
+        });
+        return {
+          attachment: { attachmentId: binding.descriptor.attachmentId },
+        };
+      },
       onEvent(event) {
         eventTypes.push(event.type);
         if (event.type === "turn.failed")
@@ -309,7 +390,7 @@ process.on("message", async (message) => {
       signal: controller.signal,
       maxCostUsd: request.maxCostUsd,
     });
-    process.send?.({
+    const result = {
       type: "result",
       outcome: {
         ...outcome,
@@ -331,10 +412,27 @@ process.on("message", async (message) => {
           modelCalls: outcome.hostCapture.modelCalls.length,
           failures,
           eventTypes,
+          attachments: attachmentBindings.map(
+            ({ reference: _reference, ...binding }) => ({
+              ...binding,
+              rawReferenceHiddenFromOutput: true,
+            })
+          ),
         },
       },
-    });
+    };
+    if (
+      !fixtureAttachmentReferencesHidden(
+        result,
+        attachmentBindings.map(({ reference }) => reference)
+      )
+    )
+      throw new Error("Fixture attachment disclosure refused");
+    process.send?.(result);
   } catch (error) {
+    const httpError = z
+      .object({ status: z.number().int().min(400).max(599) })
+      .safeParse(error);
     const reason =
       error instanceof Error &&
       [
@@ -344,13 +442,24 @@ process.on("message", async (message) => {
         "Evaluation exceeded its reserved budget",
         "A paused evaluation requires an explicit response, not another message",
         "Fixture response needs exactly one pending question",
+        "Fixture attachment disclosure refused",
+        "Fixture attachment turn was bound more than once",
+        "Scripted attachment binding was not visible to the model",
       ].includes(error.message)
         ? error.message
         : "isolated runtime failure";
-    process.send?.({
+    const failure = {
       type: "failed",
-      phase: `${phase}: ${reason}; events=${eventTypes.slice(-5).join(",")}; failures=${failures.join(",")}; scripted=${scriptedDiagnostics.join(",")}`,
-    });
+      phase: `${phase}: ${reason}; http=${httpError.success ? httpError.data.status : "none"}; events=${eventTypes.slice(-5).join(",")}; failures=${failures.join(",")}; scripted=${scriptedDiagnostics.join(",")}`,
+    };
+    process.send?.(
+      fixtureAttachmentReferencesHidden(
+        failure,
+        attachmentBindings.map(({ reference }) => reference)
+      )
+        ? failure
+        : { type: "failed", phase: "Fixture attachment disclosure refused" }
+    );
   } finally {
     host?.close();
   }

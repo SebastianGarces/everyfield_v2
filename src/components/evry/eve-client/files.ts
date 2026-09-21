@@ -1,4 +1,6 @@
 import type { EvryPeopleFileSubmission } from "../evry-shell";
+import { eveAttachmentDescriptorSchema } from "@/lib/evry/eve/runtime/attachment-contract";
+import type { PreparedEvryPeopleFile } from "../people-file-state";
 import {
   preparedEvryPeopleUploadFromResponse,
   preparedEvryPeopleFileFromStage,
@@ -95,4 +97,43 @@ export async function stagePeopleFile(input: EvryPeopleFileSubmission) {
     );
   }
   return prepared;
+}
+
+/** Idempotently associate the already-staged bytes with the client's owned Eve session. */
+export class EveAttachmentUnavailableError extends Error {
+  constructor() {
+    super(
+      "This upload is no longer available. Try again to upload the selected file."
+    );
+    this.name = "EveAttachmentUnavailableError";
+  }
+}
+
+export async function bindPeopleFile(
+  sessionId: string,
+  kind: EvryPeopleFileSubmission["kind"],
+  prepared: PreparedEvryPeopleFile
+) {
+  const response = await fetch("/api/evry/eve/attachments", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      sessionId,
+      kind,
+      reference: prepared.reference,
+      digest: prepared.digest,
+    }),
+  });
+  if (response.status === 404) throw new EveAttachmentUnavailableError();
+  const value: unknown = await response.json();
+  if (
+    !response.ok ||
+    !value ||
+    typeof value !== "object" ||
+    !("attachment" in value)
+  )
+    throw new Error(
+      "Unable to attach this file. Keep it selected and try again."
+    );
+  return eveAttachmentDescriptorSchema.parse(value.attachment);
 }

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { createHash } from "node:crypto";
 import { questions } from "../catalog";
 import { createFixtureManifest } from "./manifest";
 import type { CapturedCall } from "./host-capture";
@@ -8,17 +9,19 @@ import {
   contentActionFixtureIds,
   observedPeopleCsvFacts,
   observedBookmarkPlanFacts,
+  peopleReviewCsv,
+  peopleReviewUpload,
 } from "./content-actions";
 
 const attachment = {
-  attachmentReference: "host-created-signed-reference",
+  attachmentId: "att_fixture-review",
   attachmentDigest: "a".repeat(64),
 };
 function csvCall(): CapturedCall {
   return {
     id: "csv",
     name: "files.inspect",
-    input: attachment,
+    input: { attachmentId: attachment.attachmentId },
     output: {
       kind: "read",
       counts: { matched: 5, returned: 5, excluded: 0 },
@@ -63,11 +66,46 @@ test("unchanged original prompts gain an explicit attachment turn, never a hidde
   );
   const m = createFixtureManifest("documents-06", 0),
     turns = questions.find((q) => q.id === m.caseId)!.turns;
-  assert.throws(() => bindContentActionTurns(m, turns), /requires an attached/);
-  const bound = bindContentActionTurns(m, turns, attachment);
+  const bound = bindContentActionTurns(m, turns);
   assert.equal(bound[0], turns[0]);
   assert.equal(bound.length, 2);
-  assert.match(bound[1]!, /Do not import/);
+  assert.equal(
+    bound[1],
+    "Here is the People CSV. Review only. Do not import any rows."
+  );
+  assert.deepEqual(
+    bindContentActionTurns(createFixtureManifest("wiki-06", 0), [
+      "Bookmark it.",
+    ]),
+    ["Bookmark it."]
+  );
+});
+test("CSV upload declares exact fixture bytes on the explicit attachment turn", () => {
+  const m = createFixtureManifest("documents-06", 0);
+  const upload = peopleReviewUpload(m);
+  assert.deepEqual(upload, {
+    turnIndex: 1,
+    kind: "people_csv",
+    name: "people-review.csv",
+    contentType: "text/csv",
+    bytesBase64: peopleReviewCsv(m).toString("base64"),
+    personId: null,
+  });
+  const bytes = Buffer.from(upload.bytesBase64, "base64");
+  assert.equal(bytes.toString("base64"), upload.bytesBase64);
+  assert.deepEqual(bytes, peopleReviewCsv(m));
+  const turns = bindContentActionTurns(
+    m,
+    questions.find((q) => q.id === m.caseId)!.turns
+  );
+  assert.ok(upload.turnIndex < turns.length);
+  for (const value of [
+    upload.bytesBase64,
+    createHash("sha256").update(bytes).digest("hex"),
+    attachment.attachmentId,
+  ]) {
+    assert.ok(!turns.join("\n").includes(value));
+  }
 });
 test("CSV facts require the exact bytes binding and all rows, regardless of card choice", () => {
   const call = csvCall(),
@@ -103,7 +141,15 @@ test("CSV facts require the exact bytes binding and all rows, regardless of card
   );
   assert.deepEqual(
     observedPeopleCsvFacts(
-      [{ ...call, input: { ...attachment, attachmentDigest: "b".repeat(64) } }],
+      [
+        {
+          ...call,
+          input: {
+            attachmentReference: "old-signed-reference",
+            attachmentDigest: attachment.attachmentDigest,
+          },
+        },
+      ],
       attachment
     ).facts,
     {}
@@ -113,12 +159,39 @@ test("CSV facts require the exact bytes binding and all rows, regardless of card
       [
         {
           ...call,
-          input: { ...attachment, attachmentReference: "another-reference" },
+          input: { attachmentId: "att_another-file" },
         },
       ],
       attachment
     ).facts,
     {}
+  );
+  assert.equal(
+    observedPeopleCsvFacts(
+      [
+        {
+          ...call,
+          input: {
+            attachmentId: attachment.attachmentId,
+            attachmentDigest: "b".repeat(64),
+          },
+        },
+      ],
+      attachment
+    ).facts.attachmentDigest,
+    attachment.attachmentDigest,
+    "A model-supplied digest cannot replace the host-verified byte binding"
+  );
+  assert.deepEqual(
+    observedPeopleCsvFacts(
+      [
+        call,
+        { ...call, id: "new-inspection", output: { status: "unavailable" } },
+      ],
+      attachment
+    ).facts,
+    {},
+    "A later failed inspection cannot borrow an older successful result"
   );
   const output = call.output as { items: unknown[] };
   assert.deepEqual(

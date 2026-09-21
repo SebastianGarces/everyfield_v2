@@ -14,6 +14,12 @@ import type { EvryPageContext } from "@/lib/evry/resolvers/contract";
 import { resolveAuthorizedEvryPageContext } from "@/lib/evry/resolvers/page-context";
 import { meetingInvitationRequestSchema } from "@/lib/evry/recipes/meeting-invitation";
 import { prepareMeetingInvitation } from "@/lib/evry/recipes/meeting-invitation-conversation";
+import {
+  eveFilePreparationSchema,
+  eveFilePreparations,
+  eveAttachmentIdSchema,
+  type EveAttachmentResolver,
+} from "../runtime/attachment-contract";
 
 const meetingInput = meetingInvitationRequestSchema
   .omit({ sourceText: true })
@@ -58,7 +64,7 @@ export const evePreparationInputSchema = z.strictObject({
     evePreparations.map((entry) =>
       z.strictObject({
         operation: z.literal(entry.id),
-        arguments: entry.inputSchema,
+        arguments: eveFilePreparationSchema(entry.id, entry.inputSchema),
       })
     )
   ),
@@ -71,7 +77,7 @@ export function selectedEvePreparationSchema(operations: readonly string[]) {
     if (!entry) throw new Error(`Unknown preparation operation: ${id}`);
     return z.strictObject({
       operation: z.literal(entry.id),
-      arguments: entry.inputSchema,
+      arguments: eveFilePreparationSchema(entry.id, entry.inputSchema),
     });
   });
   if (!selected.length)
@@ -87,6 +93,7 @@ export function createEvePreparation(options: {
   pageContext: EvryPageContext | null;
   now: Date;
   authorizeRead: typeof authorizeEvryReadCapability;
+  resolveAttachment?: EveAttachmentResolver;
 }) {
   const conversationId = evryConversationIdSchema.parse(options.conversationId);
   return {
@@ -114,6 +121,21 @@ export function createEvePreparation(options: {
       )
         return { status: "unavailable", reason: "not_authorized" };
       const operation = byOperation.get(parsed.data.request.operation)!;
+      let argumentsValue = parsed.data.request.arguments;
+      const kind = eveFilePreparations.get(operation.id);
+      if (kind) {
+        const { attachmentId, ...rest } = z
+          .object({ attachmentId: eveAttachmentIdSchema })
+          .catchall(z.unknown())
+          .parse(argumentsValue);
+        const attachment = await options.resolveAttachment?.(
+          attachmentId,
+          kind
+        );
+        if (!attachment)
+          return { status: "unavailable", reason: "attachment_unavailable" };
+        argumentsValue = { ...rest, reference: attachment.reference };
+      }
       const pageContext = await resolveAuthorizedEvryPageContext({
         actor,
         pageContext: options.pageContext,
@@ -132,7 +154,7 @@ export function createEvePreparation(options: {
           requestPageContext: options.pageContext,
           now: options.now,
         },
-        parsed.data.request.arguments
+        argumentsValue
       );
       invocation.signal?.throwIfAborted();
       return result ?? { status: "unavailable" };

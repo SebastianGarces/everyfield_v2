@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { Expectations } from "../contract";
+import type { CompiledFixtureRequest } from "../http/process-contract";
 import { fixtureId, type FixtureManifest } from "./manifest";
 import type { FixtureStore } from "./store";
 import { capturedReadArtifactSchema, type CapturedCall } from "./host-capture";
@@ -27,54 +28,32 @@ export function peopleReviewCsv(m: FixtureManifest) {
   );
 }
 export type PeopleReviewAttachment = Readonly<{
-  attachmentReference: string;
+  attachmentId: string;
   attachmentDigest: string;
 }>;
 
-/** The host must configure this same secret for files.inspect before binding the case. */
-export async function createPeopleReviewAttachment(
-  m: FixtureManifest,
-  signingSecret: string,
-  now = new Date()
-): Promise<PeopleReviewAttachment> {
-  assert.ok(signingSecret.length > 0);
-  const { sealEvryPeopleAttachmentReference } =
-    await import("@/lib/evry/capabilities/people/attachments");
-  const bytes = peopleReviewCsv(m);
-  const attachmentDigest = createHash("sha256").update(bytes).digest("hex");
+/** The host stages these fixture-owned bytes and binds them to the actual Eve session. */
+export function peopleReviewUpload(
+  m: FixtureManifest
+): NonNullable<CompiledFixtureRequest["attachments"]>[number] {
   return {
-    attachmentDigest,
-    attachmentReference: sealEvryPeopleAttachmentReference(
-      {
-        version: 2,
-        kind: "people_csv",
-        actorUserId: m.ids.actor,
-        plantId: m.ids.plant,
-        personId: null,
-        digest: attachmentDigest,
-        contentType: "text/csv",
-        size: bytes.length,
-        originalName: "people-review.csv",
-        expiresAt: new Date(now.getTime() + 30 * 60_000).toISOString(),
-        uploadId: contentActionId(m, "upload"),
-        bytesBase64Url: bytes.toString("base64url"),
-      },
-      signingSecret
-    ),
+    turnIndex: 1,
+    kind: "people_csv",
+    name: "people-review.csv",
+    contentType: "text/csv",
+    bytesBase64: peopleReviewCsv(m).toString("base64"),
+    personId: null,
   };
 }
 
 export function bindContentActionTurns(
   m: FixtureManifest,
-  turns: readonly string[],
-  attachment?: PeopleReviewAttachment
+  turns: readonly string[]
 ) {
   if (m.caseId !== "documents-06") return [...turns];
-  if (!attachment)
-    throw new Error("documents-06 requires an attached People CSV");
   return [
     ...turns,
-    `Here is the People CSV attachment. Reference: ${attachment.attachmentReference}\nSHA-256: ${attachment.attachmentDigest}\nReview only. Do not import any rows.`,
+    "Here is the People CSV. Review only. Do not import any rows.",
   ];
 }
 
@@ -186,7 +165,7 @@ export function contentActionExpectations(
   };
 }
 
-/** Authorization evidence is independent of whether the model chooses to show a card. */
+/** The host verifies attachment ownership and digest before supplying this binding. */
 export function observedPeopleCsvFacts(
   calls: readonly CapturedCall[],
   attachment: PeopleReviewAttachment
@@ -196,9 +175,7 @@ export function observedPeopleCsvFacts(
     evidence: [] as string[],
   };
   const call = calls.findLast((entry) => entry.name === "files.inspect");
-  const args = z
-    .object({ attachmentReference: z.string(), attachmentDigest: z.string() })
-    .safeParse(call?.input);
+  const args = z.object({ attachmentId: z.string() }).safeParse(call?.input);
   const output = capturedReadArtifactSchema
     .extend({
       counts: z.object({
@@ -212,8 +189,7 @@ export function observedPeopleCsvFacts(
   if (
     !args.success ||
     !output.success ||
-    args.data.attachmentReference !== attachment.attachmentReference ||
-    args.data.attachmentDigest !== attachment.attachmentDigest
+    args.data.attachmentId !== attachment.attachmentId
   )
     return empty;
   const artifact = output.data;
@@ -244,7 +220,7 @@ export function observedPeopleCsvFacts(
   }
   return {
     facts: {
-      attachmentDigest: args.data.attachmentDigest,
+      attachmentDigest: attachment.attachmentDigest,
       rows: rows.sort(),
       mergeTargets: mergeTargets.sort(),
       missingNameRows: missingNameRows.sort(),

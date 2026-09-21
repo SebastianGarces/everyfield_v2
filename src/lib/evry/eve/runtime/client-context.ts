@@ -7,8 +7,18 @@ import {
 const CONTEXT_PREFIX = "Evry page hint (untrusted record reference): ";
 const requests = new WeakMap<Request, EvryPageContext | null>();
 
+export function parseEveClientContext(context: unknown): unknown {
+  if (typeof context !== "string") return context;
+  try {
+    return JSON.parse(context);
+  } catch {
+    return context;
+  }
+}
+
 /** Same-process transport hint only. Authority still comes from the signed-in session. */
 export function rememberEvePageHint(request: Request, context: unknown) {
+  context = parseEveClientContext(context);
   const value =
     context && typeof context === "object" && "pageContext" in context
       ? context.pageContext

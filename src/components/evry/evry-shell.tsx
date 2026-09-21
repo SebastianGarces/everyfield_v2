@@ -32,7 +32,12 @@ import {
   type EveSessionBinding,
   type EveSessionMetadata,
 } from "./eve-client/session";
-import { stagePeopleFile } from "./eve-client/files";
+import {
+  bindPeopleFile,
+  stagePeopleFile,
+  EveAttachmentUnavailableError,
+} from "./eve-client/files";
+import type { EveAttachmentContext } from "@/lib/evry/eve/runtime/attachment-contract";
 import type { PreparedEvryPeopleFile } from "./people-file-state";
 import {
   EVE_RETRY_MESSAGE,
@@ -50,7 +55,10 @@ type PendingTurn = {
   text: string;
   clientContext:
     | string
-    | { pageContext: VisibleEvryPageContext["wire"] | null };
+    | {
+        pageContext: VisibleEvryPageContext["wire"] | null;
+        attachment?: EveAttachmentContext;
+      };
   inputResponses?: { requestId: string; text?: string; optionId?: string }[];
   eventStartIndex: number;
   retry: "replay" | "resubmit";
@@ -162,6 +170,25 @@ export function EvryShell({
   bindingRef.current = binding;
   const [client, setClient] = useState<EveClient | null>(null);
   const clientRef = useRef<EveClient | null>(null);
+  const sessionIdentity = useRef<{
+    bindingKey: string;
+    sessionId: string;
+  } | null>(null);
+  const uploadCreation = useRef<{
+    bindingKey: string;
+    operationId: string;
+  } | null>(null);
+  const stagedUploads = useRef(
+    new WeakMap<
+      File,
+      {
+        bindingKey: string;
+        target: string;
+        prepared: Promise<PreparedEvryPeopleFile>;
+      }
+    >()
+  );
+  const restageUploads = useRef(new WeakSet<File>());
   const finishedSnapshot = useRef<EveSnapshot | null>(null);
   const replayCompletion = useRef<ReturnType<
     typeof Promise.withResolvers<void>
@@ -304,6 +331,10 @@ export function EvryShell({
       });
   }, []);
   const onSession = useCallback((id: string) => {
+    sessionIdentity.current = {
+      bindingKey: bindingRef.current.key,
+      sessionId: id,
+    };
     if (metadataRef.current?.id === id) return;
     const key = bindingRef.current.key;
     void readEveSession({ sessionId: id })
@@ -413,7 +444,11 @@ export function EvryShell({
     [activeContext]
   );
   const requestHeaders = useCallback((): Record<string, string> => {
-    const operationId = pendingTurn.current?.operationId;
+    const operationId =
+      pendingTurn.current?.operationId ??
+      (uploadCreation.current?.bindingKey === bindingRef.current.key
+        ? uploadCreation.current.operationId
+        : undefined);
     return operationId ? { "x-evry-operation-id": operationId } : {};
   }, []);
   const readFinishedSnapshot = useCallback(() => finishedSnapshot.current, []);
@@ -527,10 +562,7 @@ export function EvryShell({
     [readFinishedSnapshot, replaySession]
   );
   const send = useCallback(
-    async (
-      text: string,
-      attachment?: Record<string, string | number | null | unknown[] | object>
-    ) => {
+    async (text: string, attachment?: EveAttachmentContext) => {
       const current = clientRef.current;
       if (
         !current ||
@@ -587,7 +619,7 @@ export function EvryShell({
         operationId,
         text,
         clientContext: attachment
-          ? JSON.stringify({ ...contextForTurn(), attachment })
+          ? { ...contextForTurn(), attachment }
           : contextForTurn(),
         inputResponses:
           question?.kind === "question" && !attachment
@@ -696,30 +728,73 @@ export function EvryShell({
         };
       setUploading(true);
       setError(null);
+      const uploadBinding = bindingRef.current.key;
+      const uploadClient = clientRef.current;
       try {
-        const prepared =
-          input.kind === "people_csv" && input.prepared
-            ? input.prepared
-            : await stagePeopleFile(input);
+        if (!uploadClient) throw new Error("Conversation unavailable");
+        const cached = stagedUploads.current.get(input.file);
+        if (cached && cached.bindingKey !== uploadBinding)
+          throw new Error("Conversation changed during upload");
+        const target = `${input.kind}:${input.kind === "people_csv" ? "" : input.personId}`;
+        const restaging = restageUploads.current.has(input.file);
+        const preparedPromise =
+          (cached?.target === target ? cached.prepared : undefined) ??
+          (input.kind === "people_csv" && input.prepared && !restaging
+            ? Promise.resolve(input.prepared)
+            : stagePeopleFile(input));
+        stagedUploads.current.set(input.file, {
+          bindingKey: uploadBinding,
+          target,
+          prepared: preparedPromise,
+        });
+        let prepared: PreparedEvryPeopleFile;
+        try {
+          prepared = await preparedPromise;
+        } catch (error) {
+          stagedUploads.current.delete(input.file);
+          throw error;
+        }
+        if (bindingRef.current.key !== uploadBinding)
+          throw new Error("Conversation changed during upload");
+        restageUploads.current.delete(input.file);
         if (
           input.kind === "people_csv" &&
-          input.duplicateResolutions === null &&
+          (input.duplicateResolutions === null || restaging) &&
           prepared.duplicateRows.length
         )
           return { status: "needs_duplicate_resolution", prepared };
+        // Prewarm this same store, preserving its creation key across a lost response.
+        if (!uploadClient.session) {
+          if (uploadCreation.current?.bindingKey !== uploadBinding)
+            uploadCreation.current = {
+              bindingKey: uploadBinding,
+              operationId: crypto.randomUUID(),
+            };
+          await uploadClient.prewarm();
+        }
+        const sessionId =
+          clientRef.current?.session?.sessionId ??
+          (sessionIdentity.current?.bindingKey === uploadBinding
+            ? sessionIdentity.current.sessionId
+            : null);
+        if (bindingRef.current.key !== uploadBinding || !sessionId)
+          throw new Error("Conversation changed during upload");
+        uploadCreation.current = null;
+        const bound = await bindPeopleFile(sessionId, input.kind, prepared);
+        if (bindingRef.current.key !== uploadBinding)
+          throw new Error("Conversation changed during upload");
         const attachment = {
-          kind: input.kind,
-          reference: prepared.reference,
+          attachmentId: bound.attachmentId,
           ...(input.kind === "people_csv"
             ? {
                 duplicateResolutions: Object.entries(
-                  input.duplicateResolutions ?? {}
+                  restaging ? {} : (input.duplicateResolutions ?? {})
                 ).map(([rowNumber, resolution]) => ({
                   rowNumber: Number(rowNumber),
                   resolution,
                 })),
               }
-            : { personId: input.personId }),
+            : {}),
           ...(input.kind === "commitment_document"
             ? {
                 commitmentType: input.commitmentType,
@@ -743,7 +818,12 @@ export function EvryShell({
               "Your file is ready. Reconnect to retry sending its review.",
           };
         return { status: "submitted" };
-      } catch {
+      } catch (error) {
+        if (error instanceof EveAttachmentUnavailableError) {
+          stagedUploads.current.delete(input.file);
+          restageUploads.current.add(input.file);
+          return { status: "failed", message: error.message };
+        }
         return {
           status: "failed",
           message:

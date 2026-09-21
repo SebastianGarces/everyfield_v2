@@ -112,7 +112,7 @@ export const EVE_CAPABILITY_CATALOG = [
   ],
   [
     "files.inspect",
-    "Inspect an authorized uploaded file by opaque reference through bounded parsers. No arbitrary URL fetching.",
+    "Inspect an uploaded People CSV using its attachmentId from this conversation's file context. The server resolves the exact authorized file; no signed tokens, file bodies or arbitrary URLs.",
     ["documents", "people"],
   ],
   [
