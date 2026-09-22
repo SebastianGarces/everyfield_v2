@@ -194,6 +194,12 @@ import {
   weeklyBriefExpectations,
   observedWeeklyBriefFacts,
 } from "./weekly-brief";
+import {
+  meetingAttendanceFixtureIds,
+  seedMeetingAttendanceFixture,
+  meetingAttendanceExpectations,
+  observedMeetingAttendanceFacts,
+} from "./meeting-attendance";
 
 type FixtureTransports = {
   prepareDocumentFiles?: DocumentFixtureTransport;
@@ -404,6 +410,12 @@ const fixtureFamilies: readonly FixtureFamily[] = [
     seed: seedWeeklyBriefFixture,
     expectations: weeklyBriefExpectations,
     observe: observedWeeklyBriefFacts,
+  },
+  {
+    ids: meetingAttendanceFixtureIds,
+    seed: seedMeetingAttendanceFixture,
+    expectations: meetingAttendanceExpectations,
+    observe: observedMeetingAttendanceFacts,
   },
 ];
 const familyCaseIds = [

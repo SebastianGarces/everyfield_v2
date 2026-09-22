@@ -108,6 +108,9 @@ const expectedOriginals = [
   "communication-04",
   "communication-06",
   "tasks-07",
+  "orientations-01",
+  "meetings-03",
+  "meetings-06",
 ].sort();
 const expectedRegressions = [
   "regression-today",
@@ -127,14 +130,14 @@ const expectedRegressions = [
   "regression-partial-outage",
 ].sort();
 
-test("default production fixture coverage has 98 bindings and does not claim the remaining 60 pass", () => {
+test("default production fixture coverage has 101 bindings and does not claim the remaining 57 pass", () => {
   const coverage = productionFixtureCoverage();
   const corpus = [...questions, ...regressions];
   assert.deepEqual(coverage.counts, {
-    runnable: 98,
-    originals: 83,
+    runnable: 101,
+    originals: 86,
     regressions: 15,
-    unbound: 60,
+    unbound: 57,
     corpus: 158,
   });
   assert.deepEqual([...coverage.originalIds].sort(), expectedOriginals);
@@ -215,10 +218,10 @@ test("document comparison is opt-in only after a file transport is supplied", as
     };
   };
   assert.deepEqual(productionFixtureCoverage({ prepareDocumentFiles }).counts, {
-    runnable: 99,
-    originals: 84,
+    runnable: 102,
+    originals: 87,
     regressions: 15,
-    unbound: 59,
+    unbound: 56,
     corpus: 158,
   });
   assert.ok(productionFixtureCoverage().unboundIds.includes("documents-04"));
@@ -384,10 +387,10 @@ test("CSV review requires its signed attachment transport and revokes a failed s
     throw provisionError;
   };
   assert.deepEqual(productionFixtureCoverage({ preparePeopleCsv }).counts, {
-    runnable: 99,
-    originals: 84,
+    runnable: 102,
+    originals: 87,
     regressions: 15,
-    unbound: 59,
+    unbound: 56,
     corpus: 158,
   });
   assert.deepEqual(
@@ -396,10 +399,10 @@ test("CSV review requires its signed attachment transport and revokes a failed s
       prepareDocumentFiles: async () => async () => {},
     }).counts,
     {
-      runnable: 100,
-      originals: 85,
+      runnable: 103,
+      originals: 88,
       regressions: 15,
-      unbound: 58,
+      unbound: 55,
       corpus: 158,
     }
   );
