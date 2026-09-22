@@ -180,8 +180,9 @@ test(
       );
       assert.equal(outcome.runtimeProof?.modelCalls, 4);
       const afterLoad = outcome.runtimeProof?.modelRequests?.[1];
+      assert.ok(afterLoad, "The model must continue after loading tools");
       assert.ok(
-        afterLoad?.tools.includes("tasks_query"),
+        afterLoad.tools.includes("tasks_query"),
         "The step after load_tools must actually expose the direct task tool"
       );
       const taskSchema = afterLoad.toolSchemas?.find(
