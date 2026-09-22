@@ -213,6 +213,58 @@ test("top six retains finalized zero and distinct people instead of summing pers
     observed
   );
 });
+test("completed top-six reads prove past timing from returned local starts without a redundant filter", () => {
+  const withoutTiming = read(
+    "meetings.query",
+    {
+      where: { all: [{ types: ["vision_meeting"], statuses: ["completed"] }] },
+      query: { mode: "list", sort: "date", direction: "desc", limit: 6 },
+    },
+    selected,
+    8,
+    "6"
+  );
+  assert.deepEqual(
+    observedMeetingAttendanceFacts("meetings-06", [withoutTiming, listRead()]),
+    observedMeetingAttendanceFacts("meetings-06", [meetingRead(), listRead()])
+  );
+  for (const replacement of [
+    { "Local start": "2026-09-20 12:01:00" },
+    { "Local start": "2026-09-20 12:00:00" },
+    { Timezone: "Pacific/Honolulu" },
+  ]) {
+    const rows = structuredClone(selected);
+    rows[0].facts = rows[0].facts.map((fact) => ({
+      ...fact,
+      value:
+        Object.entries(replacement).find(
+          ([label]) => label === fact.label
+        )?.[1] ?? fact.value,
+    }));
+    const invalid = read("meetings.query", withoutTiming.input, rows, 8, "6");
+    assert.deepEqual(
+      observedMeetingAttendanceFacts("meetings-06", [invalid, listRead()])
+        .facts,
+      {}
+    );
+  }
+  const wrongOrder = read(
+    "meetings.query",
+    {
+      where: { all: [{ types: ["vision_meeting"], statuses: ["completed"] }] },
+      query: { mode: "list", sort: "date", direction: "asc", limit: 6 },
+    },
+    selected,
+    8,
+    "6"
+  );
+  assert.deepEqual(
+    observedMeetingAttendanceFacts("meetings-06", [wrongOrder, listRead()])
+      .facts,
+    {}
+  );
+});
+
 test("comparison accepts full grouped counts plus exact overall distinct count", () => {
   const groups = selected.slice(1).map((m, i) =>
     row(`group-${i}`, {

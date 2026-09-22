@@ -1,6 +1,11 @@
 import { z } from "zod";
 import type { Expectations } from "../contract";
-import { fixtureId, type FixtureManifest } from "./manifest";
+import {
+  FIXTURE_NOW,
+  FIXTURE_ZONE,
+  fixtureId,
+  type FixtureManifest,
+} from "./manifest";
 import type { FixtureStore } from "./store";
 import { capturedReadArtifactSchema, type CapturedCall } from "./host-capture";
 
@@ -269,6 +274,29 @@ function pages(
   if (!complete && !(top !== undefined && items.length >= top)) return null;
   return { items, complete, call: last, total: total! };
 }
+const fixtureClockParts = new Intl.DateTimeFormat("en-US", {
+  timeZone: FIXTURE_ZONE,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hourCycle: "h23",
+}).formatToParts(FIXTURE_NOW);
+const clockPart = (type: Intl.DateTimeFormatPartTypes) =>
+  fixtureClockParts.find((part) => part.type === type)!.value;
+const fixtureLocalNow = `${clockPart("year")}-${clockPart("month")}-${clockPart("day")} ${clockPart("hour")}:${clockPart("minute")}:${clockPart("second")}`;
+function isPastFixtureMeeting(item: Item) {
+  const start = field(item, "Local start");
+  return (
+    field(item, "Timezone") === FIXTURE_ZONE &&
+    start !== undefined &&
+    /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d+)?$/.test(start) &&
+    start < fixtureLocalNow
+  );
+}
+
 function meetingSelection(caseId: string, calls: readonly CapturedCall[]) {
   const limit =
     caseId === "orientations-01" ? 1 : caseId === "meetings-06" ? 6 : undefined;
@@ -286,11 +314,19 @@ function meetingSelection(caseId: string, calls: readonly CapturedCall[]) {
   )
     return null;
   const timings = all.data.flatMap((f) => (f.timing ? [f.timing] : []));
-  if (
-    timings.length !== 1 ||
-    timings[0] !== (caseId === "orientations-01" ? "upcoming" : "past")
-  )
-    return null;
+  const explicitTiming =
+    timings.length === 1 &&
+    timings[0] === (caseId === "orientations-01" ? "upcoming" : "past");
+  // A descending completed-meeting prefix already proves the latest six are
+  // past when every returned start precedes the trusted fixture clock. Older
+  // unseen pages cannot introduce a newer meeting. Do not infer this from status alone.
+  const pastPrefix =
+    caseId === "meetings-06" &&
+    timings.length === 0 &&
+    result.items.every(isPastFixtureMeeting) &&
+    object(input.query).sort === "date" &&
+    object(input.query).direction === "desc";
+  if (!explicitTiming && !pastPrefix) return null;
   const typeFilters = all.data.flatMap((f) => (f.types ? [f.types] : [])),
     statusFilters = all.data.flatMap((f) => (f.statuses ? [f.statuses] : []));
   const expectedType =

@@ -37,14 +37,16 @@ const next = (r: Read) =>
 async function retrieve(
   caseId: string,
   invoke: (name: string, input: unknown) => Promise<unknown>,
-  strategy: "list" | "aggregate" = "list"
+  strategy: "list" | "aggregate" | "completed-prefix" = "list"
 ) {
   const orientation = caseId === "orientations-01",
     broad = strategy === "aggregate";
   const where = {
     all: [
       {
-        timing: orientation ? "upcoming" : "past",
+        ...(strategy === "completed-prefix"
+          ? {}
+          : { timing: orientation ? "upcoming" : "past" }),
         ...(!broad
           ? {
               ...(caseId !== "meetings-03"
@@ -329,7 +331,7 @@ test(
           );
       const { createProductionEveEvalAdapter } =
         await import("@/lib/evry/eve/evals/fixtures/adapter");
-      let strategy: "list" | "aggregate" = "list";
+      let strategy: "list" | "aggregate" | "completed-prefix" = "list";
       const adapter = createProductionEveEvalAdapter({
         store,
         buildSha: "0".repeat(40),
@@ -353,9 +355,15 @@ test(
         },
       });
       // One adapter owns monotonically increasing fixture repetitions for both strategies.
-      for (const selectedStrategy of ["list", "aggregate"] as const) {
+      for (const selectedStrategy of [
+        "list",
+        "aggregate",
+        "completed-prefix",
+      ] as const) {
         strategy = selectedStrategy;
-        for (const caseId of meetingAttendanceFixtureIds)
+        for (const caseId of meetingAttendanceFixtureIds.filter(
+          (id) => strategy !== "completed-prefix" || id === "meetings-06"
+        ))
           await t.test(`${caseId}: ${strategy} actual adapter`, async () => {
             const scenario = questions.find((q) => q.id === caseId)!;
             const fixture = await adapter.prepare(scenario);
