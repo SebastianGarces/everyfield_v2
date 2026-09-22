@@ -95,6 +95,9 @@ const expectedOriginals = [
   "teams-03",
   "teams-04",
   "teams-05",
+  "teams-06",
+  "roles-05",
+  "training-05",
   "roles-02",
   "training-04",
   "cross-03",
@@ -137,14 +140,14 @@ const expectedRegressions = [
   "regression-partial-outage",
 ].sort();
 
-test("default production fixture coverage has 108 bindings and does not claim the remaining 50 pass", () => {
+test("default production fixture coverage has 111 bindings and does not claim the remaining 47 pass", () => {
   const coverage = productionFixtureCoverage();
   const corpus = [...questions, ...regressions];
   assert.deepEqual(coverage.counts, {
-    runnable: 108,
-    originals: 93,
+    runnable: 111,
+    originals: 96,
     regressions: 15,
-    unbound: 50,
+    unbound: 47,
     corpus: 158,
   });
   assert.deepEqual([...coverage.originalIds].sort(), expectedOriginals);
@@ -225,10 +228,10 @@ test("document comparison is opt-in only after a file transport is supplied", as
     };
   };
   assert.deepEqual(productionFixtureCoverage({ prepareDocumentFiles }).counts, {
-    runnable: 109,
-    originals: 94,
+    runnable: 112,
+    originals: 97,
     regressions: 15,
-    unbound: 49,
+    unbound: 46,
     corpus: 158,
   });
   assert.ok(productionFixtureCoverage().unboundIds.includes("documents-04"));
@@ -394,10 +397,10 @@ test("CSV review requires its signed attachment transport and revokes a failed s
     throw provisionError;
   };
   assert.deepEqual(productionFixtureCoverage({ preparePeopleCsv }).counts, {
-    runnable: 109,
-    originals: 94,
+    runnable: 112,
+    originals: 97,
     regressions: 15,
-    unbound: 49,
+    unbound: 46,
     corpus: 158,
   });
   assert.deepEqual(
@@ -406,10 +409,10 @@ test("CSV review requires its signed attachment transport and revokes a failed s
       prepareDocumentFiles: async () => async () => {},
     }).counts,
     {
-      runnable: 110,
-      originals: 95,
+      runnable: 113,
+      originals: 98,
       regressions: 15,
-      unbound: 48,
+      unbound: 45,
       corpus: 158,
     }
   );
