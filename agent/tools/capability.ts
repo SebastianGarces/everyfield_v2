@@ -97,6 +97,9 @@ export default defineDynamic({
       const preparations = evryLoadedPreparations.get();
       for (const entry of catalog.filter((entry) => selected.has(entry.name))) {
         const name = entry.name;
+        // Eve persists callback captures as JSON. Capture this scalar, not the
+        // discovery entry containing the executable Zod input schema.
+        const isRead = entry.effect === "read";
         // A restored session may predate operation-level selection. It can reload
         // an exact operation through load_tools without exposing the full union.
         if (name === "actions.prepare" && preparations.length === 0) continue;
@@ -120,7 +123,7 @@ export default defineDynamic({
                   toolContext.callId,
                 ]);
               });
-            return entry.effect === "read"
+            return isRead
               ? withSafeEveToolErrors(toolContext.abortSignal, execute)
               : execute();
           },
