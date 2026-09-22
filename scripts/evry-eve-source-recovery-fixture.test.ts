@@ -364,7 +364,9 @@ test(
             },
             AbortSignal.timeout(150_000)
           );
-          assert.deepEqual(outcome.runtimeProof?.failures, []);
+          assert.deepEqual(outcome.runtimeProof?.failures, [
+            "tool-result:ACTION_RESULT_FAILED",
+          ]);
           assert.equal(outcome.runtimeProof?.modelCalls, 5);
           const directTools = outcome.runtimeProof?.modelRequests?.[1]?.tools;
           assert.ok(
@@ -378,6 +380,18 @@ test(
             compiled.ids.plant
           );
           const parts = outcome.messages.flatMap((message) => message.parts);
+          assert.deepEqual(
+            parts
+              .filter(
+                (part) =>
+                  part.type === "dynamic-tool" && part.state === "output-error"
+              )
+              .map((part) =>
+                part.type === "dynamic-tool" ? part.toolCallId : null
+              ),
+            ["direct-meetings-fault"],
+            "only the deliberately faulted read may fail"
+          );
           const failed = parts.find(
             (part) =>
               part.type === "dynamic-tool" &&
