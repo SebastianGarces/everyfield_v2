@@ -200,6 +200,21 @@ import {
   meetingAttendanceExpectations,
   observedMeetingAttendanceFacts,
 } from "./meeting-attendance";
+import {
+  weeklyOverviewFixtureIds,
+  seedWeeklyOverviewFixture,
+  weeklyOverviewExpectations,
+  weeklyOverviewTruth,
+  observedWeeklyOverviewFacts,
+} from "./weekly-overview";
+import {
+  taskSelectionFixtureIds,
+  seedTaskSelectionFixture,
+  bindTaskSelectionTurns,
+  taskSelectionExpectations,
+  readPreparedTaskSelectionFacts,
+} from "./task-selection";
+import type { fixtureMessageSchema } from "../http/transcript";
 
 type FixtureTransports = {
   prepareDocumentFiles?: DocumentFixtureTransport;
@@ -222,6 +237,8 @@ type ProductionOutcome = Pick<
   costUsd: number;
   /** Trusted server-side observation journal. Never populate this from model or browser data. */
   hostCapture?: FixtureHostCapture;
+  /** Actual ordered reducer transcript, required to prove references to a prior displayed result. */
+  messages?: z.infer<typeof fixtureMessageSchema>[];
   eveSessionId?: string;
 };
 export type ProductionEvalRunner = (input: {
@@ -424,6 +441,8 @@ const familyCaseIds = [
   ...contentActionFixtureIds,
   ...communicationRetryFixtureIds,
   ...taskCleanupFixtureIds,
+  ...taskSelectionFixtureIds,
+  ...weeklyOverviewFixtureIds,
 ];
 
 /** Bound means a runnable fixture, not a passed model-quality evaluation. */
@@ -737,47 +756,59 @@ export function createProductionEveEvalAdapter(
           seedCommunicationRetryFixture(manifest, options.store);
         if (scenario.id === "tasks-07")
           seedTaskCleanupFixture(manifest, options.store);
+        seedTaskSelectionFixture(manifest, options.store);
+        seedWeeklyOverviewFixture(manifest, options.store);
+        const weeklyTruth =
+          scenario.id === "cross-01"
+            ? weeklyOverviewTruth(manifest, options.store)
+            : null;
         const securityFixture = seedSecurityFixture(manifest, options.store);
         const boundScenario =
-          scenario.id === "communication-06"
-            ? {
-                ...scenario,
-                turns: bindCommunicationRetryTurns(manifest, scenario.turns),
-              }
-            : scenario.id === "documents-06"
+          scenario.id === "tasks-10"
+            ? { ...scenario, turns: bindTaskSelectionTurns(scenario.turns) }
+            : scenario.id === "communication-06"
               ? {
                   ...scenario,
-                  turns: bindContentActionTurns(manifest, scenario.turns),
+                  turns: bindCommunicationRetryTurns(manifest, scenario.turns),
                 }
-              : scenario.id === "documents-04"
+              : scenario.id === "documents-06"
                 ? {
                     ...scenario,
-                    turns: bindDocumentReviewTurns(manifest, scenario.turns),
+                    turns: bindContentActionTurns(manifest, scenario.turns),
                   }
-                : securityFixture && "fixture" in scenario
-                  ? bindSecurityScenario(scenario, securityFixture)
-                  : scenario.id === "intelligence-04"
-                    ? {
-                        ...scenario,
-                        // The original question is ambiguous without page context.
-                        // Supply a visible user clarification, not hidden domain metadata.
-                        turns: [
-                          ...scenario.turns,
-                          "The Plant Intelligence reports for our church.",
-                        ],
-                      }
-                    : {
-                        ...scenario,
-                        turns: bindContentTurns(manifest, scenario.turns),
-                      };
+                : scenario.id === "documents-04"
+                  ? {
+                      ...scenario,
+                      turns: bindDocumentReviewTurns(manifest, scenario.turns),
+                    }
+                  : securityFixture && "fixture" in scenario
+                    ? bindSecurityScenario(scenario, securityFixture)
+                    : scenario.id === "intelligence-04"
+                      ? {
+                          ...scenario,
+                          // The original question is ambiguous without page context.
+                          // Supply a visible user clarification, not hidden domain metadata.
+                          turns: [
+                            ...scenario.turns,
+                            "The Plant Intelligence reports for our church.",
+                          ],
+                        }
+                      : {
+                          ...scenario,
+                          turns: bindContentTurns(manifest, scenario.turns),
+                        };
         let expectations =
-          scenario.id === "tasks-07"
-            ? taskCleanupExpectations(manifest, options.store)
-            : scenario.id === "communication-06"
-              ? communicationRetryExpectations(manifest, options.store)
-              : securityFixture && "fixture" in scenario
-                ? securityExpectations(scenario, securityFixture)
-                : contentActionExpectations(manifest, options.store);
+          scenario.id === "tasks-10"
+            ? taskSelectionExpectations(manifest, options.store)
+            : scenario.id === "cross-01"
+              ? weeklyOverviewExpectations(manifest, options.store)
+              : scenario.id === "tasks-07"
+                ? taskCleanupExpectations(manifest, options.store)
+                : scenario.id === "communication-06"
+                  ? communicationRetryExpectations(manifest, options.store)
+                  : securityFixture && "fixture" in scenario
+                    ? securityExpectations(scenario, securityFixture)
+                    : contentActionExpectations(manifest, options.store);
         for (const family of fixtureFamilies) {
           if (expectations) break;
           expectations = family.expectations(manifest, options.store);
@@ -836,6 +867,7 @@ export function createProductionEveEvalAdapter(
                 (scenario.id === "regression-orientation" ||
                 scenario.id === "communication-06" ||
                 scenario.id === "tasks-07" ||
+                scenario.id === "tasks-10" ||
                 scenario.id === "wiki-06"
                   ? createEvePreparation({
                       actor,
@@ -956,39 +988,56 @@ export function createProductionEveEvalAdapter(
               );
               const foreignIds = options.store.foreignRecordIds(manifest);
               const contentAction =
-                scenario.id === "tasks-07"
-                  ? await readPreparedTaskCleanupFacts({
+                scenario.id === "tasks-10"
+                  ? await readPreparedTaskSelectionFacts({
                       manifest,
                       store: options.store,
                       calls,
                       presented,
+                      messages: result.messages,
                     })
-                  : scenario.id === "communication-06"
-                    ? await readPreparedCommunicationRetryFacts({
+                  : scenario.id === "tasks-07"
+                    ? await readPreparedTaskCleanupFacts({
                         manifest,
                         store: options.store,
                         calls,
                         presented,
                       })
-                    : scenario.id === "wiki-06"
-                      ? await observedBookmarkPlanFacts(
+                    : scenario.id === "communication-06"
+                      ? await readPreparedCommunicationRetryFacts({
                           manifest,
-                          options.store,
+                          store: options.store,
                           calls,
-                          presented
-                        )
-                      : peopleCsv && result.eveSessionId
-                        ? observedBoundPeopleCsvFacts(
+                          presented,
+                        })
+                      : scenario.id === "wiki-06"
+                        ? await observedBookmarkPlanFacts(
                             manifest,
                             options.store,
                             calls,
-                            result.eveSessionId,
-                            peopleCsv.bytesBase64
+                            presented
                           )
-                        : null;
+                        : peopleCsv && result.eveSessionId
+                          ? observedBoundPeopleCsvFacts(
+                              manifest,
+                              options.store,
+                              calls,
+                              result.eveSessionId,
+                              peopleCsv.bytesBase64
+                            )
+                          : null;
               if (contentAction) {
                 Object.assign(captured.facts, contentAction.facts);
                 captured.evidence.push(...contentAction.evidence);
+              }
+              if (weeklyTruth) {
+                const weekly = observedWeeklyOverviewFacts(
+                  scenario.id,
+                  calls,
+                  weeklyTruth
+                );
+                Object.assign(captured.facts, weekly.facts);
+                captured.evidence.push(...weekly.evidence);
               }
               const securityObserved = securityFixture
                 ? observeSecurityFixture(securityFixture, calls, result.answer)
