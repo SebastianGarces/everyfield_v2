@@ -383,11 +383,14 @@ test(
                 "Resend only the failed invitations from that meeting."
               );
               assert.equal(scenario.turns.length, 2);
+              const meetingSelection = scenario.turns[1];
+              assert.ok(
+                typeof meetingSelection === "string",
+                "Retry fixture requires an explicit text meeting selection"
+              );
               const meetingId = z
                 .uuid()
-                .parse(
-                  scenario.turns[1]!.match(/\/meetings\/([a-f0-9-]+)/)?.[1]
-                );
+                .parse(meetingSelection.match(/\/meetings\/([a-f0-9-]+)/)?.[1]);
               const found = capturedReadArtifactSchema.parse(
                 await registry.invoke(
                   "communication.query",

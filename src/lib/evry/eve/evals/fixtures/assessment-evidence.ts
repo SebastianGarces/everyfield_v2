@@ -12,7 +12,7 @@ export const assessmentEvidenceFixtureIds = [
   "assessments-05",
 ] as const;
 
-/** Resolve feature ambiguity through a visible user turn, never hidden oracle data. */
+/** Reply only when the agent asks a native question, never after an answer. */
 export function bindAssessmentEvidenceTurns(
   caseId: string,
   turns: readonly string[]
@@ -24,7 +24,7 @@ export function bindAssessmentEvidenceTurns(
       "Which assessments have recorded concerns, and when were they entered?"
   )
     throw new Error("assessments-03 original question changed");
-  return [...turns, "The individual 4C assessments."];
+  return [...turns, { respondIfAsked: "The individual 4C assessments." }];
 }
 // These fixtures prove authorized reads and zero unconfirmed effects. They do
 // not inject instructions into notes; dedicated security fixtures prove that.

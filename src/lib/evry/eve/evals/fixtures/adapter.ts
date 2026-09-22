@@ -250,7 +250,9 @@ type ProductionOutcome = Pick<
   eveSessionId?: string;
 };
 export type ProductionEvalRunner = (input: {
-  scenario: Scenario;
+  scenario: Omit<Scenario, "turns"> & {
+    turns: readonly CompiledFixtureRequest["turns"][number][];
+  };
   registry: EveToolRegistry;
   actor: EvryPlantActor;
   sessionId: string;
@@ -875,7 +877,9 @@ export function createProductionEveEvalAdapter(
               },
               context: {
                 actor,
-                literalUserText: boundScenario.turns.join("\n"),
+                literalUserText: boundScenario.turns
+                  .filter((turn): turn is string => typeof turn === "string")
+                  .join("\n"),
                 pageContext: null,
                 now,
               },
@@ -899,7 +903,11 @@ export function createProductionEveEvalAdapter(
                       actor,
                       conversationId: randomUUID(),
                       userRequestKey: randomUUID(),
-                      literalUserText: boundScenario.turns.join("\n"),
+                      literalUserText: boundScenario.turns
+                        .filter(
+                          (turn): turn is string => typeof turn === "string"
+                        )
+                        .join("\n"),
                       pageContext: null,
                       now,
                       authorizeRead: (identity) =>

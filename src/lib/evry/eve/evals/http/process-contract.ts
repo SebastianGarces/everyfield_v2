@@ -4,6 +4,16 @@ import { processingSnapshotSchema } from "./processing-snapshot";
 import { clarificationMeasurementSchema } from "../contract";
 import { taskPreparationAssertionSchema } from "./task-state-script";
 
+export const fixtureTurnSchema = z.union([
+  z.string().min(1),
+  z.strictObject({ respond: z.string().min(1) }),
+  // Optional fixture context is supplied only for a native pending question.
+  // Plain prose is deliberately not classified as a question by this runner.
+  z.strictObject({ respondIfAsked: z.string().min(1) }),
+  z.strictObject({ optionId: z.string().min(1) }),
+]);
+export type FixtureTurn = z.infer<typeof fixtureTurnSchema>;
+
 const restartFollowupSchema = z.strictObject({
   turn: z.string().min(1).max(4_000),
   responses: z
@@ -33,15 +43,7 @@ export const compiledFixtureRequest = z
     proxyUrl: z.string().url(),
     sessionToken: z.string().min(1),
     actor: z.strictObject({ userId: z.string(), plantId: z.string() }),
-    turns: z
-      .array(
-        z.union([
-          z.string().min(1),
-          z.strictObject({ respond: z.string().min(1) }),
-          z.strictObject({ optionId: z.string().min(1) }),
-        ])
-      )
-      .min(1),
+    turns: z.array(fixtureTurnSchema).min(1),
     /** Fixture-owned bytes delivered by native staging, never pasted into a model turn. */
     attachments: z
       .array(

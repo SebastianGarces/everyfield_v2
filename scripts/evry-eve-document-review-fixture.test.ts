@@ -100,8 +100,13 @@ test(
               2,
               "Explicit user references must be retained in the runner"
             );
+            const documentSelection = scenario.turns[1];
+            assert.ok(
+              typeof documentSelection === "string",
+              "Document fixture requires explicit text document links"
+            );
             const ids = [
-              ...scenario.turns[1]!.matchAll(
+              ...documentSelection.matchAll(
                 /\/api\/documents\/history\/([0-9a-f-]{36})/g
               ),
             ].map((match) => z.uuid().parse(match[1]));

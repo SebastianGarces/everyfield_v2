@@ -6,7 +6,7 @@ import {
   assertIsolatedFixtureTarget,
 } from "./host";
 import { createHttpEveEvalRunner } from "./runner";
-import { compiledFixtureRequest } from "./process-contract";
+import { compiledFixtureRequest, fixtureTurnSchema } from "./process-contract";
 
 const origin = "http://127.0.0.1:4109";
 const databaseUrl = "postgres://fixture:fixture@localhost:5499/eve_fixture";
@@ -23,6 +23,211 @@ const identity = {
   ...actor,
   appSessionId: createHash("sha256").update(sessionToken).digest("hex"),
 };
+
+test("optional native question replies have a distinct strict fixture contract", () => {
+  assert.deepEqual(
+    fixtureTurnSchema.parse({
+      respondIfAsked: "The individual 4C assessments.",
+    }),
+    { respondIfAsked: "The individual 4C assessments." }
+  );
+  for (const invalid of [
+    { respondIfAsked: "" },
+    { respondIfAsked: "4C", respond: "Required" },
+    { respondIfAsked: "4C", optionId: "continue" },
+  ])
+    assert.equal(fixtureTurnSchema.safeParse(invalid).success, false);
+});
+
+test("optional replies only answer a native question and never manufacture follow-up messages", async () => {
+  for (const mode of [
+    "answer",
+    "prose",
+    "question",
+    "session-limit",
+    "multiple",
+  ] as const) {
+    const priorFetch = globalThis.fetch;
+    const priorDb = process.env.DATABASE_URL;
+    process.env.DATABASE_URL = databaseUrl;
+    const posted: unknown[] = [];
+    const prepared: number[] = [];
+    let serial = 0;
+    const event = (type: string, data: unknown) => ({
+      type,
+      data,
+      meta: {
+        at: now.toISOString(),
+        id: `optional-${serial++}`,
+        deliveryIds: [`delivery-${posted.length}`],
+      },
+    });
+    globalThis.fetch = async (input, init) => {
+      const url = new URL(String(input));
+      assert.equal(
+        new Headers(init?.headers).get("cookie"),
+        `session=${sessionToken}`
+      );
+      assert.equal(new Headers(init?.headers).get("origin"), origin);
+      if (url.pathname.endsWith("/cancel")) return Response.json({ ok: true });
+      if (url.pathname === "/eve/v1/session")
+        return Response.json({ sessionId: "optional-session" });
+      if (init?.method === "POST") {
+        assert.equal(url.pathname, "/eve/v1/session/optional-session");
+        posted.push(JSON.parse(String(init.body)));
+        return Response.json({
+          sessionId: "optional-session",
+          deliveryId: `delivery-${posted.length}`,
+        });
+      }
+      assert.equal(url.pathname, "/eve/v1/session/optional-session/stream");
+      const data = {
+        sequence: posted.length - 1,
+        turnId: `turn-${posted.length}`,
+        stepIndex: 0,
+      };
+      const events = [event("turn.started", data)];
+      if (
+        posted.length === 1 &&
+        ["question", "session-limit", "multiple"].includes(mode)
+      ) {
+        const request = {
+          kind: mode === "session-limit" ? "session-limit" : "question",
+          requestId: "scope-question",
+          prompt: "Which assessments?",
+          allowFreeform: true,
+          action: {
+            kind: "tool-call",
+            callId: "scope-question",
+            toolName: "ask_question",
+            input: {},
+          },
+        };
+        events.push(
+          event("input.requested", {
+            ...data,
+            requests:
+              mode === "multiple"
+                ? [request, { ...request, requestId: "another-question" }]
+                : [request],
+          })
+        );
+      } else {
+        if (posted.length === 2)
+          events.push(
+            event("input.resolved", {
+              ...data,
+              resolutions: [
+                {
+                  requestId: "scope-question",
+                  status: "answered",
+                  text: "The individual 4C assessments.",
+                },
+              ],
+            })
+          );
+        const message =
+          mode === "prose"
+            ? "Do you mean the individual 4C assessments?"
+            : "Two assessments have recorded concerns.";
+        events.push(
+          event("message.completed", {
+            ...data,
+            message,
+            finishReason: "stop",
+          }),
+          event("turn.completed", data)
+        );
+      }
+      events.push(
+        event("session.waiting", { ...data, reason: "awaiting-message" })
+      );
+      return new Response(
+        events.map((entry) => JSON.stringify(entry)).join("\n") + "\n",
+        {
+          headers: {
+            "content-type": "application/x-ndjson",
+            "x-eve-stream-version": "25",
+          },
+        }
+      );
+    };
+    const host = installIsolatedFixtureHost({ origin, databaseUrl });
+    try {
+      const run = createHttpEveEvalRunner({
+        origin,
+        databaseUrl,
+        host,
+        prices,
+        beforeTurn: async ({ turnIndex }) => {
+          prepared.push(turnIndex);
+          return undefined;
+        },
+      });
+      const promise = run({
+        scenario: {
+          turns: [
+            "Which assessments have recorded concerns?",
+            { respondIfAsked: "The individual 4C assessments." },
+            { respondIfAsked: "Do not send after the question is resolved." },
+          ],
+        },
+        actor,
+        sessionToken,
+        now,
+        maxCostUsd: 1,
+        signal: AbortSignal.timeout(2_000),
+      });
+      if (mode === "session-limit" || mode === "multiple") {
+        await assert.rejects(promise, /exactly one native pending question/);
+        assert.equal(posted.length, 1);
+        assert.deepEqual(prepared, [0]);
+      } else {
+        const result = await promise;
+        assert.equal(result.judge, null);
+        assert.equal(posted.length, mode === "question" ? 2 : 1);
+        assert.deepEqual(prepared, mode === "question" ? [0, 1] : [0]);
+        assert.deepEqual(posted[0], {
+          message: "Which assessments have recorded concerns?",
+        });
+        if (mode === "question") {
+          assert.deepEqual(posted[1], {
+            inputResponses: [
+              {
+                requestId: "scope-question",
+                text: "The individual 4C assessments.",
+              },
+            ],
+          });
+          assert.equal(result.clarificationCount, 1);
+          assert.deepEqual(result.clarificationMeasurement?.observedTurnIds, [
+            "turn-1",
+          ]);
+        } else {
+          assert.equal(
+            result.answer,
+            mode === "prose"
+              ? "Do you mean the individual 4C assessments?"
+              : "Two assessments have recorded concerns."
+          );
+          assert.deepEqual(result.clarificationMeasurement?.unmeasuredTurnIds, [
+            "turn-1",
+          ]);
+          assert.equal(
+            result.clarificationCount,
+            0,
+            "Structural lower bound is not a human prose judgment"
+          );
+        }
+      }
+    } finally {
+      host.close();
+      globalThis.fetch = priorFetch;
+      if (priorDb === undefined) delete process.env.DATABASE_URL;
+      else process.env.DATABASE_URL = priorDb;
+    }
+  }
+});
 
 test("attachment fixture declarations require one bounded upload per existing turn", () => {
   const request = {

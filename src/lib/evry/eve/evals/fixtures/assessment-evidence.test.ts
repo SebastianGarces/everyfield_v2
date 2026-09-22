@@ -18,14 +18,14 @@ import {
   type AssessmentEvidenceRecord,
 } from "./assessment-evidence";
 
-test("assessment concern scenario adds only a visible feature clarification after the unchanged question", () => {
+test("assessment concern scenario offers clarification only for a native question", () => {
   const scenario = questions.find(
     (question) => question.id === "assessments-03"
   )!;
   const original = [...scenario.turns];
   assert.deepEqual(bindAssessmentEvidenceTurns(scenario.id, scenario.turns), [
     "Which assessments have recorded concerns, and when were they entered?",
-    "The individual 4C assessments.",
+    { respondIfAsked: "The individual 4C assessments." },
   ]);
   assert.deepEqual(scenario.turns, original);
   assert.throws(() =>

@@ -16,6 +16,7 @@ import { fixtureTranscript } from "./transcript";
 import { observeClarifications } from "./clarifications";
 import { splitEveResponse } from "../../presentation";
 import type { Observation } from "../contract";
+import type { FixtureTurn } from "./process-contract";
 import type { EveJsonValue } from "../../capabilities/registry";
 import { isDeepStrictEqual } from "node:util";
 import {
@@ -126,7 +127,7 @@ export function createHttpEveEvalRunner(config: {
   const origin = new URL(config.origin).origin;
   return async (input: {
     scenario: {
-      turns: readonly (string | { respond: string } | { optionId: string })[];
+      turns: readonly FixtureTurn[];
     };
     actor: { userId: string; plantId: string };
     sessionToken: string;
@@ -210,11 +211,28 @@ export function createHttpEveEvalRunner(config: {
       } else {
         ({ session } = await client.sessions.create({ signal }));
       }
-      for (const [index, turn] of (config.replaySessionId
+      for (const [index, scriptedTurn] of (config.replaySessionId
         ? []
         : input.scenario.turns
       ).entries()) {
         signal.throwIfAborted();
+        let turn: Exclude<FixtureTurn, { respondIfAsked: string }>;
+        if (
+          typeof scriptedTurn !== "string" &&
+          "respondIfAsked" in scriptedTurn
+        ) {
+          // Skip before beforeTurn: an unused reply must not stage a file or
+          // create a new user turn after an already complete answer.
+          if (pendingQuestions.length === 0) continue;
+          if (
+            pendingQuestions.length !== 1 ||
+            pendingQuestions[0]?.kind !== "question"
+          )
+            throw new Error(
+              "Optional fixture reply needs exactly one native pending question"
+            );
+          turn = { respond: scriptedTurn.respondIfAsked };
+        } else turn = scriptedTurn;
         const questionReply =
           typeof turn === "string" &&
           pendingQuestions.length === 1 &&

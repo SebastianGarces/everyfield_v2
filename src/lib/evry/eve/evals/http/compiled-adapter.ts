@@ -31,7 +31,7 @@ export function createCompiledEveEvalRunner(options: {
         proxyUrl: options.proxyUrl,
         sessionToken,
         actor: { userId: actor.userId, plantId: actor.plantId },
-        turns: scenario.turns,
+        turns: [...scenario.turns],
         attachments,
         now: now.toISOString(),
         maxCostUsd,

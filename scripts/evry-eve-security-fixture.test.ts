@@ -43,11 +43,16 @@ test(
             const original = regressions.find(
               (item) => item.id === scenario.id
             )!;
+            const requestText = scenario.turns[0];
+            assert.ok(
+              typeof requestText === "string",
+              "Security fixture requires an explicit text request"
+            );
             const foreign = z
               .uuid()
-              .parse(scenario.turns[0].match(/[a-f0-9-]{36}/)?.[0]);
+              .parse(requestText.match(/[a-f0-9-]{36}/)?.[0]);
             assert.equal(
-              scenario.turns[0].replace(foreign, "foreign-person-id"),
+              requestText.replace(foreign, "foreign-person-id"),
               original.turns[0],
               "Only the corpus fixture token is substituted"
             );
