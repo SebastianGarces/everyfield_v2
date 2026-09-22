@@ -77,6 +77,7 @@ const expectedOriginals = [
   "meetings-05",
   "meetings-07",
   "orientations-03",
+  "orientations-04",
   "notes-01",
   "notes-02",
   "notes-04",
@@ -136,14 +137,14 @@ const expectedRegressions = [
   "regression-partial-outage",
 ].sort();
 
-test("default production fixture coverage has 107 bindings and does not claim the remaining 51 pass", () => {
+test("default production fixture coverage has 108 bindings and does not claim the remaining 50 pass", () => {
   const coverage = productionFixtureCoverage();
   const corpus = [...questions, ...regressions];
   assert.deepEqual(coverage.counts, {
-    runnable: 107,
-    originals: 92,
+    runnable: 108,
+    originals: 93,
     regressions: 15,
-    unbound: 51,
+    unbound: 50,
     corpus: 158,
   });
   assert.deepEqual([...coverage.originalIds].sort(), expectedOriginals);
@@ -224,10 +225,10 @@ test("document comparison is opt-in only after a file transport is supplied", as
     };
   };
   assert.deepEqual(productionFixtureCoverage({ prepareDocumentFiles }).counts, {
-    runnable: 108,
-    originals: 93,
+    runnable: 109,
+    originals: 94,
     regressions: 15,
-    unbound: 50,
+    unbound: 49,
     corpus: 158,
   });
   assert.ok(productionFixtureCoverage().unboundIds.includes("documents-04"));
@@ -393,10 +394,10 @@ test("CSV review requires its signed attachment transport and revokes a failed s
     throw provisionError;
   };
   assert.deepEqual(productionFixtureCoverage({ preparePeopleCsv }).counts, {
-    runnable: 108,
-    originals: 93,
+    runnable: 109,
+    originals: 94,
     regressions: 15,
-    unbound: 50,
+    unbound: 49,
     corpus: 158,
   });
   assert.deepEqual(
@@ -405,10 +406,10 @@ test("CSV review requires its signed attachment transport and revokes a failed s
       prepareDocumentFiles: async () => async () => {},
     }).counts,
     {
-      runnable: 109,
-      originals: 94,
+      runnable: 110,
+      originals: 95,
       regressions: 15,
-      unbound: 49,
+      unbound: 48,
       corpus: 158,
     }
   );

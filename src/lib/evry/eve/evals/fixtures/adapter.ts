@@ -238,6 +238,12 @@ import {
   orientationDocumentExpectations,
   observedOrientationDocumentFacts,
 } from "./orientation-document";
+import {
+  orientationInvitationsFixtureIds,
+  seedOrientationInvitationsFixture,
+  orientationInvitationsExpectations,
+  readPreparedOrientationInvitationsFacts,
+} from "./orientation-invitations";
 
 type FixtureTransports = {
   prepareDocumentFiles?: DocumentFixtureTransport;
@@ -473,6 +479,7 @@ const familyCaseIds = [
   ...assessmentEvidenceFixtureIds,
   ...sourceRecoveryFixtureIds,
   ...orientationDocumentFixtureIds,
+  ...orientationInvitationsFixtureIds,
 ];
 
 /** Bound means a runnable fixture, not a passed model-quality evaluation. */
@@ -791,7 +798,11 @@ export function createProductionEveEvalAdapter(
         seedAssessmentEvidenceFixture(manifest, options.store);
         seedSourceRecoveryFixture(manifest, options.store);
         seedOrientationDocumentFixture(manifest, options.store);
-        const orientationDocument = orientationDocumentTruth(manifest, options.store);
+        seedOrientationInvitationsFixture(manifest, options.store);
+        const orientationDocument = orientationDocumentTruth(
+          manifest,
+          options.store
+        );
         const assessmentTruth = assessmentEvidenceTruth(
           manifest,
           options.store
@@ -852,6 +863,7 @@ export function createProductionEveEvalAdapter(
                               turns: bindContentTurns(manifest, scenario.turns),
                             };
         let expectations =
+          orientationInvitationsExpectations(manifest, options.store) ??
           orientationDocumentExpectations(manifest) ??
           sourceRecoveryExpectations(manifest, options.store) ??
           assessmentEvidenceExpectations(manifest, options.store) ??
@@ -928,6 +940,7 @@ export function createProductionEveEvalAdapter(
                 scenario.id === "tasks-07" ||
                 scenario.id === "tasks-10" ||
                 scenario.id === "documents-05" ||
+                scenario.id === "orientations-04" ||
                 scenario.id === "wiki-06"
                   ? createEvePreparation({
                       actor,
@@ -1123,10 +1136,25 @@ export function createProductionEveEvalAdapter(
               }
               if (scenario.id === "documents-05") {
                 const document = await observedOrientationDocumentFacts(
-                  manifest, options.store, orientationDocument, calls, presented
+                  manifest,
+                  options.store,
+                  orientationDocument,
+                  calls,
+                  presented
                 );
                 Object.assign(captured.facts, document.facts);
                 captured.evidence.push(...document.evidence);
+              }
+              if (scenario.id === "orientations-04") {
+                const invitation =
+                  await readPreparedOrientationInvitationsFacts({
+                    manifest,
+                    store: options.store,
+                    calls,
+                    presented,
+                  });
+                Object.assign(captured.facts, invitation.facts);
+                captured.evidence.push(...invitation.evidence);
               }
               const securityObserved = securityFixture
                 ? observeSecurityFixture(securityFixture, calls, result.answer)
