@@ -24,12 +24,14 @@ import { LaunchSundayChecklistsDocument } from "./launch-sunday-checklists";
 import { ResponseCardDocument } from "./response-card";
 import { SignInSheetDocument } from "./sign-in-sheet";
 import { VisionMeetingAgendaDocument } from "./vision-meeting-agenda";
+import { OrientationAgendaDocument } from "./orientation-agenda";
 
 type TemplateComponent = (props: {
   values: DocumentMergeValues;
 }) => ReactElement;
 
 const PDF_COMPONENTS: Record<string, TemplateComponent> = {
+  "orientation-agenda": OrientationAgendaDocument,
   "commitment-card": CommitmentCardDocument,
   "response-card": ResponseCardDocument,
   "guest-sign-in-sheet": SignInSheetDocument,

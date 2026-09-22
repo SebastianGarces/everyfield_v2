@@ -8,8 +8,10 @@
 // ============================================================================
 
 import type { DocumentTemplate } from "./types";
+import { ORIENTATION_AGENDA_TEMPLATE } from "./content/orientation-agenda";
 
 export const DOCUMENT_TEMPLATES: DocumentTemplate[] = [
+  ORIENTATION_AGENDA_TEMPLATE,
   {
     id: "commitment-card",
     name: "Core Group Commitment Card",

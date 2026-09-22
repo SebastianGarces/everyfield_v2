@@ -14,10 +14,12 @@ import { buildFollowUpLetter } from "./follow-up-letter";
 import { buildLaunchTeamCommitment } from "./launch-team-commitment";
 import { buildMemberExpectations } from "./member-expectations";
 import { buildVisionMeetingAgenda } from "./vision-meeting-agenda";
+import { buildOrientationAgenda } from "./orientation-agenda";
 
 type DocxBuilder = (values: DocumentMergeValues) => Document;
 
 const DOCX_BUILDERS: Record<string, DocxBuilder> = {
+  "orientation-agenda": buildOrientationAgenda,
   "vision-meeting-agenda": buildVisionMeetingAgenda,
   "member-expectations": buildMemberExpectations,
   "launch-team-commitment": buildLaunchTeamCommitment,
