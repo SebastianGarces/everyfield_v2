@@ -21,6 +21,8 @@ import {
   observedSourceRecoveryFacts,
   seedSourceRecoveryFixture,
   sourceRecoveryExpectations,
+  sourceRecoveryRequest,
+  sourceRecoverySetup,
   sourceRecoveryTruth,
 } from "@/lib/evry/eve/evals/fixtures/source-recovery";
 
@@ -309,10 +311,7 @@ test(
                 userId: compiled.ids.actor,
                 plantId: compiled.ids.plant,
               },
-              turns: [
-                "Show my pending tasks and upcoming meetings.",
-                "Try the meeting lookup again.",
-              ],
+              turns: [sourceRecoverySetup, sourceRecoveryRequest],
               sourceRecovery: "edges-13",
               now: compiled.now,
               maxCostUsd: 1,
@@ -349,7 +348,6 @@ test(
                       },
                     ],
                   },
-                  { text: "Scripted failure boundary." },
                   {
                     toolCalls: [
                       {
@@ -360,6 +358,7 @@ test(
                     ],
                   },
                   { text: "Scripted recovery boundary." },
+                  { text: "Scripted retained evidence boundary." },
                 ],
               },
             },
