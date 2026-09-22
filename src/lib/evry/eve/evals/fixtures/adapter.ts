@@ -269,6 +269,13 @@ import {
   selectedNotificationExpectations,
   observedSelectedNotifications,
 } from "./selected-notifications";
+import {
+  commitmentDocumentFixtureIds,
+  commitmentDocumentFiles,
+  seedCommitmentDocument,
+  commitmentDocumentExpectations,
+  observedCommitmentDocument,
+} from "./commitment-document";
 
 type FixtureTransports = {
   prepareDocumentFiles?: DocumentFixtureTransport;
@@ -509,6 +516,7 @@ const familyCaseIds = [
   ...identityNotesFixtureIds,
   ...foundationalRequestIds,
   ...selectedNotificationIds,
+  ...commitmentDocumentFixtureIds,
 ];
 
 /** Bound means a runnable fixture, not a passed model-quality evaluation. */
@@ -516,6 +524,7 @@ export function productionFixtureCoverage(options: FixtureTransports = {}) {
   const runnableIds = [...boundCases, ...familyCaseIds].filter(
     (id) =>
       (id !== "documents-04" || options.prepareDocumentFiles) &&
+      (id !== "commitments-03" || options.prepareDocumentFiles) &&
       (id !== "documents-06" || options.preparePeopleCsv)
   );
   const bound = new Set(runnableIds);
@@ -815,6 +824,10 @@ export function createProductionEveEvalAdapter(
           cleanupFiles = await options.prepareDocumentFiles!(
             documentReviewFiles(manifest)
           );
+        if (scenario.id === "commitments-03")
+          cleanupFiles = await options.prepareDocumentFiles!(
+            await commitmentDocumentFiles(manifest)
+          );
         for (const family of fixtureFamilies)
           family.seed(manifest, options.store);
         seedContentActionFixture(manifest, options.store);
@@ -832,6 +845,7 @@ export function createProductionEveEvalAdapter(
         seedIdentityNotesFixture(manifest, options.store);
         seedFoundationalRequests(manifest, options.store);
         seedSelectedNotifications(manifest, options.store);
+        seedCommitmentDocument(manifest, options.store);
         const orientationDocument = orientationDocumentTruth(
           manifest,
           options.store
@@ -910,6 +924,7 @@ export function createProductionEveEvalAdapter(
                                 ),
                               };
         let expectations =
+          commitmentDocumentExpectations(manifest, options.store) ??
           selectedNotificationExpectations(manifest, options.store) ??
           foundationalExpectations(manifest, options.store) ??
           identityNotesExpectations(manifest, options.store) ??
@@ -1257,6 +1272,16 @@ export function createProductionEveEvalAdapter(
                 });
                 Object.assign(captured.facts, selected.facts);
                 captured.evidence.push(...selected.evidence);
+              }
+              if (scenario.id === "commitments-03") {
+                const document = observedCommitmentDocument({
+                  manifest,
+                  store: options.store,
+                  calls,
+                  messages: result.messages,
+                });
+                Object.assign(captured.facts, document.facts);
+                captured.evidence.push(...document.evidence);
               }
               const securityObserved = securityFixture
                 ? observeSecurityFixture(securityFixture, calls, result.answer)

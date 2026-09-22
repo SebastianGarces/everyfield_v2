@@ -55,7 +55,11 @@ async function main() {
     | undefined;
   const previousStorageEnvironment = new Map<string, string | undefined>();
   try {
-    if (ids.includes("documents-04") || ids.includes("documents-06")) {
+    if (
+      ids.includes("documents-04") ||
+      ids.includes("documents-06") ||
+      ids.includes("commitments-03")
+    ) {
       documentStorage = await startDocumentFixtureStorage({
         allowNativeUploads: ids.includes("documents-06"),
       });

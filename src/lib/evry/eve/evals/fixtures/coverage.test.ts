@@ -235,13 +235,66 @@ test("document comparison is opt-in only after a file transport is supplied", as
     };
   };
   assert.deepEqual(productionFixtureCoverage({ prepareDocumentFiles }).counts, {
-    runnable: 119,
-    originals: 102,
+    runnable: 120,
+    originals: 103,
     regressions: 17,
-    unbound: 39,
+    unbound: 38,
     corpus: 158,
   });
   assert.ok(productionFixtureCoverage().unboundIds.includes("documents-04"));
+  const adapter = createProductionEveEvalAdapter({
+    store: {
+      ...createFixtureStore("evry-eve-fixture-000000000000-pg"),
+      seed() {},
+      sql() {
+        assert.ok(ready || cleaned);
+        return "";
+      },
+      query() {
+        throw reachedTruth;
+      },
+      revoke() {
+        revoked = true;
+      },
+    },
+    prepareDocumentFiles,
+    buildSha: "0".repeat(40),
+    async runProduction() {
+      throw new Error("Fixture setup must not invoke Eve");
+    },
+  });
+  await assert.rejects(adapter.prepare(scenario), reachedTruth);
+  assert.equal(ready, false);
+  assert.equal(cleaned, true);
+  assert.equal(revoked, true);
+});
+
+test("commitment lookup requires real file transport and cleans its files after setup failure", async () => {
+  const scenario = questions.find((q) => q.id === "commitments-03");
+  assert.ok(scenario);
+  const reachedTruth = new Error("Stop before commitment SQL truth");
+  let ready = false;
+  let cleaned = false;
+  let revoked = false;
+  const prepareDocumentFiles = async (
+    files: readonly { key: string; body: Uint8Array }[]
+  ) => {
+    assert.equal(files.length, 3);
+    assert.equal(new Set(files.map((file) => file.key)).size, 3);
+    for (const file of files)
+      assert.equal(Buffer.from(file.body).subarray(0, 5).toString(), "%PDF-");
+    ready = true;
+    return async () => {
+      ready = false;
+      cleaned = true;
+    };
+  };
+  assert.ok(productionFixtureCoverage().unboundIds.includes(scenario.id));
+  assert.ok(
+    productionFixtureCoverage({ prepareDocumentFiles }).runnableIds.includes(
+      scenario.id
+    )
+  );
   const adapter = createProductionEveEvalAdapter({
     store: {
       ...createFixtureStore("evry-eve-fixture-000000000000-pg"),
@@ -416,10 +469,10 @@ test("CSV review requires its signed attachment transport and revokes a failed s
       prepareDocumentFiles: async () => async () => {},
     }).counts,
     {
-      runnable: 120,
-      originals: 103,
+      runnable: 121,
+      originals: 104,
       regressions: 17,
-      unbound: 38,
+      unbound: 37,
       corpus: 158,
     }
   );
