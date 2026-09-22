@@ -59,6 +59,7 @@ import { AuthenticatedLink } from "@/components/authenticated-navigation";
 import {
   customerContentPreviews,
   customerReviewTargets,
+  customerTaskReview,
   readResultLabel,
 } from "./artifact-presentation";
 
@@ -589,8 +590,10 @@ function ConfirmationAudience({
 
 function DetailedConfirmation({
   artifact,
+  taskReviews,
 }: {
   artifact: EvryDetailedConfirmationArtifactDocument;
+  taskReviews: readonly ReturnType<typeof customerTaskReview>[];
 }) {
   return (
     <div className="space-y-6">
@@ -600,19 +603,24 @@ function DetailedConfirmation({
       </p>
 
       <ol className="space-y-4">
-        {artifact.steps.map((step) => {
-          const targets = customerReviewTargets(
-            step.resolvedTargets,
-            step.effectKind
+        {artifact.steps.map((step, stepIndex) => {
+          const taskReview = taskReviews[stepIndex];
+          const targets =
+            taskReview?.targets ??
+            customerReviewTargets(step.resolvedTargets, step.effectKind);
+          const previews = customerContentPreviews(
+            step.contentPreviews,
+            taskReview?.detailsUnavailable
           );
-          const previews = customerContentPreviews(step.contentPreviews);
+          const changes = taskReview?.changes ?? step.beforeAfter;
           const title = confirmationStepTitle(step);
           const lead = confirmationStepLead(step);
           const StepIcon = confirmationStepIcon(step);
           const showChanges =
             step.effectKind === "bulk_change" ||
             step.effectKind === "destructive" ||
-            step.effectKind === "file_import";
+            step.effectKind === "file_import" ||
+            taskReview !== null;
           const excludedCount = step.exclusions.reduce(
             (sum, exclusion) => sum + exclusion.count,
             0
@@ -709,15 +717,15 @@ function DetailedConfirmation({
                 </details>
               ) : null}
 
-              {showChanges && step.beforeAfter.length ? (
+              {showChanges && changes.length ? (
                 <section>
                   <h5 className="text-sm font-medium">
                     Changes after confirmation
                   </h5>
                   <ul className="mt-2 space-y-2">
-                    {step.beforeAfter.map((change) => (
+                    {changes.map((change, changeIndex) => (
                       <li
-                        key={change.label}
+                        key={`${changeIndex}:${change.label}`}
                         className="bg-background/80 grid gap-3 rounded-lg p-3 text-sm sm:grid-cols-2"
                       >
                         <div>
@@ -799,6 +807,13 @@ function DetailedConfirmation({
           );
         })}
       </ol>
+      {taskReviews.some((review) => review !== null) ? (
+        <ul className="list-disc space-y-1 pl-5 text-sm">
+          {artifact.consequences.map((consequence) => (
+            <li key={consequence}>{consequence}</li>
+          ))}
+        </ul>
+      ) : null}
     </div>
   );
 }
@@ -808,6 +823,11 @@ function renderConfirmation(
   options: EvryArtifactRenderOptions
 ) {
   const controls = options.confirmationControls;
+  const taskReviews =
+    "artifactVersion" in artifact ? artifact.steps.map(customerTaskReview) : [];
+  const detailsUnavailable = taskReviews.some(
+    (review) => review?.detailsUnavailable
+  );
   return (
     <ArtifactFrame
       variant="confirmation"
@@ -837,6 +857,7 @@ function renderConfirmation(
             <Button
               type="button"
               onClick={controls.onExecute}
+              disabled={detailsUnavailable}
               className="min-h-10 w-full active:scale-[0.96] sm:w-auto"
             >
               {artifact.actionLabel}
@@ -846,7 +867,7 @@ function renderConfirmation(
       }
     >
       {"artifactVersion" in artifact ? (
-        <DetailedConfirmation artifact={artifact} />
+        <DetailedConfirmation artifact={artifact} taskReviews={taskReviews} />
       ) : (
         <div className="space-y-4">
           <dl className="space-y-2 text-sm">

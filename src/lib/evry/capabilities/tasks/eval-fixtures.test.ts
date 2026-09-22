@@ -589,7 +589,7 @@ test("a source-derived handoff above the bulk UI cap remains fully reviewable", 
   assert.match(targets[100]!.value, /assignedToId/);
 });
 
-test("large compound Task evidence remains byte-exact through persistence, public projection, and rendering", () => {
+test("large compound Task evidence remains byte-exact in storage without rendering unchanged snapshots", () => {
   const identity = TASK_ACTION_CONTRACTS.bulkRescheduleTasksAction.operationId;
   const base = taskEffectPlanFixture("bulkRescheduleTasksAction");
   const midpoint = "TASK_DESCRIPTION_MIDPOINT_SENTINEL";
@@ -611,6 +611,7 @@ test("large compound Task evidence remains byte-exact through persistence, publi
         id: taskId,
         title: `Large compound task ${index + 1}`,
         description: `${description}-${index}`,
+        dueDate: "2026-09-25",
       },
     };
   });
@@ -680,5 +681,8 @@ test("large compound Task evidence remains byte-exact through persistence, publi
       model: renderableEvryArtifact(publicArtifact),
     })
   );
-  assert.match(markup, new RegExp(midpoint));
+  assert.doesNotMatch(markup, new RegExp(midpoint));
+  assert.doesNotMatch(markup, /Immutable Task plan evidence/);
+  assert.match(markup, /Large compound task 8/);
+  assert.match(markup, /Sep 25, 2026/);
 });
