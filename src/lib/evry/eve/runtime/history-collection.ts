@@ -21,6 +21,7 @@ const record = z.strictObject({
 const evidence = {
   scope: historyCollectionInputSchema,
   matched: z.number().int().nonnegative().nullable(),
+  timeZone: z.string().min(1).nullable(),
   records: z.array(record),
   readCount: z.number().int().nonnegative(),
   snapshot: z.literal("multiple_reads"),
@@ -30,6 +31,7 @@ export const historyCollectionOutputSchema = z.discriminatedUnion("status", [
     status: z.literal("complete"),
     ...evidence,
     matched: z.number().int().nonnegative(),
+    timeZone: z.string().min(1),
     records: z.array(
       record.extend({
         contentComplete: z.literal(true),
@@ -65,10 +67,10 @@ const history = ((read) => Object.freeze({collect: async (input) => {
     throw new Error('history.collect requires structured history filters only.');
   const scope = JSON.parse(JSON.stringify(input));
   const records = new Map();
-  let matched = null, readCount = 0;
+  let matched = null, timeZone = null, readCount = 0;
   const outcome = (reason) => ({
     status: reason ? 'partial' : 'complete', ...(reason ? {reason} : {}),
-    scope, matched, records: [...records.values()].map(({nextOffset, signature, ...record}) => record),
+    scope, matched, timeZone, records: [...records.values()].map(({nextOffset, signature, ...record}) => record),
     readCount, snapshot: 'multiple_reads'
   });
   const chunkLabels = ['Recorded notes','Change reason','Notes character count','Notes character offset','Next content offset'];
@@ -81,6 +83,11 @@ const history = ((read) => Object.freeze({collect: async (input) => {
         !Number.isSafeInteger(page.counts?.matched) || page.counts.matched < 0 ||
         typeof page.resultReference !== 'string' || !page.resultReference)
       return {reason:'continuation_unavailable'};
+    const zones = page.filters?.filter(f => f.label === 'Time zone');
+    if (!zones || zones.length !== 1 || typeof zones[0].value !== 'string' || !zones[0].value.trim())
+      return {reason:'continuation_unavailable'};
+    if (timeZone !== null && timeZone !== zones[0].value) return {reason:'evidence_changed'};
+    timeZone = zones[0].value;
     const ids = new Set();
     const decoded = [];
     for (const item of page.items) {

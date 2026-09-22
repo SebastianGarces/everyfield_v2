@@ -30,6 +30,9 @@ test("complete note guidance preserves scope and independent record/content cont
   assert.match(section, /except `text`, `result` and `contentOffset`/);
   assert.match(section, /both record pages and Unicode note continuations/);
   assert.match(section, /matches literal wording, not meaning/);
+  assert.match(section, /Interpret narrative evidence by meaning/);
+  assert.match(section, /requested details for every relevant record/);
+  assert.match(section, /collection's `timeZone` is the source church's zone/);
   assert.match(
     section,
     /entry timestamps, source links and exact result references/

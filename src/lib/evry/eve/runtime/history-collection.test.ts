@@ -139,6 +139,7 @@ test("collects all pages and batches Unicode note continuations through the actu
   const result = await evidence(fixture);
   assert.equal(result.status, "complete");
   assert.equal(result.matched, 53);
+  assert.equal(result.timeZone, "America/New_York");
   assert.equal(result.readCount, 4);
   assert.deepEqual(
     result.records.map((r) => ({ id: r.item.id, notes: r.notes })),
@@ -198,6 +199,66 @@ test("empty cohort and measured empty notes are complete, not unknown", async ()
   assert.equal(blank.status, "complete");
   assert.equal(blank.records[0].totalCharacters, 0);
   assert.equal(blank.records[0].notes, "");
+});
+
+test("source timezone is required, never supplied by caller or replaced across pages and chunks", async () => {
+  assert.equal(
+    historyCollectionInputSchema.safeParse({ ...scope, timeZone: "UTC" })
+      .success,
+    false
+  );
+  for (const mode of [
+    "missing",
+    "duplicate",
+    "empty",
+    "changed-page",
+    "changed-chunk",
+  ]) {
+    const result = await evidence(
+      setup({
+        change: (value, _input, call) => {
+          if (
+            (mode === "changed-page" && call !== 2) ||
+            (mode === "changed-chunk" && call !== 3)
+          )
+            return value;
+          const output = z
+            .object({
+              filters: z.array(
+                z.object({ label: z.string(), value: z.string() })
+              ),
+            })
+            .passthrough()
+            .parse(value);
+          const zone = output.filters.find((f) => f.label === "Time zone");
+          assert.ok(zone);
+          if (mode === "missing")
+            output.filters = output.filters.filter(
+              (f) => f.label !== "Time zone"
+            );
+          else if (mode === "duplicate") output.filters.push({ ...zone });
+          else zone.value = mode === "empty" ? "" : "America/Chicago";
+          return output;
+        },
+      })
+    );
+    assert.equal(result.status, "partial", mode);
+    if (result.status !== "partial") assert.fail();
+    if (mode.startsWith("changed")) {
+      assert.equal(result.reason, "evidence_changed");
+      assert.equal(result.timeZone, "America/New_York");
+      assert.ok(
+        result.records[0].item.facts.some(
+          (f) =>
+            f.label === "Recorded at (UTC)" &&
+            f.value === "2026-09-14T03:30:00.123456Z"
+        )
+      );
+    } else {
+      assert.equal(result.reason, "continuation_unavailable");
+      assert.equal(result.timeZone, null);
+    }
+  }
 });
 
 test("schema and sandbox refuse literal search and caller-owned pagination", async () => {

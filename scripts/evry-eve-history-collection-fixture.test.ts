@@ -27,6 +27,7 @@ const collectedSchema = z.object({
     latestPerPerson: z.literal(false),
   }),
   matched: z.literal(53),
+  timeZone: z.literal("America/New_York"),
   readCount: z.literal(4),
   snapshot: z.literal("multiple_reads"),
   records: z
