@@ -106,6 +106,22 @@ test("failed source cannot become zero; a real nonempty retry is allowed", () =>
     true
   );
 });
+test("same-scope corroborating count preserves complete identities, never manufactures them", () => {
+  const full = page(["a", "b"], 2, "0", "End of results", { mine: true });
+  const count: CapturedCall = {
+    ...page([], 2, "0", "End of results", { mine: true }),
+    input: { where: { mine: true }, query: { mode: "count" } },
+    output: { kind: "read", resultMode: "count", counts: { matched: 2, returned: 0 }, items: [] },
+  };
+  assert.deepEqual(observedSourceRecoveryFacts(m, [full, count], [fault]).facts.taskIds, ["a", "b"]);
+  for (const calls of [
+    [count],
+    [page(["a"], 2, "0", "1", { mine: true }), count],
+    [full, { ...count, input: { where: { mine: false }, query: { mode: "count" } } }],
+    [full, { ...count, output: { kind: "read", resultMode: "count", counts: { matched: 3, returned: 0 }, items: [] } }],
+    [full, { ...count, output: { status: "unavailable" } }],
+  ]) assert.equal(observedSourceRecoveryFacts(m, calls, [fault]).facts.taskIds, undefined);
+});
 test("only exact isolated dependency and tenant are faulted once; all other requests delegate", async () => {
   let delegated = 0;
   const proxyUrl = "http://127.0.0.1:12345/sql";

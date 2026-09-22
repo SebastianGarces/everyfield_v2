@@ -192,6 +192,26 @@ function taskIds(calls: readonly CapturedCall[]) {
     | { scope: unknown; total: number; next: number | null; ids: string[] }
     | undefined;
   for (const call of calls.filter((c) => c.name === "tasks.query")) {
+    const countInput = z
+      .object({ query: z.object({ mode: z.literal("count") }) })
+      .passthrough()
+      .safeParse(call.input);
+    if (countInput.success) {
+      const { query: _query, ...scope } = countInput.data;
+      const count = capturedReadArtifactSchema
+        .extend({ resultMode: z.literal("count") })
+        .safeParse(call.output);
+      // A corroborating count supplies no identities, but does not erase a
+      // complete list. Changed scope/totals still invalidate earlier evidence.
+      if (
+        !run ||
+        !count.success ||
+        !isDeepStrictEqual(run.scope, scope) ||
+        count.data.counts.matched !== run.total
+      )
+        run = undefined;
+      continue;
+    }
     const input = pageInput.safeParse(call.input),
       output = pageSchema.safeParse(call.output);
     if (!input.success || !output.success) {
