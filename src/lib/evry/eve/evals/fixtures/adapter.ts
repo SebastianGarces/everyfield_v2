@@ -231,6 +231,13 @@ import {
   observedSourceRecoveryFacts,
   type SourceRecoveryFault,
 } from "./source-recovery";
+import {
+  orientationDocumentFixtureIds,
+  seedOrientationDocumentFixture,
+  orientationDocumentTruth,
+  orientationDocumentExpectations,
+  observedOrientationDocumentFacts,
+} from "./orientation-document";
 
 type FixtureTransports = {
   prepareDocumentFiles?: DocumentFixtureTransport;
@@ -465,6 +472,7 @@ const familyCaseIds = [
   ...weeklyOverviewFixtureIds,
   ...assessmentEvidenceFixtureIds,
   ...sourceRecoveryFixtureIds,
+  ...orientationDocumentFixtureIds,
 ];
 
 /** Bound means a runnable fixture, not a passed model-quality evaluation. */
@@ -782,6 +790,8 @@ export function createProductionEveEvalAdapter(
         seedWeeklyOverviewFixture(manifest, options.store);
         seedAssessmentEvidenceFixture(manifest, options.store);
         seedSourceRecoveryFixture(manifest, options.store);
+        seedOrientationDocumentFixture(manifest, options.store);
+        const orientationDocument = orientationDocumentTruth(manifest, options.store);
         const assessmentTruth = assessmentEvidenceTruth(
           manifest,
           options.store
@@ -842,6 +852,7 @@ export function createProductionEveEvalAdapter(
                               turns: bindContentTurns(manifest, scenario.turns),
                             };
         let expectations =
+          orientationDocumentExpectations(manifest) ??
           sourceRecoveryExpectations(manifest, options.store) ??
           assessmentEvidenceExpectations(manifest, options.store) ??
           (scenario.id === "tasks-10"
@@ -916,6 +927,7 @@ export function createProductionEveEvalAdapter(
                 scenario.id === "communication-06" ||
                 scenario.id === "tasks-07" ||
                 scenario.id === "tasks-10" ||
+                scenario.id === "documents-05" ||
                 scenario.id === "wiki-06"
                   ? createEvePreparation({
                       actor,
@@ -1108,6 +1120,13 @@ export function createProductionEveEvalAdapter(
                 );
                 Object.assign(captured.facts, recovery.facts);
                 captured.evidence.push(...recovery.evidence);
+              }
+              if (scenario.id === "documents-05") {
+                const document = await observedOrientationDocumentFacts(
+                  manifest, options.store, orientationDocument, calls, presented
+                );
+                Object.assign(captured.facts, document.facts);
+                captured.evidence.push(...document.evidence);
               }
               const securityObserved = securityFixture
                 ? observeSecurityFixture(securityFixture, calls, result.answer)
