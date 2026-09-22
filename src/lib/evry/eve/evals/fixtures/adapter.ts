@@ -215,6 +215,13 @@ import {
   readPreparedTaskSelectionFacts,
 } from "./task-selection";
 import type { fixtureMessageSchema } from "../http/transcript";
+import {
+  assessmentEvidenceFixtureIds,
+  seedAssessmentEvidenceFixture,
+  assessmentEvidenceTruth,
+  assessmentEvidenceExpectations,
+  observedAssessmentEvidenceFacts,
+} from "./assessment-evidence";
 
 type FixtureTransports = {
   prepareDocumentFiles?: DocumentFixtureTransport;
@@ -443,6 +450,7 @@ const familyCaseIds = [
   ...taskCleanupFixtureIds,
   ...taskSelectionFixtureIds,
   ...weeklyOverviewFixtureIds,
+  ...assessmentEvidenceFixtureIds,
 ];
 
 /** Bound means a runnable fixture, not a passed model-quality evaluation. */
@@ -758,6 +766,11 @@ export function createProductionEveEvalAdapter(
           seedTaskCleanupFixture(manifest, options.store);
         seedTaskSelectionFixture(manifest, options.store);
         seedWeeklyOverviewFixture(manifest, options.store);
+        seedAssessmentEvidenceFixture(manifest, options.store);
+        const assessmentTruth = assessmentEvidenceTruth(
+          manifest,
+          options.store
+        );
         const weeklyTruth =
           scenario.id === "cross-01"
             ? weeklyOverviewTruth(manifest, options.store)
@@ -798,7 +811,8 @@ export function createProductionEveEvalAdapter(
                           turns: bindContentTurns(manifest, scenario.turns),
                         };
         let expectations =
-          scenario.id === "tasks-10"
+          assessmentEvidenceExpectations(manifest, options.store) ??
+          (scenario.id === "tasks-10"
             ? taskSelectionExpectations(manifest, options.store)
             : scenario.id === "cross-01"
               ? weeklyOverviewExpectations(manifest, options.store)
@@ -808,7 +822,7 @@ export function createProductionEveEvalAdapter(
                   ? communicationRetryExpectations(manifest, options.store)
                   : securityFixture && "fixture" in scenario
                     ? securityExpectations(scenario, securityFixture)
-                    : contentActionExpectations(manifest, options.store);
+                    : contentActionExpectations(manifest, options.store));
         for (const family of fixtureFamilies) {
           if (expectations) break;
           expectations = family.expectations(manifest, options.store);
@@ -1038,6 +1052,15 @@ export function createProductionEveEvalAdapter(
                 );
                 Object.assign(captured.facts, weekly.facts);
                 captured.evidence.push(...weekly.evidence);
+              }
+              if (assessmentTruth) {
+                const assessment = observedAssessmentEvidenceFacts(
+                  scenario.id,
+                  calls,
+                  assessmentTruth
+                );
+                Object.assign(captured.facts, assessment.facts);
+                captured.evidence.push(...assessment.evidence);
               }
               const securityObserved = securityFixture
                 ? observeSecurityFixture(securityFixture, calls, result.answer)
