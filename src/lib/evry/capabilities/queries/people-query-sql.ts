@@ -252,7 +252,15 @@ export const peopleHistoryQuerySchema = z.strictObject({
     .describe(
       "Account IDs, not person IDs. Returned author labels are already resolved."
     ),
-  text: z.string().trim().min(1).max(160).optional(),
+  text: z
+    .string()
+    .trim()
+    .min(1)
+    .max(160)
+    .optional()
+    .describe(
+      "Case-insensitive wording match within recorded notes, not a semantic filter. Use for requested wording; omit when interpreting the meaning of complete notes."
+    ),
   latestPerPerson: z
     .boolean()
     .default(false)

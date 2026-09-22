@@ -5,6 +5,10 @@ import {
 } from "@ai-sdk/code-mode";
 import { tool, type ToolSet } from "ai";
 import { z } from "zod";
+import {
+  HISTORY_HELPER_SOURCE_BYTES,
+  withHistoryCollection,
+} from "../runtime/history-collection";
 
 /** Limits are trusted configuration, never fields in the model's tool input. */
 export const COMPOSITION_LIMITS = Object.freeze({
@@ -161,6 +165,10 @@ export async function runEvryComposition(options: {
   }
   if (!options.callId.trim())
     throw new Error("Composition requires a trusted call identity.");
+  // The caller keeps its whole source allowance; only fixed authored helper code
+  // is added to the SDK's bound. A larger generated program is still rejected.
+  if (Buffer.byteLength(options.js) > policy.maxSourceBytes)
+    return { status: "failed", reason: "limit", calls: 0 };
   let calls = 0;
   let budgetExceeded = false;
   const concurrency = Math.min(
@@ -239,7 +247,7 @@ export async function runEvryComposition(options: {
   const { maxConcurrentToolCalls: _dispatchLimit, ...executionPolicy } = policy;
   try {
     const output = await experimental_runCodeMode({
-      js: options.js,
+      js: withHistoryCollection(options.js),
       tools,
       toolExecutionOptions: {
         toolCallId: options.callId,
@@ -250,6 +258,8 @@ export async function runEvryComposition(options: {
         // Admit the existing total budget; our local queue still dispatches four.
         executionPolicy: {
           ...executionPolicy,
+          maxSourceBytes:
+            executionPolicy.maxSourceBytes + HISTORY_HELPER_SOURCE_BYTES,
           maxInFlightBridgeRequests: concurrency + maxQueued,
         },
         approval: { onApprovalRequired: () => "denied" },
