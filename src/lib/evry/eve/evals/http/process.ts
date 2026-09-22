@@ -15,9 +15,22 @@ import {
 /** Each case owns its storage; restart verification reuses it only after the first child exits. */
 export async function runCompiledEveFixture(
   input: CompiledFixtureRequest,
-  signal: AbortSignal
+  signal: AbortSignal,
+  hooks?: {
+    /** Fixture-owned source-route assertion, never serialized or model supplied. */
+    beforeRestart?(
+      outcome: z.output<typeof httpEvalOutcomeSchema>
+    ): Promise<void>;
+  }
 ) {
   const request = compiledFixtureRequest.parse(input);
+  if (
+    hooks?.beforeRestart &&
+    (request.model.mode !== "scripted" || !request.restartFollowup)
+  )
+    throw new Error(
+      "Before-restart hook requires a scripted restart follow-up"
+    );
   signal.throwIfAborted();
   const directory = await mkdtemp(join(tmpdir(), "evry-eve-http-fixture-"));
   try {
@@ -29,6 +42,43 @@ export async function runCompiledEveFixture(
         );
       first.outcome.processingSnapshots =
         await readFixtureProcessingSnapshots(directory);
+    }
+    if (request.restartFollowup) {
+      signal.throwIfAborted();
+      await hooks?.beforeRestart?.(first.outcome);
+      signal.throwIfAborted();
+      const secondRequest = compiledFixtureRequest.parse({
+        ...request,
+        restartFollowup: undefined,
+        verifyProcessingState: false,
+        turns: [request.restartFollowup.turn],
+        model: {
+          mode: "scripted",
+          responses: request.restartFollowup.responses,
+        },
+      });
+      const second = await runWorker(
+        secondRequest,
+        signal,
+        directory,
+        undefined,
+        first.outcome.eveSessionId
+      );
+      return {
+        ...first.outcome,
+        restartFollowup: {
+          sameSession:
+            first.outcome.eveSessionId === second.outcome.eveSessionId,
+          differentProcess: first.pid !== second.pid,
+          firstPid: first.pid,
+          replacementPid: second.pid,
+          restoredTranscript: isDeepStrictEqual(
+            first.outcome.messages,
+            second.outcome.followupRestore?.messages
+          ),
+          outcome: second.outcome,
+        },
+      };
     }
     if (!request.verifyRestart) return first.outcome;
     signal.throwIfAborted();
@@ -65,7 +115,8 @@ async function runWorker(
   request: z.output<typeof compiledFixtureRequest>,
   signal: AbortSignal,
   directory: string,
-  replaySessionId?: string
+  replaySessionId?: string,
+  followupSessionId?: string
 ) {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
@@ -151,7 +202,12 @@ async function runWorker(
             );
           }
         });
-        worker.send({ type: "run", request, replaySessionId });
+        worker.send({
+          type: "run",
+          request,
+          replaySessionId,
+          followupSessionId,
+        });
       }
     );
     if (!worker.pid)

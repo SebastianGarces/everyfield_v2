@@ -69,12 +69,21 @@ process.on("message", async (message) => {
   }> = [];
   let host: ReturnType<typeof installIsolatedFixtureHost> | undefined;
   try {
-    const { request, replaySessionId } = z
+    const { request, replaySessionId, followupSessionId } = z
       .object({
         type: z.literal("run"),
         request: compiledFixtureRequest,
         replaySessionId: z.string().optional(),
+        followupSessionId: z.string().optional(),
       })
+      .refine(
+        (input) =>
+          !input.followupSessionId ||
+          (!input.replaySessionId &&
+            input.request.model.mode === "scripted" &&
+            input.request.turns.length === 1),
+        "Saved-session follow-up is a separate single-turn scripted fixture"
+      )
       .parse(message);
     phase = "compiled entry lookup";
     await access(request.compiledEntry);
@@ -393,6 +402,7 @@ process.on("message", async (message) => {
       verifyReplay: request.verifyReplay,
       expectedTurnFailureMessage: request.expectedTurnFailureMessage,
       replaySessionId,
+      followupSessionId,
       async beforeTurn({ turnIndex, sessionId }) {
         const upload = request.attachments?.find(
           (item) => item.turnIndex === turnIndex

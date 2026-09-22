@@ -92,6 +92,55 @@ test("restart proof refuses a live model before spawning either server", () => {
     assert.deepEqual(live.error.issues[0]?.path, ["verifyRestart"]);
 });
 
+test("scripted restart follow-up cannot change identity or enable live calls or GET-only replay", () => {
+  const request = {
+    compiledEntry: "/private/tmp/compiled/index.mjs",
+    databaseUrl,
+    proxyUrl: origin,
+    sessionToken,
+    actor,
+    turns: ["Prepare a review"],
+    now: now.toISOString(),
+    maxCostUsd: 1,
+    prices,
+    model: { mode: "scripted", responses: [{ text: "Prepared" }] },
+    restartFollowup: {
+      turn: "What happened?",
+      responses: [
+        { toolCalls: [{ name: "actions_status", input: {} }] },
+        { text: "Status checked" },
+      ],
+    },
+  };
+  assert.equal(compiledFixtureRequest.safeParse(request).success, true);
+  for (const invalid of [
+    { ...request, model: { mode: "live", spendingApproved: true } },
+    { ...request, verifyRestart: true },
+    { ...request, attachments: [] },
+    {
+      ...request,
+      restartFollowup: { ...request.restartFollowup, sessionId: "other" },
+    },
+    {
+      ...request,
+      restartFollowup: {
+        ...request.restartFollowup,
+        actor: { userId: "other", plantId: "other" },
+      },
+    },
+    {
+      ...request,
+      restartFollowup: { ...request.restartFollowup, responses: [] },
+    },
+    {
+      ...request,
+      restartFollowup: { ...request.restartFollowup, model: { mode: "live" } },
+    },
+    { ...request, expectedTurnFailureMessage: "EVRY_SCRIPTED_STREAM_FAILURE" },
+  ])
+    assert.equal(compiledFixtureRequest.safeParse(invalid).success, false);
+});
+
 test("isolated host rejects remote targets, ordinary databases, and cross-actor bindings", () => {
   assert.throws(() =>
     assertIsolatedFixtureTarget("https://example.com", databaseUrl)
@@ -353,6 +402,124 @@ test("official Eve client runner uses cookie auth, fixed-session follow-ups and 
     host.close();
     globalThis.fetch = priorFetch;
     process.env.DATABASE_URL = priorDb;
+  }
+});
+
+test("restart follow-up snapshots before its sole POST and records zero restored work", async () => {
+  const priorFetch = globalThis.fetch;
+  const priorDb = process.env.DATABASE_URL;
+  process.env.DATABASE_URL = databaseUrl;
+  const requests: string[] = [];
+  const eventsFor = (sequence: number, text: string) => {
+    const common = { sequence, turnId: `turn-${sequence}`, stepIndex: 0 };
+    return [
+      { type: "turn.started", data: common },
+      {
+        type: "message.completed",
+        data: { ...common, message: text, finishReason: "stop" },
+      },
+      { type: "turn.completed", data: common },
+      {
+        type: "session.waiting",
+        data: { ...common, reason: "awaiting-message" },
+      },
+    ].map((entry, index) => ({
+      ...entry,
+      meta: {
+        at: now.toISOString(),
+        id: `event-${sequence}-${index}`,
+        deliveryIds: [`delivery-${sequence}`],
+      },
+    }));
+  };
+  globalThis.fetch = async (input, init) => {
+    const url = new URL(String(input));
+    const method = init?.method ?? "GET";
+    requests.push(`${method} ${url.pathname}`);
+    assert.equal(
+      new Headers(init?.headers).get("cookie"),
+      `session=${sessionToken}`
+    );
+    if (method === "POST") {
+      assert.equal(url.pathname, "/eve/v1/session/saved-session");
+      assert.deepEqual(JSON.parse(String(init?.body)), {
+        message: "What happened?",
+      });
+      return Response.json({
+        sessionId: "saved-session",
+        deliveryId: "delivery-1",
+      });
+    }
+    assert.equal(url.pathname, "/eve/v1/session/saved-session/stream");
+    const isRestore = requests.length === 1;
+    if (!isRestore) {
+      const hooks =
+        globalThis.__everyfieldIsolatedEveFixtureHost!.run(identity);
+      hooks.authorize(true);
+      hooks.call({
+        id: "new-status",
+        name: "actions.status",
+        input: {},
+        output: { status: "unavailable" },
+      });
+    }
+    return new Response(
+      eventsFor(
+        isRestore ? 0 : 1,
+        isRestore ? "Saved answer" : "Current status"
+      )
+        .map((entry) => JSON.stringify(entry))
+        .join("\n") + "\n",
+      {
+        headers: {
+          "content-type": "application/x-ndjson",
+          "x-eve-stream-version": "25",
+          "x-eve-stream-tail-index": "3",
+        },
+      }
+    );
+  };
+  const host = installIsolatedFixtureHost({ origin, databaseUrl });
+  try {
+    const result = await createHttpEveEvalRunner({
+      origin,
+      databaseUrl,
+      host,
+      prices,
+      followupSessionId: "saved-session",
+    })({
+      scenario: { turns: ["What happened?"] },
+      actor,
+      sessionToken,
+      now,
+      maxCostUsd: 1,
+      signal: AbortSignal.timeout(1_000),
+    });
+    assert.deepEqual(requests, [
+      "GET /eve/v1/session/saved-session/stream",
+      "POST /eve/v1/session/saved-session",
+      "GET /eve/v1/session/saved-session/stream",
+    ]);
+    assert.equal(result.answer, "Saved answer\n\nCurrent status");
+    assert.ok(result.followupRestore);
+    assert.equal(result.followupRestore.messages.length, 1);
+    assert.deepEqual(
+      {
+        generations: result.followupRestore.generations,
+        invocations: result.followupRestore.invocations,
+        capturedCalls: result.followupRestore.capturedCalls,
+      },
+      { generations: 0, invocations: 0, capturedCalls: 0 }
+    );
+    assert.deepEqual(
+      result.hostCapture.calls.map((call) => call.name),
+      ["actions.status"]
+    );
+  } finally {
+    host.close();
+    globalThis.fetch = priorFetch;
+    if (priorDb === undefined) delete process.env.DATABASE_URL;
+    else process.env.DATABASE_URL = priorDb;
   }
 });
 

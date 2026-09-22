@@ -39,6 +39,12 @@ export type HttpEvalOutcome = {
   hostCapture: HostCapture;
   eveSessionId: string;
   messages: ReturnType<typeof fixtureTranscript>;
+  followupRestore?: {
+    messages: ReturnType<typeof fixtureTranscript>;
+    generations: number;
+    invocations: number;
+    capturedCalls: number;
+  };
   replay?: {
     matchingTranscript: boolean;
     stableActivity: boolean;
@@ -105,6 +111,8 @@ export function createHttpEveEvalRunner(config: {
     | "EVRY_SCRIPTED_COMPACTION_FAILURE";
   /** Fixture-only restart path: attach and read, never create or submit. */
   replaySessionId?: string;
+  /** Separate fixture path: restore first, then submit the scripted follow-up. */
+  followupSessionId?: string;
   /** Isolated native-upload setup; returns only the normal model-safe client context. */
   beforeTurn?(input: {
     turnIndex: number;
@@ -113,6 +121,8 @@ export function createHttpEveEvalRunner(config: {
   onEvent?: (event: MessageStreamEvent) => void;
 }) {
   assertIsolatedFixtureTarget(config.origin, config.databaseUrl);
+  if (config.replaySessionId && config.followupSessionId)
+    throw new Error("Replay and follow-up cannot share one fixture run");
   const origin = new URL(config.origin).origin;
   return async (input: {
     scenario: {
@@ -164,12 +174,39 @@ export function createHttpEveEvalRunner(config: {
     const interaction = createFirstInteractionObserver();
     const events: MessageStreamEvent[] = [];
     let pendingQuestions: readonly InputRequest[] = [];
+    let followupRestore: HttpEvalOutcome["followupRestore"];
     try {
       // Allocate the stable identity before any model work so cancellation never loses the target.
-      if (config.replaySessionId) {
-        session = client.sessions.attach(config.replaySessionId);
+      const existingSessionId =
+        config.replaySessionId ?? config.followupSessionId;
+      const historicalReferences = new Set<string>();
+      if (existingSessionId) {
+        session = client.sessions.attach(existingSessionId);
         const restored = await session.snapshot({ signal });
         events.push(...restored.events);
+        // The replacement host journal owns only new calls. Restored native
+        // envelopes remain in the transcript but cannot become new evidence.
+        if (config.followupSessionId) {
+          session = client.sessions.attach(existingSessionId, {
+            streamIndex: restored.session.streamIndex,
+          });
+          const historical = fixtureTranscript(
+            new EveAgentStore({
+              reducer: defaultMessageReducer(),
+              initialEvents: restored.events,
+            }).snapshot.data.messages
+          );
+          const activity = fixture.activity();
+          followupRestore = {
+            messages: historical,
+            generations: activity.generations,
+            invocations: activity.invocations,
+            capturedCalls: fixture.snapshot().calls.length,
+          };
+          for (const message of historical)
+            for (const reference of selectedEveResultReferences(message))
+              historicalReferences.add(reference);
+        }
       } else {
         ({ session } = await client.sessions.create({ signal }));
       }
@@ -291,7 +328,8 @@ export function createHttpEveEvalRunner(config: {
       if (!config.replaySessionId)
         for (const message of transcript)
           for (const reference of selectedEveResultReferences(message))
-            fixture.present(reference);
+            if (!historicalReferences.has(reference))
+              fixture.present(reference);
       const hostCapture = fixture.snapshot();
       if (hostCapture.costUsd > input.maxCostUsd)
         throw new Error("Evaluation exceeded its reserved budget");
@@ -329,6 +367,7 @@ export function createHttpEveEvalRunner(config: {
       }
       return {
         messages: transcript,
+        ...(followupRestore ? { followupRestore } : {}),
         ...(replay ? { replay } : {}),
         answer: transcript
           .filter((message) => message.role === "assistant")

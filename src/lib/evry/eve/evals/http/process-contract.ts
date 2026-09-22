@@ -4,6 +4,28 @@ import { processingSnapshotSchema } from "./processing-snapshot";
 import { clarificationMeasurementSchema } from "../contract";
 import { taskPreparationAssertionSchema } from "./task-state-script";
 
+const restartFollowupSchema = z.strictObject({
+  turn: z.string().min(1).max(4_000),
+  responses: z
+    .array(
+      z.strictObject({
+        text: z.string().optional(),
+        toolCalls: z
+          .array(
+            z.strictObject({
+              name: z.string(),
+              input: z.json().optional(),
+              id: z.string().optional(),
+            })
+          )
+          .max(8)
+          .optional(),
+      })
+    )
+    .min(1)
+    .max(8),
+});
+
 export const compiledFixtureRequest = z
   .strictObject({
     compiledEntry: z.string().min(1),
@@ -57,6 +79,8 @@ export const compiledFixtureRequest = z
       .optional(),
     verifyProcessingState: z.boolean().optional(),
     verifyRestart: z.boolean().optional(),
+    /** Separate scripted POST proof; verifyRestart remains strictly GET-only. */
+    restartFollowup: restartFollowupSchema.optional(),
     routing: z
       .array(
         z.discriminatedUnion("status", [
@@ -154,9 +178,30 @@ export const compiledFixtureRequest = z
       message: "Process-restart verification supports scripted providers only",
       path: ["verifyRestart"],
     }
+  )
+  .refine(
+    (request) =>
+      !request.restartFollowup ||
+      (request.model.mode === "scripted" &&
+        !request.verifyRestart &&
+        !request.attachments &&
+        !request.expectedTurnFailureMessage),
+    {
+      message:
+        "Restart follow-up requires a separate scripted run without GET-only restart, attachments or expected failures",
+      path: ["restartFollowup"],
+    }
   );
 export type CompiledFixtureRequest = z.input<typeof compiledFixtureRequest>;
-export const httpEvalOutcomeSchema = z.object({
+const httpEvalBaseOutcomeSchema = z.object({
+  followupRestore: z
+    .object({
+      messages: z.array(fixtureMessageSchema),
+      generations: z.number().int().nonnegative(),
+      invocations: z.number().int().nonnegative(),
+      capturedCalls: z.number().int().nonnegative(),
+    })
+    .optional(),
   routingRequests: z.array(z.json()).optional(),
   processingSnapshots: z.array(processingSnapshotSchema).optional(),
   restart: z
@@ -297,4 +342,16 @@ export const httpEvalOutcomeSchema = z.object({
     ),
   }),
   eveSessionId: z.string(),
+});
+export const httpEvalOutcomeSchema = httpEvalBaseOutcomeSchema.extend({
+  restartFollowup: z
+    .object({
+      sameSession: z.boolean(),
+      differentProcess: z.boolean(),
+      firstPid: z.number().int().positive(),
+      replacementPid: z.number().int().positive(),
+      restoredTranscript: z.boolean(),
+      outcome: httpEvalBaseOutcomeSchema,
+    })
+    .optional(),
 });
