@@ -256,6 +256,12 @@ import {
   identityNotesExpectations,
   observedIdentityNotesFacts,
 } from "./identity-notes";
+import {
+  foundationalRequestIds,
+  seedFoundationalRequests,
+  foundationalExpectations,
+  observedFoundationalFacts,
+} from "./foundational-requests";
 
 type FixtureTransports = {
   prepareDocumentFiles?: DocumentFixtureTransport;
@@ -494,6 +500,7 @@ const familyCaseIds = [
   ...orientationInvitationsFixtureIds,
   ...staffingPreparationFixtureIds,
   ...identityNotesFixtureIds,
+  ...foundationalRequestIds,
 ];
 
 /** Bound means a runnable fixture, not a passed model-quality evaluation. */
@@ -815,6 +822,7 @@ export function createProductionEveEvalAdapter(
         seedOrientationInvitationsFixture(manifest, options.store);
         seedStaffingPreparationFixture(manifest, options.store);
         seedIdentityNotesFixture(manifest, options.store);
+        seedFoundationalRequests(manifest, options.store);
         const orientationDocument = orientationDocumentTruth(
           manifest,
           options.store
@@ -879,6 +887,7 @@ export function createProductionEveEvalAdapter(
                               turns: bindContentTurns(manifest, scenario.turns),
                             };
         let expectations =
+          foundationalExpectations(manifest, options.store) ??
           identityNotesExpectations(manifest, options.store) ??
           staffingPreparationExpectations(manifest, options.store) ??
           orientationInvitationsExpectations(manifest, options.store) ??
@@ -959,6 +968,7 @@ export function createProductionEveEvalAdapter(
                 scenario.id === "tasks-10" ||
                 scenario.id === "documents-05" ||
                 scenario.id === "orientations-04" ||
+                scenario.id === "notifications-04" ||
                 identityNotesFixtureIds.some((id) => id === scenario.id) ||
                 staffingPreparationFixtureIds.some(
                   (id) => id === scenario.id
@@ -1200,6 +1210,17 @@ export function createProductionEveEvalAdapter(
                 });
                 Object.assign(captured.facts, identity.facts);
                 captured.evidence.push(...identity.evidence);
+              }
+              if (foundationalRequestIds.some((id) => id === scenario.id)) {
+                const foundational = await observedFoundationalFacts({
+                  manifest,
+                  store: options.store,
+                  calls,
+                  presented,
+                  messages: result.messages,
+                });
+                Object.assign(captured.facts, foundational.facts);
+                captured.evidence.push(...foundational.evidence);
               }
               const securityObserved = securityFixture
                 ? observeSecurityFixture(securityFixture, calls, result.answer)
