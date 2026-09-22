@@ -9,7 +9,7 @@ import {
   evePreparationInputSchema,
 } from "../preparation";
 import { evryTurnInput } from "./task-state";
-import { collectResult, evryResultState } from "./results";
+import { publishResult } from "./results";
 import type { EveRuntimeScope } from "./scope";
 import type { EveAuthenticatedSession } from "./auth-policy";
 import {
@@ -128,12 +128,9 @@ export function createBoundEveRegistry(
           const review = reviewFromPreparation(result, reference);
           if (review) evryReviewState.update(() => review);
         }
-        evryResultState.update((records) =>
-          collectResult(
-            records,
-            { reference, turnId: scope.turnId, capability: name },
-            result
-          )
+        publishResult(
+          { reference, turnId: scope.turnId, capability: name },
+          result
         );
         if (name === "actions.prepare") {
           const modelOutput = preparationModelOutput(result);

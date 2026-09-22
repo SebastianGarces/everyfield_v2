@@ -2,7 +2,7 @@ import { wrapLanguageModel, type LanguageModelMiddleware } from "ai";
 import { openai } from "eve/models/openai";
 import { currentFixtureRun } from "./fixture-bridge";
 import { presentationGuidanceMiddleware } from "./presentation-guidance";
-import { evryResultState } from "./results";
+import { evryIssuedResultReferences, evryResultState } from "./results";
 import {
   evryInitialWorkingSet,
   initialSkillGuidance,
@@ -107,6 +107,7 @@ export const evryLunaModel = wrapLanguageModel({
     presentationGuidanceMiddleware(() => ({
       turnId: evryInitialWorkingSet.get().turnId,
       results: evryResultState.get(),
+      issuedReferences: evryIssuedResultReferences.get(),
     })),
     processingBudgetMiddleware(evryProcessingBudget),
     fixtureBudgetMiddleware,

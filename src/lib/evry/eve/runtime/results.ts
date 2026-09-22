@@ -19,6 +19,42 @@ export const evryResultState = defineState<ResultRecord[]>(
   () => []
 );
 
+// Session metadata only. These identities survive artifact eviction and
+// compaction. Storage grows with issued read handles, never with record data.
+// This inventory is never included in model input.
+export const evryIssuedResultReferences = defineState<string[]>(
+  "evry.issued-result-references",
+  () => []
+);
+
+export function issuedResultReferences(
+  previous: readonly string[],
+  entry: Omit<ResultRecord, "artifacts">,
+  result: EveJsonValue
+): string[] {
+  if (
+    entry.capability === "actions.prepare" ||
+    !result ||
+    typeof result !== "object" ||
+    Array.isArray(result) ||
+    (result.kind !== "read" && result.kind !== "clarification") ||
+    previous.includes(entry.reference)
+  )
+    return [...previous];
+  return [...previous, entry.reference];
+}
+
+/** Called only by the authenticated registry after a successful invocation. */
+export function publishResult(
+  entry: Omit<ResultRecord, "artifacts">,
+  result: EveJsonValue
+) {
+  evryResultState.update((records) => collectResult(records, entry, result));
+  evryIssuedResultReferences.update((references) =>
+    issuedResultReferences(references, entry, result)
+  );
+}
+
 /** Project at presentation time, including results saved by older agent builds. */
 export function publicResultArtifacts(artifacts: readonly EveJsonValue[]) {
   return artifacts.map((artifact) =>

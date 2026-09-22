@@ -177,7 +177,7 @@ test("the bound registry captures original evidence before shared model projecti
     "fixture?.call({ id: reference, name, input, output: result })"
   );
   const review = source.indexOf("reviewFromPreparation(result, reference)");
-  const collect = source.indexOf("evryResultState.update((records)");
+  const collect = source.indexOf("publishResult(");
   const project = source.indexOf(
     "const modelOutput = preparationModelOutput(result)"
   );
