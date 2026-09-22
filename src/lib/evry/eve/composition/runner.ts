@@ -17,8 +17,66 @@ export const COMPOSITION_LIMITS = Object.freeze({
   maxToolInputBytes: 64 * 1024,
   maxToolOutputBytes: 512 * 1024,
   maxBridgeRequests: 24,
-  maxInFlightBridgeRequests: 4,
-} satisfies Required<CodeModeExecutionPolicy>);
+  maxConcurrentToolCalls: 4,
+} satisfies Omit<
+  Required<CodeModeExecutionPolicy>,
+  "maxInFlightBridgeRequests"
+> & {
+  maxConcurrentToolCalls: number;
+});
+
+/** One program owns its slots. Closing never starts queued or late host work. */
+function createDispatchQueue(concurrency: number, maxQueued: number) {
+  let active = 0;
+  let closed = false;
+  const waiting: { start(): void; cancel(): void }[] = [];
+  const unavailable = () => new Error("Composition dispatch is unavailable.");
+  const drain = () => {
+    while (!closed && active < concurrency && waiting.length) {
+      waiting.shift()?.start();
+    }
+  };
+  return {
+    acquire(signal?: AbortSignal): Promise<() => void> {
+      if (closed || signal?.aborted) return Promise.reject(unavailable());
+      return new Promise((resolve, reject) => {
+        const request = {
+          start() {
+            signal?.removeEventListener("abort", request.cancel);
+            if (closed || signal?.aborted) {
+              reject(unavailable());
+              return;
+            }
+            active += 1;
+            let released = false;
+            resolve(() => {
+              if (released) return;
+              released = true;
+              active -= 1;
+              drain();
+            });
+          },
+          cancel() {
+            const index = waiting.indexOf(request);
+            if (index >= 0) waiting.splice(index, 1);
+            signal?.removeEventListener("abort", request.cancel);
+            reject(unavailable());
+          },
+        };
+        if (active < concurrency) request.start();
+        else if (waiting.length >= maxQueued) reject(unavailable());
+        else {
+          waiting.push(request);
+          signal?.addEventListener("abort", request.cancel, { once: true });
+        }
+      });
+    },
+    close() {
+      closed = true;
+      for (const request of [...waiting]) request.cancel();
+    },
+  };
+}
 
 export interface CompositionRegistry {
   describe(): readonly {
@@ -105,6 +163,16 @@ export async function runEvryComposition(options: {
     throw new Error("Composition requires a trusted call identity.");
   let calls = 0;
   let budgetExceeded = false;
+  const concurrency = Math.min(
+    policy.maxConcurrentToolCalls,
+    policy.maxBridgeRequests
+  );
+  const maxQueued = Math.min(
+    COMPOSITION_LIMITS.maxBridgeRequests -
+      COMPOSITION_LIMITS.maxConcurrentToolCalls,
+    policy.maxBridgeRequests - concurrency
+  );
+  const queue = createDispatchQueue(concurrency, maxQueued);
   const tools: ToolSet = Object.create(null);
   const names = new Set<string>();
   const trace = (event: CompositionTrace) => {
@@ -127,16 +195,21 @@ export async function runEvryComposition(options: {
       execute: async (input, execution) => {
         const started = performance.now();
         const event = { name: entry.name, callId: execution.toolCallId };
-        trace({ ...event, status: "started", durationMs: 0 });
+        let release: (() => void) | undefined;
+        let dispatched = false;
         try {
+          release = await queue.acquire(execution.abortSignal);
           execution.abortSignal?.throwIfAborted();
           try {
             options.budget.consume();
           } catch {
             budgetExceeded = true;
+            queue.close();
             throw new Error("Call budget exhausted.");
           }
           calls += 1;
+          dispatched = true;
+          trace({ ...event, status: "started", durationMs: 0 });
           const output = await options.registry.invoke(entry.name, input, {
             callId: execution.toolCallId,
             signal: execution.abortSignal,
@@ -149,17 +222,21 @@ export async function runEvryComposition(options: {
           });
           return output;
         } catch {
-          trace({
-            ...event,
-            status: execution.abortSignal?.aborted ? "cancelled" : "failed",
-            durationMs: performance.now() - started,
-          });
+          if (dispatched)
+            trace({
+              ...event,
+              status: execution.abortSignal?.aborted ? "cancelled" : "failed",
+              durationMs: performance.now() - started,
+            });
           // Never forward provider/database exception text, which can contain secrets.
           throw new Error("The requested capability could not complete.");
+        } finally {
+          release?.();
         }
       },
     });
   }
+  const { maxConcurrentToolCalls: _dispatchLimit, ...executionPolicy } = policy;
   try {
     const output = await experimental_runCodeMode({
       js: options.js,
@@ -169,7 +246,12 @@ export async function runEvryComposition(options: {
         abortSignal: options.signal,
       },
       options: {
-        executionPolicy: policy,
+        // The SDK counts pending bridge promises, not actual host dispatches.
+        // Admit the existing total budget; our local queue still dispatches four.
+        executionPolicy: {
+          ...executionPolicy,
+          maxInFlightBridgeRequests: concurrency + maxQueued,
+        },
         approval: { onApprovalRequired: () => "denied" },
       },
     });
@@ -219,6 +301,8 @@ export async function runEvryComposition(options: {
           : "program_failed",
       calls,
     };
+  } finally {
+    queue.close();
   }
 }
 

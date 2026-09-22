@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createCompositionBudget, runEvryComposition } from "./runner";
-import { selectRuntimeTools } from "../runtime/tool-selection";
+import { resolveToolLoad, toolLoadSchema } from "../runtime/tool-selection";
 
 test("captured launch composition rejects flat arguments and succeeds with the discovered query wrapper after direct-tool replacement", async () => {
   process.env.DATABASE_URL ??=
@@ -14,8 +14,15 @@ test("captured launch composition rejects flat arguments and succeeds with the d
     effect: "read" as const,
     inputSchema: eveRuntimeToolSchema(name),
   }));
-  // load_tools replaces provider discovery, not the authorized composition registry.
-  const selected = selectRuntimeTools(["teams.get_many"], descriptions);
+  // Explicit replacement changes provider discovery, not the authorized registry.
+  const replacement = resolveToolLoad(
+    { names: ["launch.query"], preparationOperations: [] },
+    toolLoadSchema.parse({ mode: "replace", names: ["teams.get_many"] }),
+    descriptions,
+    []
+  );
+  assert.equal(replacement.status, "loaded");
+  const selected = replacement.loaded;
   assert.deepEqual(selected, ["teams.get_many"]);
   const calls: { name: string; input: unknown }[] = [];
   const registry = {

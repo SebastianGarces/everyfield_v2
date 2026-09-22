@@ -219,28 +219,35 @@ test("bridge budget, output budget and source budget are enforced", async () => 
     );
 });
 
-test("memory and in-flight bridge caps are enforced by the real sandbox", async () => {
+test("memory cap and a tighter dispatch cap are enforced by the real sandbox", async () => {
   const memory = await runEvryComposition({
     ...base(),
     js: `return new ArrayBuffer(64 * 1024 * 1024).byteLength;`,
     limits: { memoryLimitBytes: 4 * 1024 * 1024 },
   });
   assert.equal(memory.status, "failed");
+  let active = 0;
+  let highWater = 0;
   const concurrency = await runEvryComposition({
     ...base(),
-    registry: fixture(
-      async () => new Promise((resolve) => setTimeout(() => resolve([]), 20))
-    ),
+    registry: fixture(async () => {
+      highWater = Math.max(highWater, ++active);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      active--;
+      return [];
+    }),
     js: `return await Promise.all([tools["people.query"]({ids:[]}),tools["people.query"]({ids:[]})]);`,
-    limits: { maxInFlightBridgeRequests: 1 },
+    limits: { maxConcurrentToolCalls: 1 },
   });
-  assert.equal(concurrency.status, "failed");
+  assert.equal(concurrency.status, "completed");
+  assert.equal(concurrency.calls, 2);
+  assert.equal(highWater, 1);
 });
 
 test("bounded batches retain all eight read results within the production concurrency cap", async () => {
   let active = 0;
   let highWater = 0;
-  const count = COMPOSITION_LIMITS.maxInFlightBridgeRequests * 2;
+  const count = COMPOSITION_LIMITS.maxConcurrentToolCalls * 2;
   const result = await runEvryComposition({
     ...base(),
     registry: fixture(async (_name, input) => {
@@ -251,8 +258,8 @@ test("bounded batches retain all eight read results within the production concur
       return input;
     }),
     js: `const results = [];
-      for (let start = 0; start < ${count}; start += ${COMPOSITION_LIMITS.maxInFlightBridgeRequests}) {
-        const batch = Array.from({length: ${COMPOSITION_LIMITS.maxInFlightBridgeRequests}}, (_, i) => tools["people.query"]({ids: [String(start + i)]}));
+      for (let start = 0; start < ${count}; start += ${COMPOSITION_LIMITS.maxConcurrentToolCalls}) {
+        const batch = Array.from({length: ${COMPOSITION_LIMITS.maxConcurrentToolCalls}}, (_, i) => tools["people.query"]({ids: [String(start + i)]}));
         results.push(...await Promise.allSettled(batch));
       }
       return results;`,
@@ -260,7 +267,7 @@ test("bounded batches retain all eight read results within the production concur
   assert.equal(result.status, "completed");
   if (result.status !== "completed") assert.fail("Expected completed batches");
   assert.equal(result.calls, count);
-  assert.equal(highWater, COMPOSITION_LIMITS.maxInFlightBridgeRequests);
+  assert.equal(highWater, COMPOSITION_LIMITS.maxConcurrentToolCalls);
   assert.deepEqual(
     result.output,
     Array.from({ length: count }, (_, i) => ({
@@ -270,19 +277,225 @@ test("bounded batches retain all eight read results within the production concur
   );
 });
 
-test("an unbounded eight-call batch still fails the production concurrency cap", async () => {
+for (const count of [8, COMPOSITION_LIMITS.maxBridgeRequests]) {
+  test(`${count} simultaneous reads queue with four active dispatches and stable identities`, async () => {
+    let active = 0;
+    let highWater = 0;
+    const ids: string[] = [];
+    const result = await runEvryComposition({
+      ...base(),
+      registry: fixture(async (_name, input, invocation) => {
+        ids.push(invocation.callId);
+        highWater = Math.max(highWater, ++active);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        active--;
+        return input;
+      }),
+      js: `return await Promise.allSettled(Array.from({length: ${count}}, (_, i) => tools["people.query"]({ids: [String(i)]})));`,
+    });
+    assert.deepEqual(result, {
+      status: "completed",
+      calls: count,
+      output: Array.from({ length: count }, (_, i) => ({
+        status: "fulfilled",
+        value: { ids: [String(i)] },
+      })),
+    });
+    assert.equal(highWater, 4);
+    assert.equal(active, 0);
+    assert.equal(new Set(ids).size, count);
+    assert.deepEqual(
+      ids,
+      Array.from({ length: count }, (_, i) => `test-call:tool-${i + 1}`)
+    );
+  });
+}
+
+test("the 25th admitted call is terminal even with allSettled and catch", async () => {
+  const invoked: string[] = [];
+  const result = await runEvryComposition({
+    ...base(),
+    registry: fixture(async (_name, input, invocation) => {
+      invoked.push(invocation.callId);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      return input;
+    }),
+    js: `try { return await Promise.allSettled(Array.from({length:25}, () => tools["people.query"]({ids:[]}))); } catch { return "ignored"; }`,
+  });
+  assert.equal(result.status, "failed");
+  if (result.status !== "failed") assert.fail("Expected terminal limit");
+  assert.equal(result.reason, "limit");
+  assert.ok(result.calls <= 4);
+  assert.ok(!invoked.includes("test-call:tool-25"));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(invoked.length, result.calls);
+});
+
+test("tightening dispatch never expands the production bound of twenty queued requests", async () => {
+  const release = Promise.withResolvers<void>();
+  let calls = 0;
+  try {
+    const result = await runEvryComposition({
+      ...base(),
+      limits: { maxConcurrentToolCalls: 1 },
+      registry: fixture(async () => {
+        calls++;
+        await release.promise;
+        return [];
+      }),
+      js: `return await Promise.allSettled(Array.from({length:22}, () => tools["people.query"]({ids:[]})));`,
+    });
+    assert.deepEqual(result, { status: "failed", reason: "limit", calls: 1 });
+    assert.equal(calls, 1);
+  } finally {
+    release.resolve();
+  }
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(calls, 1);
+});
+
+test("parallel queued calls cannot overdraw the shared 48-call turn allowance", async () => {
+  const budget = createCompositionBudget();
+  for (let i = 0; i < 45; i++) budget.consume();
+  let invoked = 0;
+  const result = await runEvryComposition({
+    ...base(),
+    budget,
+    registry: fixture(async () => {
+      invoked++;
+      return [];
+    }),
+    js: `return await Promise.allSettled(Array.from({length:8}, () => tools["people.query"]({ids:[]})));`,
+  });
+  assert.deepEqual(result, { status: "failed", reason: "limit", calls: 3 });
+  assert.equal(invoked, 3);
+  assert.equal(budget.used, 48);
+  assert.deepEqual(
+    await runEvryComposition({
+      ...base(),
+      budget,
+      js: `try { await tools["people.query"]({ids:[]}); } catch {} return "ignored";`,
+    }),
+    { status: "failed", reason: "limit", calls: 0 }
+  );
+});
+
+for (const termination of ["abort", "timeout", "early-return"] as const) {
+  test(
+    `real sandbox ${termination} cancels queued work and ignores late releases`,
+    { timeout: 5_000 },
+    async () => {
+      const controller = new AbortController();
+      const started = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      const budget = createCompositionBudget();
+      const signals: AbortSignal[] = [];
+      let invoked = 0;
+      const run = runEvryComposition({
+        ...base(),
+        budget,
+        signal: controller.signal,
+        limits: { timeoutMs: 700 },
+        registry: fixture(async (_name, input, invocation) => {
+          assert.ok(invocation.signal);
+          signals.push(invocation.signal);
+          invoked++;
+          if (invoked === 4) started.resolve();
+          // Deliberately ignores abort to exercise host work finishing after teardown.
+          await release.promise;
+          return input;
+        }),
+        js:
+          termination === "early-return"
+            ? `const pending = Array.from({length:8}, () => tools["people.query"]({ids:[]})); return "detached";`
+            : `return await Promise.allSettled(Array.from({length:8}, () => tools["people.query"]({ids:[]})));`,
+      });
+      try {
+        if (termination === "abort") {
+          await started.promise;
+          await new Promise((resolve) => setTimeout(resolve, 30));
+          controller.abort();
+        }
+        const result = await run;
+        assert.equal(result.status, "failed");
+        if (result.status !== "failed")
+          assert.fail("Expected terminal failure");
+        assert.equal(
+          result.reason,
+          termination === "abort"
+            ? "cancelled"
+            : termination === "timeout"
+              ? "limit"
+              : "program_failed"
+        );
+        assert.ok(invoked <= 4);
+        if (termination !== "early-return") assert.equal(invoked, 4);
+        assert.equal(budget.used, invoked);
+        assert.ok(signals.every((signal) => signal.aborted));
+        release.resolve();
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        assert.equal(invoked, result.calls);
+        assert.equal(budget.used, result.calls);
+      } finally {
+        controller.abort();
+        release.resolve();
+        await run;
+      }
+    }
+  );
+}
+
+test("queued dispatch re-enters the registry after revocation and frees failed slots without leaking errors", async () => {
+  let allowed = true;
+  let attempts = 0;
+  let active = 0;
+  let highWater = 0;
+  const result = await runEvryComposition({
+    ...base(),
+    registry: fixture(async () => {
+      attempts++;
+      highWater = Math.max(highWater, ++active);
+      try {
+        // A registry stub proves dispatch timing, not production database authorization.
+        if (!allowed) throw new Error("private revocation person@example.test");
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        allowed = false;
+        return { visible: true };
+      } finally {
+        active--;
+      }
+    }),
+    js: `return (await Promise.allSettled(Array.from({length:8}, () => tools["people.query"]({ids:[]})))).map(r => r.status === "fulfilled" ? r.value : {error: r.reason.message});`,
+  });
+  assert.equal(result.status, "completed");
+  assert.equal(result.calls, 8);
+  assert.equal(attempts, 8);
+  assert.equal(highWater, 4);
+  assert.equal(active, 0);
+  if (result.status !== "completed") assert.fail("Expected settled results");
+  assert.deepEqual(result.output, [
+    ...Array(4).fill({ visible: true }),
+    ...Array(4).fill({ error: "Host tool failed." }),
+  ]);
+  assert.doesNotMatch(JSON.stringify(result), /private|person@/);
+});
+
+test("one failed read frees its slot and allSettled retains the other seven outcomes", async () => {
   const result = await runEvryComposition({
     ...base(),
     registry: fixture(async (_name, input) => {
-      await new Promise((resolve) => setTimeout(resolve, 20));
-      return input;
+      const { ids } = z.object({ ids: z.array(z.string()) }).parse(input);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      if (ids[0] === "0") throw new Error("provider secret");
+      return ids[0];
     }),
-    js: `return await Promise.all(Array.from({length: 8}, (_, i) => tools["people.query"]({ids: [String(i)]})));`,
+    js: `return (await Promise.allSettled(Array.from({length:8}, (_, i) => tools["people.query"]({ids:[String(i)]})))).map(r => r.status === "fulfilled" ? r.value : r.reason.message);`,
   });
-  assert.equal(result.status, "failed");
-  if (result.status !== "failed") assert.fail("Expected concurrency refusal");
-  assert.equal(result.reason, "limit");
-  assert.ok(result.calls <= COMPOSITION_LIMITS.maxInFlightBridgeRequests);
+  assert.deepEqual(result, {
+    status: "completed",
+    calls: 8,
+    output: ["Host tool failed.", "1", "2", "3", "4", "5", "6", "7"],
+  });
 });
 
 test("preparation gets a stable trusted nested identity on replay", async () => {
@@ -370,6 +583,15 @@ test("trusted limits cannot be widened and descriptions derive from the registry
     }),
     /Invalid composition limit/
   );
+  for (const limits of [
+    { maxConcurrentToolCalls: 5 },
+    { maxBridgeRequests: 25 },
+  ]) {
+    await assert.rejects(
+      runEvryComposition({ ...base(), js: "return 1", limits }),
+      /Invalid composition limit/
+    );
+  }
   const [description] = describeCompositionTools(fixture());
   assert.equal(description.name, "people.query");
   assert.equal(description.inputSchema.type, "object");

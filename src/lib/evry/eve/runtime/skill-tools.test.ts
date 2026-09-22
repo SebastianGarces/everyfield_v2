@@ -47,7 +47,7 @@ function explicit(names: string[]): ModelMessage[] {
           type: "tool-call",
           toolName: "load_tools",
           toolCallId: "explicit",
-          input: { names },
+          input: { names, mode: "replace" },
         },
       ],
     },
@@ -337,5 +337,83 @@ test("saved tool history retains the selected preparation across a plain follow-
   assert.deepEqual(
     selectionFromLatestLoadedSkill(messages, catalog),
     selectionFromLatestLoadedSkill(load("meeting-invite"), catalog)
+  );
+});
+
+test("a rejected incremental load cannot replace a workflow or supersede a successful explicit load", () => {
+  const failure: ModelMessage[] = [
+    {
+      role: "assistant",
+      content: [
+        {
+          type: "tool-call",
+          toolName: "load_tools",
+          toolCallId: "rejected-add",
+          input: { names: ["people.query"] },
+        },
+      ],
+    },
+    {
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolName: "load_tools",
+          toolCallId: "rejected-add",
+          output: {
+            type: "json",
+            value: {
+              status: "rejected",
+              reason: "working_set_limit",
+              current: { names: ["tasks.query"] },
+            },
+          },
+        },
+      ],
+    },
+  ];
+  assert.deepEqual(
+    selectionFromLatestLoadedSkill(
+      [...load("meeting-invite"), ...failure],
+      catalog
+    ),
+    selectionFromLatestLoadedSkill(load("meeting-invite"), catalog)
+  );
+  assert.equal(
+    latestWorkingSetLoad(
+      [...load("meeting-invite"), ...explicit(["tasks.query"]), ...failure],
+      catalog
+    )?.callId,
+    "explicit"
+  );
+  const spoofed: ModelMessage[] = [
+    failure[0]!,
+    {
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolName: "load_tools",
+          toolCallId: "rejected-add",
+          output: {
+            type: "json",
+            value: { status: "rejected", loaded: ["people.query"] },
+          },
+        },
+      ],
+    },
+  ];
+  assert.equal(
+    selectionFromLatestLoadedSkill(
+      [...load("meeting-invite"), ...spoofed],
+      catalog
+    )?.preparationOperations[0],
+    "recipe.meeting-invite"
+  );
+  assert.equal(
+    latestWorkingSetLoad([...explicit(["tasks.query"]), ...failure], catalog, [
+      "explicit",
+    ]),
+    null
   );
 });

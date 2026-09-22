@@ -120,7 +120,7 @@ test(
                   {
                     id: "replace",
                     name: "load_tools",
-                    input: { names: ["tasks.query"] },
+                    input: { mode: "replace", names: ["tasks.query"] },
                   },
                 ],
               },

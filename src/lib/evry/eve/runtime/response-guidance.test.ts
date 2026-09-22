@@ -52,13 +52,15 @@ test("task cleanup applies known exclusions early and preserves complete exact r
 });
 
 test("composition guidance publishes the actual configured concurrency and call limits", () => {
+  assert.match(composition, /\$\{COMPOSITION_LIMITS\.maxConcurrentToolCalls\}/);
+  assert.match(composition, /\$\{COMPOSITION_LIMITS\.maxBridgeRequests\}/);
   assert.match(
     composition,
-    /\$\{COMPOSITION_LIMITS\.maxInFlightBridgeRequests\}/
+    /additional calls queue automatically within the same program deadline/
   );
-  assert.match(composition, /\$\{COMPOSITION_LIMITS\.maxBridgeRequests\}/);
-  assert.match(composition, /await each batch before starting another/);
-  assert.match(composition, /Promise\.allSettled within each bounded batch/);
+  assert.match(composition, /Promise\.allSettled and inspect every outcome/);
+  assert.match(composition, /Await all calls before returning/);
+  assert.doesNotMatch(composition, /await each batch before starting another/);
   assert.match(
     composition,
     /No filesystem, imports, network, secrets, execution, or confirmation/
@@ -88,11 +90,12 @@ test("discovery guidance uses already available tools without a schema housekeep
   );
 });
 
-test("discovery guidance retains later replacement and exact preparation selection", () => {
-  assert.match(
-    loader,
-    /Replaces the previous working set without losing results or task notes/
-  );
+test("discovery guidance adds missing definitions with bounded explicit replacement and exact preparation selection", () => {
+  assert.match(loader, /adding them to the current working set/);
+  assert.match(loader, /Use mode: replace/);
+  assert.match(loader, /supply the complete desired set/);
+  assert.match(loader, /over-limit addition leaves the current set unchanged/);
+  assert.match(loader, /without losing results or task notes/);
   assert.match(loader, /An empty names list unloads it/);
   assert.match(loader, /Select up to eight canonical names/);
   assert.match(

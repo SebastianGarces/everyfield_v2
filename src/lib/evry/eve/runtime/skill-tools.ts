@@ -44,10 +44,14 @@ export function latestWorkingSetLoad(
       if (
         call.name === "load_tools" &&
         part.output.type === "json" &&
-        z.object({ loaded: z.array(z.string()) }).safeParse(part.output.value)
-          .success
+        z
+          .object({
+            status: z.literal("loaded").optional(),
+            loaded: z.array(z.string()).max(8),
+          })
+          .safeParse(part.output.value).success
       ) {
-        selected = { callId: part.toolCallId, selection: null }; // Explicit replacement owns the working set from here.
+        selected = { callId: part.toolCallId, selection: null }; // The successful loader owns its persisted working set.
       }
       if (
         call.name !== "load_skill" ||
