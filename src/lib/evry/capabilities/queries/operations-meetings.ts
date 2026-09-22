@@ -20,6 +20,7 @@ import {
   operationsWhere,
   predicateSet,
 } from "./operations-core";
+import { meetingAgendaItemEvidence } from "./meeting-agenda-evidence";
 
 const filterSchema = z.strictObject({
   date: evryDateRangeSchema.optional(),
@@ -172,7 +173,7 @@ export function meetingsGetManyStatement(
   let evidence = facts(...detail);
   if (input.sections.includes("agenda")) {
     const agenda = sql`case when jsonb_typeof(m.agenda) = 'array' then m.agenda else '[]'::jsonb end`;
-    evidence = sql`${evidence} || ${facts(fact("Agenda total", sql`jsonb_array_length(${agenda})`), fact("Agenda coverage", sql`case when m.agenda is null then 'No agenda recorded' when jsonb_typeof(m.agenda) <> 'array' then 'Stored agenda format is not readable' else 'Requested page; see agenda total' end`))} || coalesce((select jsonb_agg(${fact("Agenda item", sql`coalesce(entry ->> 'title', entry ->> 'name', entry ->> 'topic', 'Untitled agenda item') || coalesce(': ' || (entry ->> 'description'), '')`)} order by ordinal) from (select entry, ordinal from jsonb_array_elements(${agenda}) with ordinality as a(entry, ordinal) order by ordinal limit ${input.relatedLimit} offset ${input.relatedOffset ?? 0}) a), '[]'::jsonb)`;
+    evidence = sql`${evidence} || ${facts(fact("Agenda total", sql`jsonb_array_length(${agenda})`), fact("Agenda coverage", sql`case when m.agenda is null then 'No agenda recorded' when jsonb_typeof(m.agenda) <> 'array' then 'Stored agenda format is not readable' else 'Requested page; see agenda total' end`))} || coalesce((select jsonb_agg(${fact("Agenda item", meetingAgendaItemEvidence(sql`entry`))} order by ordinal) from (select entry, ordinal from jsonb_array_elements(${agenda}) with ordinality as a(entry, ordinal) order by ordinal limit ${input.relatedLimit} offset ${input.relatedOffset ?? 0}) a), '[]'::jsonb)`;
   }
   if (input.sections.includes("checklist"))
     evidence = sql`${evidence} || ${facts(fact("Checklist total", sql`(select count(*) from meeting_checklist_items c where c.church_id = ${plantId} and c.meeting_id = m.id)`))} || coalesce((select jsonb_agg(${relatedFact("Preparation item", sql`c.item_name || ' · ' || case when c.is_checked then 'Complete' else 'Incomplete' end || coalesce(' · ' || c.notes, '')`, sql`c.item_name || ' [' || c.id || ']'`)} order by c.id) from (select c.id, c.item_name, c.is_checked, c.notes from meeting_checklist_items c where c.church_id = ${plantId} and c.meeting_id = m.id order by c.id limit ${input.relatedLimit} offset ${input.relatedOffset ?? 0}) c), '[]'::jsonb)`;
