@@ -85,6 +85,8 @@ test(
         return previous.fetch(input, init);
       };
       globalThis.fetch = proxyFetch;
+      const { EVE_TOOL_FAILURE_MESSAGE } =
+        await import("@/lib/evry/eve/runtime/tool-errors");
       const [
         { createEveToolRegistry },
         { requireEvryPlantViewerForSession },
@@ -286,6 +288,156 @@ test(
         assert.ok(freshAuthorizations >= 7);
         assert.equal(external, 0);
       });
+      await t.test(
+        "compiled direct failure reaches the next provider safely, retains its peer, and permits explicit retry",
+        { skip: !process.env.EVRY_EVE_COMPILED_ENTRY },
+        async () => {
+          const { runCompiledEveFixture } =
+            await import("@/lib/evry/eve/evals/http/process");
+          const compiled = createFixtureManifest("edges-13", 452);
+          store.seed(compiled);
+          seedSourceRecoveryFixture(compiled, store);
+          const truth = sourceRecoveryTruth(compiled, store);
+          const audit = store.auditStart();
+          const outcome = await runCompiledEveFixture(
+            {
+              compiledEntry: process.env.EVRY_EVE_COMPILED_ENTRY!,
+              databaseUrl: stack.databaseUrl,
+              proxyUrl: stack.proxyUrl,
+              sessionToken: compiled.sessionToken,
+              actor: {
+                userId: compiled.ids.actor,
+                plantId: compiled.ids.plant,
+              },
+              turns: [
+                "Show my pending tasks and upcoming meetings.",
+                "Try the meeting lookup again.",
+              ],
+              sourceRecovery: "edges-13",
+              now: compiled.now,
+              maxCostUsd: 1,
+              timeoutMs: 120_000,
+              prices: {
+                inputUsdPerMillion: 1,
+                outputUsdPerMillion: 2,
+                maxInputBytes: 500_000,
+                maxOutputTokens: 1_000,
+              },
+              model: {
+                mode: "scripted",
+                responses: [
+                  {
+                    toolCalls: [
+                      {
+                        id: "load-direct-readers",
+                        name: "load_tools",
+                        input: { names: ["tasks.query", "meetings.query"] },
+                      },
+                    ],
+                  },
+                  {
+                    toolCalls: [
+                      {
+                        id: "direct-tasks",
+                        name: "tasks_query",
+                        input: taskInput,
+                      },
+                      {
+                        id: "direct-meetings-fault",
+                        name: "meetings_query",
+                        input: meetingInput,
+                      },
+                    ],
+                  },
+                  { text: "Scripted failure boundary." },
+                  {
+                    toolCalls: [
+                      {
+                        id: "direct-meetings-retry",
+                        name: "meetings_query",
+                        input: meetingInput,
+                      },
+                    ],
+                  },
+                  { text: "Scripted recovery boundary." },
+                ],
+              },
+            },
+            AbortSignal.timeout(150_000)
+          );
+          assert.deepEqual(outcome.runtimeProof?.failures, []);
+          assert.equal(outcome.runtimeProof?.modelCalls, 5);
+          assert.equal(outcome.sourceRecoveryFaults?.length, 1);
+          assert.equal(
+            outcome.sourceRecoveryFaults?.[0]?.plantId,
+            compiled.ids.plant
+          );
+          const parts = outcome.messages.flatMap((message) => message.parts);
+          const failed = parts.find(
+            (part) =>
+              part.type === "dynamic-tool" &&
+              part.toolCallId === "direct-meetings-fault"
+          );
+          assert.ok(
+            failed?.type === "dynamic-tool" && failed.state === "output-error"
+          );
+          assert.equal(failed.errorText, EVE_TOOL_FAILURE_MESSAGE);
+          const providerErrors =
+            outcome.runtimeProof?.modelRequests?.flatMap(
+              (request) => request.toolErrors ?? []
+            ) ?? [];
+          const providerFailure = providerErrors.find(
+            (error) => error.id === "direct-meetings-fault"
+          );
+          assert.ok(
+            providerFailure,
+            "the next real scripted provider request must contain the failure"
+          );
+          assert.equal(providerFailure.name, "meetings_query");
+          assert.equal(providerFailure.output, EVE_TOOL_FAILURE_MESSAGE);
+          assert.doesNotMatch(
+            JSON.stringify({ messages: outcome.messages, providerErrors }),
+            /Failed query:|params:|Isolated meeting dependency/
+          );
+          for (const id of ["direct-tasks", "direct-meetings-retry"]) {
+            assert.ok(
+              parts.some(
+                (part) =>
+                  part.type === "dynamic-tool" &&
+                  part.toolCallId === id &&
+                  part.state === "output-available"
+              )
+            );
+          }
+          assert.equal(
+            outcome.hostCapture.calls.filter(
+              (call) => call.name === "meetings.query"
+            ).length,
+            1
+          );
+          assert.ok(
+            !outcome.hostCapture.calls.some(
+              (call) => call.id === "direct-meetings-fault"
+            )
+          );
+          for (const [name, ids] of [
+            ["tasks.query", truth.taskIds],
+            ["meetings.query", truth.meetingIds],
+          ] as const) {
+            const call = outcome.hostCapture.calls.find(
+              (call) => call.name === name
+            );
+            assert.ok(call);
+            const artifact = capturedReadArtifactSchema.parse(call.output);
+            assert.deepEqual(artifact.items.map((item) => item.id).sort(), ids);
+          }
+          assert.ok(outcome.hostCapture.freshAuthorizations >= 3);
+          assert.equal(outcome.hostCapture.refusedAuthorizations, 0);
+          assert.equal(outcome.hostCapture.outboundMessages, 0);
+          assert.deepEqual(store.writesSince(audit, compiled), []);
+          assert.equal(outcome.judge, null);
+        }
+      );
       await t.test(
         "compiled two-turn runtime returns only genuine worker receipts and retained successful calls",
         { skip: !process.env.EVRY_EVE_COMPILED_ENTRY },

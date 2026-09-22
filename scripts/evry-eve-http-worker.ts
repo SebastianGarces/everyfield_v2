@@ -22,6 +22,7 @@ import {
   preparationFromObservedTask,
 } from "../src/lib/evry/eve/evals/http/task-state-script";
 import { createSourceRecoveryFault } from "../src/lib/evry/eve/evals/fixtures/source-recovery";
+import { EVE_TOOL_FAILURE_MESSAGE } from "../src/lib/evry/eve/runtime/tool-errors";
 
 const controller = new AbortController();
 let unhandledRejections = 0;
@@ -60,6 +61,7 @@ process.on("message", async (message) => {
     sequence: number;
   }> = [];
   const scriptedDiagnostics: string[] = [];
+  const verifiedRecoveryResults = new Set<string>();
   const attachmentBindings: Array<{
     turnIndex: number;
     attachmentId: string;
@@ -148,6 +150,52 @@ process.on("message", async (message) => {
             respond: (modelRequest) => {
               if (request.model.mode !== "scripted")
                 throw new Error("Invalid fixture model");
+              if (request.sourceRecovery) {
+                // Inspect the actual provider prompt, including successful outer
+                // code_mode results whose nested read failed. Do not export it.
+                if (
+                  /Failed query:|params:|Isolated meeting dependency/.test(
+                    JSON.stringify(modelRequest.toolResults)
+                  )
+                )
+                  throw new Error("Unsafe source recovery provider input");
+                for (const result of modelRequest.toolResults) {
+                  if (result.id === "direct-meetings-fault") {
+                    if (
+                      result.name !== "meetings_query" ||
+                      !result.isError ||
+                      result.output !== EVE_TOOL_FAILURE_MESSAGE
+                    )
+                      throw new Error("Unsafe source recovery provider input");
+                    verifiedRecoveryResults.add(result.id);
+                  }
+                  if (result.id === "source-pair") {
+                    const parsed = z
+                      .object({
+                        status: z.literal("completed"),
+                        calls: z.literal(2),
+                        output: z.tuple([
+                          z.object({
+                            status: z.literal("fulfilled"),
+                            value: z.unknown(),
+                          }),
+                          z.object({
+                            status: z.literal("rejected"),
+                            reason: z.literal("Host tool failed."),
+                          }),
+                        ]),
+                      })
+                      .safeParse(result.output);
+                    if (
+                      result.name !== "code_mode" ||
+                      result.isError ||
+                      !parsed.success
+                    )
+                      throw new Error("Unsafe source recovery provider input");
+                    verifiedRecoveryResults.add(result.id);
+                  }
+                }
+              }
               const compaction = isScriptedCompactionRequest(modelRequest);
               const response:
                 | (typeof request.model.responses)[number]
@@ -490,6 +538,17 @@ process.on("message", async (message) => {
       signal: controller.signal,
       maxCostUsd: request.maxCostUsd,
     });
+    if (request.sourceRecovery && request.model.mode === "scripted") {
+      for (const call of request.model.responses.flatMap(
+        (response) => response.toolCalls ?? []
+      )) {
+        if (
+          (call.id === "source-pair" || call.id === "direct-meetings-fault") &&
+          !verifiedRecoveryResults.has(call.id)
+        )
+          throw new Error("Source recovery result did not reach the provider");
+      }
+    }
     if (unhandledRejections > 0)
       throw new Error("Compiled runtime had an unhandled rejection");
     const result = {
@@ -550,6 +609,8 @@ process.on("message", async (message) => {
         "Fixture attachment disclosure refused",
         "Fixture attachment turn was bound more than once",
         "Scripted attachment binding was not visible to the model",
+        "Unsafe source recovery provider input",
+        "Source recovery result did not reach the provider",
       ].includes(error.message)
         ? error.message
         : "isolated runtime failure";

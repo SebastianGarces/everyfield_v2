@@ -7,6 +7,7 @@ import {
 } from "../../src/lib/evry/eve/runtime/registry";
 import { eveRuntimeToolSchema } from "../../src/lib/evry/eve/runtime/tool-schemas";
 import { withEveRuntimeScope } from "../../src/lib/evry/eve/runtime/scope";
+import { withSafeEveToolErrors } from "../../src/lib/evry/eve/runtime/tool-errors";
 import { captureEveTurnInput } from "../../src/lib/evry/eve/runtime/turn-context";
 import { withResultPresentation } from "../../src/lib/evry/eve/runtime/results";
 import { latestWorkingSetLoad } from "../../src/lib/evry/eve/runtime/skill-tools";
@@ -104,20 +105,25 @@ export default defineDynamic({
         tools[key] = defineTool({
           description: `${entry.description} Canonical code-mode name: ${entry.name}.`,
           inputSchema: eveRuntimeToolSchema(name, preparations),
-          execute: (input, toolContext) =>
-            withEveRuntimeScope(toolContext, async (scope) => {
-              const result = await createBoundEveRegistry(scope).invoke(
-                name,
-                input,
-                {
-                  signal: toolContext.abortSignal,
-                  callId: toolContext.callId,
-                }
-              );
-              return withResultPresentation(result, scope.turnId, [
-                toolContext.callId,
-              ]);
-            }),
+          execute: (input, toolContext) => {
+            const execute = () =>
+              withEveRuntimeScope(toolContext, async (scope) => {
+                const result = await createBoundEveRegistry(scope).invoke(
+                  name,
+                  input,
+                  {
+                    signal: toolContext.abortSignal,
+                    callId: toolContext.callId,
+                  }
+                );
+                return withResultPresentation(result, scope.turnId, [
+                  toolContext.callId,
+                ]);
+              });
+            return entry.effect === "read"
+              ? withSafeEveToolErrors(toolContext.abortSignal, execute)
+              : execute();
+          },
           toModelOutput: ({ data }) => ({ type: "json", value: data }),
         });
       }
