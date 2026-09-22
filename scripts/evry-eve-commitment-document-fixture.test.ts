@@ -28,7 +28,6 @@ import {
   type DocumentFixtureTransport,
 } from "@/lib/evry/eve/evals/fixtures/document-storage";
 import { UnauthorizedError } from "@/lib/auth/unauthorized";
-import { historyContinuationSchema } from "@/lib/evry/eve/runtime/history-continuation";
 
 test(
   "commitment lookup uses actual scoped history and authorized app downloads without effects",
@@ -51,7 +50,7 @@ test(
       endpoint: neonConfig.fetchEndpoint,
       fetch: globalThis.fetch,
     };
-    let external = 0;
+    const rejectedFetches: { protocol: string; origin: string }[] = [];
     try {
       process.env.DATABASE_URL = stack.databaseUrl;
       process.env.RESEND_API_KEY = "re_isolated_no_delivery";
@@ -67,9 +66,9 @@ test(
             storage.environment.AWS_ENDPOINT_URL_S3,
           ].includes(url.origin)
         ) {
-          external++;
+          rejectedFetches.push({ protocol: url.protocol, origin: url.origin });
           throw new Error(
-            "External fetch prohibited in commitment lookup proof"
+            `External fetch prohibited in commitment lookup proof: ${JSON.stringify(rejectedFetches.at(-1))}`
           );
         }
         return previous.fetch(input, init);
@@ -78,10 +77,12 @@ test(
         { createProductionEveEvalAdapter },
         { collectResult, publicResultArtifacts },
         { GET: downloadCommitment },
+        { historyContinuationSchema },
       ] = await Promise.all([
         import("@/lib/evry/eve/evals/fixtures/adapter"),
         import("@/lib/evry/eve/runtime/results"),
         import("@/app/api/evry/people/files/commitments/[commitmentId]/route"),
+        import("@/lib/evry/eve/runtime/history-continuation"),
       ]);
       const store = createFixtureStore(stack.container);
       const variants = [
@@ -374,7 +375,11 @@ test(
             repetition++;
           }
         });
-      assert.equal(external, 0);
+      assert.deepEqual(
+        rejectedFetches,
+        [],
+        `Rejected fetches: ${JSON.stringify(rejectedFetches)}`
+      );
     } finally {
       globalThis.fetch = previous.fetch;
       neonConfig.fetchEndpoint = previous.endpoint;
