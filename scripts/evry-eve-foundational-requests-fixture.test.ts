@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { test } from "node:test";
+import { z } from "zod";
 import { neonConfig } from "@neondatabase/serverless";
 import { startFixtureStack } from "@/lib/evry/eve/evals/fixtures/stack";
 import { createFixtureStore } from "@/lib/evry/eve/evals/fixtures/store";
@@ -143,7 +143,20 @@ test(
         const calls: CapturedCall[] = [];
         const invoke = async (name: string, input: unknown) => {
           const callId = `foundational-${serial++}`;
-          const output = await registry.invoke(name, input, { callId });
+          let output: unknown;
+          if (variant === "stale-review" && name === "actions.prepare") {
+            // The repository deliberately owns its creation clock; a supplied
+            // preparation-context date does not control immutable plan expiry.
+            t.mock.timers.enable({
+              apis: ["Date"],
+              now: now.getTime() - 86_400_000,
+            });
+            try {
+              output = await registry.invoke(name, input, { callId });
+            } finally {
+              t.mock.timers.reset();
+            }
+          } else output = await registry.invoke(name, input, { callId });
           calls.push({ id: callId, name, input, output });
           return output;
         };
@@ -219,6 +232,37 @@ test(
             "Must exercise a real saved preparation"
           );
           if (variant !== "unshown") onPresentResult(prepared.id);
+          if (variant === "stale-review") {
+            const { activePlan } = z
+              .object({
+                activePlan: z.object({
+                  mode: z.literal("set"),
+                  plan: z.object({
+                    planId: z.uuid(),
+                    fingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+                  }),
+                }),
+              })
+              .parse(prepared.output);
+            const [stored] = z
+              .tuple([
+                z.object({
+                  created_ms: z.coerce.number(),
+                  expired: z.literal(true),
+                  positive_lifetime: z.literal(true),
+                }),
+              ])
+              .parse(
+                store.query(
+                  `select extract(epoch from created_at)*1000 as created_ms, expires_at <= '${now.toISOString()}'::timestamptz as expired, expires_at > created_at as positive_lifetime from evry_action_plans where id='${activePlan.plan.planId}' and fingerprint='${activePlan.plan.fingerprint}' and church_id='${actor.plantId}' and actor_user_id='${actor.userId}'`
+                )
+              );
+            assert.equal(
+              stored.created_ms,
+              now.getTime() - 86_400_000,
+              "Actual immutable plan creation, not context.now, must use the earlier fixture instant"
+            );
+          }
         }
         return {
           eveSessionId: sessionId,
@@ -240,31 +284,6 @@ test(
         captureMode: "isolated_http",
         runProduction,
       });
-      const { createEvePreparation } =
-        await import("@/lib/evry/eve/preparation");
-      const { authorizeEvryReadCapabilityForSession } =
-        await import("@/lib/evry/eligibility/capabilities");
-      const expiredAdapter = createProductionEveEvalAdapter({
-        store,
-        buildSha: "0".repeat(40),
-        runProduction,
-        preparation: ({ actor, manifest }) =>
-          createEvePreparation({
-            actor,
-            conversationId: randomUUID(),
-            userRequestKey: randomUUID(),
-            literalUserText: foundationalQuestions["notifications-04"],
-            pageContext: null,
-            // Create a real review at an earlier request instant; immutable stored
-            // bytes remain untouched when the observer sees it after expiration.
-            now: new Date(new Date(manifest.now).getTime() - 86_400_000),
-            authorizeRead: (identity) =>
-              authorizeEvryReadCapabilityForSession(
-                identity,
-                manifest.sessionId
-              ),
-          }),
-      });
       for (const id of foundationalRequestIds)
         await t.test(id, async (t) => {
           const scenario = [...questions, ...regressions].find(
@@ -285,11 +304,9 @@ test(
             await t.test(mode, async () => {
               variant = mode;
               const fixture = await (
-                mode === "stale-review"
-                  ? expiredAdapter
-                  : id === "regression-capabilities"
-                    ? compiledAdapter
-                    : registryAdapter
+                id === "regression-capabilities"
+                  ? compiledAdapter
+                  : registryAdapter
               ).prepare(scenario);
               assert.ok(fixture);
               try {
