@@ -29,6 +29,31 @@ import {
 } from "@/components/evry/eve-message-projection";
 
 type FixtureHost = ReturnType<typeof installIsolatedFixtureHost>;
+
+/** Record visible questions as answers without repeating identical prose in the same message. */
+export function projectHttpEvalAnswer(
+  messages: ReturnType<typeof fixtureTranscript>
+): string {
+  return messages
+    .filter((message) => message.role === "assistant")
+    .flatMap((message) => {
+      const parts = projectEveMessage(message);
+      const prose = new Set(
+        parts.flatMap((part) =>
+          part.kind === "text" ? [part.text.trim()] : []
+        )
+      );
+      return parts.flatMap((part) => {
+        if (part.kind === "text") return [part.text.trim()];
+        if (part.kind === "question" && !prose.has(part.prompt.trim()))
+          return [part.prompt.trim()];
+        return [];
+      });
+    })
+    .filter(Boolean)
+    .join("\n\n");
+}
+
 export type HttpEvalOutcome = {
   answer: string;
   latency: {
@@ -392,13 +417,7 @@ export function createHttpEveEvalRunner(config: {
         messages: transcript,
         ...(followupRestore ? { followupRestore } : {}),
         ...(replay ? { replay } : {}),
-        answer: transcript
-          .filter((message) => message.role === "assistant")
-          .flatMap(projectEveMessage)
-          .filter((part) => part.kind === "text")
-          .map((part) => part.text.trim())
-          .filter(Boolean)
-          .join("\n\n"),
+        answer: projectHttpEvalAnswer(transcript),
         latency: {
           acknowledgementMs,
           firstTextMs,
