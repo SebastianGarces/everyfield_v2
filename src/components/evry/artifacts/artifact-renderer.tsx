@@ -625,6 +625,11 @@ function DetailedConfirmation({
             (sum, exclusion) => sum + exclusion.count,
             0
           );
+          const unchangedTaskCount =
+            taskReview?.exclusions?.groups.reduce(
+              (sum, group) => sum + group.count,
+              0
+            ) ?? 0;
           return (
             <li
               key={step.stepId}
@@ -702,7 +707,59 @@ function DetailedConfirmation({
                 </dl>
               ) : null}
 
-              {step.exclusions.length ? (
+              {taskReview?.exclusions ? (
+                <div className="text-muted-foreground space-y-3 text-sm">
+                  {taskReview.exclusions.groups.length ? (
+                    <details>
+                      <summary className="min-h-6 cursor-pointer font-medium">
+                        {unchangedTaskCount === 1
+                          ? "1 task not changed"
+                          : `${unchangedTaskCount.toLocaleString()} tasks not changed`}
+                      </summary>
+                      <ul className="mt-2 space-y-3">
+                        {taskReview.exclusions.groups.map((group) => (
+                          <li key={group.reason}>
+                            <p>{group.label}</p>
+                            <ul className="mt-1 list-disc space-y-1 ps-5">
+                              {group.tasks.map((task, index) => (
+                                <li
+                                  key={task.href ?? index}
+                                  className="[overflow-wrap:anywhere]"
+                                >
+                                  {task.href ? (
+                                    <AuthenticatedLink
+                                      href={task.href}
+                                      className={linkClassName}
+                                    >
+                                      {task.title}
+                                    </AuthenticatedLink>
+                                  ) : (
+                                    task.title
+                                  )}
+                                </li>
+                              ))}
+                            </ul>
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  ) : null}
+                  {taskReview.exclusions.contactLogNotes.length ? (
+                    <details>
+                      <summary className="min-h-6 cursor-pointer font-medium">
+                        Contact log notes
+                      </summary>
+                      <ul className="mt-2 list-disc space-y-1 ps-5">
+                        {taskReview.exclusions.contactLogNotes.map((note) => (
+                          <li key={note.reason}>
+                            {note.count.toLocaleString()} {note.reason}
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  ) : null}
+                </div>
+              ) : step.exclusions.length ? (
                 <details className="text-muted-foreground text-sm">
                   <summary className="min-h-6 cursor-pointer font-medium">
                     {excludedCount.toLocaleString()} not included

@@ -6,7 +6,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { EVRY_CONFIRMATION_FIXTURES } from "@/lib/evry/artifacts/fixtures";
 import { buildEvryConfirmationArtifact } from "@/lib/evry/artifacts/review";
 import { publicEvryArtifact } from "@/lib/evry/artifacts/public";
-import { taskFixtureSnapshot } from "@/lib/evry/capabilities/tasks/test-fixtures";
+import {
+  taskFixtureSnapshot,
+  taskEffectPlanFixture,
+} from "@/lib/evry/capabilities/tasks/test-fixtures";
+import { TASKS_EFFECT_ARGUMENT_SCHEMAS } from "@/lib/evry/capabilities/tasks/effect-contracts";
 import {
   hydrateStoredEvryConversationArtifact,
   parseEvryConversationArtifactDocument,
@@ -44,8 +48,8 @@ function target(
     sourceLink: { label: "Open task", href: `/tasks/${taskId}` },
   };
 }
-function evidence(writes: unknown[]) {
-  const text = JSON.stringify({ taskWrites: writes });
+function evidence(writes: unknown[], additional: Record<string, unknown> = {}) {
+  const text = JSON.stringify({ ...additional, taskWrites: writes });
   const parts = [];
   for (let offset = 0; offset < text.length; offset += 3800)
     parts.push({
@@ -129,13 +133,48 @@ test("task review projects the actual changed date and title without modifying i
 });
 
 test("the actual renderer shows task changes and preserves confirmation, exclusions and consequences", () => {
+  const input = step();
+  const beforeTask = {
+    ...taskFixtureSnapshot(taskId, "in_progress"),
+    title: "Call the venue coordinator",
+    dueDate: "2026-09-17",
+    description: "unchanged snapshot data",
+  };
+  const excludedId = "00000000-0000-4000-8000-000000000003";
+  const reason = "Task is complete — reopen it before rescheduling";
+  const expectedTask = {
+    ...taskFixtureSnapshot(excludedId, "complete"),
+    title: "Launch milestone",
+  };
+  const args = TASKS_EFFECT_ARGUMENT_SCHEMAS.bulkRescheduleTasksAction.parse({
+    ...taskEffectPlanFixture("bulkRescheduleTasksAction"),
+    taskWrites: [
+      {
+        taskId,
+        before: beforeTask,
+        after: { ...beforeTask, dueDate: "2026-09-25" },
+      },
+    ],
+    notifications: { scopedTaskIds: [taskId], before: [], after: [] },
+    sourceAssertion: {
+      kind: "bulk_selection",
+      requestedTaskIds: [taskId, excludedId],
+      actionableTaskIds: [taskId],
+      excludedTasks: [{ taskId: excludedId, reason, expectedTask }],
+    },
+    exclusions: [
+      { target: `Task ${excludedId}: ${expectedTask.title}`, reason },
+    ],
+  });
+  input.contentPreviews = evidence(args.taskWrites, args);
+  input.exclusions = [{ reason, count: 1 }];
   const artifact = buildEvryConfirmationArtifact({
     kind: "confirmation",
     artifactVersion: 1,
     plan: EVRY_CONFIRMATION_FIXTURES.bulkStageChange.plan,
     title: "Move overdue tasks to Friday",
     actionLabel: "Reschedule tasks",
-    steps: [step()],
+    steps: [input],
     consequences: ["Only the reviewed due dates will change."],
   });
   const before = JSON.stringify(artifact);
@@ -151,7 +190,8 @@ test("the actual renderer shows task changes and preserves confirmation, exclusi
     "Call the venue coordinator",
     "Sep 17, 2026",
     "Sep 25, 2026",
-    "Launch milestones remain unchanged",
+    "Launch milestone",
+    "Complete; reopen before rescheduling",
     "Only the reviewed due dates will change.",
     "Reschedule tasks",
     "Nothing has changed yet",
@@ -172,6 +212,12 @@ test("the actual renderer shows task changes and preserves confirmation, exclusi
     markup.match(/<button[^>]*>Reschedule tasks<\/button>/)?.[0] ?? "",
     / disabled=""/
   );
+});
+
+test("legacy taskWrites-only evidence with exclusions cannot enable confirmation", () => {
+  const projected = customerTaskReview(step());
+  assert.equal(projected?.detailsUnavailable, true);
+  assert.equal(projected?.exclusions, null);
 });
 
 test("real status and assignment changes remain visible without inventing an assignee name", () => {

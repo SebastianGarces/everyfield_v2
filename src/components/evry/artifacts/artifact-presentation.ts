@@ -1,5 +1,8 @@
 import { formatDateWithoutWeekday } from "@/lib/datetime";
-import { taskEffectSnapshotSchema } from "@/lib/evry/capabilities/tasks/effect-contracts";
+import {
+  taskEffectSnapshotSchema,
+  TASKS_EFFECT_ARGUMENT_SCHEMAS,
+} from "@/lib/evry/capabilities/tasks/effect-contracts";
 import {
   CATEGORY_CONFIG,
   PRIORITY_CONFIG,
@@ -59,6 +62,16 @@ type TaskTarget = Readonly<{
   title: string;
   changes: Record<string, TaskChange>;
 }>;
+type ReviewExclusion = Readonly<{ reason: string; count: number }>;
+type TaskExclusionGroup = ReviewExclusion &
+  Readonly<{
+    label: string;
+    tasks: readonly Readonly<{ title: string; href: string | null }>[];
+  }>;
+type TaskExclusions = Readonly<{
+  groups: readonly TaskExclusionGroup[];
+  contactLogNotes: readonly ReviewExclusion[];
+}>;
 const TASK_PREFIX = /^Task ([0-9a-f-]{36}): /i;
 const TASK_EVIDENCE = /^Immutable Task plan evidence(?: \(\d+\))?$/;
 const TASK_BOOKKEEPING = new Set([
@@ -110,17 +123,22 @@ function taskTarget(target: ReviewTarget): TaskTarget | null {
 
 // Large task edits use chunked evidence instead of the compact target. Read
 // only the matching write; never render the snapshots or notification payload.
-function expandedTaskTargets(
-  previews: readonly ContentPreview[]
-): Map<string, TaskTarget> {
-  const result = new Map<string, TaskTarget>();
+function taskPlanEvidence(previews: readonly ContentPreview[]): unknown {
   try {
-    const value: unknown = JSON.parse(
+    return JSON.parse(
       previews
         .filter((p) => TASK_EVIDENCE.test(p.label))
         .map((p) => p.content)
         .join("")
     );
+  } catch {
+    return null;
+  }
+}
+
+function expandedTaskTargets(value: unknown): Map<string, TaskTarget> {
+  const result = new Map<string, TaskTarget>();
+  try {
     if (!record(value) || !Array.isArray(value.taskWrites)) return result;
     for (const write of value.taskWrites) {
       if (
@@ -158,6 +176,92 @@ function expandedTaskTargets(
     /* The caller discloses unavailable details instead of raw chunks. */
   }
   return result;
+}
+
+function customerTaskExclusions(
+  evidence: unknown,
+  exclusions: readonly ReviewExclusion[]
+): { value: TaskExclusions | null; detailsUnavailable: boolean } {
+  if (!record(evidence))
+    return { value: null, detailsUnavailable: exclusions.length > 0 };
+  const schema =
+    evidence.operation === "bulkCompleteTasksAction"
+      ? TASKS_EFFECT_ARGUMENT_SCHEMAS.bulkCompleteTasksAction
+      : evidence.operation === "bulkRescheduleTasksAction"
+        ? TASKS_EFFECT_ARGUMENT_SCHEMAS.bulkRescheduleTasksAction
+        : null;
+  const bulk =
+    schema !== null ||
+    (record(evidence.sourceAssertion) &&
+      evidence.sourceAssertion.kind === "bulk_selection");
+  if (!bulk) {
+    const operationSchema = Object.entries(TASKS_EFFECT_ARGUMENT_SCHEMAS).find(
+      ([operation]) => operation === evidence.operation
+    )?.[1];
+    return {
+      value: null,
+      // Missing discriminators must not turn an incomplete bulk review into
+      // a valid non-bulk review. Existing non-bulk effects can retain their
+      // ancillary notices only with a complete canonical argument contract.
+      detailsUnavailable:
+        exclusions.length > 0 && !operationSchema?.safeParse(evidence).success,
+    };
+  }
+  const parsed = schema?.safeParse(evidence);
+  if (!parsed?.success || parsed.data.sourceAssertion.kind !== "bulk_selection")
+    return { value: null, detailsUnavailable: true };
+
+  const counts = new Map<string, number>();
+  for (const { reason } of parsed.data.exclusions)
+    counts.set(reason, (counts.get(reason) ?? 0) + 1);
+  if (
+    exclusions.length !== counts.size ||
+    new Set(exclusions.map((e) => e.reason)).size !== counts.size ||
+    exclusions.some(({ reason, count }) => counts.get(reason) !== count)
+  )
+    return { value: null, detailsUnavailable: true };
+
+  const groups = new Map<
+    string,
+    {
+      reason: string;
+      label: string;
+      count: number;
+      tasks: { title: string; href: string | null }[];
+    }
+  >();
+  const labels = {
+    "Task not found": "Unavailable tasks",
+    "Task is already complete": "Already complete",
+    "Task is complete — reopen it before rescheduling":
+      "Complete; reopen before rescheduling",
+    "That task is assigned to somebody else": "Assigned to someone else",
+  };
+  for (const { reason, expectedTask } of parsed.data.sourceAssertion
+    .excludedTasks) {
+    const group = groups.get(reason) ?? {
+      reason,
+      label: labels[reason],
+      count: 0,
+      tasks: [],
+    };
+    group.count++;
+    group.tasks.push(
+      expectedTask
+        ? { title: expectedTask.title, href: `/tasks/${expectedTask.id}` }
+        : { title: "Unavailable task", href: null }
+    );
+    groups.set(reason, group);
+  }
+  return {
+    value: {
+      groups: [...groups.values()],
+      // The canonical bulk schema accounts for every other exclusion as a
+      // skipped contact-log effect. It does not mean the task is unchanged.
+      contactLogNotes: exclusions.filter(({ reason }) => !groups.has(reason)),
+    },
+    detailsUnavailable: false,
+  };
 }
 
 function taskFieldValue(field: string, value: unknown): string {
@@ -207,16 +311,20 @@ export function customerTaskReview(input: {
   resolvedTargets: readonly ReviewTarget[];
   contentPreviews: readonly ContentPreview[];
   beforeAfter: readonly ReviewChange[];
+  exclusions?: readonly ReviewExclusion[];
 }): Readonly<{
   targets: readonly ReviewTarget[];
   changes: readonly ReviewChange[];
   detailsUnavailable: boolean;
+  exclusions: TaskExclusions | null;
 }> | null {
-  const expanded = expandedTaskTargets(input.contentPreviews);
+  const evidence = taskPlanEvidence(input.contentPreviews);
+  const expanded = expandedTaskTargets(evidence);
+  const exclusions = customerTaskExclusions(evidence, input.exclusions ?? []);
   const represented = new Map<string, number>();
   const changes: ReviewChange[] = [];
   let found = false;
-  let detailsUnavailable = false;
+  let detailsUnavailable = exclusions.detailsUnavailable;
   const targets = input.resolvedTargets.map((target) => {
     const id = /^Task \d+$/.test(target.label)
       ? TASK_PREFIX.exec(target.value)?.[1]
@@ -292,6 +400,7 @@ export function customerTaskReview(input: {
     targets: customerReviewTargets(targets),
     changes: [...changes, ...remaining],
     detailsUnavailable,
+    exclusions: exclusions.value,
   };
 }
 
