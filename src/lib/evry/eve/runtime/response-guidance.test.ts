@@ -43,6 +43,42 @@ test("feature ambiguity keeps clarification while discoverable records get a rel
   );
 });
 
+test("required clarification uses the native question protocol without prescribing the answer", () => {
+  const protocol = instructions
+    .split("\n\n")
+    .find((paragraph) => paragraph.startsWith("When user input is required"));
+  assert.ok(protocol);
+  assert.match(
+    protocol,
+    /required to continue the current request, use ask_question/
+  );
+  assert.match(protocol, /natural, concise prompt and allowFreeform: true/);
+  assert.match(protocol, /Offer options when they help explain a real choice/);
+  assert.match(protocol, /Do not end with only a prose question/);
+  assert.match(
+    protocol,
+    /repeat the same question in both prose and the tool prompt/
+  );
+  assert.match(
+    protocol,
+    /Completed answers, rhetorical questions and optional offers of further help do not need ask_question/
+  );
+  assert.match(protocol, /clarification reply never approves a change/);
+  assert.doesNotMatch(
+    protocol,
+    /4C|Plant Intelligence|assessments-03|respondIfAsked/
+  );
+});
+
+test("daily lists use their returned total without requesting the same count again", () => {
+  assert.match(
+    daily,
+    /result already includes the total number of matches across all pages/
+  );
+  assert.match(daily, /Use count mode when only a total is needed/);
+  assert.match(daily, /Do not repeat the same filtered lookup in both modes/);
+});
+
 test("personal summaries stay focused while church-wide briefs consider cross-feature priorities", () => {
   assert.match(daily, /Keep personal summaries focused/);
   assert.match(daily, /church-wide operational brief/);
@@ -183,7 +219,7 @@ test("overall launch reviews retain broad evidence and a substantive narrative",
 test("simple missing input can be requested without discovery or an empty draft while preserving accumulated choices", () => {
   assert.match(
     instructions,
-    /ask directly when there are no accumulated choices to save/
+    /call ask_question directly when there are no accumulated choices to save/
   );
   assert.match(
     instructions,

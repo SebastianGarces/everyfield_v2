@@ -44,6 +44,7 @@ test("optional replies only answer a native question and never manufacture follo
     "answer",
     "prose",
     "question",
+    "tool-approval",
     "session-limit",
     "multiple",
   ] as const) {
@@ -89,10 +90,15 @@ test("optional replies only answer a native question and never manufacture follo
       const events = [event("turn.started", data)];
       if (
         posted.length === 1 &&
-        ["question", "session-limit", "multiple"].includes(mode)
+        ["question", "session-limit", "multiple", "tool-approval"].includes(
+          mode
+        )
       ) {
         const request = {
-          kind: mode === "session-limit" ? "session-limit" : "question",
+          kind:
+            mode === "session-limit" || mode === "tool-approval"
+              ? mode
+              : "question",
           requestId: "scope-question",
           prompt: "Which assessments?",
           allowFreeform: true,
@@ -203,6 +209,14 @@ test("optional replies only answer a native question and never manufacture follo
           assert.deepEqual(result.clarificationMeasurement?.observedTurnIds, [
             "turn-1",
           ]);
+        } else if (mode === "tool-approval") {
+          assert.deepEqual(
+            result.clarificationMeasurement?.observedTurnIds,
+            []
+          );
+          assert.equal(result.clarificationCount, 0);
+          assert.equal(result.answer, "");
+          assert.deepEqual(result.hostCapture.calls, []);
         } else {
           assert.equal(
             result.answer,
