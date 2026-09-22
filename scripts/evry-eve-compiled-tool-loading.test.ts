@@ -58,6 +58,7 @@ test(
             "Review this week's operations without making changes.",
             "Switch to task cleanup tools, then clear them and select wiki search.",
             "Keep that selection; do not make any changes.",
+            "Review interview candidates, then show their recorded attendance details without changing anything.",
           ],
           now: FIXTURE_NOW.toISOString(),
           maxCostUsd: 1,
@@ -94,6 +95,27 @@ test(
               }),
               { text: "Wiki search is selected. Nothing has been changed." },
               { text: "The same selection remains available." },
+              tool("interview-skill", "load_skill", {
+                skill: "interview-review",
+              }),
+              tool("candidate-read", "people_query", {
+                cohort: {
+                  all: {
+                    interview: "not_recorded",
+                    attendance: { minimumMeetings: 2 },
+                  },
+                },
+                result: { mode: "list", limit: 50 },
+              }),
+              tool("add-attendance", "load_tools", {
+                names: ["attendance.query"],
+              }),
+              tool("interview-details", "code_mode", {
+                js: "return await Promise.all([tools['people.history.query']({resource:{kind:'follow_up',state:'completed'},result:{mode:'list',limit:50}}), tools['attendance.query']({statuses:['attended'],result:{mode:'list',limit:50}})]);",
+              }),
+              {
+                text: "The candidate and attendance reads are complete. Nothing has been changed.",
+              },
             ],
           },
         },
@@ -101,7 +123,7 @@ test(
       );
       const requests = outcome.runtimeProof?.modelRequests;
       assert.ok(requests);
-      assert.equal(requests.length, 13);
+      assert.equal(requests.length, 18);
       const baseline = new Set(requests[0].tools);
       const capabilities = (index: number) =>
         requests[index].tools.filter((name) => !baseline.has(name)).sort();
@@ -176,6 +198,34 @@ test(
       assert.deepEqual(capabilities(10), []);
       for (const index of [11, 12])
         assert.deepEqual(capabilities(index), ["wiki_search"]);
+      for (const index of [14, 15])
+        assert.deepEqual(capabilities(index), [
+          "people_history_query",
+          "people_query",
+        ]);
+      for (const index of [16, 17])
+        assert.deepEqual(capabilities(index), [
+          "attendance_query",
+          "people_history_query",
+          "people_query",
+        ]);
+      for (const [index, name, required] of [
+        [14, "people_query", "result"],
+        [14, "people_history_query", "resource"],
+        [16, "attendance_query", "result"],
+      ] as const) {
+        const schema = z
+          .object({
+            properties: z.record(z.string(), z.unknown()),
+            required: z.array(z.string()),
+          })
+          .parse(
+            requests[index].toolSchemas?.find((entry) => entry.name === name)
+              ?.inputSchema
+          );
+        assert.ok(Object.hasOwn(schema.properties, required));
+        assert.ok(schema.required.includes(required));
+      }
       for (const request of requests)
         assert.ok(
           request.tools.filter((name) => !baseline.has(name)).length <= 8
@@ -199,11 +249,17 @@ test(
       );
       assert.deepEqual(
         outcome.hostCapture.calls.map((call) => call.name).sort(),
-        ["context.get", "launch.query"]
+        [
+          "attendance.query",
+          "context.get",
+          "launch.query",
+          "people.history.query",
+          "people.query",
+        ]
       );
       assert.equal(
         outcome.hostCapture.freshAuthorizations,
-        2,
+        5,
         "Loading does not authorize; each real read reauthorizes"
       );
       assert.equal(outcome.hostCapture.refusedAuthorizations, 0);

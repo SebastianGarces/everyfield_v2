@@ -195,6 +195,70 @@ test("read workflows remain read only and unavailable names cannot load", () => 
   );
 });
 
+test("interview skill keeps candidate and history reads while attendance stays discoverable and separately authorized", async () => {
+  const authorizations: string[] = [];
+  const registry = createEveToolRegistry({
+    context: {
+      actor: { userId: "fixture-actor", plantId: "fixture-plant" },
+      literalUserText: "Who needs an interview?",
+      pageContext: null,
+      now: new Date("2026-09-20T16:00:00Z"),
+    },
+    authorizeRead: async (identity) => {
+      authorizations.push(identity);
+      return null;
+    },
+  });
+  const registered = registry.describe();
+  assert.deepEqual(
+    selectionFromLatestLoadedSkill(load("interview-review"), registered),
+    {
+      names: ["people.query", "people.history.query"],
+      preparationOperations: [],
+    }
+  );
+  assert.deepEqual(
+    authorizations,
+    [],
+    "Selecting schemas does not execute reads"
+  );
+  assert.equal(
+    registered.find(({ name }) => name === "attendance.query")?.effect,
+    "read"
+  );
+  assert.deepEqual(
+    selectionFromLatestLoadedSkill(load("interview-review"), [
+      { name: "people.history.query" },
+    ]),
+    { names: ["people.history.query"], preparationOperations: [] }
+  );
+  for (const [name, input] of [
+    [
+      "people.query",
+      {
+        cohort: {
+          all: {
+            interview: "not_recorded",
+            attendance: { minimumMeetings: 2 },
+          },
+        },
+        result: { mode: "list" },
+      },
+    ],
+    [
+      "people.history.query",
+      { resource: { kind: "assessments" }, result: { mode: "list" } },
+    ],
+    ["attendance.query", { result: { mode: "list" } }],
+  ] as const) {
+    assert.deepEqual(await registry.invoke(name, input), {
+      status: "unavailable",
+      reason: "not_authorized",
+    });
+  }
+  assert.equal(authorizations.length, 3);
+});
+
 test("task cleanup loads calendar and exact rescheduling without granting execution", () => {
   const selection = selectionFromLatestLoadedSkill(
     load("task-cleanup"),

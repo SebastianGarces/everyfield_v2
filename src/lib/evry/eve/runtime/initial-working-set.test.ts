@@ -74,6 +74,30 @@ test("uncertain, unknown and unavailable choices do not restrict capabilities", 
   );
 });
 
+test("interview routing keeps candidate reads and adds attendance only from an independent available hint", () => {
+  assert.deepEqual(
+    selectInitialWorkingSet([hint("interview-review")], catalog),
+    {
+      skills: ["interview-review"],
+      names: ["people.query", "people.history.query"],
+      preparationOperations: [],
+    }
+  );
+  const hints = [hint("interview-review"), hint("attendance.query", "tool")];
+  assert.deepEqual(selectInitialWorkingSet(hints, catalog)?.names, [
+    "people.query",
+    "people.history.query",
+    "attendance.query",
+  ]);
+  assert.deepEqual(
+    selectInitialWorkingSet(
+      hints,
+      catalog.filter(({ name }) => name !== "attendance.query")
+    )?.names,
+    ["people.query", "people.history.query"]
+  );
+});
+
 test("only checked-in authored skill text is eligible for guidance and the generated copy is exact", () => {
   assert.deepEqual(
     Object.keys(authoredSkills).sort(),

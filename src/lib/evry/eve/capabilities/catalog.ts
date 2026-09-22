@@ -151,7 +151,7 @@ export const EVE_WORKFLOW_COVERAGE = [
   },
   {
     name: "interview-review",
-    tools: ["people.query", "people.history.query", "attendance.query"],
+    tools: ["people.query", "people.history.query"],
     areas: ["people", "interviews", "assessments", "commitments", "notes"],
   },
   {
