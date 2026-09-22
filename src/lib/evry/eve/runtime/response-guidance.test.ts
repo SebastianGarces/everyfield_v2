@@ -13,6 +13,57 @@ const invitation = readFileSync(
   "utf8"
 );
 const loader = readFileSync(resolve("agent/tools/load_tools.ts"), "utf8");
+const composition = readFileSync(resolve("agent/tools/code_mode.ts"), "utf8");
+const daily = readFileSync(resolve("agent/skills/daily-work/SKILL.md"), "utf8");
+const cleanup = readFileSync(
+  resolve("agent/skills/task-cleanup/SKILL.md"),
+  "utf8"
+);
+
+test("personal summaries stay focused while church-wide briefs consider cross-feature priorities", () => {
+  assert.match(daily, /Keep personal summaries focused/);
+  assert.match(daily, /church-wide operational brief/);
+  assert.match(
+    daily,
+    /launch progress, unfinished milestones and ministry staffing/
+  );
+  assert.match(daily, /Honor an explicitly narrower scope/);
+  assert.match(
+    daily,
+    /Missing history must not erase current findings or become a zero trend/
+  );
+  assert.match(launch, /broader than a personal work summary/);
+  assert.match(launch, /does not require a full readiness audit/);
+});
+
+test("task cleanup applies known exclusions early and preserves complete exact review", () => {
+  assert.match(
+    cleanup,
+    /Apply requested relationship exclusions in the initial query/
+  );
+  assert.match(cleanup, /rather than task-title words/);
+  assert.match(cleanup, /when they affect the proposed change/);
+  assert.match(
+    cleanup,
+    /Read every necessary page before preparing a bulk change/
+  );
+  assert.match(cleanup, /Prepare only requested changes/);
+  assert.match(cleanup, /domain service own that consequence/);
+});
+
+test("composition guidance publishes the actual configured concurrency and call limits", () => {
+  assert.match(
+    composition,
+    /\$\{COMPOSITION_LIMITS\.maxInFlightBridgeRequests\}/
+  );
+  assert.match(composition, /\$\{COMPOSITION_LIMITS\.maxBridgeRequests\}/);
+  assert.match(composition, /await each batch before starting another/);
+  assert.match(composition, /Promise\.allSettled within each bounded batch/);
+  assert.match(
+    composition,
+    /No filesystem, imports, network, secrets, execution, or confirmation/
+  );
+});
 
 // Protect the authored contract; live evaluations must still judge actual prose.
 test("discovery guidance uses already available tools without a schema housekeeping step", () => {

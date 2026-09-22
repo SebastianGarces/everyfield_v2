@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { z } from "zod";
 import {
+  COMPOSITION_LIMITS,
   createCompositionBudget,
   describeCompositionTools,
   runEvryComposition,
@@ -234,6 +235,54 @@ test("memory and in-flight bridge caps are enforced by the real sandbox", async 
     limits: { maxInFlightBridgeRequests: 1 },
   });
   assert.equal(concurrency.status, "failed");
+});
+
+test("bounded batches retain all eight read results within the production concurrency cap", async () => {
+  let active = 0;
+  let highWater = 0;
+  const count = COMPOSITION_LIMITS.maxInFlightBridgeRequests * 2;
+  const result = await runEvryComposition({
+    ...base(),
+    registry: fixture(async (_name, input) => {
+      active++;
+      highWater = Math.max(highWater, active);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      active--;
+      return input;
+    }),
+    js: `const results = [];
+      for (let start = 0; start < ${count}; start += ${COMPOSITION_LIMITS.maxInFlightBridgeRequests}) {
+        const batch = Array.from({length: ${COMPOSITION_LIMITS.maxInFlightBridgeRequests}}, (_, i) => tools["people.query"]({ids: [String(start + i)]}));
+        results.push(...await Promise.allSettled(batch));
+      }
+      return results;`,
+  });
+  assert.equal(result.status, "completed");
+  if (result.status !== "completed") assert.fail("Expected completed batches");
+  assert.equal(result.calls, count);
+  assert.equal(highWater, COMPOSITION_LIMITS.maxInFlightBridgeRequests);
+  assert.deepEqual(
+    result.output,
+    Array.from({ length: count }, (_, i) => ({
+      status: "fulfilled",
+      value: { ids: [String(i)] },
+    }))
+  );
+});
+
+test("an unbounded eight-call batch still fails the production concurrency cap", async () => {
+  const result = await runEvryComposition({
+    ...base(),
+    registry: fixture(async (_name, input) => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      return input;
+    }),
+    js: `return await Promise.all(Array.from({length: 8}, (_, i) => tools["people.query"]({ids: [String(i)]})));`,
+  });
+  assert.equal(result.status, "failed");
+  if (result.status !== "failed") assert.fail("Expected concurrency refusal");
+  assert.equal(result.reason, "limit");
+  assert.ok(result.calls <= COMPOSITION_LIMITS.maxInFlightBridgeRequests);
 });
 
 test("preparation gets a stable trusted nested identity on replay", async () => {

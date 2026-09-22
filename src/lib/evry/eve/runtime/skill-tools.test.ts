@@ -195,7 +195,58 @@ test("read workflows remain read only and unavailable names cannot load", () => 
   );
 });
 
-test("all authored workflow bundles fit discovery bounds and only meeting declares a preparation", () => {
+test("task cleanup loads calendar and exact rescheduling without granting execution", () => {
+  const selection = selectionFromLatestLoadedSkill(
+    load("task-cleanup"),
+    catalog
+  );
+  assert.deepEqual(selection, {
+    names: [
+      "tasks.query",
+      "tasks.get_many",
+      "tasks.assignees.search",
+      "calendar.resolve",
+      "actions.prepare",
+    ],
+    preparationOperations: ["tasks.bulk.reschedule"],
+  });
+  const schema = selectedEvePreparationSchema(selection!.preparationOperations);
+  assert.equal(
+    schema.safeParse({
+      request: {
+        operation: "tasks.bulk.reschedule",
+        arguments: {
+          taskIds: ["00000000-0000-4000-8000-000000000001"],
+          dueDate: "2026-09-25",
+        },
+      },
+    }).success,
+    true
+  );
+  assert.equal(
+    schema.safeParse({
+      request: {
+        operation: "tasks.bulk.complete",
+        arguments: { taskIds: ["00000000-0000-4000-8000-000000000001"] },
+      },
+    }).success,
+    false
+  );
+  assert.equal(
+    schema.safeParse({
+      request: { operation: "communication.send", arguments: {} },
+    }).success,
+    false
+  );
+  assert.deepEqual(
+    selectionFromLatestLoadedSkill(load("task-cleanup"), [
+      { name: "tasks.query" },
+    ]),
+    { names: ["tasks.query"], preparationOperations: [] }
+  );
+});
+
+test("all authored workflow bundles fit discovery bounds and only explicit workflows declare preparations", () => {
   for (const workflow of EVE_WORKFLOW_COVERAGE) {
     const selected = selectionFromLatestLoadedSkill(
       load(workflow.name),
@@ -204,7 +255,7 @@ test("all authored workflow bundles fit discovery bounds and only meeting declar
     assert.ok(selected);
     assert.ok(selected.names.length <= 8);
     assert.ok(selected.preparationOperations.length <= 3);
-    if (workflow.name !== "meeting-invite")
+    if (workflow.name !== "meeting-invite" && workflow.name !== "task-cleanup")
       assert.deepEqual(selected.preparationOperations, []);
   }
 });

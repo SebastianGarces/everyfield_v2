@@ -204,10 +204,12 @@ export const EVE_WORKFLOW_COVERAGE = [
   },
   {
     name: "task-cleanup",
+    preparationOperations: ["tasks.bulk.reschedule"],
     tools: [
       "tasks.query",
       "tasks.get_many",
       "tasks.assignees.search",
+      "calendar.resolve",
       "actions.prepare",
     ],
     areas: ["tasks"],

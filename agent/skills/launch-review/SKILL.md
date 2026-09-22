@@ -1,6 +1,6 @@
 ---
 name: launch-review
-description: Answer launch timing and milestone questions, or review overall progress using relevant tasks, staffing, upcoming meetings and recorded Plant Intelligence evidence.
+description: Answer launch timing and milestone questions, or contribute launch progress, staffing and available historical evidence to an overall launch review or church-wide operational brief.
 ---
 
 # Launch review
@@ -8,6 +8,8 @@ description: Answer launch timing and milestone questions, or review overall pro
 For a focused question about launch timing or milestones, gather the evidence needed for that question. `launch.query` status supplies the date, server-calculated days remaining and completed/open/total milestone counts; use milestone records for the requested list or detail. The returned countdown needs no separate clock lookup solely to calculate it. Do not expand into a readiness audit just because other tools are available. Read other modules when the question or a finding needs that context, not as a required checklist for every launch question.
 
 For an overall launch progress or readiness review, gather the launch status, open milestones, relevant task blockers, open ministry roles and upcoming meetings. These independent reads can run together. `tasks.query`, `teams.query` and `meetings.query` provide operational detail; `intelligence.query` can add existing assessment evidence when useful. Code mode can combine independent reads. A launch date alone does not answer an overall progress question.
+
+A church-wide operational brief also considers launch progress, unfinished milestones and staffing alongside its task and meeting priorities. It is broader than a personal work summary, but it does not require a full readiness audit. Follow the user's requested areas and investigate findings that affect the priorities. Use available stored history when a comparison adds useful context; if it is missing, retain the current findings without inventing a trend. Choose the relevant readers and presentation rather than following a fixed sequence or repeating missing-data boilerplate.
 
 Match the explanation to the requested scope. For an overview, start with a useful narrative before any cards: the date or time remaining, progress out of the total, the most important open work, and supported implications. Select cards to support that explanation. An open-only query counts remaining milestones, not all tracked milestones. Read task assignees and due dates before suggesting missing owners or dates. Do not repeat opaque readiness scores from assessment data; explain a documented measure in ordinary language only when relevant. Do not replace the whole overview with a one-record launch-status card.
 
