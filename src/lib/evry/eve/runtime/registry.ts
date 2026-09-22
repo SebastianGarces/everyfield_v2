@@ -21,6 +21,7 @@ import { withPreparationGate } from "./preparation-gate";
 import { fixtureRun } from "./fixture-bridge";
 import { eveAttachments } from "./attachments";
 import type { EveAttachmentResolver } from "./attachment-contract";
+import { preparationModelOutput } from "./preparation-output";
 
 export function describeEveRuntimeTools(identity: EveAuthenticatedSession) {
   return createEveToolRegistry({
@@ -121,6 +122,10 @@ export function createBoundEveRegistry(
             result
           )
         );
+        if (name === "actions.prepare") {
+          const modelOutput = preparationModelOutput(result);
+          if (modelOutput !== result) return modelOutput;
+        }
         if (
           result &&
           typeof result === "object" &&

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { resolve } from "node:path";
+import { z } from "zod";
 import { projectEveMessage } from "@/components/evry/eve-message-projection";
 import { startFixtureStack } from "@/lib/evry/eve/evals/fixtures/stack";
 import { createFixtureStore } from "@/lib/evry/eve/evals/fixtures/store";
@@ -142,6 +143,48 @@ for (const audience of [
           AbortSignal.timeout(120_000)
         );
         const visible = outcome.messages.flatMap(projectEveMessage);
+        const preparationPart = outcome.messages
+          .flatMap((message) => message.parts)
+          .find(
+            (part) =>
+              part.type === "dynamic-tool" &&
+              part.toolCallId === "fixture-prepare"
+          );
+        assert.ok(
+          preparationPart?.type === "dynamic-tool" &&
+            preparationPart.state === "output-available"
+        );
+        const modelSummary = z
+          .object({
+            data: z.strictObject({
+              status: z.literal("awaiting_confirmation"),
+              message: z.string(),
+              review: z.json(),
+            }),
+          })
+          .parse(preparationPart.output);
+        assert.doesNotMatch(
+          JSON.stringify(modelSummary.data),
+          /resultReference|activePlan|fingerprint|contentPreviews/
+        );
+        const capturedPreparation = z
+          .object({
+            activePlan: z.object({ mode: z.literal("set"), plan: z.json() }),
+            artifacts: z
+              .array(
+                z.object({ kind: z.literal("confirmation"), plan: z.json() })
+              )
+              .min(1),
+          })
+          .parse(
+            outcome.hostCapture.calls.find(({ id }) => id === "fixture-prepare")
+              ?.output
+          );
+        assert.deepEqual(
+          capturedPreparation.artifacts[0]?.plan,
+          capturedPreparation.activePlan.plan,
+          "The private oracle retains the original exact preparation, not the model summary"
+        );
         assert.equal(
           visible.some((part) => part.kind === "session-limit"),
           false
@@ -189,6 +232,10 @@ for (const audience of [
             confirmation.artifact.kind === "confirmation"
         );
         assert.ok("steps" in confirmation.artifact);
+        assert.deepEqual(
+          confirmation.artifact.plan,
+          capturedPreparation.activePlan.plan
+        );
         assert.deepEqual(
           confirmation.artifact.steps
             .find((step) => step.audience?.kind === "guests")

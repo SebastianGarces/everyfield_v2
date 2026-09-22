@@ -188,14 +188,42 @@ test("simple missing input can be requested without discovery or an empty draft 
   );
 });
 
-test("quantity guidance preserves denominator and scope through the closing summary", () => {
+test("quantity guidance preserves denominator and scope without requiring a closing summary", () => {
   assert.match(instructions, /quantities, denominators and scope consistent/);
-  assert.match(instructions, /including its closing summary/);
+  assert.match(instructions, /wherever they appear/);
+  assert.doesNotMatch(instructions, /including its closing summary/);
   assert.match(instructions, /must follow from the actual proportion/);
   assert.match(instructions, /exact completed\/total count/);
   assert.match(
     instructions,
     /Completion counts alone do not establish operational readiness/
+  );
+});
+
+test("overview guidance removes repeated recaps while retaining depth and requested summaries", () => {
+  assert.match(instructions, /Text already streamed remains visible/);
+  assert.match(
+    instructions,
+    /After explaining the findings, do not add another recap that repeats the same counts and dates/
+  );
+  assert.match(
+    instructions,
+    /A closing section should add a useful decision, implication or next step/
+  );
+  assert.match(
+    instructions,
+    /Provide a separate summary when the user asks for one/
+  );
+  assert.match(
+    instructions,
+    /Keep the substantive explanation and supporting evidence/
+  );
+  assert.match(instructions, /Do not reduce a substantive overview to a count/);
+  assert.match(instructions, /When a card helps/);
+  assert.match(instructions, /Combine evidence across modules/);
+  assert.doesNotMatch(
+    instructions,
+    /(?:at most|no more than|limit (?:the |your )?(?:answer|response) to) \d+ (?:sentences|words)/i
   );
 });
 
