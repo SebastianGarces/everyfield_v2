@@ -29,6 +29,34 @@ import {
 } from "@/lib/evry/eve/evals/fixtures/document-storage";
 import { UnauthorizedError } from "@/lib/auth/unauthorized";
 
+function isEmbeddedFixtureBinary(url: URL) {
+  return (
+    url.protocol === "data:" &&
+    url.origin === "null" &&
+    /^data:(?:application\/octet-stream|font\/ttf);base64,/i.test(url.href)
+  );
+}
+
+test("commitment proof permits only its known embedded binary data URLs", () => {
+  assert.equal(
+    isEmbeddedFixtureBinary(
+      new URL("data:application/octet-stream;base64,AGFzbQ==")
+    ),
+    true
+  );
+  assert.equal(
+    isEmbeddedFixtureBinary(new URL("data:font/ttf;base64,AAEAAA==")),
+    true
+  );
+  for (const value of [
+    "data:text/plain;base64,SGVsbG8=",
+    "data:application/octet-stream,not-base64",
+    "data:application/javascript;base64,YWxlcnQoMSk=",
+    "https://example.test/font.ttf",
+  ])
+    assert.equal(isEmbeddedFixtureBinary(new URL(value)), false, value);
+});
+
 test(
   "commitment lookup uses actual scoped history and authorized app downloads without effects",
   {
@@ -60,12 +88,11 @@ test(
         const url = new URL(
           input instanceof Request ? input.url : String(input)
         );
-        if (
-          ![
-            new URL(stack.proxyUrl).origin,
-            storage.environment.AWS_ENDPOINT_URL_S3,
-          ].includes(url.origin)
-        ) {
+        const allowedLoopback = [
+          new URL(stack.proxyUrl).origin,
+          storage.environment.AWS_ENDPOINT_URL_S3,
+        ].includes(url.origin);
+        if (!allowedLoopback && !isEmbeddedFixtureBinary(url)) {
           rejectedFetches.push({ protocol: url.protocol, origin: url.origin });
           throw new Error(
             `External fetch prohibited in commitment lookup proof: ${JSON.stringify(rejectedFetches.at(-1))}`
@@ -77,7 +104,7 @@ test(
         { createProductionEveEvalAdapter },
         { collectResult, publicResultArtifacts },
         { GET: downloadCommitment },
-        { historyContinuationSchema },
+        { historyContinuationModelOutput, historyContinuationSchema },
       ] = await Promise.all([
         import("@/lib/evry/eve/evals/fixtures/adapter"),
         import("@/lib/evry/eve/runtime/results"),
@@ -154,26 +181,36 @@ test(
           let afterId: string | undefined;
           const cursors = new Set<string>();
           do {
+            const historyInput = {
+              resource: { kind: "commitments" },
+              cohort: {
+                all: { personIds: people.items.map((p) => p.id) },
+              },
+              latestPerPerson: variant === "latest-only",
+              result: {
+                mode: "list" as const,
+                limit: 1,
+                ...(afterId ? { afterId } : {}),
+              },
+            };
+            const historyCall = await invoke(
+              "people.history.query",
+              historyInput
+            );
+            const original = z.json().parse(historyCall.output);
+            const frozen = JSON.stringify(original);
             const page = capturedReadArtifactSchema
               .extend({
                 continuation: historyContinuationSchema,
               })
-              .parse(
-                (
-                  await invoke("people.history.query", {
-                    resource: { kind: "commitments" },
-                    cohort: {
-                      all: { personIds: people.items.map((p) => p.id) },
-                    },
-                    latestPerPerson: variant === "latest-only",
-                    result: {
-                      mode: "list",
-                      limit: 1,
-                      ...(afterId ? { afterId } : {}),
-                    },
-                  })
-                ).output
-              );
+              .parse(historyContinuationModelOutput(historyInput, original));
+            assert.equal(JSON.stringify(original), frozen);
+            assert.ok(
+              original &&
+                typeof original === "object" &&
+                !Array.isArray(original)
+            );
+            assert.equal(Object.hasOwn(original, "continuation"), false);
             documents.push(...page.items.map((row) => row.id));
             assert.equal(page.continuation.status, "available");
             assert.ok(page.continuation.status === "available");
