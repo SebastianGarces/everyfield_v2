@@ -9,6 +9,7 @@ import {
   selectedEveResultReferences,
 } from "@/components/evry/eve-message-projection";
 import { STATUS_CONFIG } from "@/lib/tasks/presentation";
+import { holdsSeatFor } from "@/lib/auth/seat-rules";
 import {
   taskCleanupPlanReference,
   taskCleanupRowSignature,
@@ -109,15 +110,23 @@ export function taskSelectionTruth(m: FixtureManifest, store: FixtureStore) {
         `select id,title,description,status,priority,due_date::text as "dueDate",assigned_to_id as "assignedToId" from tasks where church_id='${m.ids.plant}' and deleted_at is null and parent_task_id is null and description=${quote(listDescription)} order by id`
       )
     );
-  const seat = z
-    .enum(["owner", "admin", "member"])
+  const actor = z
+    .object({
+      seat: z.enum(["owner", "admin", "member"]),
+      churchId: z.uuid(),
+      sendingChurchId: z.uuid().nullable(),
+      sendingNetworkId: z.uuid().nullable(),
+    })
     .parse(
       store.query(
-        `select seat from users where id='${m.ids.actor}' and church_id='${m.ids.plant}'`
-      )[0]?.seat
+        `select seat,church_id as "churchId",sending_church_id as "sendingChurchId",sending_network_id as "sendingNetworkId" from users where id='${m.ids.actor}' and church_id='${m.ids.plant}'`
+      )[0]
     );
+  const mayManageTasks = holdsSeatFor(actor, "tasks.write");
+  const mayCompleteOwnTasks = holdsSeatFor(actor, "tasks.own");
   const actionable = rows.filter(
-    (r) => r.assignedToId === m.ids.actor || seat !== "member"
+    (r) =>
+      mayManageTasks || (mayCompleteOwnTasks && r.assignedToId === m.ids.actor)
   );
   const dependencies = store
     .query(
