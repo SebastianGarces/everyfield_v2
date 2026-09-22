@@ -23,6 +23,10 @@ import { eveAttachments } from "./attachments";
 import type { EveAttachmentResolver } from "./attachment-contract";
 import { preparationModelOutput } from "./preparation-output";
 import { createEveActionStatusReader } from "./action-status";
+import {
+  describeHistoryContinuation,
+  historyContinuationModelOutput,
+} from "./history-continuation";
 
 export function describeEveRuntimeTools(identity: EveAuthenticatedSession) {
   return createEveToolRegistry({
@@ -43,7 +47,9 @@ export function describeEveRuntimeTools(identity: EveAuthenticatedSession) {
         throw new Error("Discovery cannot prepare actions");
       },
     },
-  }).describe();
+  })
+    .describe()
+    .map(describeHistoryContinuation);
 }
 
 export function createBoundEveRegistry(
@@ -94,7 +100,7 @@ export function createBoundEveRegistry(
     }),
   });
   return {
-    describe: registry.describe,
+    describe: () => registry.describe().map(describeHistoryContinuation),
     async invoke(name, input, invocation) {
       const validPreparation =
         name === "actions.prepare" &&
@@ -132,6 +138,16 @@ export function createBoundEveRegistry(
         if (name === "actions.prepare") {
           const modelOutput = preparationModelOutput(result);
           if (modelOutput !== result) return modelOutput;
+        }
+        if (name === "people.history.query") {
+          const modelOutput = historyContinuationModelOutput(input, result);
+          if (
+            modelOutput &&
+            typeof modelOutput === "object" &&
+            !Array.isArray(modelOutput) &&
+            modelOutput !== result
+          )
+            return { ...modelOutput, resultReference: reference };
         }
         if (
           result &&
