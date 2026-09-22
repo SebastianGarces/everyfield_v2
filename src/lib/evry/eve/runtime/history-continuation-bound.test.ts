@@ -1,21 +1,48 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawnSync, type SpawnSyncReturns } from "node:child_process";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { test } from "node:test";
+
+function withProofDirectory<T>(work: (directory: string) => T): T {
+  const directory = mkdtempSync(resolve(".history-bound-proof-"));
+  try {
+    return work(directory);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+function childFailure(child: SpawnSyncReturns<string>) {
+  return JSON.stringify({
+    status: child.status,
+    signal: child.signal,
+    error: child.error
+      ? {
+          name: child.error.name,
+          message: child.error.message,
+          code: "code" in child.error ? child.error.code : undefined,
+        }
+      : null,
+    stderr: child.stderr,
+  });
+}
 
 test("bound production registry retains authoritative artifacts while direct and code-mode callers receive continuation", () => {
   // Run the production registry and native Eve state. Only read execution and
   // session authorization are doubled; this is not database/authentication proof.
-  const child = spawnSync(
-    process.execPath,
-    [
-      "--import",
-      "tsx",
-      "--input-type=module",
-      "--eval",
-      `
+  withProofDirectory((directory) => {
+    const child = spawnSync(
+      process.execPath,
+      [
+        "--import",
+        "tsx",
+        "--input-type=module",
+        "--eval",
+        `
     import assert from 'node:assert/strict';
     import {createRequire} from 'node:module';
-    import {readFileSync,mkdtempSync,writeFileSync,rmSync} from 'node:fs';
+    import {readFileSync,writeFileSync} from 'node:fs';
     import {pathToFileURL} from 'node:url';
     import {resolve,dirname,join} from 'node:path';
     const file=p=>pathToFileURL(resolve(p)).href;
@@ -38,9 +65,8 @@ test("bound production registry retains authoritative artifacts while direct and
           ? 'export const authorizeEvryReadCapabilityForSession=async(name,session)=>{globalThis.fixture.auth.push([name,session]);return globalThis.fixture.authorization;};'
           : "import {createEveToolRegistry as actual} from './src/lib/evry/eve/capabilities/registry'; export const createEveToolRegistry=options=>actual({...options,reads:globalThis.fixture.reads});"}));
       }}]});
-    const directory=mkdtempSync(resolve('.history-bound-proof-'));
+    const directory=${JSON.stringify(directory)};
     const entry=join(directory,'entry.mjs');writeFileSync(entry,built.outputFiles[0].text);
-    try {
     const {createBoundEveRegistry,describeEveRuntimeTools,evryResultState,withResultPresentation,defineEvryReadRegistration}=await import(pathToFileURL(entry).href);
     const {createCompositionBudget,runEvryComposition}=await load('src/lib/evry/eve/composition/runner.ts');
     const actor={userId:'actor',plantId:'plant',seat:'owner'};
@@ -94,21 +120,52 @@ test("bound production registry retains authoritative artifacts while direct and
       assert.equal(evryResultState.get().length,2);
     });
     console.log('bound history continuation proof passed');
-    } finally { rmSync(directory,{recursive:true}); }
   `,
-    ],
-    {
-      cwd: process.cwd(),
-      env: {
-        ...process.env,
-        DATABASE_URL: "postgresql://unused:unused@127.0.0.1:1/unused",
-        RESEND_API_KEY: "re_isolated_no_send",
-      },
-      encoding: "utf8",
-      timeout: 30_000,
-      maxBuffer: 128 * 1024,
+      ],
+      {
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          DATABASE_URL: "postgresql://unused:unused@127.0.0.1:1/unused",
+          RESEND_API_KEY: "re_isolated_no_send",
+        },
+        encoding: "utf8",
+        timeout: 30_000,
+        maxBuffer: 128 * 1024,
+      }
+    );
+    assert.equal(child.status, 0, childFailure(child));
+    assert.match(child.stdout, /bound history continuation proof passed/);
+  });
+});
+
+test("parent cleanup survives a killed child and reports its timeout and signal", () => {
+  let directory = "";
+  assert.throws(
+    () =>
+      withProofDirectory((created) => {
+        directory = created;
+        writeFileSync(`${created}/entry.mjs`, "fixture");
+        const child = spawnSync(
+          process.execPath,
+          [
+            "--eval",
+            `
+      setInterval(() => {}, 1000);
+    `,
+          ],
+          { encoding: "utf8", timeout: 1_000 }
+        );
+        assert.equal(existsSync(`${created}/entry.mjs`), true);
+        assert.equal(child.status, 0, childFailure(child));
+      }),
+    (error: unknown) => {
+      assert.ok(error instanceof assert.AssertionError);
+      assert.match(error.message, /ETIMEDOUT/);
+      assert.match(error.message, /"signal":"SIGTERM"/);
+      return true;
     }
   );
-  assert.equal(child.status, 0, child.stderr);
-  assert.match(child.stdout, /bound history continuation proof passed/);
+  assert.notEqual(directory, "");
+  assert.equal(existsSync(directory), false);
 });
