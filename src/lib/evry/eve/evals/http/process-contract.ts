@@ -3,6 +3,11 @@ import { fixtureMessageSchema } from "./transcript";
 import { processingSnapshotSchema } from "./processing-snapshot";
 import { clarificationMeasurementSchema } from "../contract";
 import { taskPreparationAssertionSchema } from "./task-state-script";
+import {
+  sourceRecoveryFaultSchema,
+  sourceRecoveryRequest,
+  sourceRecoverySetup,
+} from "../fixtures/source-recovery";
 
 export const fixtureTurnSchema = z.union([
   z.string().min(1),
@@ -44,6 +49,8 @@ export const compiledFixtureRequest = z
     sessionToken: z.string().min(1),
     actor: z.strictObject({ userId: z.string(), plantId: z.string() }),
     turns: z.array(fixtureTurnSchema).min(1),
+    /** Host-only opt-in, never a model tool or user message field. */
+    sourceRecovery: z.literal("edges-13").optional(),
     /** Fixture-owned bytes delivered by native staging, never pasted into a model turn. */
     attachments: z
       .array(
@@ -151,6 +158,21 @@ export const compiledFixtureRequest = z
   })
   .refine(
     (request) =>
+      !request.sourceRecovery ||
+      (request.turns.length === 2 &&
+        request.turns[0] === sourceRecoverySetup &&
+        request.turns[1] === sourceRecoveryRequest &&
+        !request.verifyRestart &&
+        !request.restartFollowup &&
+        !request.attachments),
+    {
+      message:
+        "Source recovery fault requires the unchanged edges-13 fixture and setup turn",
+      path: ["sourceRecovery"],
+    }
+  )
+  .refine(
+    (request) =>
       !request.attachments ||
       (new Set(request.attachments.map((item) => item.turnIndex)).size ===
         request.attachments.length &&
@@ -196,6 +218,8 @@ export const compiledFixtureRequest = z
   );
 export type CompiledFixtureRequest = z.input<typeof compiledFixtureRequest>;
 const httpEvalBaseOutcomeSchema = z.object({
+  /** Generated only by the worker's actual dependency fault, not hostCapture/model output. */
+  sourceRecoveryFaults: z.array(sourceRecoveryFaultSchema).max(1).optional(),
   followupRestore: z
     .object({
       messages: z.array(fixtureMessageSchema),

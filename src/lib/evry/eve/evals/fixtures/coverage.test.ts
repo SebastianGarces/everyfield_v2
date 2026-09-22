@@ -87,6 +87,7 @@ const expectedOriginals = [
   "cross-04",
   "notifications-01",
   "edges-02",
+  "edges-13",
   "teams-01",
   "teams-02",
   "teams-03",
@@ -134,14 +135,14 @@ const expectedRegressions = [
   "regression-partial-outage",
 ].sort();
 
-test("default production fixture coverage has 105 bindings and does not claim the remaining 53 pass", () => {
+test("default production fixture coverage has 106 bindings and does not claim the remaining 52 pass", () => {
   const coverage = productionFixtureCoverage();
   const corpus = [...questions, ...regressions];
   assert.deepEqual(coverage.counts, {
-    runnable: 105,
-    originals: 90,
+    runnable: 106,
+    originals: 91,
     regressions: 15,
-    unbound: 53,
+    unbound: 52,
     corpus: 158,
   });
   assert.deepEqual([...coverage.originalIds].sort(), expectedOriginals);
@@ -222,10 +223,10 @@ test("document comparison is opt-in only after a file transport is supplied", as
     };
   };
   assert.deepEqual(productionFixtureCoverage({ prepareDocumentFiles }).counts, {
-    runnable: 106,
-    originals: 91,
+    runnable: 107,
+    originals: 92,
     regressions: 15,
-    unbound: 52,
+    unbound: 51,
     corpus: 158,
   });
   assert.ok(productionFixtureCoverage().unboundIds.includes("documents-04"));
@@ -391,10 +392,10 @@ test("CSV review requires its signed attachment transport and revokes a failed s
     throw provisionError;
   };
   assert.deepEqual(productionFixtureCoverage({ preparePeopleCsv }).counts, {
-    runnable: 106,
-    originals: 91,
+    runnable: 107,
+    originals: 92,
     regressions: 15,
-    unbound: 52,
+    unbound: 51,
     corpus: 158,
   });
   assert.deepEqual(
@@ -403,10 +404,10 @@ test("CSV review requires its signed attachment transport and revokes a failed s
       prepareDocumentFiles: async () => async () => {},
     }).counts,
     {
-      runnable: 107,
-      originals: 92,
+      runnable: 108,
+      originals: 93,
       regressions: 15,
-      unbound: 51,
+      unbound: 50,
       corpus: 158,
     }
   );

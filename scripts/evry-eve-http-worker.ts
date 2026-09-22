@@ -21,6 +21,7 @@ import {
   isScriptedCompactionRequest,
   preparationFromObservedTask,
 } from "../src/lib/evry/eve/evals/http/task-state-script";
+import { createSourceRecoveryFault } from "../src/lib/evry/eve/evals/fixtures/source-recovery";
 
 const controller = new AbortController();
 let unhandledRejections = 0;
@@ -68,6 +69,8 @@ process.on("message", async (message) => {
     rawReferenceHiddenFromModel: boolean | null;
   }> = [];
   let host: ReturnType<typeof installIsolatedFixtureHost> | undefined;
+  let sourceFault: ReturnType<typeof createSourceRecoveryFault> | undefined;
+  let hostGuardedFetch: typeof globalThis.fetch | undefined;
   try {
     const { request, replaySessionId, followupSessionId } = z
       .object({
@@ -379,6 +382,26 @@ process.on("message", async (message) => {
           }
         : {}),
     });
+    if (request.sourceRecovery) {
+      phase = "authenticated source recovery fixture";
+      const { requireEvryPlantViewerForSession } =
+        await import("../src/lib/evry/eligibility/viewer");
+      const authenticated = await requireEvryPlantViewerForSession(
+        createHash("sha256").update(request.sessionToken).digest("hex")
+      );
+      if (
+        authenticated.userId !== request.actor.userId ||
+        authenticated.plantId !== request.actor.plantId
+      )
+        throw new Error("Source recovery fixture identity mismatch");
+      hostGuardedFetch = globalThis.fetch;
+      sourceFault = createSourceRecoveryFault({
+        proxyUrl: request.proxyUrl,
+        plantId: authenticated.plantId,
+        fetch: hostGuardedFetch,
+      });
+      globalThis.fetch = sourceFault.fetch;
+    }
     phase = "compiled runtime startup";
     await import(pathToFileURL(request.compiledEntry).href);
     for (let attempt = 0; attempt < 100; attempt++) {
@@ -473,6 +496,7 @@ process.on("message", async (message) => {
       type: "result",
       outcome: {
         ...outcome,
+        ...(sourceFault ? { sourceRecoveryFaults: sourceFault.receipts } : {}),
         ...(request.model.mode === "scripted" && request.routing
           ? { routingRequests }
           : {}),
@@ -542,6 +566,12 @@ process.on("message", async (message) => {
         : { type: "failed", phase: "Fixture attachment disclosure refused" }
     );
   } finally {
+    if (
+      sourceFault &&
+      globalThis.fetch === sourceFault.fetch &&
+      hostGuardedFetch
+    )
+      globalThis.fetch = hostGuardedFetch;
     host?.close();
   }
 });

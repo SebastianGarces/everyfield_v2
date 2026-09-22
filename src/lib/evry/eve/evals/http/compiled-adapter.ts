@@ -32,6 +32,7 @@ export function createCompiledEveEvalRunner(options: {
         sessionToken,
         actor: { userId: actor.userId, plantId: actor.plantId },
         turns: [...scenario.turns],
+        ...(scenario.id === "edges-13" ? { sourceRecovery: "edges-13" } : {}),
         attachments,
         now: now.toISOString(),
         maxCostUsd,
