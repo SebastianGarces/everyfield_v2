@@ -19,6 +19,7 @@ import {
   assessmentEvidenceId,
   seedAssessmentEvidenceFixture,
   assessmentEvidenceTruth,
+  assessmentEvidenceText,
   assessmentEvidenceExpectations,
   observedAssessmentEvidenceFacts,
 } from "@/lib/evry/eve/evals/fixtures/assessment-evidence";
@@ -245,11 +246,13 @@ test(
         { requireEvryPlantViewerForSession },
         { authorizeEvryReadCapabilityForSession },
         { withAuthenticatedSessionId },
+        { historyContinuationModelOutput, historyContinuationSchema },
       ] = await Promise.all([
         import("@/lib/evry/eve/capabilities/registry"),
         import("@/lib/evry/eligibility/viewer"),
         import("@/lib/evry/eligibility/capabilities"),
         import("@/lib/auth/session-scope"),
+        import("@/lib/evry/eve/runtime/history-continuation"),
       ]);
       const store = createFixtureStore(stack.container);
       for (const caseId of assessmentEvidenceFixtureIds) {
@@ -314,6 +317,149 @@ test(
           calls.push({ id, name, input, output });
           return output;
         };
+        if (caseId === "assessments-03")
+          await t.test(
+            "typed continuation projects real SQL pages and complete Unicode notes without changing original evidence",
+            async () => {
+              calls = [];
+              const authorizedBefore = authorizations;
+              const base = {
+                resource: { kind: "assessments" },
+                dateBasis: "created_at",
+                latestPerPerson: false,
+                result: { mode: "list", limit: 50 },
+              };
+              const projected = async (input: unknown) => {
+                // Actual authorized production reader first; this projection is
+                // not a compiled bound-registry or live-model proof.
+                const original = await invoke("people.history.query", input);
+                const frozen = JSON.stringify(original);
+                const result = artifact
+                  .extend({ continuation: historyContinuationSchema })
+                  .parse(
+                    historyContinuationModelOutput(
+                      input,
+                      z.json().parse(original)
+                    )
+                  );
+                assert.equal(JSON.stringify(original), frozen);
+                assert.ok(original && typeof original === "object");
+                assert.equal(Object.hasOwn(original, "continuation"), false);
+                assert.equal(result.continuation.status, "available");
+                if (result.continuation.status !== "available") assert.fail();
+                return { ...result, continuation: result.continuation };
+              };
+              const first = await projected(base);
+              assert.equal(first.items.length, 50);
+              assert.equal(
+                first.continuation.nextAfterId,
+                first.items.at(-1)?.id
+              );
+              assert.notEqual(first.continuation.nextAfterId, null);
+              const last = await projected({
+                ...base,
+                result: {
+                  ...base.result,
+                  afterId: first.continuation.nextAfterId,
+                },
+              });
+              assert.equal(last.items.length, 3);
+              assert.equal(last.continuation.nextAfterId, null);
+              const pages = [first, last];
+              assert.deepEqual(
+                pages.flatMap((page) =>
+                  page.continuation.records.map(({ id }) => id)
+                ),
+                truth.records.map(({ id }) => id)
+              );
+              const complete = new Map<string, string>();
+              const continuedOffsets: number[] = [];
+              for (const page of pages) {
+                for (const record of page.continuation.records) {
+                  let content = record.content;
+                  assert.equal(content.status, "available");
+                  if (content.status !== "available") assert.fail();
+                  assert.equal(content.offset, 0);
+                  const row = truth.records.find(({ id }) => id === record.id);
+                  assert.ok(row);
+                  const expectedText = assessmentEvidenceText(row);
+                  const characters = Array.from(expectedText);
+                  assert.equal(content.totalCharacters, characters.length);
+                  const initial = page.items.find(({ id }) => id === record.id);
+                  assert.ok(initial);
+                  let text = z
+                    .string()
+                    .parse(
+                      initial.facts.find(
+                        ({ label }) => label === "Recorded notes"
+                      )?.value
+                    );
+                  assert.equal(text, characters.slice(0, 240).join(""));
+                  for (let n = 0; content.nextOffset !== null; n++) {
+                    assert.ok(
+                      n < 3,
+                      "Seeded note must finish within three continuations"
+                    );
+                    const offset: number = content.nextOffset;
+                    continuedOffsets.push(offset);
+                    const next = await projected({
+                      ...base,
+                      recordIds: [record.id],
+                      contentOffset: offset,
+                    });
+                    assert.equal(next.continuation.nextAfterId, null);
+                    assert.equal(next.continuation.records.length, 1);
+                    assert.equal(next.continuation.records[0].id, record.id);
+                    content = next.continuation.records[0].content;
+                    if (content.status !== "available") assert.fail();
+                    assert.equal(content.offset, offset);
+                    assert.equal(content.totalCharacters, characters.length);
+                    assert.equal(
+                      content.nextOffset,
+                      offset + 240 < characters.length ? offset + 240 : null
+                    );
+                    const chunk = z
+                      .string()
+                      .parse(
+                        next.items[0].facts.find(
+                          ({ label }) => label === "Recorded notes"
+                        )?.value
+                      );
+                    assert.equal(
+                      chunk,
+                      characters.slice(offset, offset + 240).join("")
+                    );
+                    text += chunk;
+                  }
+                  assert.equal(text, expectedText);
+                  complete.set(record.id, text);
+                }
+              }
+              assert.equal(complete.size, 53);
+              assert.deepEqual(continuedOffsets, [240, 480]);
+              const unicode = complete.get(
+                assessmentEvidenceId(m, "recorded-concern")
+              );
+              assert.ok(unicode);
+              assert.ok(unicode.includes("🙂"));
+              assert.ok(unicode.length > Array.from(unicode).length);
+              assert.equal(calls.length, 4);
+              assert.equal(authorizations - authorizedBefore, calls.length);
+              // The established independent observer still sees only original
+              // reader outputs and must prove all evidence, unchanged.
+              assert.deepEqual(
+                required(
+                  observedAssessmentEvidenceFacts(caseId, calls, truth).facts,
+                  expected.facts
+                ),
+                expected.facts
+              );
+              for (const call of calls)
+                for (const absent of expected.absentRecordIds)
+                  assert.ok(!JSON.stringify(call.output).includes(absent));
+              assert.deepEqual(store.writesSince(audit, m), []);
+            }
+          );
         await t.test(
           `${caseId}: complete authorized history matches stored dates, scores and all notes`,
           async () => {
@@ -466,7 +612,7 @@ test(
         );
       }
       await t.test(
-        "actual adapter binds unchanged prompts, grades SQL evidence, and does not fabricate model quality",
+        "actual adapter preserves original prompts and optional native clarification, grades SQL evidence, and does not fabricate model quality",
         async () => {
           const { createProductionEveEvalAdapter } =
             await import("@/lib/evry/eve/evals/fixtures/adapter");
@@ -479,7 +625,12 @@ test(
             async runProduction({ scenario, registry, sessionId }) {
               assert.deepEqual(
                 scenario.turns,
-                questions.find((q) => q.id === scenario.id)!.turns
+                [
+                  ...questions.find((q) => q.id === scenario.id)!.turns,
+                  ...(scenario.id === "assessments-03"
+                    ? [{ respondIfAsked: "The individual 4C assessments." }]
+                    : []),
+                ]
               );
               sessions.add(sessionId);
               let n = 0;
