@@ -4,6 +4,12 @@ import { processingSnapshotSchema } from "./processing-snapshot";
 import { clarificationMeasurementSchema } from "../contract";
 import { taskPreparationAssertionSchema } from "./task-state-script";
 import {
+  presentationAssertionSchema,
+  presentationReceiptSchema,
+  presentationInventoryRequestSchema,
+  presentationInventoryReceiptSchema,
+} from "../../../../../../scripts/evry-eve-presentation-proof";
+import {
   sourceRecoveryFaultSchema,
   sourceRecoveryRequest,
   sourceRecoverySetup,
@@ -25,6 +31,7 @@ const restartFollowupSchema = z.strictObject({
     .array(
       z.strictObject({
         text: z.string().optional(),
+        assertPresentation: presentationAssertionSchema.optional(),
         toolCalls: z
           .array(
             z.strictObject({
@@ -90,6 +97,7 @@ export const compiledFixtureRequest = z
     verifyRestart: z.boolean().optional(),
     /** Separate scripted POST proof; verifyRestart remains strictly GET-only. */
     restartFollowup: restartFollowupSchema.optional(),
+    verifyPresentationInventory: presentationInventoryRequestSchema.optional(),
     routing: z
       .array(
         z.discriminatedUnion("status", [
@@ -114,6 +122,7 @@ export const compiledFixtureRequest = z
             z
               .strictObject({
                 text: z.string().optional(),
+                assertPresentation: presentationAssertionSchema.optional(),
                 failStream: z.boolean().optional(),
                 failGenerate: z.boolean().optional(),
                 taskPreparation: taskPreparationAssertionSchema.optional(),
@@ -190,6 +199,14 @@ export const compiledFixtureRequest = z
   })
   .refine(
     (request) =>
+      !request.verifyPresentationInventory || request.model.mode === "scripted",
+    {
+      message: "Presentation inventory proof requires a scripted provider",
+      path: ["verifyPresentationInventory"],
+    }
+  )
+  .refine(
+    (request) =>
       !request.verifyProcessingState || request.model.mode === "scripted",
     {
       message: "Processing snapshot proof requires a scripted provider",
@@ -260,6 +277,7 @@ const httpEvalBaseOutcomeSchema = z.object({
   messages: z.array(fixtureMessageSchema),
   runtimeProof: z
     .object({
+      presentationInventory: presentationInventoryReceiptSchema.optional(),
       attachments: z
         .array(
           z.object({
@@ -280,6 +298,7 @@ const httpEvalBaseOutcomeSchema = z.object({
             inputBytes: z.number().int().nonnegative(),
             retainedOriginalRequest: z.boolean().optional(),
             compaction: z.boolean().optional(),
+            presentation: presentationReceiptSchema.optional(),
             observedTask: z
               .object({
                 draftCallId: z.string(),

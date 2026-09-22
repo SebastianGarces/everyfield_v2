@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { access } from "node:fs/promises";
 import { mockModel } from "eve/evals";
-import { wrapLanguageModel } from "ai";
+import { wrapLanguageModel, type LanguageModelMiddleware } from "ai";
 import { z } from "zod";
 import { neonConfig as sourceNeonConfig } from "@neondatabase/serverless";
 import { installIsolatedFixtureHost } from "../src/lib/evry/eve/evals/http/host";
@@ -23,6 +23,10 @@ import {
 } from "../src/lib/evry/eve/evals/http/task-state-script";
 import { createSourceRecoveryFault } from "../src/lib/evry/eve/evals/fixtures/source-recovery";
 import { EVE_TOOL_FAILURE_MESSAGE } from "../src/lib/evry/eve/runtime/tool-errors";
+import {
+  assertProviderPresentation,
+  presentationReceiptSchema,
+} from "./evry-eve-presentation-proof";
 
 const controller = new AbortController();
 let unhandledRejections = 0;
@@ -119,6 +123,11 @@ process.on("message", async (message) => {
     phase = "scripted provider configuration";
     let responseIndex = 0;
     let responseFlags: { failStream?: boolean; failGenerate?: boolean } = {};
+    let providerPrompt:
+      | Parameters<
+          NonNullable<LanguageModelMiddleware["transformParams"]>
+        >[0]["params"]["prompt"]
+      | undefined;
     const availableTools = new Set<string>();
     const originalRequest =
       typeof request.turns[0] === "string" ? request.turns[0] : undefined;
@@ -127,6 +136,7 @@ process.on("message", async (message) => {
       inputBytes: number;
       retainedOriginalRequest?: boolean;
       compaction?: boolean;
+      presentation?: z.infer<typeof presentationReceiptSchema>;
       observedTask?: {
         draftCallId: string;
         revision: number;
@@ -161,12 +171,24 @@ process.on("message", async (message) => {
                   throw new Error("Unsafe source recovery provider input");
                 for (const result of modelRequest.toolResults) {
                   if (result.id === "direct-meetings-fault") {
+                    if (result.name !== "meetings_query" || !result.isError)
+                      throw new Error(
+                        "Source recovery direct failure classification mismatch"
+                      );
+                    // AI SDK serializes Error with toString() for provider
+                    // history; Eve's native failure event uses error.message.
                     if (
-                      result.name !== "meetings_query" ||
-                      !result.isError ||
-                      result.output !== EVE_TOOL_FAILURE_MESSAGE
-                    )
-                      throw new Error("Unsafe source recovery provider input");
+                      result.output !== `Error: ${EVE_TOOL_FAILURE_MESSAGE}`
+                    ) {
+                      const encoded =
+                        JSON.stringify(result.output) ?? "undefined";
+                      scriptedDiagnostics.push(
+                        `directFailure:type=${typeof result.output};bytes=${Buffer.byteLength(encoded)};sha256=${createHash("sha256").update(encoded).digest("hex")}`
+                      );
+                      throw new Error(
+                        "Source recovery direct failure message mismatch"
+                      );
+                    }
                     verifiedRecoveryResults.add(result.id);
                   }
                   if (result.id === "source-pair") {
@@ -222,6 +244,19 @@ process.on("message", async (message) => {
                     modelRequest.toolResults
                   )
                 : null;
+              let presentation:
+                | z.infer<typeof presentationReceiptSchema>
+                | undefined;
+              if (response.assertPresentation) {
+                if (!providerPrompt)
+                  throw new Error(
+                    "Scripted presentation assertion lacks provider input"
+                  );
+                presentation = assertProviderPresentation(
+                  providerPrompt,
+                  response.assertPresentation
+                );
+              }
               for (const binding of attachmentBindings) {
                 binding.modelSawBinding =
                   binding.modelSawBinding === true ||
@@ -238,6 +273,7 @@ process.on("message", async (message) => {
               }
               modelRequests.push({
                 compaction,
+                ...(presentation ? { presentation } : {}),
                 ...(taskPreparation
                   ? { observedTask: taskPreparation.observed }
                   : {}),
@@ -351,6 +387,10 @@ process.on("message", async (message) => {
       ? wrapLanguageModel({
           model,
           middleware: {
+            transformParams: async ({ params }) => {
+              providerPrompt = params.prompt;
+              return params;
+            },
             wrapGenerate: async ({ doGenerate }) => {
               const response = await Promise.resolve(doGenerate()).catch(
                 recordScriptedFailure
@@ -610,6 +650,8 @@ process.on("message", async (message) => {
         "Fixture attachment turn was bound more than once",
         "Scripted attachment binding was not visible to the model",
         "Unsafe source recovery provider input",
+        "Source recovery direct failure classification mismatch",
+        "Source recovery direct failure message mismatch",
         "Source recovery result did not reach the provider",
       ].includes(error.message)
         ? error.message

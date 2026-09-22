@@ -366,6 +366,12 @@ test(
           );
           assert.deepEqual(outcome.runtimeProof?.failures, []);
           assert.equal(outcome.runtimeProof?.modelCalls, 5);
+          const directTools = outcome.runtimeProof?.modelRequests?.[1]?.tools;
+          assert.ok(
+            directTools?.includes("tasks_query") &&
+              directTools.includes("meetings_query"),
+            "the actual provider must receive both direct schemas after loading"
+          );
           assert.equal(outcome.sourceRecoveryFaults?.length, 1);
           assert.equal(
             outcome.sourceRecoveryFaults?.[0]?.plantId,
@@ -393,7 +399,10 @@ test(
             "the next real scripted provider request must contain the failure"
           );
           assert.equal(providerFailure.name, "meetings_query");
-          assert.equal(providerFailure.output, EVE_TOOL_FAILURE_MESSAGE);
+          assert.equal(
+            providerFailure.output,
+            `Error: ${EVE_TOOL_FAILURE_MESSAGE}`
+          );
           assert.doesNotMatch(
             JSON.stringify({ messages: outcome.messages, providerErrors }),
             /Failed query:|params:|Isolated meeting dependency/

@@ -6,6 +6,7 @@ import { dirname, join, resolve } from "node:path";
 import { z } from "zod";
 import { isDeepStrictEqual } from "node:util";
 import { readFixtureProcessingSnapshots } from "./processing-snapshot";
+import { assertSavedPresentationInventory } from "../../../../../../scripts/evry-eve-presentation-proof";
 import {
   compiledFixtureRequest,
   httpEvalOutcomeSchema,
@@ -35,6 +36,17 @@ export async function runCompiledEveFixture(
   const directory = await mkdtemp(join(tmpdir(), "evry-eve-http-fixture-"));
   try {
     const first = await runWorker(request, signal, directory);
+    if (request.verifyPresentationInventory) {
+      if (!first.outcome.runtimeProof)
+        throw new Error(
+          "Presentation inventory proof requires runtime evidence"
+        );
+      first.outcome.runtimeProof.presentationInventory =
+        await assertSavedPresentationInventory(
+          directory,
+          request.verifyPresentationInventory
+        );
+    }
     if (request.verifyProcessingState) {
       if (request.model.mode !== "scripted")
         throw new Error(
@@ -64,6 +76,17 @@ export async function runCompiledEveFixture(
         undefined,
         first.outcome.eveSessionId
       );
+      if (request.verifyPresentationInventory) {
+        if (!second.outcome.runtimeProof)
+          throw new Error(
+            "Presentation inventory proof requires restored runtime evidence"
+          );
+        second.outcome.runtimeProof.presentationInventory =
+          await assertSavedPresentationInventory(
+            directory,
+            request.verifyPresentationInventory
+          );
+      }
       return {
         ...first.outcome,
         restartFollowup: {
