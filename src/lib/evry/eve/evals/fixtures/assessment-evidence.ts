@@ -644,8 +644,11 @@ export function observedAssessmentEvidenceFacts(
           [...new Set(partitions.flatMap((s) => s.ids))].sort(),
           expectedIds.sort()
         );
+      // Complete history may be fetched in date windows as well as person
+      // batches. The independent full-record union below still requires every
+      // record, including the meeting day, and complete notes for each one.
       const broadPartitions = candidates.filter(
-        (s) => !s.input.latestPerPerson && !s.input.dates
+        (s) => !s.input.latestPerPerson
       );
       const broad = covers(
         broadPartitions,

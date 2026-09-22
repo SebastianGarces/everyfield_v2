@@ -305,6 +305,144 @@ test("latest before/after queries are equivalent evidence with nullable unmatche
   ];
   assert.notEqual(observe(wrong).facts.comparisonEvidenceComplete, true);
 });
+test("complete non-latest date partitions equal full history without an attendance requirement", () => {
+  const partitions = [
+    ...history(
+      records.filter((r) => r.day < truth.orientation!.day),
+      {
+        dates: { through: "2026-09-14" },
+      }
+    ),
+    ...history(
+      records.filter((r) => r.day > truth.orientation!.day),
+      {
+        dates: { from: "2026-09-16" },
+      }
+    ),
+    ...history(
+      records.filter((r) => r.day === truth.orientation!.day),
+      {
+        dates: { from: "2026-09-15", through: "2026-09-15" },
+      }
+    ),
+  ];
+  assert.deepEqual(
+    observe([meeting, ...partitions]),
+    observe([meeting, ...history(records)])
+  );
+  assert.notEqual(
+    observe([meeting, ...partitions.slice(0, -1)]).facts
+      .comparisonEvidenceComplete,
+    true,
+    "A same-day record cannot disappear from a full-history comparison"
+  );
+  assert.notEqual(
+    observe([
+      meeting,
+      ...history(
+        records.filter((r) => r.day >= "2026-09-01"),
+        {
+          dates: { from: "2026-09-01" },
+        }
+      ),
+    ]).facts.comparisonEvidenceComplete,
+    true,
+    "An omitted older record is not complete history"
+  );
+});
+test("date partition composition preserves pagination and cohort coverage requirements", () => {
+  const pages = history(
+    records.filter((r) => r.day < truth.orientation!.day),
+    { dates: { through: "2026-09-14" } },
+    0,
+    2
+  );
+  const rest = history(
+    records.filter((r) => r.day >= truth.orientation!.day),
+    { dates: { from: "2026-09-15" } }
+  );
+  assert.equal(
+    observe([meeting, ...pages, ...rest]).facts.comparisonEvidenceComplete,
+    true
+  );
+  assert.notEqual(
+    observe([meeting, ...pages.slice(0, -1), ...rest]).facts
+      .comparisonEvidenceComplete,
+    true
+  );
+  const allRecordedPeople = [...new Set(records.map((r) => r.person))];
+  assert.notEqual(
+    observe(
+      [
+        meeting,
+        ...allRecordedPeople.flatMap((person) =>
+          history(
+            records.filter((r) => r.person === person),
+            {
+              cohort: { all: { personIds: [person] } },
+              dates: { from: "2026-01-01" },
+            }
+          )
+        ),
+      ],
+      {
+        ...truth,
+        orientation: {
+          ...truth.orientation!,
+          attendees: [...truth.orientation!.attendees, id("no-record")],
+        },
+      }
+    ).facts.comparisonEvidenceComplete,
+    true,
+    "The same IDs from a narrowed cohort prove neither full plant nor attendee scope"
+  );
+});
+test("date partitions still require complete Unicode notes", () => {
+  const long = {
+    ...records.find((r) => r.id === id("a-before"))!,
+    notes: ["🙂 Context. ".repeat(55), null, null, null],
+  };
+  const source = {
+    ...truth,
+    records: records.map((r) => (r.id === long.id ? long : r)),
+  };
+  const calls = [
+    meeting,
+    ...history(
+      source.records.filter((r) => r.day < truth.orientation!.day),
+      {
+        dates: { through: "2026-09-14" },
+      }
+    ),
+    ...history(
+      source.records.filter((r) => r.day >= truth.orientation!.day),
+      {
+        dates: { from: "2026-09-15" },
+      }
+    ),
+  ];
+  assert.notEqual(
+    observe(calls, source).facts.comparisonEvidenceComplete,
+    true
+  );
+  for (
+    let offset = 240;
+    offset < Array.from(fullText(long)).length;
+    offset += 240
+  )
+    calls.push(...history([long], { recordIds: [long.id] }, offset));
+  assert.equal(observe(calls, source).facts.comparisonEvidenceComplete, true);
+  assert.notEqual(
+    observe(
+      [
+        ...calls,
+        changeFact(calls.at(-1)!, "Recorded notes", "Invented conclusion"),
+      ],
+      source
+    ).facts.comparisonEvidenceComplete,
+    true
+  );
+});
 test("entry time cannot replace event date, and wrong-score or timestamp output fails", () => {
   const good = history(records);
   for (const [label, value] of [
