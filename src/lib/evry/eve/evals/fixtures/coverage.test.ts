@@ -25,6 +25,8 @@ test("calendar fixture clock is part of the reproducible manifest digest", () =>
 });
 
 const expectedOriginals = [
+  "edges-01",
+  "notes-05",
   "tasks-01",
   "tasks-02",
   "tasks-03",
@@ -123,6 +125,7 @@ const expectedOriginals = [
   "cross-01",
 ].sort();
 const expectedRegressions = [
+  "regression-clarification-name",
   "regression-today",
   "regression-followup-priority",
   "regression-readable-copy",
@@ -140,14 +143,14 @@ const expectedRegressions = [
   "regression-partial-outage",
 ].sort();
 
-test("default production fixture coverage has 111 bindings and does not claim the remaining 47 pass", () => {
+test("default production fixture coverage has 114 bindings and does not claim the remaining 44 pass", () => {
   const coverage = productionFixtureCoverage();
   const corpus = [...questions, ...regressions];
   assert.deepEqual(coverage.counts, {
-    runnable: 111,
-    originals: 96,
-    regressions: 15,
-    unbound: 47,
+    runnable: 114,
+    originals: 98,
+    regressions: 16,
+    unbound: 44,
     corpus: 158,
   });
   assert.deepEqual([...coverage.originalIds].sort(), expectedOriginals);
@@ -228,10 +231,10 @@ test("document comparison is opt-in only after a file transport is supplied", as
     };
   };
   assert.deepEqual(productionFixtureCoverage({ prepareDocumentFiles }).counts, {
-    runnable: 112,
-    originals: 97,
-    regressions: 15,
-    unbound: 46,
+    runnable: 115,
+    originals: 99,
+    regressions: 16,
+    unbound: 43,
     corpus: 158,
   });
   assert.ok(productionFixtureCoverage().unboundIds.includes("documents-04"));
@@ -397,10 +400,10 @@ test("CSV review requires its signed attachment transport and revokes a failed s
     throw provisionError;
   };
   assert.deepEqual(productionFixtureCoverage({ preparePeopleCsv }).counts, {
-    runnable: 112,
-    originals: 97,
-    regressions: 15,
-    unbound: 46,
+    runnable: 115,
+    originals: 99,
+    regressions: 16,
+    unbound: 43,
     corpus: 158,
   });
   assert.deepEqual(
@@ -409,10 +412,10 @@ test("CSV review requires its signed attachment transport and revokes a failed s
       prepareDocumentFiles: async () => async () => {},
     }).counts,
     {
-      runnable: 113,
-      originals: 98,
-      regressions: 15,
-      unbound: 45,
+      runnable: 116,
+      originals: 100,
+      regressions: 16,
+      unbound: 42,
       corpus: 158,
     }
   );

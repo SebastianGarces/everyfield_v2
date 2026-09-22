@@ -250,6 +250,12 @@ import {
   staffingPreparationExpectations,
   readPreparedStaffingFacts,
 } from "./staffing-preparations";
+import {
+  identityNotesFixtureIds,
+  seedIdentityNotesFixture,
+  identityNotesExpectations,
+  observedIdentityNotesFacts,
+} from "./identity-notes";
 
 type FixtureTransports = {
   prepareDocumentFiles?: DocumentFixtureTransport;
@@ -487,6 +493,7 @@ const familyCaseIds = [
   ...orientationDocumentFixtureIds,
   ...orientationInvitationsFixtureIds,
   ...staffingPreparationFixtureIds,
+  ...identityNotesFixtureIds,
 ];
 
 /** Bound means a runnable fixture, not a passed model-quality evaluation. */
@@ -807,6 +814,7 @@ export function createProductionEveEvalAdapter(
         seedOrientationDocumentFixture(manifest, options.store);
         seedOrientationInvitationsFixture(manifest, options.store);
         seedStaffingPreparationFixture(manifest, options.store);
+        seedIdentityNotesFixture(manifest, options.store);
         const orientationDocument = orientationDocumentTruth(
           manifest,
           options.store
@@ -871,6 +879,7 @@ export function createProductionEveEvalAdapter(
                               turns: bindContentTurns(manifest, scenario.turns),
                             };
         let expectations =
+          identityNotesExpectations(manifest, options.store) ??
           staffingPreparationExpectations(manifest, options.store) ??
           orientationInvitationsExpectations(manifest, options.store) ??
           orientationDocumentExpectations(manifest) ??
@@ -950,6 +959,7 @@ export function createProductionEveEvalAdapter(
                 scenario.id === "tasks-10" ||
                 scenario.id === "documents-05" ||
                 scenario.id === "orientations-04" ||
+                identityNotesFixtureIds.some((id) => id === scenario.id) ||
                 staffingPreparationFixtureIds.some(
                   (id) => id === scenario.id
                 ) ||
@@ -1179,6 +1189,17 @@ export function createProductionEveEvalAdapter(
                 });
                 Object.assign(captured.facts, staffing.facts);
                 captured.evidence.push(...staffing.evidence);
+              }
+              if (identityNotesFixtureIds.some((id) => id === scenario.id)) {
+                const identity = await observedIdentityNotesFacts({
+                  manifest,
+                  store: options.store,
+                  calls,
+                  presented,
+                  messages: result.messages,
+                });
+                Object.assign(captured.facts, identity.facts);
+                captured.evidence.push(...identity.evidence);
               }
               const securityObserved = securityFixture
                 ? observeSecurityFixture(securityFixture, calls, result.answer)
