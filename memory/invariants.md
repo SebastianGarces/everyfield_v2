@@ -454,6 +454,7 @@ The guard is `ops/tests/requirement-ids.test.mjs`. Applies to every requirement 
 
 ## Evry — Plant Route and Action Parity
 
+- `actions.status` reads only the current conversation's server-written review pointer after fresh app-session and Eve-session ownership checks. It accepts no plan identity and never confirms, executes or retries. Planned counts are not completed effects, an unresolved claim remains unknown, and an execution receipt is not email-delivery evidence.
 - Failed-delivery retries require signed provider failure evidence and a separately confirmed, source-bound review. An uncertain send keeps its original frozen payload and provider key; after the safe recovery window it remains unresolved, because a new key or expired deduplication window can deliver a duplicate email. Successful delivery evidence always excludes a recipient from failed-delivery retries.
 - Eve receives session-bound attachment IDs, not signed upload references or file bodies. Every lookup rechecks the actor, plant, live conversation, file kind and original expiry; the native preparation still freezes the verified reference, digest and signed person target for exact confirmation. An unknown upload response reuses its staged file, while a definitive unavailable response requires fresh staging and renewed duplicate choices.
 
