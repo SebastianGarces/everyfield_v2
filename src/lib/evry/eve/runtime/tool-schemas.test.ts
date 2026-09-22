@@ -57,6 +57,7 @@ test("durable schema loader exposes exactly the same schemas as the invoked regi
       now: new Date(0),
     },
     authorizeRead: async () => null,
+    readActionStatus: async () => ({ status: "unavailable" }),
     preparation: {
       inputSchema: evePreparationInputSchema,
       prepare: async () => null,

@@ -50,6 +50,7 @@ test("registry carries the full capability catalog with one schema source and no
     context,
     authorizeRead: async () => null,
     helperDependencies: helpers,
+    readActionStatus: async () => ({ status: "unavailable" }),
     preparation: {
       inputSchema: z.strictObject({
         operation: z.literal("example"),
@@ -61,8 +62,8 @@ test("registry carries the full capability catalog with one schema source and no
   const names = registry.describe().map((entry) => entry.name);
   for (const [name] of EVE_CAPABILITY_CATALOG)
     assert.ok(names.includes(name), name);
-  assert.equal(EVE_CAPABILITY_CATALOG.length, 24);
-  assert.equal(names.length, 29);
+  assert.equal(EVE_CAPABILITY_CATALOG.length, 25);
+  assert.equal(names.length, 30);
   assert.equal(new Set(names).size, names.length);
   assert.equal(
     names.some((name) =>

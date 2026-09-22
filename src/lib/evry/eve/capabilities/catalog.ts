@@ -116,6 +116,11 @@ export const EVE_CAPABILITY_CATALOG = [
     ["documents", "people"],
   ],
   [
+    "actions.status",
+    "Read the saved status and recorded step counts of this conversation's current review. Takes no plan ID. Unavailable is not proof nothing happened. Planned counts are not completed changes; uncertain results stay unknown. This cannot confirm, execute or retry. Email delivery requires communication evidence, not an execution receipt.",
+    ["cross", "edges", "communication"],
+  ],
+  [
     "actions.prepare",
     "Prepare typed changes for an exact editable human review. This tool cannot execute, send or confirm changes.",
     ["cross", "edges"],

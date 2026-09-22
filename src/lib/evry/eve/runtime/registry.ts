@@ -22,6 +22,7 @@ import { fixtureRun } from "./fixture-bridge";
 import { eveAttachments } from "./attachments";
 import type { EveAttachmentResolver } from "./attachment-contract";
 import { preparationModelOutput } from "./preparation-output";
+import { createEveActionStatusReader } from "./action-status";
 
 export function describeEveRuntimeTools(identity: EveAuthenticatedSession) {
   return createEveToolRegistry({
@@ -33,6 +34,9 @@ export function describeEveRuntimeTools(identity: EveAuthenticatedSession) {
     },
     authorizeRead: (name) =>
       authorizeEvryReadCapabilityForSession(name, identity.appSessionId),
+    readActionStatus: async () => {
+      throw new Error("Discovery cannot read a conversation review");
+    },
     preparation: {
       inputSchema: evePreparationInputSchema,
       prepare: async () => {
@@ -76,6 +80,9 @@ export function createBoundEveRegistry(
     context,
     authorizeRead,
     resolveAttachment,
+    readActionStatus: createEveActionStatusReader(scope, undefined, (allowed) =>
+      fixture?.authorize(allowed)
+    ),
     preparation: createEvePreparation({
       ...context,
       conversationId: scope.conversationId,

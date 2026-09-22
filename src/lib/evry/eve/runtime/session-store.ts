@@ -74,7 +74,10 @@ export async function listEveSessions(
     .limit(100);
 }
 
-export async function getEveSession(sessionId: string, owner: EveSessionOwner) {
+export async function getEveSession(
+  sessionId: string,
+  owner: EveSessionOwner
+): Promise<typeof evryEveSessions.$inferSelect | null> {
   const [row] = await db
     .select()
     .from(evryEveSessions)

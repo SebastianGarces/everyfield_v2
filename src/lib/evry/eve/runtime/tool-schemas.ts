@@ -1,4 +1,7 @@
-import { EVE_READ_REGISTRATIONS } from "../capabilities/registry";
+import {
+  EVE_READ_REGISTRATIONS,
+  eveActionStatusInputSchema,
+} from "../capabilities/registry";
 import { extendedEveReadSchema } from "../capabilities/extended-reads";
 import {
   createEveHelperTools,
@@ -16,6 +19,7 @@ export function eveRuntimeToolSchema(
   preparationOperations?: readonly string[]
 ) {
   if (name === "files.inspect") return eveAttachmentInputSchema;
+  if (name === "actions.status") return eveActionStatusInputSchema;
   if (name === "actions.prepare")
     return preparationOperations
       ? selectedEvePreparationSchema(preparationOperations)

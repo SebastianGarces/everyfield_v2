@@ -33,6 +33,7 @@ export type EveJsonValue =
   | string
   | EveJsonValue[]
   | { [key: string]: EveJsonValue };
+export const eveActionStatusInputSchema = z.strictObject({});
 export type EveToolInvocation = Readonly<{
   signal?: AbortSignal;
   callId?: string;
@@ -88,6 +89,8 @@ export function createEveToolRegistry(options: {
   /** Isolated adapters exercise the actual registry without a shared database. */
   reads?: readonly EvryReadRegistration[];
   resolveAttachment?: EveAttachmentResolver;
+  /** Server-bound reader reauthenticates session ownership on every invocation. No arbitrary plan input. */
+  readActionStatus?: (invocation: { signal?: AbortSignal }) => Promise<unknown>;
 }): EveToolRegistry {
   const { context } = options;
   const reads = options.reads ?? EVE_READ_REGISTRATIONS;
@@ -116,6 +119,16 @@ export function createEveToolRegistry(options: {
       effect: "read" as const,
       capabilityIdentities: [helper.capabilityIdentity],
     })),
+    ...(options.readActionStatus
+      ? [
+          {
+            name: "actions.status",
+            description: descriptions.get("actions.status")!,
+            inputSchema: eveActionStatusInputSchema,
+            effect: "read" as const,
+          },
+        ]
+      : []),
     ...(options.preparation
       ? [
           {
@@ -139,7 +152,11 @@ export function createEveToolRegistry(options: {
       const contract = contractMap.get(name);
       if (!contract) return { status: "unavailable", reason: "unknown_tool" };
       let result: unknown;
-      if (contract.effect === "prepare") {
+      if (name === "actions.status" && options.readActionStatus) {
+        if (!eveActionStatusInputSchema.safeParse(input).success)
+          return { status: "invalid_input" };
+        result = await options.readActionStatus({ signal: invocation.signal });
+      } else if (contract.effect === "prepare") {
         if (!invocation.callId?.trim() || !options.preparation)
           return { status: "unavailable", reason: "missing_call_identity" };
         const parsed = contract.inputSchema.safeParse(input);
