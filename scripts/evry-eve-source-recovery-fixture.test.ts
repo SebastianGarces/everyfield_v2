@@ -6,6 +6,7 @@ import { questions } from "@/lib/evry/eve/evals/catalog";
 import { createFixtureManifest } from "@/lib/evry/eve/evals/fixtures/manifest";
 import { startFixtureStack } from "@/lib/evry/eve/evals/fixtures/stack";
 import { createFixtureStore } from "@/lib/evry/eve/evals/fixtures/store";
+import { sourceRecoveryPreparationPrompt } from "@/lib/evry/eve/evals/http/process-contract";
 import {
   capturedReadArtifactSchema,
   type CapturedCall,
@@ -457,6 +458,174 @@ test(
           assert.equal(outcome.hostCapture.refusedAuthorizations, 0);
           assert.equal(outcome.hostCapture.outboundMessages, 0);
           assert.deepEqual(store.writesSince(audit, compiled), []);
+          assert.equal(outcome.judge, null);
+        }
+      );
+      await t.test(
+        "compiled direct preparation failure stays private and retry produces only an unexecuted exact review",
+        { skip: !process.env.EVRY_EVE_COMPILED_ENTRY },
+        async () => {
+          const { runCompiledEveFixture } =
+            await import("@/lib/evry/eve/evals/http/process");
+          const compiled = createFixtureManifest("edges-13", 453);
+          store.seed(compiled);
+          const audit = store.auditStart();
+          const preparation = {
+            request: {
+              operation: "meetings.lifecycle.status",
+              arguments: {
+                meetingId: compiled.ids["meeting-upcoming"],
+                status: "ready",
+              },
+            },
+          };
+          const outcome = await runCompiledEveFixture(
+            {
+              compiledEntry: process.env.EVRY_EVE_COMPILED_ENTRY!,
+              databaseUrl: stack.databaseUrl,
+              proxyUrl: stack.proxyUrl,
+              sessionToken: compiled.sessionToken,
+              actor: {
+                userId: compiled.ids.actor,
+                plantId: compiled.ids.plant,
+              },
+              turns: [sourceRecoveryPreparationPrompt],
+              sourceRecovery: "edges-13",
+              now: compiled.now,
+              maxCostUsd: 1,
+              timeoutMs: 120_000,
+              verifyReplay: true,
+              prices: {
+                inputUsdPerMillion: 1,
+                outputUsdPerMillion: 2,
+                maxInputBytes: 500_000,
+                maxOutputTokens: 1_000,
+              },
+              model: {
+                mode: "scripted",
+                responses: [
+                  {
+                    toolCalls: [
+                      {
+                        id: "load-preparation",
+                        name: "load_tools",
+                        input: {
+                          names: ["actions.prepare"],
+                          preparationOperations: ["meetings.lifecycle.status"],
+                        },
+                      },
+                    ],
+                  },
+                  {
+                    toolCalls: [
+                      {
+                        id: "direct-preparation-fault",
+                        name: "actions_prepare",
+                        input: preparation,
+                      },
+                    ],
+                  },
+                  {
+                    toolCalls: [
+                      {
+                        id: "direct-preparation-retry",
+                        name: "actions_prepare",
+                        input: preparation,
+                      },
+                    ],
+                  },
+                  { text: "Scripted preparation recovery boundary." },
+                ],
+              },
+            },
+            AbortSignal.timeout(150_000)
+          );
+          assert.deepEqual(outcome.runtimeProof?.failures, [
+            "tool-result:ACTION_RESULT_FAILED",
+          ]);
+          assert.equal(outcome.runtimeProof?.modelCalls, 4);
+          assert.ok(
+            outcome.runtimeProof?.modelRequests?.[1]?.tools.includes(
+              "actions_prepare"
+            )
+          );
+          assert.equal(outcome.sourceRecoveryFaults?.length, 1);
+          assert.equal(
+            outcome.sourceRecoveryFaults?.[0]?.plantId,
+            compiled.ids.plant
+          );
+          const parts = outcome.messages.flatMap((message) => message.parts);
+          const failed = parts.filter(
+            (part) =>
+              part.type === "dynamic-tool" && part.state === "output-error"
+          );
+          assert.equal(failed.length, 1);
+          assert.ok(
+            failed[0]?.type === "dynamic-tool" &&
+              failed[0].state === "output-error"
+          );
+          assert.equal(failed[0].toolCallId, "direct-preparation-fault");
+          assert.equal(failed[0].errorText, EVE_TOOL_FAILURE_MESSAGE);
+          const providerErrors =
+            outcome.runtimeProof?.modelRequests?.flatMap(
+              (request) => request.toolErrors ?? []
+            ) ?? [];
+          assert.ok(
+            providerErrors.some(
+              (error) =>
+                error.id === "direct-preparation-fault" &&
+                error.name === "actions_prepare" &&
+                error.output === `Error: ${EVE_TOOL_FAILURE_MESSAGE}`
+            )
+          );
+          assert.doesNotMatch(
+            JSON.stringify({ messages: outcome.messages, providerErrors }),
+            /Failed query:|params:|Isolated meeting dependency/
+          );
+          const retry = parts.find(
+            (part) =>
+              part.type === "dynamic-tool" &&
+              part.toolCallId === "direct-preparation-retry"
+          );
+          assert.ok(
+            retry?.type === "dynamic-tool" && retry.state === "output-available"
+          );
+          z.object({
+            data: z.object({ status: z.literal("awaiting_confirmation") }),
+          }).parse(retry.output);
+          const captured = outcome.hostCapture.calls.filter(
+            (call) => call.name === "actions.prepare"
+          );
+          assert.deepEqual(
+            captured.map((call) => call.id),
+            ["direct-preparation-retry"]
+          );
+          const original = z
+            .object({
+              activePlan: z.object({
+                mode: z.literal("set"),
+                plan: z.object({ planId: z.uuid(), fingerprint: z.string() }),
+              }),
+            })
+            .parse(captured[0]?.output);
+          assert.deepEqual(
+            store.query(
+              `select p.id, p.fingerprint, s.status from evry_action_plans p join evry_action_plan_states s on s.plan_id=p.id and s.church_id=p.church_id where p.church_id='${compiled.ids.plant}' and p.actor_user_id='${compiled.ids.actor}'`
+            ),
+            [
+              {
+                id: original.activePlan.plan.planId,
+                fingerprint: original.activePlan.plan.fingerprint,
+                status: "awaiting_confirmation",
+              },
+            ]
+          );
+          assert.deepEqual(store.writesSince(audit, compiled), []);
+          assert.equal(outcome.hostCapture.outboundMessages, 0);
+          assert.equal(outcome.costUsd, 0);
+          assert.ok(outcome.replay?.matchingTranscript);
+          assert.ok(outcome.replay?.stableActivity);
+          assert.ok(outcome.replay?.stableCapture);
           assert.equal(outcome.judge, null);
         }
       );

@@ -9,6 +9,7 @@ import { z } from "zod";
 import { neonConfig as sourceNeonConfig } from "@neondatabase/serverless";
 import { installIsolatedFixtureHost } from "../src/lib/evry/eve/evals/http/host";
 import { createHttpEveEvalRunner } from "../src/lib/evry/eve/evals/http/runner";
+import type { FixtureFailureDiagnostic } from "../src/lib/evry/eve/evals/http/failure-diagnostic";
 import { compiledFixtureRequest } from "../src/lib/evry/eve/evals/http/process-contract";
 import { EVE_WORKFLOW_COVERAGE } from "../src/lib/evry/eve/capabilities/catalog";
 import { bindFixtureUpload } from "../src/lib/evry/eve/evals/http/attachments";
@@ -55,6 +56,7 @@ process.on("message", async (message) => {
   if (used) return;
   used = true;
   let phase = "configuration";
+  let failureDiagnostic: FixtureFailureDiagnostic | undefined;
   const failures: string[] = [];
   const eventTypes: string[] = [];
   // Appended by onEvent in client arrival order; sequence is a turn-step
@@ -170,8 +172,15 @@ process.on("message", async (message) => {
                 )
                   throw new Error("Unsafe source recovery provider input");
                 for (const result of modelRequest.toolResults) {
-                  if (result.id === "direct-meetings-fault") {
-                    if (result.name !== "meetings_query" || !result.isError)
+                  if (
+                    result.id === "direct-meetings-fault" ||
+                    result.id === "direct-preparation-fault"
+                  ) {
+                    const expectedName =
+                      result.id === "direct-preparation-fault"
+                        ? "actions_prepare"
+                        : "meetings_query";
+                    if (result.name !== expectedName || !result.isError)
                       throw new Error(
                         "Source recovery direct failure classification mismatch"
                       );
@@ -514,6 +523,9 @@ process.on("message", async (message) => {
       expectedTurnFailureMessage: request.expectedTurnFailureMessage,
       replaySessionId,
       followupSessionId,
+      onFailure(diagnostic) {
+        failureDiagnostic = diagnostic;
+      },
       async beforeTurn({ turnIndex, sessionId }) {
         const upload = request.attachments?.find(
           (item) => item.turnIndex === turnIndex
@@ -583,7 +595,9 @@ process.on("message", async (message) => {
         (response) => response.toolCalls ?? []
       )) {
         if (
-          (call.id === "source-pair" || call.id === "direct-meetings-fault") &&
+          (call.id === "source-pair" ||
+            call.id === "direct-meetings-fault" ||
+            call.id === "direct-preparation-fault") &&
           !verifiedRecoveryResults.has(call.id)
         )
           throw new Error("Source recovery result did not reach the provider");
@@ -658,6 +672,7 @@ process.on("message", async (message) => {
         : "isolated runtime failure";
     const failure = {
       type: "failed",
+      ...(failureDiagnostic ? { diagnostic: failureDiagnostic } : {}),
       phase: `${phase}: ${reason}; http=${httpError.success ? httpError.data.status : "none"}; events=${eventTypes.slice(-5).join(",")}; failures=${failures.join(",")}; scripted=${scriptedDiagnostics.join(",")}`,
     };
     process.send?.(

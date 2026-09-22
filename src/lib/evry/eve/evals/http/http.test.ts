@@ -6,6 +6,7 @@ import {
   assertIsolatedFixtureTarget,
 } from "./host";
 import { createHttpEveEvalRunner } from "./runner";
+import { fixtureFailureDiagnosticSchema } from "./failure-diagnostic";
 import { compiledFixtureRequest, fixtureTurnSchema } from "./process-contract";
 
 const origin = "http://127.0.0.1:4109";
@@ -748,6 +749,7 @@ test("abort sends an authenticated server cancellation rather than only closing 
   process.env.DATABASE_URL = databaseUrl;
   const controller = new AbortController();
   let cancelled = false;
+  const diagnostics: unknown[] = [];
   globalThis.fetch = async (input, init) => {
     const url = new URL(String(input));
     if (url.pathname === "/eve/v1/session")
@@ -770,7 +772,15 @@ test("abort sends an authenticated server cancellation rather than only closing 
   };
   const host = installIsolatedFixtureHost({ origin, databaseUrl });
   try {
-    const run = createHttpEveEvalRunner({ origin, databaseUrl, host, prices });
+    const run = createHttpEveEvalRunner({
+      origin,
+      databaseUrl,
+      host,
+      prices,
+      onFailure: (diagnostic) => {
+        diagnostics.push(diagnostic);
+      },
+    });
     await assert.rejects(
       run({
         scenario: { turns: ["Hello"] },
@@ -782,6 +792,15 @@ test("abort sends an authenticated server cancellation rather than only closing 
       })
     );
     assert.equal(cancelled, true);
+    assert.equal(diagnostics.length, 1);
+    const diagnostic = fixtureFailureDiagnosticSchema.parse(diagnostics[0]);
+    assert.equal(diagnostic.stop, "cancelled");
+    assert.equal(diagnostic.generations, 0);
+    assert.equal(diagnostic.costUsd, 0);
+    assert.doesNotMatch(
+      JSON.stringify(diagnostic),
+      /test cancellation|stream interrupted|fixture-only-cookie/
+    );
   } finally {
     host.close();
     globalThis.fetch = priorFetch;

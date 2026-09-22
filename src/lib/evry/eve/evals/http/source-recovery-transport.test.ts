@@ -4,6 +4,7 @@ import { z } from "zod";
 import {
   compiledFixtureRequest,
   httpEvalOutcomeSchema,
+  sourceRecoveryPreparationPrompt,
 } from "./process-contract";
 import { createFixtureManifest } from "../fixtures/manifest";
 import {
@@ -71,6 +72,25 @@ test("fault opt-in is host-only and bound to original edges-13 setup and questio
   ])
     assert.equal(
       compiledFixtureRequest.safeParse({ ...request, ...invalid }).success,
+      false
+    );
+});
+test("preparation fault is limited to its exact scripted proof and cannot opt in live", () => {
+  const preparation = {
+    ...request,
+    sourceRecovery: "edges-13",
+    turns: [sourceRecoveryPreparationPrompt],
+  };
+  assert.ok(compiledFixtureRequest.safeParse(preparation).success);
+  for (const override of [
+    { model: { mode: "live", spendingApproved: true } },
+    { turns: [sourceRecoveryPreparationPrompt, "Another turn"] },
+    { turns: ["Another preparation"] },
+    { verifyRestart: true },
+    { attachments: [] },
+  ])
+    assert.equal(
+      compiledFixtureRequest.safeParse({ ...preparation, ...override }).success,
       false
     );
 });

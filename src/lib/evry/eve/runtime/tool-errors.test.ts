@@ -113,14 +113,31 @@ test("a failed scope/read stays rejected while successful peer results remain un
   assert.deepEqual(results[1], { status: "fulfilled", value: original });
 });
 
-test("both native entry points protect scope setup; direct preparation is unchanged", () => {
+test("returned preparation refusals and successful reviews retain their identity", async () => {
+  for (const result of [
+    {
+      status: "invalid_input",
+      issues: [{ path: "title", message: "Required" }],
+    },
+    { status: "unavailable", reason: "not_authorized" },
+    { status: "needs_resolution", question: "Which meeting?" },
+    { status: "awaiting_confirmation", title: "Review meeting changes" },
+  ]) {
+    assert.equal(
+      await withSafeEveToolErrors(undefined, async () => result),
+      result
+    );
+  }
+});
+
+test("both native entry points protect scope setup and all direct capabilities", () => {
   const direct = readFileSync("agent/tools/capability.ts", "utf8");
   assert.match(direct, /const execute = \(\) =>\s*withEveRuntimeScope/);
   assert.match(
     direct,
-    /return isRead\s*\? withSafeEveToolErrors\(toolContext.abortSignal, execute\)\s*: execute\(\)/
+    /return withSafeEveToolErrors\(toolContext.abortSignal, execute\)/
   );
-  assert.match(direct, /const isRead = entry.effect === "read";/);
+  assert.doesNotMatch(direct, /\bisRead\b/);
   const executor = direct.slice(
     direct.indexOf("execute: (input, toolContext) =>"),
     direct.indexOf("toModelOutput:")
@@ -133,7 +150,7 @@ test("both native entry points protect scope setup; direct preparation is unchan
   );
 });
 
-test("installed Eve rejects a captured schema entry but persists scalar read classification", () => {
+test("installed Eve rejects a captured schema entry but persists canonical names", () => {
   // Use shipped Eve modules under plain Node, without tsx transforming them.
   const result = spawnSync(
     process.execPath,
@@ -155,9 +172,9 @@ test("installed Eve rejects a captured schema entry but persists scalar read cla
          return defineTool({description:'Read records',inputSchema:{type:'object',properties:{}},execute:callback});
        }
        assert.throws(() => validateDurableDynamicToolCallbacks('meetings_query', authored({entry:{effect:'read',inputSchema:z.object({})},name:'meetings.query'}), owner), /non-serializable capture/);
-       for (const isRead of [true,false]) {
-         const metadata = validateDurableDynamicToolCallbacks('meetings_query', authored({isRead,name:'meetings.query'}), owner);
-         assert.deepEqual(metadata.execute.closure, {isRead,name:'meetings.query'});
+       for (const name of ['meetings.query','actions.prepare']) {
+         const metadata = validateDurableDynamicToolCallbacks('meetings_query', authored({name}), owner);
+         assert.deepEqual(metadata.execute.closure, {name});
        }`,
     ],
     {
@@ -171,60 +188,61 @@ test("installed Eve rejects a captured schema entry but persists scalar read cla
   assert.equal(result.status, 0, result.stdout + result.stderr);
 });
 
-for (const mode of ["generate", "stream"] as const)
-  test(`installed SDK ${mode} sends the exact safe failure to the next provider`, async () => {
-    let modelCalls = 0;
-    let verifiedFailures = 0;
-    let successfulOutputProjections = 0;
-    const model = mockModel({
-      respond(request) {
-        modelCalls++;
-        if (modelCalls === 1)
-          return {
-            toolCalls: [
-              { id: "failed-read", name: "meetings_query", input: {} },
-            ],
-          };
-        assert.deepEqual(request.toolResults, [
-          {
-            id: "failed-read",
-            name: "meetings_query",
-            isError: true,
-            output: `Error: ${EVE_TOOL_FAILURE_MESSAGE}`,
-          },
-        ]);
-        assert.doesNotMatch(
-          JSON.stringify(request),
-          /private_column|private_table|private-value|params:/
-        );
-        verifiedFailures++;
-        return "The source was unavailable.";
-      },
+for (const toolName of ["meetings_query", "actions_prepare"] as const)
+  for (const mode of ["generate", "stream"] as const)
+    test(`installed SDK ${mode} sends the exact ${toolName} failure to the next provider`, async () => {
+      let modelCalls = 0;
+      let verifiedFailures = 0;
+      let successfulOutputProjections = 0;
+      const model = mockModel({
+        respond(request) {
+          modelCalls++;
+          if (modelCalls === 1)
+            return {
+              toolCalls: [
+                { id: "failed-capability", name: toolName, input: {} },
+              ],
+            };
+          assert.deepEqual(request.toolResults, [
+            {
+              id: "failed-capability",
+              name: toolName,
+              isError: true,
+              output: `Error: ${EVE_TOOL_FAILURE_MESSAGE}`,
+            },
+          ]);
+          assert.doesNotMatch(
+            JSON.stringify(request),
+            /private_column|private_table|private-value|params:/
+          );
+          verifiedFailures++;
+          return "The source was unavailable.";
+        },
+      });
+      const options = {
+        model,
+        prompt: "Read the meeting records.",
+        stopWhen: stepCountIs(2),
+        tools: {
+          [toolName]: tool({
+            inputSchema: z.object({}).strict(),
+            execute: (): Promise<unknown> =>
+              withSafeEveToolErrors(undefined, async () => {
+                throw fault();
+              }),
+            toModelOutput: () => {
+              successfulOutputProjections++;
+              return { type: "text", value: "Unexpected success projection" };
+            },
+          }),
+        },
+      };
+      const result =
+        mode === "generate" ? await generateText(options) : streamText(options);
+      if (mode === "stream" && "consumeStream" in result)
+        await result.consumeStream();
+      assert.equal(await result.text, "The source was unavailable.");
+      assert.equal(modelCalls, 2);
+      assert.equal(verifiedFailures, 1);
+      assert.equal(successfulOutputProjections, 0);
     });
-    const options = {
-      model,
-      prompt: "Read the meeting records.",
-      stopWhen: stepCountIs(2),
-      tools: {
-        meetings_query: tool({
-          inputSchema: z.object({}).strict(),
-          execute: (): Promise<unknown> =>
-            withSafeEveToolErrors(undefined, async () => {
-              throw fault();
-            }),
-          toModelOutput: () => {
-            successfulOutputProjections++;
-            return { type: "text", value: "Unexpected success projection" };
-          },
-        }),
-      },
-    };
-    const result =
-      mode === "generate" ? await generateText(options) : streamText(options);
-    if (mode === "stream" && "consumeStream" in result)
-      await result.consumeStream();
-    assert.equal(await result.text, "The source was unavailable.");
-    assert.equal(modelCalls, 2);
-    assert.equal(verifiedFailures, 1);
-    assert.equal(successfulOutputProjections, 0);
-  });

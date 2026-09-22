@@ -20,6 +20,10 @@ import type { FixtureTurn } from "./process-contract";
 import type { EveJsonValue } from "../../capabilities/registry";
 import { isDeepStrictEqual } from "node:util";
 import {
+  fixtureFailureDiagnostic,
+  type FixtureFailureDiagnostic,
+} from "./failure-diagnostic";
+import {
   projectEveMessage,
   selectedEveResultReferences,
 } from "@/components/evry/eve-message-projection";
@@ -120,6 +124,7 @@ export function createHttpEveEvalRunner(config: {
     sessionId: string;
   }): Promise<Record<string, EveJsonValue> | undefined>;
   onEvent?: (event: MessageStreamEvent) => void;
+  onFailure?: (diagnostic: FixtureFailureDiagnostic) => void;
 }) {
   assertIsolatedFixtureTarget(config.origin, config.databaseUrl);
   if (config.replaySessionId && config.followupSessionId)
@@ -409,6 +414,13 @@ export function createHttpEveEvalRunner(config: {
     } catch (error) {
       cancel();
       await cancellation;
+      config.onFailure?.(
+        fixtureFailureDiagnostic({
+          signal,
+          elapsedMs: performance.now() - started,
+          capture: fixture.snapshot(),
+        })
+      );
       throw error;
     } finally {
       signal.removeEventListener("abort", cancel);

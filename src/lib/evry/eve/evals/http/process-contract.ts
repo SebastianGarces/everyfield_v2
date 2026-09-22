@@ -25,6 +25,9 @@ export const fixtureTurnSchema = z.union([
 ]);
 export type FixtureTurn = z.infer<typeof fixtureTurnSchema>;
 
+export const sourceRecoveryPreparationPrompt =
+  "Prepare to mark Next orientation ready for my review.";
+
 const restartFollowupSchema = z.strictObject({
   turn: z.string().min(1).max(4_000),
   responses: z
@@ -168,15 +171,18 @@ export const compiledFixtureRequest = z
   .refine(
     (request) =>
       !request.sourceRecovery ||
-      (request.turns.length === 2 &&
+      (((request.turns.length === 2 &&
         request.turns[0] === sourceRecoverySetup &&
-        request.turns[1] === sourceRecoveryRequest &&
+        request.turns[1] === sourceRecoveryRequest) ||
+        (request.model.mode === "scripted" &&
+          request.turns.length === 1 &&
+          request.turns[0] === sourceRecoveryPreparationPrompt)) &&
         !request.verifyRestart &&
         !request.restartFollowup &&
         !request.attachments),
     {
       message:
-        "Source recovery fault requires the unchanged edges-13 fixture and setup turn",
+        "Source recovery fault requires unchanged edges-13 turns or the scripted preparation proof",
       path: ["sourceRecovery"],
     }
   )
