@@ -31,6 +31,22 @@ export type FixtureFailureDiagnostic = z.infer<
   typeof fixtureFailureDiagnosticSchema
 >;
 
+/** A malformed optional receipt must not hide the worker's actual failure. */
+export function fixtureFailureMessage(message: unknown): string | null {
+  const envelope = z
+    .object({
+      type: z.literal("failed"),
+      phase: z.string(),
+      diagnostic: z.unknown().optional(),
+    })
+    .safeParse(message);
+  if (!envelope.success) return null;
+  const { phase, diagnostic } = envelope.data;
+  if (diagnostic === undefined) return phase;
+  const parsed = fixtureFailureDiagnosticSchema.safeParse(diagnostic);
+  return `${phase}; diagnostic=${parsed.success ? JSON.stringify(parsed.data) : "invalid_metadata"}`;
+}
+
 /** Metadata only. Never serialize the exception, prompt, arguments or results. */
 export function fixtureFailureDiagnostic(input: {
   signal: AbortSignal;

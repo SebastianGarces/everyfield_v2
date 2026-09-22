@@ -4,6 +4,7 @@ import type { HostCapture } from "./host";
 import {
   fixtureFailureDiagnostic,
   fixtureFailureDiagnosticSchema,
+  fixtureFailureMessage,
 } from "./failure-diagnostic";
 
 const capture: HostCapture = {
@@ -87,5 +88,37 @@ test("metadata transport refuses payload widening and diagnostic size is bounded
     fixtureFailureDiagnosticSchema.safeParse({ ...result, prompt: "private" })
       .success,
     false
+  );
+});
+
+test("malformed optional diagnostic never suppresses the failure or leaks its contents", () => {
+  assert.equal(
+    fixtureFailureMessage({
+      type: "failed",
+      phase: "conversation",
+      diagnostic: { elapsedMs: -1, prompt: "private" },
+    }),
+    "conversation; diagnostic=invalid_metadata"
+  );
+  assert.equal(
+    fixtureFailureMessage({ type: "failed", phase: "conversation" }),
+    "conversation"
+  );
+  assert.equal(
+    fixtureFailureMessage({ type: "result", phase: "conversation" }),
+    null
+  );
+  const diagnostic = fixtureFailureDiagnostic({
+    signal: new AbortController().signal,
+    elapsedMs: 30,
+    capture,
+  });
+  assert.equal(
+    fixtureFailureMessage({
+      type: "failed",
+      phase: "conversation",
+      diagnostic,
+    }),
+    `conversation; diagnostic=${JSON.stringify(diagnostic)}`
   );
 });

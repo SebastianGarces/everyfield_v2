@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { z } from "zod";
 import { isDeepStrictEqual } from "node:util";
-import { fixtureFailureDiagnosticSchema } from "./failure-diagnostic";
+import { fixtureFailureMessage } from "./failure-diagnostic";
 import { readFixtureProcessingSnapshots } from "./processing-snapshot";
 import { assertSavedPresentationInventory } from "../../../../../../scripts/evry-eve-presentation-proof";
 import {
@@ -214,19 +214,11 @@ async function runWorker(
             resolve(success.data.outcome);
             return;
           }
-          const failed = z
-            .object({
-              type: z.literal("failed"),
-              phase: z.string(),
-              diagnostic: fixtureFailureDiagnosticSchema.optional(),
-            })
-            .safeParse(message);
-          if (failed.success) {
+          const failed = fixtureFailureMessage(message);
+          if (failed !== null) {
             clearTimeout(timer);
             reject(
-              new Error(
-                `Compiled HTTP evaluation failed during ${failed.data.phase}${failed.data.diagnostic ? `; diagnostic=${JSON.stringify(failed.data.diagnostic)}` : ""}`
-              )
+              new Error(`Compiled HTTP evaluation failed during ${failed}`)
             );
           }
         });

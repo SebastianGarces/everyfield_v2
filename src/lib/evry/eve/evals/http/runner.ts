@@ -412,15 +412,15 @@ export function createHttpEveEvalRunner(config: {
         eveSessionId: session.state.sessionId,
       };
     } catch (error) {
+      // Observe the failure before cancellation cleanup can cross the deadline.
+      const diagnostic = fixtureFailureDiagnostic({
+        signal,
+        elapsedMs: performance.now() - started,
+        capture: fixture.snapshot(),
+      });
       cancel();
       await cancellation;
-      config.onFailure?.(
-        fixtureFailureDiagnostic({
-          signal,
-          elapsedMs: performance.now() - started,
-          capture: fixture.snapshot(),
-        })
-      );
+      config.onFailure?.(diagnostic);
       throw error;
     } finally {
       signal.removeEventListener("abort", cancel);
