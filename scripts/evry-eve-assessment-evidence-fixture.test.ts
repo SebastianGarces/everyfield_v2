@@ -623,15 +623,12 @@ test(
             store,
             buildSha: "0".repeat(40),
             async runProduction({ scenario, registry, sessionId }) {
-              assert.deepEqual(
-                scenario.turns,
-                [
-                  ...questions.find((q) => q.id === scenario.id)!.turns,
-                  ...(scenario.id === "assessments-03"
-                    ? [{ respondIfAsked: "The individual 4C assessments." }]
-                    : []),
-                ]
-              );
+              assert.deepEqual(scenario.turns, [
+                ...questions.find((q) => q.id === scenario.id)!.turns,
+                ...(scenario.id === "assessments-03"
+                  ? [{ respondIfAsked: "The individual 4C assessments." }]
+                  : []),
+              ]);
               sessions.add(sessionId);
               let n = 0;
               await retrieve(

@@ -129,7 +129,10 @@ test(
         );
         // PDF layout may load bundled WASM through a data URL. It is inline
         // local bytes, not an outbound request; every external origin is blocked.
-        if (url.protocol !== "data:" && url.origin !== new URL(stack.proxyUrl).origin) {
+        if (
+          url.protocol !== "data:" &&
+          url.origin !== new URL(stack.proxyUrl).origin
+        ) {
           outbound++;
           outboundOrigins.push(url.origin);
           throw new Error("External fetch prohibited in orientation proof");
@@ -243,8 +246,14 @@ test(
                     sections: ["agenda"],
                   })
                 );
-                assert.ok(foreign.items.every((item) => item.label === "Record unavailable"));
-                assert.ok(!JSON.stringify(foreign).includes("FOREIGN_LOCATION"));
+                assert.ok(
+                  foreign.items.every(
+                    (item) => item.label === "Record unavailable"
+                  )
+                );
+                assert.ok(
+                  !JSON.stringify(foreign).includes("FOREIGN_LOCATION")
+                );
               }
             );
             const presented = new Set(
