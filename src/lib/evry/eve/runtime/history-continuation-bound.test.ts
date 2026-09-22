@@ -118,6 +118,31 @@ test("bound production registry retains authoritative artifacts while direct and
       assert.equal(invalid.status,'invalid_input');assert.equal('continuation' in invalid,false);
       assert.equal(globalThis.fixture.auth.length,3);
       assert.equal(evryResultState.get().length,2);
+      const selectionInput={selections:[{resultReference:'direct-history',itemIds:original.items.map(item=>item.id)}]};
+      for(const authorization of [null,
+        {actor:{...actor,userId:'other'},registration:{identity:read.capabilityIdentity}},
+        {actor:{...actor,plantId:'other'},registration:{identity:read.capabilityIdentity}},
+        {actor,registration:{identity:'wrong.read'}}]) {
+        globalThis.fixture.authorization=authorization;
+        assert.deepEqual(await registry.invoke('results.select',selectionInput,{callId:'refused-selection'}),{status:'unavailable',reason:'not_authorized'});
+        assert.equal(evryResultState.get().some(row=>row.reference==='refused-selection'),false);
+      }
+      globalThis.fixture.authorization={actor,registration:{identity:read.capabilityIdentity}};
+      const selected=await registry.invoke('results.select',selectionInput,{callId:'selected-direct'});
+      assert.equal(selected.resultReference,'selected-direct');
+      assert.equal(selected.selection.sources[0].reference,'direct-history');
+      assert.deepEqual(selected.items,original.items);
+      assert.equal(describeEveRuntimeTools(identity).some(tool=>tool.name==='results.select'),true);
+      const subset=await runEvryComposition({registry,callId:'selected-composed',budget:createCompositionBudget(),
+        js:'return await tools["results.select"]('+JSON.stringify(selectionInput)+');'});
+      assert.equal(subset.status,'completed');
+      assert.equal(subset.output.resultReference,'selected-composed:tool-1');
+      assert.equal(executed,2,'Selecting cached rows must not run another database read');
+      const selectedEnvelope=withResultPresentation(subset.output,'turn',[subset.output.resultReference]);
+      assert.equal(selectedEnvelope.presentation.results[0].artifacts[0].selection.sources[0].reference,'direct-history');
+      assert.deepEqual(evryResultState.get().find(row=>row.reference==='direct-history').artifacts,[original]);
+      globalThis.fixture.authorization=null;
+      assert.deepEqual(await registry.invoke('results.select',{selections:[{resultReference:'selected-direct',itemIds:original.items.map(item=>item.id)}]},{callId:'revoked-selection'}),{status:'unavailable',reason:'not_authorized'});
     });
     console.log('bound history continuation proof passed');
   `,

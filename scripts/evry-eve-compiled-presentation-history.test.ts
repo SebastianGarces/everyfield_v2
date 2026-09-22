@@ -9,8 +9,11 @@ import {
 } from "@/lib/evry/eve/evals/fixtures/manifest";
 import { runCompiledEveFixture } from "@/lib/evry/eve/evals/http/process";
 import { compiledFixtureRequest } from "@/lib/evry/eve/evals/http/process-contract";
+import { parseEvryConversationArtifactDocument } from "@/lib/evry/conversations/artifacts";
+import { evePresentedToolOutputSchema } from "@/lib/evry/eve/presentation";
 
 const reference = "native-history:read";
+const selectedReference = "native-history:selected";
 const firstTurn = "Show my pending tasks.";
 const secondTurn = `Keep the saved task evidence. Literal reference ${reference}.`;
 
@@ -44,7 +47,7 @@ test("presentation checkpoint inspection is unavailable to live fixture requests
 });
 
 test(
-  "compiled read publication persists its inventory across replacement and scrubs only obsolete provider presentation cues",
+  "compiled read and selected-card publication persist across replacement and scrub only obsolete provider presentation cues",
   {
     skip: process.env.EVRY_EVE_HTTP_PROOF !== "1",
     timeout: 180_000,
@@ -76,7 +79,7 @@ test(
             maxInputBytes: 500_000,
             maxOutputTokens: 1_000,
           },
-          verifyPresentationInventory: [reference],
+          verifyPresentationInventory: [reference, selectedReference],
           model: {
             mode: "scripted",
             responses: [
@@ -85,7 +88,7 @@ test(
                   {
                     id: "history-load",
                     name: "load_tools",
-                    input: { names: ["tasks.query"] },
+                    input: { names: ["tasks.query", "results.select"] },
                   },
                 ],
               },
@@ -117,6 +120,28 @@ test(
                 },
                 toolCalls: [
                   {
+                    id: selectedReference,
+                    name: "results_select",
+                    input: {
+                      selections: [
+                        {
+                          resultReference: reference,
+                          itemIds: [manifest.ids["task-today"]],
+                        },
+                      ],
+                    },
+                  },
+                ],
+              },
+              {
+                assertPresentation: {
+                  retired: [],
+                  current: [reference, selectedReference],
+                  preservedText: ["task-today"],
+                  userText: firstTurn,
+                },
+                toolCalls: [
+                  {
                     id: "history-alias",
                     name: "code_mode",
                     input: {
@@ -128,11 +153,11 @@ test(
               {
                 assertPresentation: {
                   retired: [],
-                  current: [reference],
+                  current: [reference, selectedReference],
                   preservedText: ["task-today"],
                   userText: firstTurn,
                 },
-                text: `Saved task evidence. [[evry-result:${encodeURIComponent(reference)}]]`,
+                text: `Saved task evidence. [[evry-result:${encodeURIComponent(selectedReference)}]]`,
               },
             ],
           },
@@ -141,7 +166,7 @@ test(
             responses: [
               {
                 assertPresentation: {
-                  retired: [reference],
+                  retired: [reference, selectedReference],
                   current: [],
                   preservedText: ["task-today", "Saved task evidence."],
                   userText: secondTurn,
@@ -164,7 +189,7 @@ test(
           run.runtimeProof?.presentationInventory?.exactIssuedSet,
           true
         );
-        assert.equal(run.runtimeProof?.presentationInventory?.issuedCount, 1);
+        assert.equal(run.runtimeProof?.presentationInventory?.issuedCount, 2);
         assert.ok(
           (run.runtimeProof?.presentationInventory?.matchingSnapshots ?? 0) > 0
         );
@@ -178,7 +203,7 @@ test(
           (outcome.runtimeProof?.presentationInventory?.matchingSnapshots ?? 0),
         "The replacement process must persist its own checkpoint with the issued inventory; the first process's old checkpoint is insufficient"
       );
-      assert.equal(outcome.runtimeProof?.modelCalls, 4);
+      assert.equal(outcome.runtimeProof?.modelCalls, 5);
       const afterLoad = outcome.runtimeProof?.modelRequests?.[1];
       assert.ok(afterLoad, "The model must continue after loading tools");
       assert.ok(
@@ -192,22 +217,95 @@ test(
         taskSchema?.inputSchema && typeof taskSchema.inputSchema === "object",
         "The direct task tool must reach the provider with its schema"
       );
-      assert.ok(outcome.hostCapture.freshAuthorizations > 0);
+      assert.ok(afterLoad.tools.includes("results_select"));
+      const selectionSchema = afterLoad.toolSchemas?.find(
+        (tool) => tool.name === "results_select"
+      );
+      assert.ok(
+        selectionSchema?.inputSchema &&
+          typeof selectionSchema.inputSchema === "object",
+        "The selected-row tool must reach the actual provider with its schema"
+      );
+      assert.ok(outcome.hostCapture.freshAuthorizations >= 2);
       assert.equal(outcome.hostCapture.refusedAuthorizations, 0);
       assert.deepEqual(
         outcome.hostCapture.calls.map((call) => ({
           id: call.id,
           name: call.name,
         })),
-        [{ id: reference, name: "tasks.query" }]
+        [
+          { id: reference, name: "tasks.query" },
+          { id: selectedReference, name: "results.select" },
+        ],
+        "Selection reauthorizes but must not invoke an additional data reader"
       );
-      assert.deepEqual(outcome.hostCapture.presented, [reference]);
+      const sourceCall = outcome.hostCapture.calls[0];
+      const selectedCall = outcome.hostCapture.calls[1];
+      assert.ok(sourceCall && selectedCall);
+      const source = parseEvryConversationArtifactDocument(sourceCall.output);
+      const selected = parseEvryConversationArtifactDocument(
+        selectedCall.output
+      );
+      assert.equal(source.kind, "read");
+      assert.equal(selected.kind, "read");
+      assert.ok(source.items.length > 1);
+      const originalItem = source.items.find(
+        (item) => item.id === manifest.ids["task-today"]
+      );
+      assert.ok(originalItem);
+      assert.deepEqual(selected.items, [originalItem]);
+      assert.deepEqual(selected.counts, {
+        matched: 1,
+        returned: 1,
+        excluded: 0,
+      });
+      assert.deepEqual(selected.selection, {
+        capability: "tasks.query",
+        sources: [
+          {
+            reference,
+            itemIds: [originalItem.id],
+            counts: source.counts,
+            filters: source.filters,
+            exclusions: source.exclusions,
+          },
+        ],
+      });
+      const published = outcome.messages.flatMap((message) =>
+        message.parts.flatMap((part) => {
+          if (part.type !== "dynamic-tool" || part.state !== "output-available")
+            return [];
+          const envelope = evePresentedToolOutputSchema.safeParse(part.output);
+          return envelope.success ? envelope.data.presentation.results : [];
+        })
+      );
+      const expectedPublic = (artifact: typeof source) => ({
+        ...artifact,
+        items: artifact.items.map((item) => ({
+          ...item,
+          facts: item.facts
+            .filter((fact) => !fact.modelOnly)
+            .map(({ label, value }) => ({ label, value })),
+        })),
+      });
+      assert.deepEqual(
+        published.find((result) => result.reference === reference)?.artifacts,
+        [expectedPublic(source)],
+        "The original published full result must remain unchanged"
+      );
+      assert.deepEqual(
+        published.find((result) => result.reference === selectedReference)
+          ?.artifacts,
+        [expectedPublic(selected)],
+        "The native tool envelope must publish the exact selected row"
+      );
+      assert.deepEqual(outcome.hostCapture.presented, [selectedReference]);
       assert.equal(restart.outcome.runtimeProof?.modelCalls, 1);
       assert.equal(restart.outcome.hostCapture.calls.length, 0);
       assert.deepEqual(
         restart.outcome.runtimeProof?.modelRequests?.[0]?.presentation,
         {
-          retiredChecked: 1,
+          retiredChecked: 2,
           currentChecked: 0,
           factsChecked: 2,
           userTextPreserved: true,
@@ -216,7 +314,7 @@ test(
       // Old UI history is retained; the provider projection does not rewrite it.
       assert.ok(
         JSON.stringify(restart.outcome.messages).includes(
-          encodeURIComponent(reference)
+          encodeURIComponent(selectedReference)
         )
       );
       assert.equal(store.writesSince(before, manifest).length, 0);

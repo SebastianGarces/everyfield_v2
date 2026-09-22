@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { EvryReadSelection } from "./read-selection";
 
 import {
   addCalendarDays,
@@ -77,6 +78,8 @@ export type EvryReadArtifact = Readonly<{
   kind: "read";
   /** Absent on historical snapshot cards. Query totals cover the full population. */
   resultMode?: "list" | "count" | "group";
+  /** Counts describe this selected view; original query provenance stays here. */
+  selection?: EvryReadSelection;
   /** UTF-16 offset in the assistant message body, computed by the composer. */
   textOffset?: number;
   title: string;

@@ -12,6 +12,8 @@ type ResultRecord = {
   reference: string;
   turnId: string;
   capability: string;
+  /** Exact inventory identities successfully authorized for this read. */
+  authorizationIdentities?: string[];
   artifacts: EveJsonValue[];
 };
 export const evryResultState = defineState<ResultRecord[]>(

@@ -149,6 +149,18 @@ test("discovery guidance uses already available tools without a schema housekeep
   );
 });
 
+test("filtered cards use trusted selection while text-only answers remain valid", () => {
+  assert.match(
+    instructions,
+    /use results\.select with their exact source references and item IDs/
+  );
+  assert.match(
+    instructions,
+    /filtering code-mode output alone does not change a card/
+  );
+  assert.match(instructions, /text-only answers remain valid/);
+});
+
 test("discovery guidance adds missing definitions with bounded explicit replacement and exact preparation selection", () => {
   assert.match(loader, /adding them to the current working set/);
   assert.match(loader, /Use mode: replace/);

@@ -1,6 +1,20 @@
 /** Coverage metadata is shared by tools, skills and the evaluation inventory. */
 export const EVE_CAPABILITY_CATALOG = [
   [
+    "results.select",
+    "Create one result card from selected itemIds in retained read results from this turn. Pass selections with each resultReference and its itemIds. Sources must share a capability, title and list mode; conflicting duplicate rows are refused. Returns a new resultReference for the usual inline marker without another data query. This selects displayed rows, not a new query total. Text-only answers remain valid.",
+    [
+      "people",
+      "tasks",
+      "meetings",
+      "teams",
+      "communication",
+      "documents",
+      "wiki",
+      "cross",
+    ],
+  ],
+  [
     "people.commitment-download",
     "Find the saved document attached to a commitment and return an authenticated download link. Use commitment IDs from people.history.query; unavailable records do not establish whether a document exists elsewhere.",
     ["commitments"],

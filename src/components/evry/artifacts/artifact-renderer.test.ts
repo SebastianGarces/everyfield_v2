@@ -12,6 +12,7 @@ import {
 } from "@/lib/evry/artifacts/fixtures";
 import {
   evryPublicArtifactSchema,
+  publicReadArtifactSchema,
   publicEvryArtifact,
 } from "@/lib/evry/artifacts/public";
 import { buildEvryReadArtifact } from "@/lib/evry/artifacts/core";
@@ -97,6 +98,49 @@ test("long results render only five compact rows and an explicit full-list contr
   assert.match(markup, /View all 22/);
   assert.equal((markup.match(/<li /g) ?? []).length, 5);
   assert.doesNotMatch(markup, /Task number 6|Only in the full view/);
+});
+
+test("selected result cards name only the selected count without query metadata clutter", () => {
+  const original = publicEvryArtifact(
+    buildEvryReadArtifact({
+      title: "Assessments",
+      filters: [],
+      exclusions: [],
+      sourceLinks: [],
+      items: ["Alex", "Jordan"].map((id) => ({
+        id,
+        label: id,
+        facts: [{ label: "Date", value: "Sep 11, 2026" }],
+        sourceLink: trustedEvryApplicationSourceLink({
+          label: `Open ${id}`,
+          href: `/people/${id}`,
+        }),
+      })),
+    })
+  );
+  const selected = publicReadArtifactSchema.parse({
+    ...original,
+    resultMode: "list",
+    selection: {
+      capability: "people.history.query",
+      sources: [
+        {
+          reference: "private-source-reference",
+          itemIds: ["Alex", "Jordan"],
+          counts: { matched: 53, returned: 50, excluded: 0 },
+          filters: [{ label: "Next page cursor", value: "private-cursor" }],
+          exclusions: [],
+        },
+      ],
+    },
+  });
+  const markup = render(renderableEvryArtifact(selected));
+  assert.match(markup, /2 selected results/);
+  assert.doesNotMatch(
+    markup.replace(/<[^>]*>/g, ""),
+    /53|50|private-source-reference|private-cursor|Next page cursor/
+  );
+  assert.equal((markup.match(/<li /g) ?? []).length, 2);
 });
 
 test("read cards distinguish a page from the full result set and retain a way to open the source", () => {

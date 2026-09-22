@@ -1,4 +1,10 @@
 import { z } from "zod";
+import {
+  evryReadSelectionSchema,
+  evryReadCountsSchema,
+  evryReadFilterSchema,
+  evryReadExclusionSchema,
+} from "./read-selection";
 
 import type { EvryHydratedConversationArtifact } from "@/lib/evry/conversations/artifacts";
 import {
@@ -22,32 +28,12 @@ export const publicReadArtifactSchema = z
   .strictObject({
     kind: z.literal("read"),
     resultMode: z.enum(["list", "count", "group"]).optional(),
+    selection: evryReadSelectionSchema.optional(),
     textOffset: z.number().int().min(0).max(8000).optional(),
     title: titleSchema,
-    filters: z
-      .array(
-        z
-          .strictObject({ label: labelSchema, value: z.string().max(500) })
-          .readonly()
-      )
-      .max(16),
-    counts: z
-      .strictObject({
-        matched: z.number().int().nonnegative(),
-        returned: z.number().int().nonnegative(),
-        excluded: z.number().int().nonnegative(),
-      })
-      .readonly(),
-    exclusions: z
-      .array(
-        z
-          .strictObject({
-            reason: z.string().trim().min(1).max(240),
-            count: z.number().int().nonnegative(),
-          })
-          .readonly()
-      )
-      .max(16),
+    filters: z.array(evryReadFilterSchema).max(16),
+    counts: evryReadCountsSchema,
+    exclusions: z.array(evryReadExclusionSchema).max(16),
     items: z
       .array(
         z
@@ -70,6 +56,10 @@ export const publicReadArtifactSchema = z
       0
     );
     if (
+      (artifact.selection &&
+        (artifact.resultMode !== "list" ||
+          artifact.counts.matched !== artifact.items.length ||
+          excluded !== 0)) ||
       artifact.counts.returned !== artifact.items.length ||
       artifact.counts.excluded !== excluded ||
       (artifact.resultMode === undefined

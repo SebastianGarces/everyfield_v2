@@ -12,6 +12,10 @@ import { CONTENT_QUERY_READS } from "@/lib/evry/capabilities/queries/content";
 import { COMMITMENT_DOWNLOAD_READ } from "@/lib/evry/capabilities/people/file-reads";
 import { EVE_CAPABILITY_CATALOG } from "./catalog";
 import {
+  eveResultSelectionInputSchema,
+  type EveResultSelectionInput,
+} from "../runtime/result-selection";
+import {
   eveAttachmentInputSchema,
   type EveAttachmentResolver,
 } from "../runtime/attachment-contract";
@@ -91,6 +95,12 @@ export function createEveToolRegistry(options: {
   resolveAttachment?: EveAttachmentResolver;
   /** Server-bound reader reauthenticates session ownership on every invocation. No arbitrary plan input. */
   readActionStatus?: (invocation: { signal?: AbortSignal }) => Promise<unknown>;
+  /** Current-turn cached evidence only; the caller must establish fresh session ownership. */
+  selectResult?: (
+    input: EveResultSelectionInput,
+    invocation: EveToolInvocation
+  ) => unknown | Promise<unknown>;
+  onReadAuthorized?: (identity: string, invocation: EveToolInvocation) => void;
 }): EveToolRegistry {
   const { context } = options;
   const reads = options.reads ?? EVE_READ_REGISTRATIONS;
@@ -101,6 +111,16 @@ export function createEveToolRegistry(options: {
   const readMap = new Map(reads.map((read) => [read.id, read]));
   const helperMap = new Map(helpers.map((helper) => [helper.name, helper]));
   const contracts: readonly EveToolDescription[] = Object.freeze([
+    ...(options.selectResult
+      ? [
+          {
+            name: "results.select",
+            description: descriptions.get("results.select")!,
+            inputSchema: eveResultSelectionInputSchema,
+            effect: "read" as const,
+          },
+        ]
+      : []),
     ...reads.map((read) => ({
       name: read.id,
       description:
@@ -152,7 +172,11 @@ export function createEveToolRegistry(options: {
       const contract = contractMap.get(name);
       if (!contract) return { status: "unavailable", reason: "unknown_tool" };
       let result: unknown;
-      if (name === "actions.status" && options.readActionStatus) {
+      if (name === "results.select" && options.selectResult) {
+        const parsed = eveResultSelectionInputSchema.safeParse(input);
+        if (!parsed.success) return { status: "invalid_input" };
+        result = await options.selectResult(parsed.data, invocation);
+      } else if (name === "actions.status" && options.readActionStatus) {
         if (!eveActionStatusInputSchema.safeParse(input).success)
           return { status: "invalid_input" };
         result = await options.readActionStatus({ signal: invocation.signal });
@@ -199,6 +223,7 @@ export function createEveToolRegistry(options: {
         )
           return { status: "unavailable", reason: "not_authorized" };
         invocation.signal?.throwIfAborted();
+        options.onReadAuthorized?.(identity, invocation);
         let readInput = resolved?.input;
         if (name === "files.inspect") {
           const { attachmentId } = eveAttachmentInputSchema.parse(parsed.data);

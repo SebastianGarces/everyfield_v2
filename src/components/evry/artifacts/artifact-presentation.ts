@@ -484,6 +484,6 @@ export function customerContentPreviews(
     : customerPreviews;
 }
 
-export function readResultLabel(count: number): string {
-  return `${count.toLocaleString()} result${count === 1 ? "" : "s"}`;
+export function readResultLabel(count: number, selected = false): string {
+  return `${count.toLocaleString()} ${selected ? "selected " : ""}result${count === 1 ? "" : "s"}`;
 }

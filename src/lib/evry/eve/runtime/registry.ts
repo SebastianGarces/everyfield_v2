@@ -10,6 +10,7 @@ import {
 } from "../preparation";
 import { evryTurnInput } from "./task-state";
 import { publishResult } from "./results";
+import { selectAuthorizedCurrentEveResultRows } from "./result-selection";
 import type { EveRuntimeScope } from "./scope";
 import type { EveAuthenticatedSession } from "./auth-policy";
 import {
@@ -41,6 +42,9 @@ export function describeEveRuntimeTools(identity: EveAuthenticatedSession) {
     readActionStatus: async () => {
       throw new Error("Discovery cannot read a conversation review");
     },
+    selectResult: () => {
+      throw new Error("Discovery cannot select result rows");
+    },
     preparation: {
       inputSchema: evePreparationInputSchema,
       prepare: async () => {
@@ -57,6 +61,7 @@ export function createBoundEveRegistry(
   options: { singlePreparation?: true } = {}
 ): EveToolRegistry {
   let preparations = 0;
+  const authorizedReads = new Map<string, string[]>();
   const turn = evryTurnInput.get();
   const fixture = fixtureRun({
     ...scope.actor,
@@ -86,6 +91,30 @@ export function createBoundEveRegistry(
     context,
     authorizeRead,
     resolveAttachment,
+    onReadAuthorized: (identity, invocation) => {
+      if (invocation.callId) authorizedReads.set(invocation.callId, [identity]);
+    },
+    selectResult: async (input, invocation) => {
+      const selected = await selectAuthorizedCurrentEveResultRows(
+        scope.turnId,
+        input,
+        async (identity) => {
+          const authority = await authorizeRead(identity);
+          return Boolean(
+            authority &&
+            authority.actor.userId === scope.actor.userId &&
+            authority.actor.plantId === scope.actor.plantId &&
+            authority.registration.identity === identity
+          );
+        }
+      );
+      if (invocation.callId && selected.authorizationIdentities.length)
+        authorizedReads.set(
+          invocation.callId,
+          selected.authorizationIdentities
+        );
+      return selected.result;
+    },
     readActionStatus: createEveActionStatusReader(scope, undefined, (allowed) =>
       fixture?.authorize(allowed)
     ),
@@ -128,10 +157,17 @@ export function createBoundEveRegistry(
           const review = reviewFromPreparation(result, reference);
           if (review) evryReviewState.update(() => review);
         }
+        const authorizationIdentities = authorizedReads.get(reference);
         publishResult(
-          { reference, turnId: scope.turnId, capability: name },
+          {
+            reference,
+            turnId: scope.turnId,
+            capability: name,
+            ...(authorizationIdentities ? { authorizationIdentities } : {}),
+          },
           result
         );
+        authorizedReads.delete(reference);
         if (name === "actions.prepare") {
           const modelOutput = preparationModelOutput(result);
           if (modelOutput !== result) return modelOutput;

@@ -1,4 +1,10 @@
 import { z } from "zod";
+import {
+  evryReadSelectionSchema,
+  evryReadCountsSchema,
+  evryReadFilterSchema,
+  evryReadExclusionSchema,
+} from "../artifacts/read-selection";
 
 import { evryExecutionResultCodes } from "@/db/schema/evry";
 import {
@@ -41,17 +47,6 @@ import {
 const titleSchema = z.string().trim().min(1).max(200);
 const labelSchema = z.string().trim().min(1).max(160);
 
-const readFilterSchema = z
-  .object({ label: labelSchema, value: z.string().max(500) })
-  .strict()
-  .readonly();
-const readExclusionSchema = z
-  .object({
-    reason: z.string().trim().min(1).max(240),
-    count: z.number().int().nonnegative(),
-  })
-  .strict()
-  .readonly();
 const readItemSchema = z
   .object({
     id: z.string().min(1).max(160),
@@ -66,18 +61,12 @@ const readArtifactDocumentSchema = z
   .object({
     kind: z.literal("read"),
     resultMode: z.enum(["list", "count", "group"]).optional(),
+    selection: evryReadSelectionSchema.optional(),
     textOffset: z.number().int().min(0).max(8000).optional(),
     title: titleSchema,
-    filters: z.array(readFilterSchema).max(16),
-    counts: z
-      .object({
-        matched: z.number().int().nonnegative(),
-        returned: z.number().int().nonnegative(),
-        excluded: z.number().int().nonnegative(),
-      })
-      .strict()
-      .readonly(),
-    exclusions: z.array(readExclusionSchema).max(16),
+    filters: z.array(evryReadFilterSchema).max(16),
+    counts: evryReadCountsSchema,
+    exclusions: z.array(evryReadExclusionSchema).max(16),
     items: z.array(readItemSchema).max(100),
     sourceLinks: z.array(storedEvrySourceLinkSchema).max(32),
   })
@@ -88,6 +77,10 @@ const readArtifactDocumentSchema = z
       0
     );
     if (
+      (artifact.selection &&
+        (artifact.resultMode !== "list" ||
+          artifact.counts.matched !== artifact.items.length ||
+          excluded !== 0)) ||
       artifact.counts.returned !== artifact.items.length ||
       artifact.counts.excluded !== excluded ||
       (artifact.resultMode === undefined
@@ -398,6 +391,7 @@ export function hydrateStoredEvryConversationArtifact(
           sourceLinks: document.sourceLinks.map(trustedLink),
         }),
         counts: document.counts,
+        ...(document.selection ? { selection: document.selection } : {}),
         ...(document.resultMode === undefined
           ? {}
           : { resultMode: document.resultMode }),

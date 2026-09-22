@@ -91,6 +91,42 @@ test("trusted result markers preserve prose/card/prose without another model ste
   );
 });
 
+test("a native results_select reference uses the existing marker and keeps selection provenance", () => {
+  const selected = {
+    ...markerRead,
+    selection: {
+      capability: "people.query",
+      sources: [
+        {
+          reference: "original",
+          itemIds: ["person"],
+          counts: { matched: 53, returned: 50, excluded: 0 },
+          filters: [],
+          exclusions: [],
+        },
+      ],
+    },
+    counts: { matched: 1, returned: 1, excluded: 0 },
+    items: [
+      {
+        id: "person",
+        label: "Selected person",
+        facts: [],
+        sourceLink: { label: "Open person", href: "/people/person" },
+      },
+    ],
+  };
+  const message = markerMessage({
+    toolName: "results_select",
+    artifacts: [selected],
+  });
+  assert.deepEqual(
+    projectEveMessage(message).map((part) => part.kind),
+    ["text", "artifact", "text"]
+  );
+  assert.deepEqual(selectedEveResultReferences(message), ["read-people"]);
+});
+
 test("reference markers resolve across native text deltas without syntax flashing", () => {
   const marker = eveResultMarker("read-people");
   for (let split = 1; split < marker.length; split++) {

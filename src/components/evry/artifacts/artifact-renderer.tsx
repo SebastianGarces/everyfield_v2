@@ -320,7 +320,9 @@ function ReadResults({ artifact }: { artifact: ArtifactByVariant["read"] }) {
       icon={<ListChecks className="size-4" />}
     >
       <p className="text-muted-foreground text-sm tabular-nums">
-        {total > 5 ? `Showing 5 of ${total} results` : readResultLabel(total)}
+        {total > 5
+          ? `Showing 5 of ${readResultLabel(total, Boolean(artifact.selection))}`
+          : readResultLabel(total, Boolean(artifact.selection))}
       </p>
 
       {artifact.items.length ? (
@@ -354,8 +356,8 @@ function ReadResults({ artifact }: { artifact: ArtifactByVariant["read"] }) {
             <DialogHeader>
               <DialogTitle>{artifact.title}</DialogTitle>
               <DialogDescription>
-                {readResultLabel(total)} from this response. These are the saved
-                results, not a live view.
+                {readResultLabel(total, Boolean(artifact.selection))} from this
+                response. These are the saved results, not a live view.
               </DialogDescription>
             </DialogHeader>
             <div
