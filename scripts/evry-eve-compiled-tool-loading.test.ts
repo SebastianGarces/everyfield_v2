@@ -9,6 +9,7 @@ import {
   FIXTURE_NOW,
 } from "../src/lib/evry/eve/evals/fixtures/manifest";
 import { runCompiledEveFixture } from "../src/lib/evry/eve/evals/http/process";
+import { eveRuntimeToolSchema } from "../src/lib/evry/eve/runtime/tool-schemas";
 
 const daily = ["tasks.query", "meetings.query", "notifications.query"];
 const additional = [
@@ -114,6 +115,24 @@ test(
           weekly,
           `Provider request ${index} lost a selected schema`
         );
+      const expandedPeopleSchema = JSON.stringify(
+        z.toJSONSchema(eveRuntimeToolSchema("people.query"), {
+          target: "draft-7",
+          io: "input",
+        })
+      );
+      for (const index of [2, 3, 4, 5]) {
+        const providerSchema = requests[index].toolSchemas?.find(
+          (entry) => entry.name === "people_query"
+        )?.inputSchema;
+        const serialized = JSON.stringify(providerSchema);
+        assert.ok(serialized, "The compiled provider must receive the schema");
+        assert.match(serialized, /#\/(definitions|\$defs)\//);
+        assert.ok(
+          serialized.length < expandedPeopleSchema.length * 0.6,
+          "Compiled and replayed tools must retain compact library definitions"
+        );
+      }
       // Check actual schema content, not just the provider names.
       for (const [name, required] of [
         ["launch_query", "query"],

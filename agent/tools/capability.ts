@@ -5,7 +5,7 @@ import {
   createBoundEveRegistry,
   describeEveRuntimeTools,
 } from "../../src/lib/evry/eve/runtime/registry";
-import { eveRuntimeToolSchema } from "../../src/lib/evry/eve/runtime/tool-schemas";
+import { eveProviderToolSchema } from "../../src/lib/evry/eve/runtime/provider-tool-schema";
 import { withEveRuntimeScope } from "../../src/lib/evry/eve/runtime/scope";
 import { withSafeEveToolErrors } from "../../src/lib/evry/eve/runtime/tool-errors";
 import { captureEveTurnInput } from "../../src/lib/evry/eve/runtime/turn-context";
@@ -106,7 +106,7 @@ export default defineDynamic({
         if (tools[key]) throw new Error("Duplicate provider tool name");
         tools[key] = defineTool({
           description: `${entry.description} Canonical code-mode name: ${entry.name}.`,
-          inputSchema: eveRuntimeToolSchema(name, preparations),
+          inputSchema: eveProviderToolSchema(name, preparations),
           execute: (input, toolContext) => {
             const execute = () =>
               withEveRuntimeScope(toolContext, async (scope) => {
