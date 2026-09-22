@@ -13,9 +13,38 @@ import {
   assessmentEvidenceExpectations,
   seedAssessmentEvidenceFixture,
   observedAssessmentEvidenceFacts,
+  bindAssessmentEvidenceTurns,
   type AssessmentEvidenceTruth,
   type AssessmentEvidenceRecord,
 } from "./assessment-evidence";
+
+test("assessment concern scenario adds only a visible feature clarification after the unchanged question", () => {
+  const scenario = questions.find(
+    (question) => question.id === "assessments-03"
+  )!;
+  const original = [...scenario.turns];
+  assert.deepEqual(bindAssessmentEvidenceTurns(scenario.id, scenario.turns), [
+    "Which assessments have recorded concerns, and when were they entered?",
+    "The individual 4C assessments.",
+  ]);
+  assert.deepEqual(scenario.turns, original);
+  assert.throws(() =>
+    bindAssessmentEvidenceTurns(scenario.id, ["Changed question"])
+  );
+  assert.throws(() =>
+    bindAssessmentEvidenceTurns(scenario.id, [...original, "Unexpected answer"])
+  );
+});
+
+test("orientation comparison gets no fixture meeting, cohort, date or answer hint", () => {
+  for (const caseId of ["assessments-05", "intelligence-04"]) {
+    const scenario = questions.find((question) => question.id === caseId)!;
+    assert.deepEqual(
+      bindAssessmentEvidenceTurns(caseId, scenario.turns),
+      scenario.turns
+    );
+  }
+});
 
 test("assessment data fixtures require measured authorization and no unconfirmed effects, not an untested injection claim", () => {
   assert.deepEqual(assessmentEvidenceSafetyGates, [

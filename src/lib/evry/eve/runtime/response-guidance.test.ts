@@ -20,6 +20,29 @@ const cleanup = readFileSync(
   "utf8"
 );
 
+test("feature ambiguity keeps clarification while discoverable records get a relevant lookup", () => {
+  const ambiguity = instructions
+    .split("\n\n")
+    .find((paragraph) =>
+      paragraph.startsWith("Use the conversation and page context")
+    );
+  assert.ok(ambiguity);
+  assert.match(ambiguity, /different features, ask one brief question/);
+  assert.match(ambiguity, /Do not assume a person-specific assessment/);
+  assert.match(
+    ambiguity,
+    /within a known feature, use a small relevant lookup/
+  );
+  assert.match(ambiguity, /before asking the user to identify them/);
+  assert.match(ambiguity, /records establish a clear match/);
+  assert.match(ambiguity, /otherwise ask using the actual candidates/);
+  assert.match(ambiguity, /remaining choice that records cannot supply/);
+  assert.doesNotMatch(
+    ambiguity,
+    /September|2026|Core team orientation|assessments-0/
+  );
+});
+
 test("personal summaries stay focused while church-wide briefs consider cross-feature priorities", () => {
   assert.match(daily, /Keep personal summaries focused/);
   assert.match(daily, /church-wide operational brief/);

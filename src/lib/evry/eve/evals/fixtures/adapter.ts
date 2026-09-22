@@ -217,6 +217,7 @@ import {
 import type { fixtureMessageSchema } from "../http/transcript";
 import {
   assessmentEvidenceFixtureIds,
+  bindAssessmentEvidenceTurns,
   seedAssessmentEvidenceFixture,
   assessmentEvidenceTruth,
   assessmentEvidenceExpectations,
@@ -777,39 +778,50 @@ export function createProductionEveEvalAdapter(
             : null;
         const securityFixture = seedSecurityFixture(manifest, options.store);
         const boundScenario =
-          scenario.id === "tasks-10"
-            ? { ...scenario, turns: bindTaskSelectionTurns(scenario.turns) }
-            : scenario.id === "communication-06"
-              ? {
-                  ...scenario,
-                  turns: bindCommunicationRetryTurns(manifest, scenario.turns),
-                }
-              : scenario.id === "documents-06"
+          scenario.id === "assessments-03"
+            ? {
+                ...scenario,
+                turns: bindAssessmentEvidenceTurns(scenario.id, scenario.turns),
+              }
+            : scenario.id === "tasks-10"
+              ? { ...scenario, turns: bindTaskSelectionTurns(scenario.turns) }
+              : scenario.id === "communication-06"
                 ? {
                     ...scenario,
-                    turns: bindContentActionTurns(manifest, scenario.turns),
+                    turns: bindCommunicationRetryTurns(
+                      manifest,
+                      scenario.turns
+                    ),
                   }
-                : scenario.id === "documents-04"
+                : scenario.id === "documents-06"
                   ? {
                       ...scenario,
-                      turns: bindDocumentReviewTurns(manifest, scenario.turns),
+                      turns: bindContentActionTurns(manifest, scenario.turns),
                     }
-                  : securityFixture && "fixture" in scenario
-                    ? bindSecurityScenario(scenario, securityFixture)
-                    : scenario.id === "intelligence-04"
-                      ? {
-                          ...scenario,
-                          // The original question is ambiguous without page context.
-                          // Supply a visible user clarification, not hidden domain metadata.
-                          turns: [
-                            ...scenario.turns,
-                            "The Plant Intelligence reports for our church.",
-                          ],
-                        }
-                      : {
-                          ...scenario,
-                          turns: bindContentTurns(manifest, scenario.turns),
-                        };
+                  : scenario.id === "documents-04"
+                    ? {
+                        ...scenario,
+                        turns: bindDocumentReviewTurns(
+                          manifest,
+                          scenario.turns
+                        ),
+                      }
+                    : securityFixture && "fixture" in scenario
+                      ? bindSecurityScenario(scenario, securityFixture)
+                      : scenario.id === "intelligence-04"
+                        ? {
+                            ...scenario,
+                            // The original question is ambiguous without page context.
+                            // Supply a visible user clarification, not hidden domain metadata.
+                            turns: [
+                              ...scenario.turns,
+                              "The Plant Intelligence reports for our church.",
+                            ],
+                          }
+                        : {
+                            ...scenario,
+                            turns: bindContentTurns(manifest, scenario.turns),
+                          };
         let expectations =
           assessmentEvidenceExpectations(manifest, options.store) ??
           (scenario.id === "tasks-10"
