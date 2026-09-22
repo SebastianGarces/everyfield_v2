@@ -262,6 +262,13 @@ import {
   foundationalExpectations,
   observedFoundationalFacts,
 } from "./foundational-requests";
+import {
+  selectedNotificationIds,
+  seedSelectedNotifications,
+  bindSelectedNotificationTurns,
+  selectedNotificationExpectations,
+  observedSelectedNotifications,
+} from "./selected-notifications";
 
 type FixtureTransports = {
   prepareDocumentFiles?: DocumentFixtureTransport;
@@ -501,6 +508,7 @@ const familyCaseIds = [
   ...staffingPreparationFixtureIds,
   ...identityNotesFixtureIds,
   ...foundationalRequestIds,
+  ...selectedNotificationIds,
 ];
 
 /** Bound means a runnable fixture, not a passed model-quality evaluation. */
@@ -823,6 +831,7 @@ export function createProductionEveEvalAdapter(
         seedStaffingPreparationFixture(manifest, options.store);
         seedIdentityNotesFixture(manifest, options.store);
         seedFoundationalRequests(manifest, options.store);
+        seedSelectedNotifications(manifest, options.store);
         const orientationDocument = orientationDocumentTruth(
           manifest,
           options.store
@@ -837,56 +846,71 @@ export function createProductionEveEvalAdapter(
             : null;
         const securityFixture = seedSecurityFixture(manifest, options.store);
         const boundScenario =
-          scenario.id === "edges-13"
-            ? { ...scenario, turns: bindSourceRecoveryTurns(scenario.turns) }
-            : scenario.id === "assessments-03"
-              ? {
-                  ...scenario,
-                  turns: bindAssessmentEvidenceTurns(
-                    scenario.id,
-                    scenario.turns
-                  ),
-                }
-              : scenario.id === "tasks-10"
-                ? { ...scenario, turns: bindTaskSelectionTurns(scenario.turns) }
-                : scenario.id === "communication-06"
+          scenario.id === "notifications-03"
+            ? {
+                ...scenario,
+                turns: bindSelectedNotificationTurns(scenario.turns),
+              }
+            : scenario.id === "edges-13"
+              ? { ...scenario, turns: bindSourceRecoveryTurns(scenario.turns) }
+              : scenario.id === "assessments-03"
+                ? {
+                    ...scenario,
+                    turns: bindAssessmentEvidenceTurns(
+                      scenario.id,
+                      scenario.turns
+                    ),
+                  }
+                : scenario.id === "tasks-10"
                   ? {
                       ...scenario,
-                      turns: bindCommunicationRetryTurns(
-                        manifest,
-                        scenario.turns
-                      ),
+                      turns: bindTaskSelectionTurns(scenario.turns),
                     }
-                  : scenario.id === "documents-06"
+                  : scenario.id === "communication-06"
                     ? {
                         ...scenario,
-                        turns: bindContentActionTurns(manifest, scenario.turns),
+                        turns: bindCommunicationRetryTurns(
+                          manifest,
+                          scenario.turns
+                        ),
                       }
-                    : scenario.id === "documents-04"
+                    : scenario.id === "documents-06"
                       ? {
                           ...scenario,
-                          turns: bindDocumentReviewTurns(
+                          turns: bindContentActionTurns(
                             manifest,
                             scenario.turns
                           ),
                         }
-                      : securityFixture && "fixture" in scenario
-                        ? bindSecurityScenario(scenario, securityFixture)
-                        : scenario.id === "intelligence-04"
-                          ? {
-                              ...scenario,
-                              // The original question is ambiguous without page context.
-                              // Supply a visible user clarification, not hidden domain metadata.
-                              turns: [
-                                ...scenario.turns,
-                                "The Plant Intelligence reports for our church.",
-                              ],
-                            }
-                          : {
-                              ...scenario,
-                              turns: bindContentTurns(manifest, scenario.turns),
-                            };
+                      : scenario.id === "documents-04"
+                        ? {
+                            ...scenario,
+                            turns: bindDocumentReviewTurns(
+                              manifest,
+                              scenario.turns
+                            ),
+                          }
+                        : securityFixture && "fixture" in scenario
+                          ? bindSecurityScenario(scenario, securityFixture)
+                          : scenario.id === "intelligence-04"
+                            ? {
+                                ...scenario,
+                                // The original question is ambiguous without page context.
+                                // Supply a visible user clarification, not hidden domain metadata.
+                                turns: [
+                                  ...scenario.turns,
+                                  "The Plant Intelligence reports for our church.",
+                                ],
+                              }
+                            : {
+                                ...scenario,
+                                turns: bindContentTurns(
+                                  manifest,
+                                  scenario.turns
+                                ),
+                              };
         let expectations =
+          selectedNotificationExpectations(manifest, options.store) ??
           foundationalExpectations(manifest, options.store) ??
           identityNotesExpectations(manifest, options.store) ??
           staffingPreparationExpectations(manifest, options.store) ??
@@ -969,6 +993,7 @@ export function createProductionEveEvalAdapter(
                 scenario.id === "documents-05" ||
                 scenario.id === "orientations-04" ||
                 scenario.id === "notifications-04" ||
+                scenario.id === "notifications-03" ||
                 identityNotesFixtureIds.some((id) => id === scenario.id) ||
                 staffingPreparationFixtureIds.some(
                   (id) => id === scenario.id
@@ -1221,6 +1246,17 @@ export function createProductionEveEvalAdapter(
                 });
                 Object.assign(captured.facts, foundational.facts);
                 captured.evidence.push(...foundational.evidence);
+              }
+              if (scenario.id === "notifications-03") {
+                const selected = await observedSelectedNotifications({
+                  manifest,
+                  store: options.store,
+                  calls,
+                  presented,
+                  messages: result.messages,
+                });
+                Object.assign(captured.facts, selected.facts);
+                captured.evidence.push(...selected.evidence);
               }
               const securityObserved = securityFixture
                 ? observeSecurityFixture(securityFixture, calls, result.answer)

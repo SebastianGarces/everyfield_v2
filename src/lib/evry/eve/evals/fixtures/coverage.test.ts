@@ -25,6 +25,7 @@ test("calendar fixture clock is part of the reproducible manifest digest", () =>
 });
 
 const expectedOriginals = [
+  "notifications-03",
   "launch-02",
   "notifications-04",
   "edges-01",
@@ -146,14 +147,14 @@ const expectedRegressions = [
   "regression-partial-outage",
 ].sort();
 
-test("default production fixture coverage has 117 bindings and does not claim the remaining 41 pass", () => {
+test("default production fixture coverage has 118 bindings and does not claim the remaining 40 pass", () => {
   const coverage = productionFixtureCoverage();
   const corpus = [...questions, ...regressions];
   assert.deepEqual(coverage.counts, {
-    runnable: 117,
-    originals: 100,
+    runnable: 118,
+    originals: 101,
     regressions: 17,
-    unbound: 41,
+    unbound: 40,
     corpus: 158,
   });
   assert.deepEqual([...coverage.originalIds].sort(), expectedOriginals);
@@ -234,10 +235,10 @@ test("document comparison is opt-in only after a file transport is supplied", as
     };
   };
   assert.deepEqual(productionFixtureCoverage({ prepareDocumentFiles }).counts, {
-    runnable: 118,
-    originals: 101,
+    runnable: 119,
+    originals: 102,
     regressions: 17,
-    unbound: 40,
+    unbound: 39,
     corpus: 158,
   });
   assert.ok(productionFixtureCoverage().unboundIds.includes("documents-04"));
@@ -403,10 +404,10 @@ test("CSV review requires its signed attachment transport and revokes a failed s
     throw provisionError;
   };
   assert.deepEqual(productionFixtureCoverage({ preparePeopleCsv }).counts, {
-    runnable: 118,
-    originals: 101,
+    runnable: 119,
+    originals: 102,
     regressions: 17,
-    unbound: 40,
+    unbound: 39,
     corpus: 158,
   });
   assert.deepEqual(
@@ -415,10 +416,10 @@ test("CSV review requires its signed attachment transport and revokes a failed s
       prepareDocumentFiles: async () => async () => {},
     }).counts,
     {
-      runnable: 119,
-      originals: 102,
+      runnable: 120,
+      originals: 103,
       regressions: 17,
-      unbound: 39,
+      unbound: 38,
       corpus: 158,
     }
   );
