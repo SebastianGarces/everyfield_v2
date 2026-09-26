@@ -31,7 +31,7 @@ planter because its role said so, and `getAccessibleChurchIds` switched on the r
 at a column. With the role gone the FK IS the answer — so a stray FK stops being noise and becomes a
 competing claim.
 
-`oversightOrgOf` is the one place that resolves it, and it answers **only for a row naming exactly
+`tenancyOf` resolves it; `oversightOrgOf` selects the oversight case, and it answers **only for a row naming exactly
 one tenancy FK**. Two named resolves to nothing.
 
 A precedence order was the obvious alternative and is wrong: whichever FK won, the other tenancy's
@@ -105,20 +105,9 @@ conflating them is the mistake this section exists to prevent.
 guest list and every team assignment reference `persons.id`, and the assignment
 dialog is fed by `listPeople`. Nothing tied a `persons` row to an account, so
 the planter was the one member of their own plant who could not be put on a
-team — they staffed everybody except themselves. It is also the missing half of
-AS-006's own-duty verbs: `tasks.own` shipped only because
-`tasks.assigned_to_id` references `users.id`, and `teams.own` / `meetings.rsvp`
-did not because their subjects are `persons.id`. The subject half now exists;
-the rewire is #495+'s and owes the widening argument again rather than
-inheriting it.
+team — they staffed everybody except themselves. Own-duty permissions use that link where their subjects are people: team leadership and meeting RSVP. Tasks instead assign directly to accounts. Each verb must resolve its stored, tenant-scoped subject after the seat check; an own-duty capability alone is not authority over every row.
 
-**Written at CHURCH-GAIN and nowhere else.** `churchCreationStatements`
-(`src/lib/onboarding/create-church.ts`) is the one contract for "an account just
-gained a plant", and both paths that do it — onboarding step 1 and an invited
-planter's registration — spread that tuple whole (ruling 408-4B). Putting the
-insert there rather than in each caller is what makes "one spelling" true; a
-per-caller insert would be two, and the invited path is the one that would have
-silently lacked it.
+**Written when a plant identity is established.** `churchCreationStatements` creates the planter's linked person. Plant-seat registration and signed-in acceptance use `accountPersonLinkStatements` to adopt a matching unlinked contact or create one atomically with the seat grant. Oversight seats and coaching assignments create no plant person. The link is not a general account lookup: a person who happens to share an account's email need not be that account's linked identity.
 
 **It grants nothing, and that is a property to keep, not a coincidence.** A
 capability names a seat set and a tenancy requirement; nothing in
@@ -288,24 +277,7 @@ is one declaration of each half and no second spelling of the pair.
 **Three things are not in either set, and each is marked rather than parked in
 `ADMIN_PLUS`:**
 
-- `seats: SEATED` — an own-duty verb (AS-006). The seat half refuses a coach
-  (NULL seat) and an oversight account; the SUBJECT half needs the argument, so
-  it belongs after the parse. **`tasks.own` is the only one that ships**, and the
-  reason is a column: `tasks.assigned_to_id` references `users.id`, so
-  `assertMayActOnTask` can ask "is this yours?" once the row is loaded. It runs
-  in the SERVICE rather than in the six actions, so `/launch`'s milestone ticks
-  are covered too, and `planBulkTaskOperation` applies it PER ROW — a Member
-  ticking eight tasks writes the ones they own and gets the rest back named.
-
-  The first round shipped `teams.own` and `meetings.rsvp` the same way and that
-  was WRONG, in the direction a capability name hides: `ministry_teams.leader_id`
-  and the meeting guest list reference `persons.id`, nothing links a person row
-  to an account, and so those two had a floor with nothing above it — every
-  Member in the plant reaching every team and every RSVP, which is wider than
-  the `teams.write` it was replacing. They are `teams.write` / `meetings.write`
-  now: narrower than AS-006 describes, and a team leader holding only a Member
-  seat cannot yet make their team's writes. That is the residual in
-  [`../invariants.md`](../invariants.md), retired by AS-013's person link.
+- `seats: SEATED` is the floor for own-duty verbs, not the subject check. Task assignment resolves through `tasks.assigned_to_id`; team leadership and RSVP resolve through the live plant-scoped `persons.user_id` link. Team-meeting attendance additionally requires the led team. See the team-leader rules below; the former blanket administrative fallback is superseded.
 
 - `seats: null` — a session is the whole rule. A read, or a write whose row is
   keyed by the caller's own user id. A coach and an org Member reach these ON
@@ -316,20 +288,10 @@ is one declaration of each half and no second spelling of the pair.
   `onboarding/leadership.ts`; putting it in a set here would make a grant look
   like a permission and invite someone to "reconcile" the two.
 
-**What moved, and what deliberately did not.** Encoding the ruling narrowed some
-verbs and widened one. Narrowed: every feature-data write now refuses a plant
-Member, and a coach is refused every write including the launch milestone ticks
-that `requireChurchLevel` used to admit them to. Widened: the church profile
-(`setChurchTimeZoneAction`) went from Owner-only to `ADMIN_PLUS`, which is AS-004
-verbatim. Unchanged on purpose: the phase declaration stays the planter's under
-the phase engine's own rule, and the seven `isOrgOwner` arms in
-`invitations/core.ts` stay Owner-only — the ruling's list names the association
-verbs, and those arms are the argument-side half of the same rule, reached only
-after the endpoint's own `requireSeat` has already refused everyone else.
-
+Administrative feature writes require their capability's seat and tenancy. Own-duty writes are deliberately narrower subject grants for Members, not a general widening of administrative authority. The phase declaration remains the planter's; association management remains the org Owner's.
 
 ## Team leader duties (#22)
 
 `teams.own` checks a seated plant account first, then resolves the target's team from stored, tenant-scoped rows. The team's leader must be the caller's non-deleted linked Person. Role/roster changes preserve their existing derived leadership effects, so clearing leadership also removes permission on the next request. Training completion requires an active membership in the program's own team; a church-wide program grants no team subject. The UI receives only the authorized team id, never persons.user_id or a widened global capability.
 
-First-view Playbook seeding remains existing system initialization with fixed template contents. Explicit responsibility writes use the leader check. Team-meeting attendance uses `meetings.attendance` and the stored meeting type and led-team link. Member removal clears attendance in one UPDATE, preserving the guest-list row, RSVP/inviter and response card; Owner/Admin retain full removal. Quick Add Person, explicit RSVP/response-card edits and general meeting administration remain `meetings.write`. Real persistence, concurrent revocation and browser evidence are pending.
+First-view Playbook seeding remains existing system initialization with fixed template contents. Explicit responsibility writes use the leader check. Team-meeting attendance uses `meetings.attendance` and the stored meeting type and led-team link. Member removal clears attendance in one UPDATE, preserving the guest-list row, RSVP/inviter and response card; Owner/Admin retain full removal. Quick Add Person, explicit RSVP/response-card edits and general meeting administration remain `meetings.write`.

@@ -1,6 +1,6 @@
 # Feature Requirements Document: Evry
 
-> **Tracked on the board:** [Evry #758](https://github.com/SebastianGarces/everyfield_v2/issues/758) — open requirements are its sub-issues. Implementation status is not tracked in this file.
+> **ARCHIVAL: excluded from alpha.** The implementation was retired; a future agent requires a new specification. These historical requirements remain solely as the meaning of ids cited by immutable migrations. Do not build from this document or report its rows as current gaps. See the 2026-09-26 ruling in [the decision ledger](../../decisions.md).
 
 **Feature Code:** EV
 **References:** `product-brief.md` (Product Vision, Target Users, Success Metrics), `system-architecture.md` (Authentication & Authorization, Multi-Tenancy, Audit, Integration Boundaries)

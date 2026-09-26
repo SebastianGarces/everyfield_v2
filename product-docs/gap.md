@@ -5,7 +5,7 @@
 **Purpose:** Compare meeting discussion against product documentation (PRD + 10 FRDs) and actual codebase implementation to identify gaps, new decisions, and priorities.
 
 > **Status update (2026-07-25, pointer corrected 2026-08-10):** All implementation-status claims in
-> this document are superseded by `gap-report-2026-06.md` (itself now partially executed). **Live
+> this document are superseded by [historical gap-report-2026-06](https://github.com/SebastianGarces/everyfield_v2/blob/1e47e1c503fd3a14432d43366b161a3c523f9d78/product-docs/gap-report-2026-06.md) (itself now partially executed). **Live
 > work and current status are on the GitHub board — `gh issue list --label feature`.** The former
 > `product-docs/work-queue.md` was deleted when the board became the system of record.
 > Since this was written, tasks (F5), in-app feedback with admin triage,

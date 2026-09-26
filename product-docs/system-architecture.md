@@ -1,7 +1,6 @@
 # EveryField - System Architecture
 
-**Version:** 1.4  
-**Date:** July 25, 2026
+**Updated:** September 26, 2026
 
 ---
 
@@ -13,65 +12,21 @@ This document defines system-wide constraints, data ownership boundaries, and cr
 
 ## High-Level Architecture
 
-EveryField follows a feature-based modular architecture where each feature (F1-F10) owns its specific data and behavior while sharing common entities and services.
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                           EveryField Platform                          │
-├─────────────────────────────────────────────────────────────────────────┤
-│  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │                    Feature Layer                                │   │
-│  │  ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐│   │
-│  │  │ F1  │ │ F2  │ │ F3  │ │ F4  │ │ F5  │ │ F6  │ │ F7  │ │ F8  ││   │
-│  │  │Wiki │ │CRM  │ │Meet │ │Dash │ │Task │ │Docs │ │Fin  │ │Team ││   │
-│  │  └─────┘ └─────┘ └─────┘ └─────┘ └─────┘ └─────┘ └─────┘ └─────┘│   │
-│  │  ┌─────┐ ┌─────┐                                                │   │
-│  │  │ F9  │ │ F10 │                                                │   │
-│  │  │Comm │ │Fac  │                                                │   │
-│  │  └─────┘ └─────┘                                                │   │
-│  └─────────────────────────────────────────────────────────────────┘   │
-│  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │                   Cross-Cutting Services                        │   │
-│  │    Phase Engine │ Auth │ Search │ File Storage                  │   │
-│  └─────────────────────────────────────────────────────────────────┘   │
-│  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │                   External Integrations                         │   │
-│  │  Email │ SMS │ Payment │ Calendar │ Video │ ChMS               │   │
-│  └─────────────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
----
+EveryField uses feature-owned data and behavior with shared authentication, tenant scoping, Plant Intelligence, search and file storage. The [requirements index](prd.md) names the live features and separately identifies retired specifications.
 
 ## Core Canonical Models
 
 These are the **only** shared entities that features may depend on: **SendingNetwork**, **SendingChurch**, **Church**, **User**, **Person**, **Phase**. All other models are feature-owned.
 
-**Key invariant:** All feature data MUST include `church_id` and enforce row-level isolation. Exception: platform-wide content (e.g., global Wiki articles) uses nullable `church_id` where `null` = visible to all.
+**Key invariant:** Every record has an explicit owner: plant, organization, account or global content. Reads and writes enforce that scope; global content is an explicit exception, not a missing authorization check.
 
 For detailed contracts, referencing rules, and cross-feature invariants, see **[Core Data Contracts](./core-data-contracts.md)**.
 
 ---
 
-## Data Ownership Map
+## Data Ownership
 
-> **Principle:** Feature-owned models live in the owning FRD. This table shows boundaries only.
-
-| Feature | Owned Entities | References |
-|---------|---------------|------------|
-| **Core** | SendingNetwork, SendingChurch, Church, User, Phase, CoachAssignment, OrganizationInvitation, ChurchPrivacySettings | — |
-| **F1: Wiki** | WikiArticle, WikiSection, WikiProgress, WikiBookmark | User, Phase |
-| **F2: People/CRM** | Person, Household, Assessment, Interview, Commitment, PersonActivity *(notes are a Person field)* | Church, User |
-| **F3: Meetings** | ChurchMeeting, MeetingAttendance, Invitation, Location, MeetingEvaluation, MeetingChecklistItem *(covers vision meetings, orientations, and team meetings)* | Person |
-| **F4: Dashboard** | *(aggregates only)* | All |
-| **F5: Task Management** | Task | Person, User |
-| **F6: Documents** | Document, Template | Church, Person |
-| **F7: Financial** | Budget, BudgetLineItem | Church |
-| **F8: Ministry Teams** | MinistryTeam, TeamRole, TeamMembership, TrainingProgram, TrainingCompletion *(team meetings reuse F3's ChurchMeeting with type `team_meeting`)* | Person |
-| **F9: Communication** | MessageTemplate, Communication, CommunicationRecipient, MeetingConfirmationToken | Person, User |
-| **F10: Facility** | Facility, SiteVisit | Task, Document |
-
----
+Feature-owned entities and behavior belong to their FRDs; concrete table definitions belong to `src/db/schema/`. Shared entity meanings and association boundaries are defined in [Core Data Contracts](core-data-contracts.md). Cross-feature use goes through the owning domain's contracts rather than duplicating schema tables in this document.
 
 ## Cross-Cutting Services
 
@@ -88,16 +43,7 @@ The platform's primary differentiator. An **advisory intelligence engine**, not 
 - Emit `phase.changed` (on transition) and `plant.assessment.created` (on new snapshot)
 - Maintain an immutable transition + assessment audit history
 
-**Readiness gates** (advisory — they inform a "ready to advance" insight, they do **not** block; full table and rubric in the FRD):
-
-| Transition | Key Marks |
-|------------|-----------|
-| 0 → 1 | Foundational modules complete, values documented, coach assigned |
-| 1 → 2 | 30-40 committed adults, financial base, worship leader, geographic area |
-| 2 → 3 | All 8 team leaders assigned, launch date set |
-| 3 → 4 | Team training complete, systems tested, 3-4 weeks to launch |
-| 4 → 5 | Pre-launch services done, promotion executed |
-| 5 → 6 | First service complete, guest data entered, debrief done |
+Readiness criteria and rubric versions belong to the Phase Engine specification. They advise the planter and never block an explicit phase transition.
 
 ---
 
@@ -105,20 +51,9 @@ The platform's primary differentiator. An **advisory intelligence engine**, not 
 
 #### Hierarchical Tenant Model
 
-```
-SendingNetwork (optional, standalone)
-    └── SendingChurch(es) (optional, can exist independently)
-        └── Church Plant(s) (can exist independently)
-            └── Users (planter, coach, team members)
-```
+A plant can associate independently with a sending church and a network; neither relationship is inherited from the other. A sending church can also associate with a network. All of those associations are optional and mutable.
 
-**Design principle: All relationships are optional and mutable.** Every entity can exist independently and be associated later via the invitation system. All hierarchy FKs (`sending_church_id`, `sending_network_id`) are nullable.
-
-A church plant may be:
-- Independent (no sending relationship)
-- Sent by a church only (sending church has no network)
-- Sent by a church within a network
-- Directly under a network (no sending church)
+Accounts hold seats in a plant or oversight organization. Coaches reach plants through separate assignments, and discovery profiles can exist before a plant or seat does.
 
 A sending church may be:
 - Independent (no network affiliation)
@@ -127,26 +62,16 @@ A sending church may be:
 #### Association & Invitation System
 
 Associations between entities are managed through an invitation system:
-- **Oversight invites, target accepts.** The sending church admin or network admin initiates the invitation. The planter (or sending church admin) must accept or decline.
+- **Oversight invites, target accepts.** The sending church or network Owner initiates the invitation. The target's authorized Owner or discovery account accepts or declines.
 - Associations can be created at any time (**late association**) and removed (**disassociation**), with full audit logging.
-- Coach assignment is **planter-initiated**: the planter invites their coach.
+- Coach assignment is initiated by an authorized plant Owner or Admin.
 - On acceptance, the target entity's FK is updated (e.g., `churches.sending_church_id` is set). On removal, the FK is set back to null.
 
-#### User Roles and Scope
+#### Seats and Scope
 
-| User Type | Scope | Access |
-|-----------|-------|--------|
-| Planter | Own church | Full CRUD on church data |
-| Coach | Assigned churches | Read access to assigned planters' data (via `coach_assignments`) |
-| Team Member | Own church | Feature-limited access |
-| Sending Church Admin | Sent churches | Aggregate metrics only (per planter's privacy settings) |
-| Network Admin | Network churches | Network-wide aggregate metrics only (per planter's privacy settings) |
+A capability combines seat and tenancy; coaching adds assignment-based read scope. Org Members have the Owner's read scope but no administrative writes. Plant Members retain their explicitly scoped own-duty operations. Discovery is an explicit pre-plant profile and grants no tenant reach.
 
-**Invariants:**
-- Church-scoped data isolation enforced at application layer (DB-layer RLS is a future goal)
-- Role determines feature access; church_id determines data access
-- Oversight users (sending church/network) see aggregate metrics only; no individual person records
-- Planters control what data is visible to oversight via **per-feature privacy toggles**
+Tenant isolation is application-enforced. Oversight receives privacy-gated aggregates, never individual CRM records; basic portfolio facts and named consent-exempt milestones have separate rules. A coach's consent is the assignment, not the oversight toggles.
 
 ---
 
@@ -156,17 +81,19 @@ Unified full-text search across: Wiki articles, People (name/email/phone), Tasks
 
 ### File Storage
 
-Document uploads, template storage, export generation (PDF, XLSX). All files scoped to `church_id`.
+Document uploads, template storage and exports are scoped to their owning plant or account. Private objects are served through an authenticated application boundary; a storage key is not a public URL.
 
 ---
 
 ## Integration Boundaries
 
-### External Services
+### Integration Direction
+
+The feature specifications govern which integrations are in scope; this table does not claim that every integration is implemented.
 
 | Function | Purpose | Integration |
 |----------|---------|-------------|
-| Email | Bulk/transactional delivery | API (SendGrid, SES) |
+| Email | Bulk/transactional delivery | Resend API |
 | SMS | Text messaging | API (Twilio) |
 | Payment | Online giving | Redirect + Webhook |
 | ChMS | Member sync | API (Planning Center, Breeze) |
@@ -187,15 +114,15 @@ Document uploads, template storage, export generation (PDF, XLSX). All files sco
 ### Multi-Tenancy
 
 **Hierarchical Scoping:**
-- All feature data scoped to `church_id` (architectural invariant)
+- Plant feature data is church-scoped; org and account data retain their own scope
 - Churches optionally belong to `sending_church_id` and/or `sending_network_id` (both nullable)
 - Tenant isolation enforced at application layer; DB-layer RLS is a future goal
 
 **Access Patterns:**
 - Planters/Team Members: Single church scope (`user.church_id`)
 - Coaches: Multiple assigned churches (via `coach_assignments` table)
-- Sending Church Admins: All churches with matching `sending_church_id` (via `user.sending_church_id`)
-- Network Admins: All churches with matching `sending_network_id` (via `user.sending_network_id`)
+- Sending-church seats: The organization's associated plants; seat controls writes, not portfolio read parity
+- Network seats: Plants directly associated with the network through their own `sending_network_id`; a sending church's network association grants no additional plant reach
 
 **Late Association & Disassociation:**
 - Church plants can operate indefinitely without any sending relationship
@@ -206,7 +133,7 @@ Document uploads, template storage, export generation (PDF, XLSX). All files sco
 **Per-Feature Privacy Controls:**
 - Each church plant has a `church_privacy_settings` record controlling which features are visible to oversight users
 - Privacy toggles: `share_people`, `share_meetings`, `share_tasks`, `share_financials`, `share_ministry_teams`, `share_facilities`
-- All default to `false` (opt-in sharing)
+- Self-started plants default closed; first-association acceptance can establish invite-origin defaults with explicit consent, without resetting an already-associated plant's choices
 - Oversight users only see aggregate data for features the planter has enabled
 
 ### Security
@@ -241,7 +168,7 @@ Document uploads, template storage, export generation (PDF, XLSX). All files sco
 | **ORM** | Drizzle | Type-safe, lightweight, native RLS support |
 | **Validation** | Zod | Runtime type validation, schema-first, TypeScript integration |
 | **Authentication** | Custom (session-based) | No third-party dependency; follows Lucia/Copenhagen patterns |
-| **Authorization** | RBAC | Role-based access control per user type |
+| **Authorization** | Seat and tenancy capabilities | Shared authority rules with subject-specific own-duty checks |
 | **Multi-tenancy** | Application-layer `church_id` scoping | Enforced in query helpers; PostgreSQL RLS is a future goal |
 | **Package Manager** | pnpm | Fast, disk-efficient, strict dependency management |
 
@@ -251,7 +178,7 @@ Document uploads, template storage, export generation (PDF, XLSX). All files sco
 |-------|------------|
 | Frontend | Responsive; future offline support |
 | Backend | Multi-tenant; real-time capable |
-| Database | Relational; complex queries + row-level security |
+| Database | Relational; complex queries; application-enforced tenant isolation |
 | File Storage | Document storage with church scoping |
 | Search | Full-text across wiki, people, tasks |
 
@@ -267,20 +194,6 @@ Session-based authentication following [Lucia](https://lucia-auth.com/) and [The
 - CSRF protection on state-changing requests
 - Rate limiting on authentication endpoints
 
-### Authorization Model
+### Authorization Enforcement
 
-Role-Based Access Control (RBAC) with tenant scoping:
-
-| Role | Scope | Access |
-|------|-------|--------|
-| `planter` | Own church | Full CRUD on own church data |
-| `coach` | Assigned churches (via `coach_assignments`) | Read access to assigned planters' data |
-| `team_member` | Own church | Feature-limited access within church |
-| `sending_church_admin` | Sent churches (via `user.sending_church_id`) | Aggregate metrics for features planter has shared |
-| `network_admin` | Network churches (via `user.sending_network_id`) | Aggregate metrics for features planter has shared |
-
-**Enforcement:**
-- Application-layer enforcement of `church_id` isolation on all queries
-- Middleware validates role permissions before route access
-- Privacy settings checked before returning data to oversight users
-- DB-layer RLS is a future goal
+Every mutation boundary establishes the authenticated actor and checks the required capability before trusting input. Subject-specific authority is checked against stored, tenant-scoped records. Route handlers require their own guards; a page gate or proxy redirect is not authorization for a write. Privacy is checked before returning oversight data, and conflicting tenancy claims fail closed.

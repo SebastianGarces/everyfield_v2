@@ -7,7 +7,7 @@ the requirements-docs rules).
 
 **Method:** four parallel audit agents surveyed the codebase on `main` (sending/oversight side,
 accounts/roles/multi-user access, planter onboarding, business/production surface), cross-checked
-against `product-brief.md`, `docs-audit-2026-07.md`, and the board. Every claim below was verified
+against `product-brief.md`, [historical docs-audit-2026-07](https://github.com/SebastianGarces/everyfield_v2/blob/1e47e1c503fd3a14432d43366b161a3c523f9d78/product-docs/docs-audit-2026-07.md), and the board. Every claim below was verified
 against a concrete `file:line` at audit time; the full evidence lives in the milestone issues.
 
 ---
@@ -118,7 +118,7 @@ through the #190 bridge; Sebastian talks to the humans.
 
 ## 5. How to resume this work
 
-1. ~~Rule #192 and #193~~ — ruled 2026-07-27; ledger in `docs-audit-2026-07.md` §4.
+1. ~~Rule #192 and #193~~ — ruled 2026-07-27; ledger in [historical docs-audit-2026-07](https://github.com/SebastianGarces/everyfield_v2/blob/1e47e1c503fd3a14432d43366b161a3c523f9d78/product-docs/docs-audit-2026-07.md) §4.
 2. ~~Fix #183~~ — merged as #197, dev-DB residue repaired.
 3. Spec the `needs-spec` issues — suggested order: #184 (onboarding), #186 (oversight), #187
    (settings), #185 (team accounts — needs the duties ruling first, likely via the prototype flow),

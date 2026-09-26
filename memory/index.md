@@ -9,7 +9,7 @@ Memory holds what the code cannot tell you: invariants, rulings, and architectur
 | [entrypoints.md](entrypoints.md) | Where flows start |
 | [contracts/api.md](contracts/api.md) | Non-obvious route behaviours (cron, webhooks, tokened routes) |
 | [contracts/db.md](contracts/db.md) | Non-obvious column semantics and migration rules |
-| [contracts/config.md](contracts/config.md) | Env vars (incl. ones absent from `.env.example`) and constants |
+| [contracts/config.md](contracts/config.md) | Configuration semantics and operational setup; values live in source |
 | [contracts/data-patterns.md](contracts/data-patterns.md) | Client/server data-sync conventions |
 
 There is **no size cap** (ruled 2026-08-15). The byte budget was removed because it had become a tax on every unrelated pass: it was re-pinned four times in two days, and each raise cost a compression negotiation that bought wording back rather than removing a rule. Size is still a real cost — `memory/` is read before source on almost every pass — so the discipline that made the cap work stays, now as review rather than as a test: **each rule is 1–3 sentences**, the *why* that is not derivable from source goes down into `memory/invariants/<domain>.md`, and nothing here mirrors what the source already says. A change that adds or alters a rule updates `memory/` in the same change (`ops/process.md`).

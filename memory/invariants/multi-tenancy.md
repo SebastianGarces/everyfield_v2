@@ -34,7 +34,7 @@ The two oversight FKs are **independent associations held side by side**; neithe
 - The ruling is a **Resend email** action on pending rows, persisting nothing. An `email_sent` column also fails on the merits: `sent` from the provider is *acceptance*, not delivery.
 - **One status decision, still in the sender**: the resend calls the create's path and keeps the refusal reason, adding only the expiry, because the sender guards the STATUS and not the window. **No refusal offers a link** — when a ruling removes a CONTROL, grep the copy and the docblocks too.
 - **Accepted residual (⚖):** the resend cooldown is per client session, so a reload or a second admin mounts the row with none. Closing it needs a durable last-send record, which the no-persistence constraint refuses, and an idempotent replay returns the ORIGINAL response. The inbox still gets one email per 60-second bucket: the residual is a wrong CLAIM, never a wrong DELIVERY.
-- **A failed resend is a failed action**, unlike the create: the send is its entire product, so a refusal throws and renders inline on the row. Authority is the same `invitingOrgOf(actor)` predicate as list and revoke, and "no such invitation" and "not yours" are ONE message, because an invitation id is also an unauthenticated bearer token.
+- **A failed resend is a failed action**, unlike the create: the send is its entire product, so a refusal throws and renders inline on the row. Write authority is `invitingOrgOf(actor)`, as for revoke; the list uses the wider `readableOrgOf(actor)` so org Members retain read parity, and "no such invitation" and "not yours" are ONE message, because an invitation id is also an unauthenticated bearer token.
 
 ## Seat invitations — the same rulings, a second table (#495)
 
