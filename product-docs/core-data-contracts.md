@@ -1,216 +1,54 @@
 # EveryField - Core Data Contracts
 
-**Version:** 1.3  
-**Date:** July 25, 2026
-
----
-
-## Purpose
-
-This document defines shared entity contracts and cross-feature rules. It specifies **what features can depend on** without duplicating full schemas. Feature-owned models and detailed implementations live in each feature's FRD.
-
----
+This document defines shared meanings and ownership boundaries. Field names, types and constraints are defined in `src/db/schema/`; feature requirements define desired behavior. Do not maintain a second schema here.
 
 ## Shared Entities
 
-### SendingNetwork
+| Entity | Cross-feature meaning |
+|---|---|
+| SendingNetwork | An oversight organization that can associate with sending churches and plants. |
+| SendingChurch | An oversight organization, distinct from a plant; it can operate independently or associate with a network. |
+| Church | The plant and primary tenant for operational feature data. Its sending-church and direct-network associations are independent; one does not imply or replace the other. |
+| User | A login identity. Authority is a seat plus its tenancy, not a flat role. Coaching assignments and a discovery profile are separate relationships. |
+| Person | A plant's CRM identity. An optional account link identifies that person for own-duty checks but grants no seat or general authority. |
+| Phase | A plant's advisory journey context. Initial declarations record attested history; transitions record a change, and the two must not be counted interchangeably. |
 
-Church planting networks that oversee multiple sending churches and/or church plants. May exist independently at the top of the hierarchy.
+### Seats, coaching and discovery
 
-| Field | Type | Contract |
-|-------|------|----------|
-| `id` | UUID | Primary key |
-| `name` | String | Network name (e.g., "Send Network", "ARC") |
-| `created_at` | Timestamp | |
-| `updated_at` | Timestamp | |
+Owner, Admin and Member are seats held in one tenancy: a plant, sending church or network. A null seat means no seat, not necessarily a coach. An account with conflicting tenancy claims fails closed. Original registration can precede plant creation; discovery is an explicit profile rather than an inference from absent tenancy.
 
-### SendingChurch
+Coaching grants read access through an active assignment, independently of a seat an account may hold elsewhere. A discovery association grants neither an org seat nor tenant access. Creating a plant and accepting a plant seat establish the appropriate person link; org seats and coach assignments do not create CRM people.
 
-Churches that send planters. A separate entity from Church (church plants) because sending churches do not go through the phase journey (phases 0-6). May belong to a network or operate independently.
+### Associations and privacy
 
-| Field | Type | Contract |
-|-------|------|----------|
-| `id` | UUID | Primary key |
-| `name` | String | Church name |
-| `sending_network_id` | UUID (FK) | Optional; parent network. Nullable because a sending church can exist independently. |
-| `created_at` | Timestamp | |
-| `updated_at` | Timestamp | |
+Association invitations bind consenting entities; seat invitations grant account standing; coach invitations grant assignments. These are different authorities and must not be inferred from one another. Associations can be accepted or severed with the relevant subject's audit history.
 
-### Church
-
-The church plant being launched. The primary tenant entity.
-
-| Field | Type | Contract |
-|-------|------|----------|
-| `id` | UUID | Primary key; referenced by all feature data |
-| `name` | String | Church plant name |
-| `current_phase` | Enum (0-6) | Drives phase-aware UI/logic across features |
-| `sending_church_id` | UUID (FK) | Optional; the church that sent this plant |
-| `sending_network_id` | UUID (FK) | Optional; direct network relationship (if no sending church) |
-
-**Hierarchy note:** A church plant may have:
-- No sending relationship (independent)
-- Only `sending_church_id` (sent by independent church)
-- Both `sending_church_id` and inherited network (sent by church in network)
-- Only `sending_network_id` (directly under network, no sending church)
-
-### User
-
-| Field | Type | Contract |
-|-------|------|----------|
-| `id` | UUID | Primary key |
-| `church_id` | UUID (FK) | Nullable for oversight roles |
-| `sending_church_id` | UUID (FK) | Nullable; for sending church admins |
-| `sending_network_id` | UUID (FK) | Nullable; for network admins |
-| `role` | Enum | See role enum below |
-
-**Role Enum:** `planter` / `coach` / `team_member` / `sending_church_admin` / `network_admin`
-
-### Person
-
-| Field | Type | Contract |
-|-------|------|----------|
-| `id` | UUID | Primary key |
-| `church_id` | UUID (FK) | Required; scoping key |
-| `first_name` | String | Display name (required) |
-| `last_name` | String | Display name (required) |
-| `status` | Enum | Pipeline position (values defined in F2 FRD) |
-
-### Phase
-
-Phase is **not a standalone table**. It is `churches.current_phase` (integer 0-6) plus the Phase Engine's immutable transition audit trail. Advancement is advisory and planter-confirmed — the Phase Engine judges readiness against a versioned rubric but never gates (transitions may go forward, back, or skip).
-
-**PhaseTransition** (append-only audit record, owned by the Phase Engine):
-
-| Field | Type | Contract |
-|-------|------|----------|
-| `church_id` | UUID (FK) | Scoping key |
-| `from_phase` | Integer (0-6) | |
-| `to_phase` | Integer (0-6) | Forward, back, or skip — never blocked |
-| `initiated_by_id` | UUID (FK) | The planter who confirmed the transition |
-| `reason` | String | Planter-provided context |
-| `fact_snapshot` | JSON | Deterministic plant facts at transition time (Signal layer) |
-| `rubric_version` | String | Rubric version used for the readiness judgment |
-
-### CoachAssignment
-
-Links a coach user to the church plants they oversee. A coach can be assigned to multiple churches.
-
-| Field | Type | Contract |
-|-------|------|----------|
-| `id` | UUID | Primary key |
-| `coach_user_id` | UUID (FK) | References User; must have role `coach` |
-| `church_id` | UUID (FK) | References Church; the plant being coached |
-| `assigned_at` | Timestamp | When the assignment was created |
-| `status` | Enum | `active` / `inactive` |
-
-### OrganizationInvitation
-
-Tracks invitations between hierarchy entities (network invites sending church, sending church invites plant, etc.).
-
-| Field | Type | Contract |
-|-------|------|----------|
-| `id` | UUID | Primary key |
-| `type` | Enum | `church_to_sending_church` / `sending_church_to_network` / `church_to_network` |
-| `inviter_user_id` | UUID (FK) | The oversight admin who sent the invitation |
-| `target_church_id` | UUID (FK) | Nullable; for church plant invitations |
-| `target_sending_church_id` | UUID (FK) | Nullable; for sending church invitations to join a network |
-| `sending_church_id` | UUID (FK) | Nullable; the sending church doing the inviting |
-| `sending_network_id` | UUID (FK) | Nullable; the network doing the inviting |
-| `status` | Enum | `pending` / `accepted` / `declined` / `expired` / `revoked` |
-| `responded_by` | UUID (FK) | Nullable; the user who accepted/declined |
-| `responded_at` | Timestamp | Nullable |
-| `created_at` | Timestamp | |
-| `expires_at` | Timestamp | |
-
-### ChurchPrivacySettings
-
-Controls which feature data a church plant shares with oversight users (sending church admin, network admin). One row per church plant. All toggles default to `false` (opt-in sharing).
-
-| Field | Type | Contract |
-|-------|------|----------|
-| `id` | UUID | Primary key |
-| `church_id` | UUID (FK) | Unique; one row per church plant |
-| `share_people` | Boolean | Share People/CRM aggregate data |
-| `share_meetings` | Boolean | Share Meeting metrics |
-| `share_tasks` | Boolean | Share Task progress |
-| `share_financials` | Boolean | Share Financial data |
-| `share_ministry_teams` | Boolean | Share Ministry Team health |
-| `share_facilities` | Boolean | Share Facility data |
-| `updated_at` | Timestamp | |
-| `updated_by` | UUID (FK) | User who last changed settings |
-
----
+Feature sharing governs oversight aggregates, never individual person records. Self-started plants default closed. Acceptance of the first oversight association can establish invite-origin sharing defaults with explicit consent; re-invitation must not overwrite choices made while already associated. The basic portfolio listing and the named consent-exempt milestones remain visible under their separate rules. Coaching reads use assignment consent, not oversight sharing toggles.
 
 ## Referencing Rules
 
-Features **reference shared entities by ID only**—never duplicate profile fields.
+Features reference shared identities instead of copying mutable profile fields. A task assignee references an account; a team member or meeting attendee references a person. Those identifiers are not interchangeable.
 
-| Pattern | Example | Rationale |
-|---------|---------|-----------|
-| Store `person_id` | Task.assigned_to → Person.id | Single source of truth for name/contact |
-| Store `user_id` | Note.created_by → User.id | Audit and ownership |
-| Store `church_id` | All feature tables | Tenant scoping |
-| Read `current_phase` | Filter wiki content by phase | Phase-aware behavior |
-
-**Anti-patterns (avoid):**
-- Storing `person_name` alongside `person_id`
-- Caching `church_name` in feature tables
-- Duplicating `user.role` in feature-specific permission columns
-
----
+Do not mirror church names or permissions in feature tables. Display and authority resolve from the owning entity. Tenant scope must be established from the authenticated actor or an explicitly authorized relationship, never trusted from a submitted id.
 
 ## Cross-Feature Invariants
 
-### Tenant Scoping
+### Tenant scoping
 
-> **All feature data MUST include `church_id` and enforce row-level isolation.**
+Plant data is scoped to its church; oversight-owned data is scoped to its org; account-owned data is scoped to its account. Global content, such as shared wiki articles, has an explicit global case. Isolation is enforced by the application; database RLS is not a fallback.
 
-- Every feature table includes `church_id` foreign key
-- Row-level isolation enforced at the application layer (`church_id` filtering on all queries); DB-layer RLS is a future goal
-- Coach/Network Admin roles may have cross-church read access for assigned churches only
-- No cross-tenant data leakage in queries, exports, or search results
+The same boundaries apply to lists, by-id reads, exports, search and writes. An accessible plant does not confer access to unrelated organizations behind it.
 
-**Exception for platform-wide content:** Features with shared/global content (e.g., Wiki) may use nullable `church_id` where `null` indicates platform-wide visibility. Query pattern: `WHERE church_id IS NULL OR church_id = :current_church_id`.
+### Audit and history
 
-### Audit Expectations
+Record actor and time for auditable user decisions. Association, launch and phase history retain the meaning of their original event; a declaration is not a phase advance. Stored assessments retain their rubric version so historical judgments are not reinterpreted against a newer rubric. Financial audit requirements belong to the financial feature specification.
 
-| Requirement | Scope |
-|-------------|-------|
-| `created_at`, `updated_at` | All mutable entities |
-| `created_by` (user_id) | User-initiated mutations |
-| Immutable audit trail | Financial data (F7) |
-| Fact snapshot + rubric version on transition | Phase changes |
+### Events and ownership
 
-### Event Naming Conventions
+Domain events use `entity.action` names. Event contracts and subscribers live with their owning code; replay safety and concurrency guarantees must hold at the database boundary, not depend on a handler running once.
 
-Events follow `entity.action` pattern:
-
-| Event | Emitter | Subscribers |
-|-------|---------|-------------|
-| `phase.changed` | Phase Engine | All phase-aware features |
-| `plant.assessment.created` | Phase Engine | Dashboard (F4), Oversight views |
-| `person.created` | F2 (People/CRM) | Features needing person sync |
-| `person.status.changed` | F2 (People/CRM) | Dashboard, Communication |
-
-**Event contract:**
-- Events include `church_id` for scoping
-- Events include `timestamp` and `triggered_by` (user_id or system)
-- Subscribers handle events idempotently
-
----
-
-## Data Ownership Summary
-
-| Owner | Entities | Dependents May |
-|-------|----------|----------------|
-| **Core** | SendingNetwork, SendingChurch, Church (incl. `current_phase`), User, CoachAssignment, OrganizationInvitation, ChurchPrivacySettings | Read all fields |
-| **F2 (People/CRM)** | Person, Household | Read; write attendance/assignment via own tables |
-
-Features own their domain tables and reference shared entities by ID. See [System Architecture](./system-architecture.md) for full ownership map.
-
----
+Features own their domain entities; shared identifiers do not permit another feature to bypass the owner's mutation rules. See [System Architecture](system-architecture.md) for system-wide constraints.
 
 ## Stability
 
-This document defines **stable contracts**. Changes require cross-feature impact assessment. Field additions to shared entities are non-breaking; field removals or type changes require migration coordination.
+Changing a shared meaning requires cross-feature impact assessment. Field removals and type changes require migration coordination; existing applied migrations and historical ledgers are not rewritten to match a newer design.

@@ -11,7 +11,7 @@
 | `CRON_SECRET` | For prod | Bearer token for BOTH scheduled routes, `/api/phase-engine/assess` and `/api/notifications/dispatch`; both fail closed when unset. It must hold the same value in two places: the Vercel production env (read by the routes) and this repo's Actions secrets (sent by `.github/workflows/notifications-dispatch.yml` every 15 min and `.github/workflows/phase-engine-assess.yml` at 07:00/19:00 UTC). `vercel.json` carries no crons at all — Hobby caps them at daily, too few for either job |
 | `OPENAI_API_KEY` | Phase Engine | LLM judge + embeddings (`src/lib/phase-engine/judge/provider.ts`, `rag/embed.ts`). Not in `.env.example` |
 | `PHASE_ENGINE_TPM_LIMIT` | No | Bootstrap tokens-per-minute ceiling the assessment batch paces against (`src/lib/phase-engine/judge/token-pacer.ts`, default 30000). `x-ratelimit-limit-tokens` on any response OVERRIDES it, so it is a hint, never the authority; a non-numeric or non-positive value falls back to the default rather than throwing |
-| `LANGFUSE_SECRET_KEY` / `_PUBLIC_KEY` / `_BASE_URL` | No | LLM tracing (`src/lib/phase-engine/observability.ts`). Not in `.env.example` |
+| `LANGFUSE_SECRET_KEY` / `_PUBLIC_KEY` / `_BASE_URL` / `_TRACING_ENVIRONMENT` | No | Plant Intelligence tracing (`src/lib/phase-engine/observability.ts`). All four must be present together; partial configuration is refused. Listed in `.env.example` |
 | `UNSUBSCRIBE_TOKEN_SECRET` | **Required in production** | Seals BOTH AES-256-GCM capability tokens (`src/lib/notifications/channels/unsubscribe-token.ts`): the emailed `disable` link (180d) and the confirmation page's `enable` undo (1h). The key is `SHA-256(purpose : secret)`, so the two directions never share a key. Minimum 32 characters — a single SHA-256 is not a KDF, so one genuine token is an offline guessing oracle; `openssl rand -base64 32` gives 44 (#263 item 3). `CRON_SECRET` is a fallback in local/test runtimes ONLY (`NODE_ENV !== "production"`); production requires the dedicated variable and refuses to substitute, so one set of bytes never guards both the scheduler and every unsubscribe link in flight (#263 item 4). With no usable value, composing a notification email FAILS rather than sending a dead opt-out link |
 | `RESEND_API_KEY` | For email | Resend client (`src/lib/email/client.ts`, webhook route) |
 | `RESEND_WEBHOOK_SECRET` | Email tracking | Svix signature check in `src/app/api/webhooks/resend/route.ts` |
@@ -44,20 +44,7 @@ client, non-default ports) without a second copy.
 
 ---
 
-## Constants
 
-**Session** (`src/lib/auth/session.ts`): SESSION_EXPIRY_DAYS 30 · SESSION_REFRESH_THRESHOLD_DAYS 15 · SESSION_COOKIE_NAME "session" (`src/lib/auth/cookies.ts`)
-
-**Password hashing — Argon2id** (`src/lib/auth/password.ts`): memoryCost 19456 KiB · timeCost 2 · outputLen 32 · parallelism 1
-
----
-
-## Cookie Settings
-
-- `session` — httpOnly, secure in prod, sameSite lax. Source: `src/lib/auth/cookies.ts`
-- `sidebar_state` — non-httpOnly UI state. Source: `src/components/ui/sidebar.tsx` (shadcn sidebar)
-
----
 
 ## Navigation Config
 

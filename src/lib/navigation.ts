@@ -146,7 +146,7 @@ export const mainNavItems: NavItem[] = [
     icon: FileText,
     requiresChurch: true,
   },
-  // Sprint A: hidden until built - see gap-report-2026-06.md
+  // Hidden until the feature has a working route.
   // {
   //   title: "Financial",
   //   href: "/financial",
@@ -165,7 +165,7 @@ export const mainNavItems: NavItem[] = [
     icon: MessageSquare,
     requiresChurch: true,
   },
-  // Sprint A: hidden until built - see gap-report-2026-06.md
+  // Hidden until the feature has a working route.
   // {
   //   title: "Facilities",
   //   href: "/facilities",

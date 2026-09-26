@@ -14,7 +14,7 @@ Today, planters manage all of this with a patchwork of disconnected tools: sprea
 
 ---
 
-## What EveryField Does Today
+## What EveryField Does
 
 EveryField is a web application that gives church planters a single platform to **learn**, **plan**, **execute**, and **measure** their church plant journey, guided by proven best practices from the Launch Playbook methodology (developed by Harvest Bible Fellowship).
 
@@ -74,48 +74,6 @@ Also part of the product's scope. Check the board for where each one stands.
 
 ---
 
-## AI: The Two Halves of the Direction
+## Plant Intelligence
 
-The biggest opportunity with EveryField is reducing the operational burden on the planter. Church planters are typically not administrators — they're pastors, visionaries, and relationship builders. Every minute spent clicking through forms, writing follow-up emails, or hunting for the right wiki article is a minute not spent casting vision or meeting with people.
-
-The AI direction has two separate halves. The **judgment half** is the Phase Engine (see Core Features above): a retrieval-grounded judge that assesses each plant against the Launch Playbook and surfaces insights to planters and health signals to oversight. The **action half** is [Evry](./features/church-plant-agent/frd.md), a conversational application-action workspace for accounts in a plant tenancy.
-
-### Evry Application Actions
-
-Evry is available as a contextual panel and a dedicated conversation workspace. A person describes the EveryField work they need, reviews any lasting effects in a structured confirmation artifact, and confirms before Evry changes data, stores a file, or sends a communication.
-
-**Meeting work:**
-
-- *"Schedule a vision meeting for next Thursday at 7pm at the Johnson's house"* → Evry resolves the date, location, and meeting details, then presents the meeting for confirmation.
-- *"Invite everyone who attended the last vision meeting plus the 5 new prospects I added this week"* → Evry resolves and previews the exact recipient set and communication before confirmation.
-- *"Send a reminder to everyone who hasn't RSVP'd to Thursday's meeting"* → Evry finds the eligible recipients, reports exclusions, and previews the reminder before confirmation.
-
-**People work:**
-
-- *"Add John and Sarah Miller — they came to the vision meeting last night and Mike Davis referred them"* → Evry prepares the two People/CRM records, household link, source, referrer, and attendance effects for confirmation.
-- *"Move everyone who's attended three Vision Meetings to Following Up"* → Evry identifies the qualifying people and shows the complete before-and-after set before confirmation.
-- *"Who haven't I followed up with in the last two weeks?"* → Evry returns the application result directly because the request is a read.
-
-**Communication and task work:**
-
-- *"Send a thank-you email to everyone who came last night"* → Evry resolves attendance, drafts the email, and shows recipients and content before confirmation.
-- *"What do I need to do before the meeting on Thursday?"* → Evry shows the meeting checklist and related tasks without a confirmation pause.
-- *"Create follow-up tasks for everyone who attended last night, due in 48 hours"* → Evry shows every proposed task, assignee, and due date before confirmation.
-
-### Reducing Clicks to Zero
-
-The goal is to make common workflows require **zero navigation and zero form-filling** while keeping the same permissions and making every effect visible before it happens:
-
-
-| Traditional flow | Evry flow |
-|---|---|
-| Navigate to Meetings → New → Complete form → Save → Communication → Select recipients → Write email → Send | *"Schedule a Vision Meeting next Thursday at 7 PM and invite all prospects"* → review one combined plan → confirm |
-| Navigate to People → Add → Complete form → Save → Person → Add note → Save | *"Add Jane Doe, met her today, interested in kids ministry"* → review the record and note → confirm |
-| People → Filter by stage → Select multiple → Bulk action → Change stage → Confirm | *"Move everyone who signed a commitment card to Core Group"* → review the exact people and prior stages → confirm |
-| Tasks → Review each → Complete → Open next | *"Mark all prep tasks for last night's meeting complete"* → review the exact tasks → confirm |
-
-### Boundary, Scope, and Interface
-
-Evry covers operational work available to an authenticated account in a plant tenancy. Settings, coaching, oversight, sessionless flows, and pre-tenancy onboarding are outside its contract. It does not answer theology, prayer-guidance, pastoral-advice, or general-purpose questions; those requests produce a brief application-only message and no application access.
-
-EveryField's standard interface remains available for direct, fine-grained work. Evry adds durable conversation history, visible page context, structured read results, focused clarification choices, dynamic confirmation artifacts, execution progress, and per-step receipts. A person can return days later and see the same messages, plan state, and outcomes without risking a replay.
+Plant Intelligence interprets deterministic plant facts against the Launch Playbook and provides advisory insights. Phase decisions remain planter-confirmed. Operational work uses the product's ordinary interface; Evry and Jev are outside alpha scope.

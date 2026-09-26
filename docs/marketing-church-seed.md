@@ -21,14 +21,10 @@ church **Grace Fellowship Denton** → both plants. The network row's exact NAME
 is the seed's cleanup namespace (`--clean` scopes to it; renames must be added
 to `LEGACY_NETWORK_NAMES` in the script or prior runs are orphaned).
 
-**Status: RULED 2026-07-31 (all five open questions answered) — ready to build.**
 Purpose: real dashboard screenshots for the landing page (replacing the CSS
 mocks per the catalog's standing rule: "real screenshots replace the mocks
 when the app ships"). Shots must be the genuine product on marketing-quality
 data — no `Core dayspring-1` names, no empty states, no lorem.
-
-Sequencing: the sharp app theme (PR #239) must merge first; shots of the lime
-theme would be stale on arrival.
 
 ## The church
 

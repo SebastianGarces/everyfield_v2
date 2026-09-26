@@ -10,8 +10,8 @@ tenant scope; `created_at`/`updated_at` default now.
 ## Non-obvious column semantics
 
 - **`churches.time_zone`** (`church.ts`): non-null IANA id, default and backfill `America/Chicago`. Invalid ids are rejected on write (`isValidTimeZone` in `datetime.ts`); there is no CHECK, because IANA is `Intl`'s list. Church-scoped instants render in this zone; meeting `datetime` stays a UTC wall clock. Changed in church settings, not onboarding. There is no per-user timezone.
-- **`users.seat`** (`user.ts`): `owner` | `admin` | `member` | **null = a coach**, and null is a
-  VALUE here rather than a gap — coaching is an assignment, not a seat. Read it ONLY together with
+- **`users.seat`** (`user.ts`): `owner` | `admin` | `member` | **null = no seat**. Coaching requires an active assignment;
+  discovery requires an explicit profile. Neither identity can be inferred from a null seat. Read it ONLY together with
   the tenancy FK on the same row (`church_id` / `sending_church_id` / `sending_network_id`), through
   `src/lib/auth/tenancy.ts`: `owner` alone says nothing about whose owner. There is no `users.role`
   — migration 0051 dropped it.
@@ -175,7 +175,7 @@ Re-ran the journal-vs-applied check against the live ledger and
 | 19 | 2026-04-07T23:59:06.754Z (`1775606346754`) | **none** | Orphan. Sits between journal `0017_inactivity_thresholds` (`1771112665213`) and `0018_confused_lady_ursula` (`1781130119804`). Hash `31f441c8…` matches no committed migration blob. Live catalog OIDs place `assistant_threads` / `assistant_messages` / `assistant_artifacts` in that gap — three tables with **no repo owner** and no git history for `assistant_threads`. |
 | 40 | 2026-08-09T21:56:31.041Z (`1786312591041`) | **none** | Orphan. Same-day sibling between two journal-matched rows (`1786254063022` and `1786321828264`). Hash `dbacaf84…` matches no committed blob. No uniquely attributable leftover objects. |
 
-Every current journal `when` has a matching applied row. **0 pending.**
+At that 2026-08-16 snapshot every journal `when` had an applied row. This is historical provenance, not a current migration-status check; run the read-only diagnosis for the target database.
 
 **Id gaps** (`31`, `34`, `36`, `38`, `42`) are **deleted serial rows**, not missing journal
 entries. `__drizzle_migrations.id` is a sequence; a rollback that `DELETE`s a ledger row leaves
@@ -328,7 +328,7 @@ drift. Run read-only:
 ```sql
 -- applied rows whose created_at is not a journal `when`
 -- (paste journal whens, or join from a values list built off _journal.json)
-SELECT id, created_at, encode(hash, 'hex')
+SELECT id, created_at, hash
 FROM drizzle.__drizzle_migrations
 ORDER BY id;
 ```

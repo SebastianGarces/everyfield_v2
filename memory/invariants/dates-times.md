@@ -10,9 +10,7 @@ Human-facing plant-local wall clocks preserve timezone cardinality through
 `instantsAtZonedTime`: no instant is a daylight-saving gap and two instants are
 a fold, so either case asks for clarification. `instantAtZonedHour` keeps its
 separate digest-window behavior of normalizing the gap and choosing the first
-fold occurrence. Evry reads the plant zone from `churches.time_zone` and the
-relative-date reference from the server clock; neither is accepted from its
-request body.
+fold occurrence.
 
 See [hierarchical-access.md](hierarchical-access.md) for the day-vs-instant countdown bug that `launches.target_date` produced.
 

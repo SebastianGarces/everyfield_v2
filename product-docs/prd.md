@@ -1,7 +1,6 @@
 # EveryField - Product Requirements Document Index
 
-**Version:** 2.4
-**Date:** August 27, 2026
+**Updated:** September 26, 2026
 
 ---
 
@@ -24,13 +23,12 @@ product-docs/
 ├── core-data-contracts.md        # Shared entity contracts, referencing rules
 ├── launch-playbook.md            # Domain reference (source material)
 ├── app-summary.md                # Prose description of the product, for a reader new to it
-├── dependency-graph.md / .mmd    # ARCHIVAL: the F1-F10 sequencing model, superseded by the board
 ├── prd.md                        # This index
-├── board-design-2026-07.md       # Design log of the delivery OS (how work is tracked on GitHub)
 └── features/                     # Each feature dir: frd.md (status lives on the board, not in a file)
     ├── phase-engine/             # PE: Phase Engine (Plant Intelligence)
     │   ├── frd.md
-    │   ├── rubric-v0.md          # Companion evaluation rubric
+    │   ├── rubric-v0.md          # Historical evaluation rubric
+    │   ├── rubric-v1.md          # Active evaluation rubric
     │   └── data-posture.md       # LLM data-sharing posture
     ├── wiki/                     # F1: Wiki / Knowledge Base
     ├── people-crm/               # F2: People / CRM Management
@@ -44,13 +42,14 @@ product-docs/
     ├── facility-management/      # F10: ARCHIVAL - cut
     ├── notifications/            # F11: Notifications & Digest (shared delivery infrastructure)
     ├── planter-onboarding/       # F12: Planter Onboarding
+    ├── accounts-and-seats/       # AS: Account authority and tenancy
     ├── oversight/                # OV: Oversight (Sending Church & Network)
     ├── launch/                   # LS: Launch (Launch Sunday)
     └── church-plant-agent/
-        └── frd.md                # EV: Evry application-action workspace
+        └── frd.md                # EV: ARCHIVAL, retired agent specification
 ```
 
-Working and historical documents also live in `product-docs/` but are not requirements documents and are not indexed here: `gap.md`, `gap-report-2026-06.md`, `sprints/`, `alpha-release-2026-07.md`, `docs-audit-2026-07.md`, the brainlifts and market research, and the `wiki/` content sources. Most carry a banner saying how far they can be trusted; all of them are point-in-time records, so read the date before believing a claim.
+Historical meeting notes, alpha rationale, dated research and wiki content guidance remain as source material. Completed sprint plans, superseded audits and the old delivery-system design are available in Git history; current status and dependencies live on the GitHub board.
 
 **Implementation status is not in any of these files.** The GitHub board is the only source of what is built, in flight, or queued (`gh issue list --label feature`).
 
@@ -137,7 +136,6 @@ Each feature has its own FRD defining *what that feature must do*. FRDs are inde
 | F12 | [Planter Onboarding](./features/planter-onboarding/frd.md) | First-run journey from account creation to a usable plant |
 | OV | [Oversight (Sending Church & Network)](./features/oversight/frd.md) | The overseer's surface: plant directory and detail, privacy-gated aggregates, association invite/accept/sever with audit |
 | LS | [Launch (Launch Sunday)](./features/launch/frd.md) | Launch as a first-class entity — target date, status lifecycle, readiness milestones, and the day's outcome |
-| EV | [Evry](./features/church-plant-agent/frd.md) | Plant-tenancy application-action workspace with broad interface parity, strict application-only scope, durable conversations, and exact-plan confirmation before every lasting effect |
 
 ### Archival FRDs (not live features)
 
@@ -146,6 +144,7 @@ These documents are kept as a record of the design. Do not build from them, and 
 | Code | Feature | Why it is archival |
 |------|---------|--------------------|
 | F4 | [Progress Dashboard](./features/progress-dashboard/frd.md) | Retired into the Phase Engine. Its surviving presentation requirements moved across as Phase Engine display requirements ([`decisions.md`](./decisions.md), decision #4) |
+| EV | [Evry](./features/church-plant-agent/frd.md) | Excluded from alpha; retained for immutable migration requirement references. A future agent needs a new specification. |
 | F10 | [Facility Management](./features/facility-management/frd.md) | Cut — off the roadmap, not deferred ([`decisions.md`](./decisions.md), decision #3) |
 
 ---
@@ -194,38 +193,3 @@ Read the GitHub board — `gh issue list --label feature`. No document in `produ
 6. **An FRD states the end state, not the history** - A requirement may carry one line of *why*. It never carries ruling dates, issue numbers, supersession chains, or "previously/currently/not yet" narration. Decisions live in [`decisions.md`](./decisions.md); status lives on the board. See [Product Values](./product-values.md) §What this means for FRDs.
 
 ---
-
-## Changelog
-
-### v2.4 (August 27, 2026)
-- Replaced the Church Plant Agent vision capture with the Evry FRD and added EV to the live feature index.
-- Recorded Evry's plant-tenancy parity contract, application-only boundary, confirmation artifacts, durable conversations, recipes, UI requirements, and eval/observability requirements.
-
-### v2.3 (August 10, 2026)
-- **Index re-trued against the repo.** Added the four FRDs that existed on disk but were missing here: F11 Notifications & Digest, F12 Planter Onboarding, OV Oversight, LS Launch. Moved F4 Progress Dashboard (retired into the Phase Engine) and F10 Facility Management (cut) out of the live feature table into a new *Archival FRDs* section.
-- **Added the two new core documents:** [`decisions.md`](./decisions.md) (the decision ledger — every dated ruling, once) and [`product-values.md`](./product-values.md) (V1–V7 and their tests).
-- **Adopted the FRD hygiene rules** as Document Principle 6: an FRD states the end state; ruling dates, issue numbers, and supersession chains belong in the ledger, and status belongs on the board.
-- **Removed dead pointers:** the per-feature `checklist.md` advertisement (the checklists were deleted 2026-07-26) and `work-queue.md` from the working-documents list (deleted).
-
-### v2.2 (July 25, 2026)
-- Refreshed the Document Structure tree to match the repo: added `app-summary.md`, `dependency-graph.md`/`.mmd`, `features/phase-engine/` (frd + rubric + data posture), `features/church-plant-agent/` (vision), and per-feature `checklist.md` files (the checklists were later deleted — see v2.3).
-- Removed legacy `features/vision-meeting-management/` (superseded by `features/meetings/`).
-- Header version/date brought in line with the changelog (v2.1 was never reflected in the header).
-
-### v2.1 (June 16, 2026)
-- **Phase Engine direction change.** Reframed the Phase Engine from a deterministic exit-criteria *state machine* into the **Plant Intelligence Engine** — an advisory LLM-as-judge that reads plant activity, judges it against the methodology (Launch Playbook + wiki via RAG), and surfaces prioritized insights to planters and health signals to networks. Phase becomes advisory context; advancement is soft-gated and planter-confirmed. Added [Phase Engine FRD](./features/phase-engine/frd.md) + companion rubric (`features/phase-engine/rubric-v0.md`). Updated System Architecture (Phase Engine service) and Product Brief (Phase Structure).
-- **Follow-up alignment needed** (not yet done): dependent FRDs that describe phase "exit-criteria validation/gating" — F4 Progress Dashboard, F5 Task Management (phase-triggered templates), F1 Wiki (phase recommendations) — should be reconciled to the advisory model. The `phase.changed` contract they rely on is unchanged.
-
-### v2.0 (January 25, 2026)
-- Refactored to context-sharded structure
-- Created Product Brief separating vision from implementation
-- Created System Architecture for cross-cutting concerns
-- Separated all features into individual FRDs
-- This document converted to lightweight index
-
-### v1.1 (January 24, 2026)
-- Added F1 Wiki FRD
-- Added F8 Ministry Team Management FRD
-
-### v1.0 (January 24, 2026)
-- Initial monolithic PRD
