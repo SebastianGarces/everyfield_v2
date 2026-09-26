@@ -153,9 +153,7 @@ test("the generation INSERT is per-row idempotent, not all-or-nothing", () => {
 // VM-007 (#323 WS2) — who gets a follow-up, and when it is due.
 //
 // Both rules are pure functions of the register, so they are read here without
-// a database. The end-to-end proof that the generated ROWS carry them is
-// `scripts/g3-followup-generation.ts`, which runs the real finalize against a
-// real database and reads the tasks back.
+// a database. follow-up-race.test.ts exercises the database uniqueness rule.
 // ----------------------------------------------------------------------------
 
 function attendee(

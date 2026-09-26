@@ -243,18 +243,10 @@ import { sourceReader } from "@/lib/testing/source-span";
 //        semicolon" in that module's own test file, so it cannot regress
 //        unnoticed on a tree where every real file happens to be formatted.
 //
-// The compare-and-set is covered from both sides: §5 reads it off the generated
-// SQL (the claim's `status = 'pending'`, the association's
-// `EXISTS ... status = 'accepted'`, the slot rule
-// `fk IS NULL OR fk = <this org>` on BOTH statements, the `FOR UPDATE` lock on
-// the row the association writes, the expiry's `status = 'pending'`), and the G3
-// harness (`scripts/g3-oversight-model.ts` §3d) races real accepts on a real
-// database: against a revoke and against a decline (cases A-F), against a SECOND
-// sequential accept from another org (case G), and against a CONCURRENT accept
-// for the same free slot (case H, 10 runs — the one the row lock exists for).
-// The SQL assertions are what make the harness's result attributable to the
-// guard; the lock is the half that has nothing to assert in SQL text, since the
-// fault it fixes was two snapshots and not a missing predicate.
+// §5 checks the generated SQL: the claim's pending status, the association's
+// accepted-status guard, the slot predicate on both statements, the target-row
+// lock, and the expiry's pending status. These assertions check query shape;
+// they do not execute concurrent accepts against a database.
 //
 // §7 is the last of the four: what an action HANDS BACK. `InvitationView`, not
 // the row, because the row carries two internal user uuids.

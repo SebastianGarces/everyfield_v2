@@ -795,10 +795,9 @@ async function seedDatabase(): Promise<void> {
   }
   console.log();
 
-  // Wiki cross-links are NOT seeded here (#317). `related_article_slugs` now
-  // holds links derived from each article's own prose by
-  // `scripts/migrate-wiki-related-sections.ts`, so the corpus carries them and
-  // a fixture would only overwrite real data with invented data.
+  // Wiki cross-links are not seeded here (#317). PR #348 migrated each
+  // article's authored links into related_article_slugs. A fixture would
+  // overwrite that real corpus data with invented links.
 
   // Summary
   console.log("✅ Database seeded successfully!\n");

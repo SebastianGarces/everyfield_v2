@@ -271,36 +271,9 @@ test("the article page renders related articles and the pager", () => {
 // 4. Where the cross-links come from — the corpus, not a fixture
 // ============================================================================
 
-/**
- * Every article in the corpus authored its own "## Related Articles" section in
- * prose, so shipping `RelatedArticles` on top of it showed the reader the same
- * list twice. The ruling was that the derived component is canonical:
- * `scripts/migrate-wiki-related-sections.ts` lifted those 358 links into
- * `related_article_slugs` and deleted the prose (#317).
- *
- * That makes the column REAL data now, which is what these two assertions
- * protect. The parser itself is unit-tested in `related-sections.test.ts`; what
- * cannot be caught there is someone re-adding a hardcoded fixture, which would
- * overwrite an article's genuine cross-links with invented ones — the previous
- * fixture wrote deliberately dead slugs, and it ran on every `pnpm db:seed`.
- */
-const MIGRATION = "scripts/migrate-wiki-related-sections.ts";
+// PR #348 migrated 358 authored links into related_article_slugs across all
+// 96 articles. Keep protecting the resulting data after retiring that migration.
 const DEV_SEED = "scripts/seed-dev-db.ts";
-
-test("the prose-to-column migration both fills the column and strips the section", () => {
-  const source = readFileSync(path.join(process.cwd(), MIGRATION), "utf8");
-
-  assert.match(
-    source,
-    /relatedArticleSlugs:/,
-    `${MIGRATION} no longer writes related_article_slugs — nothing populates the column the Related Articles section reads (#317 / W-009)`
-  );
-  assert.match(
-    source,
-    /parseRelatedSection/,
-    `${MIGRATION} no longer strips the authored section — the reader would see Related Articles twice (#317)`
-  );
-});
 
 test("the dev seed does not overwrite the corpus's own cross-links", () => {
   const source = readFileSync(path.join(process.cwd(), DEV_SEED), "utf8");
