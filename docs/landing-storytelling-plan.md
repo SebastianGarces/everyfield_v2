@@ -1,9 +1,6 @@
 # Landing storytelling redesign — plan
 
-**Status: RULED 2026-08-01 (direction + all four open questions). Not yet built.**
-Sequencing ruling: merge PR #248 (real-screenshot swap) first; this plan is a
-follow-up PR series on top of it. The #248 capture rig and 2880×1800 masters
-become crop sources here.
+Design rationale from 2026-08-01. Current visual authority is `DESIGN.md`; implementation status belongs on the board. The 2880×1800 screenshot masters supplied the crop sources.
 
 ## Why (the Intercom findings)
 
@@ -117,23 +114,11 @@ Sections:
    read as the capture beside it — and the compact composition carries the
    actual words at real size everywhere the pane is too small for that to work.
 
-## PR series (after #248 merges)
 
-1. **PR A — recomposition:** crops from existing masters, hero + ptab sizing,
-   chips system, mobile stacking for both sections (no vignettes yet — crops
-   as placeholders). The page reads correctly on mobile after this PR alone.
-2. **PR B — vignettes, feature stories:** the 4 fswitch vignettes + scroll
-   trigger infrastructure.
-3. **PR C — vignettes, engine + journey:** PI scorecard vignette + the 2–3
-   journey moment-vignettes.
-4. Later / parked: ambient hero film (Remotion), prototype-switcher variants
-   if any single section direction needs a side-by-side ruling.
 
 ## Traps
 
-- ~~Vignettes must not import app components (bundle + coupling); sharp tokens
-  only, `.marketing` scope.~~ **Superseded 2026-08-04 (ruling).** A
-  presentational, server-only app component MAY be rendered live in marketing,
+- A presentational, server-only app component may be rendered live in marketing,
   fed by a typed fixture snapshotted from a real report — and that is now the
   PREFERRED way to show an app surface, because it is pixel-identical to the
   product by construction. The standing principle: *render the real app UI;

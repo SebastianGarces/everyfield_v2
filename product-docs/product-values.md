@@ -10,7 +10,7 @@ Each value ends with **The test** — the falsifiable form. A value that cannot 
 decision is decoration.
 
 Sources: `brainlift.md` (SPOV 3, DOK2), `product-brief.md` (vision, non-goals),
-`gap-report-2026-06.md` §5 (prioritization principles, previously quarantined in an
+[historical gap-report-2026-06](https://github.com/SebastianGarces/everyfield_v2/blob/1e47e1c503fd3a14432d43366b161a3c523f9d78/product-docs/gap-report-2026-06.md) §5 (prioritization principles, previously quarantined in an
 archival doc), and the rulings practice to date.
 
 ---

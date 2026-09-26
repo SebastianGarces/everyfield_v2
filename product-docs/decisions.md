@@ -11,19 +11,18 @@ The single home for dated product and canon decisions. One rule set:
 - **`product-brief.md` §Resolved Decisions** carries only decisions that change product canon,
   and each of its rows cites the issue number recorded here, so the two reconcile mechanically.
 - **Settled rows are not re-litigated.** A new ruling supersedes by adding a new dated row —
-  never by editing or deleting an old one. Challenges go through a spec-question hold
-  (`ops/agent-os/README.md` § Rulings).
+  never by editing or deleting an old one. Reconsider them through `ops/process.md` (Decide, don't ask), recording a new ruling and its reason.
 - The enforcement form of a ruling — the one-liner an agent must not silently break — lives in
   `memory/invariants.md`, tagged ⚖ and pointing back at the issue recorded here.
 
-History: the ledger began as §4 of `docs-audit-2026-07.md` (the 2026-07-26 audit's 19
+History: the ledger began as §4 of [historical docs-audit-2026-07](https://github.com/SebastianGarces/everyfield_v2/blob/1e47e1c503fd3a14432d43366b161a3c523f9d78/product-docs/docs-audit-2026-07.md) (the 2026-07-26 audit's 19
 decisions) and was appended to through 2026-08-09 before moving here on 2026-08-10.
 
 ## The ledger
 
 All 19 queue items were worked through with the planter. **These are settled — do not re-litigate
 them in a future audit.** Three were converted into action items (evidence:
-`docs-audit-2026-07.md` §5) because they needed evidence before they could be ruled on.
+[historical docs-audit-2026-07](https://github.com/SebastianGarces/everyfield_v2/blob/1e47e1c503fd3a14432d43366b161a3c523f9d78/product-docs/docs-audit-2026-07.md) §5) because they needed evidence before they could be ruled on.
 
 ### Direction / roadmap
 
@@ -94,7 +93,7 @@ argument yet for a root `CONTEXT.md` glossary.
 authenticated user in a church can mutate any team. That is a live multi-tenant authorization hole,
 filed as `risk:high` independently of what the FRD says.
 
-### Resolved 2026-07-27 — the three holdouts (evidence: `docs-audit-2026-07.md` §5)
+### Resolved 2026-07-27 — the three holdouts (evidence: [historical docs-audit-2026-07](https://github.com/SebastianGarces/everyfield_v2/blob/1e47e1c503fd3a14432d43366b161a3c523f9d78/product-docs/docs-audit-2026-07.md) §5)
 
 | # | Decision | Consequence |
 |---|----------|-------------|
@@ -463,3 +462,7 @@ Sebastian ruled in alpha programme task `01a0876e-ceb0-7f32-a6f8-8806b1400213` t
 | 830 | An explicit team leader is appointed independently of role membership. Role removal, deletion or unmarking preserves that appointment, including removal of the person's last role. | Derived leadership records its source role and clears only for that source. Explicit appointment of the same person replaces provenance. Account-seat removal retains AS-016's unconditional leadership cleanup. |
 | 830 (1) | Historical provenance is unknown; a matching role does not prove a leader was derived. Preserve historical leaders as `legacy`. | Role changes do not clear a legacy appointment. A deliberate explicit replacement or account-seat removal ends it. |
 | 830 (2) | Removing a plant seat must not be undone by a concurrent or delayed team appointment for that linked account. A linked person must regain a seat in the same plant before receiving team leadership again. | Apply the rule to explicit appointments, membership-derived fills, role enabling and direct synchronization. Keep the person and roster membership. Unlinked CRM people remain eligible without a login. |
+
+## 2026-09-26 — Evry and Jev leave alpha
+
+Sebastian ruled that Evry and Jev are excluded from alpha (implemented in PR #854). The chat UI, routes, runtime and eval tooling are retired. A future agent requires a new implementation and specification; the old Evry requirements are archival, not a delivery backlog. Historical migrations and stored data remain, as do native task safeguards, leadership locking, Plant Intelligence and its Langfuse observability. This supersedes the 2026-08-27 Evry implementation direction.
