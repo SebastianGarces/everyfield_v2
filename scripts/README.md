@@ -1,6 +1,6 @@
 # Script inventory
 
-Reviewed 2026-09-26 for #855. This covers tracked executable and support files in `scripts/`, `ops/`, and `.cursor/hooks/`, including their tests. The maintained inventory has 68 files, including 13 test files. Application regression suites and versioned SQL migrations remain in their owning directories.
+Reviewed 2026-09-26 for #855. This covers tracked executable and support files in `scripts/`, `ops/`, and `.cursor/hooks/`, including their tests. The maintained inventory has 58 files, including 12 test files. Application regression suites and versioned SQL migrations remain in their owning directories.
 
 ```sh
 node ops/script-inventory.mjs > /tmp/everyfield-script-inventory.json
@@ -10,7 +10,7 @@ The command reads tracked files and reports textual references, including relati
 
 ## Retired release tools
 
-The first cleanup removed four dead rename/import/extraction scripts. The follow-up removes 39 more files: historical release runners and their private helpers, tests and documents. Historical evidence is available in the original PRs and Git history; keeping a release reproducible does not require maintaining its entire harness on current main.
+The first cleanup removed four dead rename/import/extraction scripts. The approved follow-up retires 39 more files, six of which were also removed by the concurrent Evry retirement in PR #854: historical release runners and their private helpers, tests and documents. Historical evidence is available in the original PRs and Git history; keeping a release reproducible does not require maintaining its entire harness on current main.
 
 | Retired group | Why it left the maintained toolset |
 | --- | --- |
@@ -30,6 +30,8 @@ To inspect or recover any file retired by the follow-up, use its path at the las
 git show a94276a01978e360ffa4cceba8c736dd8f16395c:<repository-relative-path>
 ```
 
+Evry runtime tools are retired separately in [PR #854](https://github.com/SebastianGarces/everyfield_v2/pull/854). The read-only legacy database audit and retirement boundary test remain; see [the retirement record](proofs/retired-agent-alpha.md).
+
 ## Maintained tools
 
 The remaining one-off-looking runners have concrete dependencies or distinct current checks: discovery's database runner is required by its live suite; task, RSVP and leadership proofs exercise native persistence and races; mutation checks prove that regression guards detect deliberate breakage. The marketing contact repair preserves existing fixtures without reseeding their saved assessments.
@@ -38,6 +40,8 @@ The remaining one-off-looking runners have concrete dependencies or distinct cur
 
 | File | Current use |
 | --- | --- |
+| [`scripts/audit-retired-agent-db.ts`](../scripts/audit-retired-agent-db.ts) | Read-only legacy agent table, foreign-key, and migration-ledger audit. |
+| [`scripts/retired-agent-boundary.test.ts`](../scripts/retired-agent-boundary.test.ts) | Prevent retired agent runtime from returning while preserving native alpha code and migrations. |
 | [`scripts/audit-benchmark-language.ts`](../scripts/audit-benchmark-language.ts) | Read-only audit of methodology benchmark wording in the database corpus. |
 | [`scripts/backfill-snapshot.ts`](../scripts/backfill-snapshot.ts) | Migration diagnostics and snapshot/order repair; referenced by migration tests, commands or invariants. |
 | [`scripts/check-document-exports.py`](../scripts/check-document-exports.py) | Generate document samples and inspect PDF, Word and spreadsheet exports offline. |
@@ -49,8 +53,6 @@ The remaining one-off-looking runners have concrete dependencies or distinct cur
 | [`scripts/discovery-db-endpoint.test.ts`](../scripts/discovery-db-endpoint.test.ts) | Regression test for the adjacent script or operational contract; retained with the implementation it checks. |
 | [`scripts/discovery-db-endpoint.ts`](../scripts/discovery-db-endpoint.ts) | Run the discovery live suite with an owned database and local Neon endpoint. |
 | [`scripts/embed-methodology-corpus.ts`](../scripts/embed-methodology-corpus.ts) | Refresh methodology embeddings after changes to the Playbook or database wiki corpus. |
-| [`scripts/evry-latency-report.ts`](../scripts/evry-latency-report.ts) | Current Evry latency fixture and model benchmark package commands. |
-| [`scripts/evry-model-benchmark.ts`](../scripts/evry-model-benchmark.ts) | Current Evry latency fixture and model benchmark package commands. |
 | [`scripts/export-document-catalog.ts`](../scripts/export-document-catalog.ts) | Generate document samples and inspect PDF, Word and spreadsheet exports offline. |
 | [`scripts/live-db-endpoint.ts`](../scripts/live-db-endpoint.ts) | CI/local live-test infrastructure and per-suite database isolation. |
 | [`scripts/live-db-names.ts`](../scripts/live-db-names.ts) | CI/local live-test infrastructure and per-suite database isolation. |
@@ -83,16 +85,6 @@ The remaining one-off-looking runners have concrete dependencies or distinct cur
 | --- | --- |
 | [`ops/board.sh`](../ops/board.sh) | Current issue/PR coordination and label setup, referenced by delivery skills and tests. |
 | [`ops/codex-session-context.sh`](../ops/codex-session-context.sh) | Current agent setup and hook adapters, referenced by host configuration and tests. |
-| [`ops/evry-cost-audit.mjs`](../ops/evry-cost-audit.mjs) | Current cost-audit and trace smoke package commands. |
-| [`ops/evry-cost-audit.test.mjs`](../ops/evry-cost-audit.test.mjs) | Regression test for the adjacent script or operational contract; retained with the implementation it checks. |
-| [`ops/evry-langfuse-smoke.test.ts`](../ops/evry-langfuse-smoke.test.ts) | Regression test for the adjacent script or operational contract; retained with the implementation it checks. |
-| [`ops/evry-langfuse-smoke.ts`](../ops/evry-langfuse-smoke.ts) | Current cost-audit and trace smoke package commands. |
-| [`ops/evry/communication-inventory.ts`](../ops/evry/communication-inventory.ts) | Generate and validate Evry capability inventories; support modules are imported by generators and tests. |
-| [`ops/evry/generate-communication-inventory.ts`](../ops/evry/generate-communication-inventory.ts) | Generate and validate Evry capability inventories; support modules are imported by generators and tests. |
-| [`ops/evry/generate-inventory.ts`](../ops/evry/generate-inventory.ts) | Generate and validate Evry capability inventories; support modules are imported by generators and tests. |
-| [`ops/evry/generate-people-inventory.ts`](../ops/evry/generate-people-inventory.ts) | Generate and validate Evry capability inventories; support modules are imported by generators and tests. |
-| [`ops/evry/inventory.ts`](../ops/evry/inventory.ts) | Generate and validate Evry capability inventories; support modules are imported by generators and tests. |
-| [`ops/evry/people-inventory.ts`](../ops/evry/people-inventory.ts) | Generate and validate Evry capability inventories; support modules are imported by generators and tests. |
 | [`ops/format-agent-edit.sh`](../ops/format-agent-edit.sh) | Current agent setup and hook adapters, referenced by host configuration and tests. |
 | [`ops/guard-worktree-pnpm-hook.sh`](../ops/guard-worktree-pnpm-hook.sh) | Current agent setup and hook adapters, referenced by host configuration and tests. |
 | [`ops/guard-worktree-pnpm.sh`](../ops/guard-worktree-pnpm.sh) | Current agent setup and hook adapters, referenced by host configuration and tests. |

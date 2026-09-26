@@ -3,9 +3,6 @@ import { redirect } from "next/navigation";
 import { Suspense } from "react";
 
 import { AppSidebar } from "@/components/app-sidebar";
-import { EvryLauncher } from "@/components/evry/evry-launcher";
-import { EvryShell } from "@/components/evry/evry-shell";
-import { evrySuggestionsForActor } from "@/components/evry/suggestions/server";
 import { HeaderProvider } from "@/components/header";
 import { GlobalAppBar } from "@/components/header/global-app-bar";
 import { NotificationBell } from "@/components/notifications/notification-bell";
@@ -29,7 +26,6 @@ import {
   type NotificationViewer,
 } from "@/lib/notifications/feed";
 import { resolveTenancyShell } from "@/lib/navigation";
-import { evryPlantStandingOf } from "@/lib/evry/eligibility/viewer";
 import { discoveryIdentityForShell } from "./discovery-identity";
 
 import { assignedPlantsSafely } from "./assigned-plants";
@@ -163,8 +159,6 @@ export default async function DashboardLayout({
   // `holdsSeatFor` with this same `user`; only the client half needs carrying,
   // and it is carried from here so no screen re-derives it.
   const capabilities = heldCapabilities(user);
-  const evryEnabled = evryPlantStandingOf(user).status === "eligible";
-  const evrySuggestions = evrySuggestionsForActor(evryEnabled, capabilities);
   // Only unseated, untenanted accounts need the profile lookup. Identity is
   // required to choose navigation and settings; a failed read must not guess.
   const isDiscovery = await discoveryIdentityForShell(user);
@@ -183,36 +177,31 @@ export default async function DashboardLayout({
           Skip to content
         </a>
         <HeaderProvider>
-          <EvryShell
-            enabled={evryEnabled}
-            eligibleSuggestions={evrySuggestions}
-          >
-            <GlobalAppBar shell={shell} user={sidebarUser}>
-              {viewer && (
-                <Suspense
-                  fallback={
-                    <NotificationBell
-                      unreadCount="loading"
-                      className={APP_BAR_ICON_CLASS}
-                    />
-                  }
-                >
-                  <NotificationBellSlot viewer={viewer} />
-                </Suspense>
-              )}
-              <EvryLauncher />
-            </GlobalAppBar>
-            <div className="flex min-h-0 flex-1">
-              <AppSidebar
-                user={sidebarUser}
-                orgType={org?.type ?? null}
-                hasChurch={!!user.churchId}
-                isDiscovery={isDiscovery}
-                assignedPlants={assignedPlants}
-                isPlatformAdmin={userIsPlatformAdmin}
-              />
-              <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
-                {/* `tabIndex={-1}` makes the main a reliable skip-link target. The
+          <GlobalAppBar shell={shell} user={sidebarUser}>
+            {viewer && (
+              <Suspense
+                fallback={
+                  <NotificationBell
+                    unreadCount="loading"
+                    className={APP_BAR_ICON_CLASS}
+                  />
+                }
+              >
+                <NotificationBellSlot viewer={viewer} />
+              </Suspense>
+            )}
+          </GlobalAppBar>
+          <div className="flex min-h-0 flex-1">
+            <AppSidebar
+              user={sidebarUser}
+              orgType={org?.type ?? null}
+              hasChurch={!!user.churchId}
+              isDiscovery={isDiscovery}
+              assignedPlants={assignedPlants}
+              isPlatformAdmin={userIsPlatformAdmin}
+            />
+            <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
+              {/* `tabIndex={-1}` makes the main a reliable skip-link target. The
                 settings modal has a narrower focus target inside PageCanvas:
                 page content AFTER breadcrumb/actions, so its next Tab cannot
                 re-enter contextual navigation.
@@ -221,14 +210,14 @@ export default async function DashboardLayout({
                 scroll container, so a nested route transition can offset this
                 persistent shell and erase PageCanvas's visual inset. Route
                 canvases and specialized panes own scrolling below this clip. */}
-                <SidebarInset
-                  id={DASHBOARD_MAIN_ID}
-                  tabIndex={-1}
-                  className="min-h-0 overflow-clip overscroll-y-none outline-none"
-                >
-                  {children}
-                </SidebarInset>
-                {/* SETTINGS, MOUNTED ON EVERY DASHBOARD SCREEN AND OPEN ON NONE
+              <SidebarInset
+                id={DASHBOARD_MAIN_ID}
+                tabIndex={-1}
+                className="min-h-0 overflow-clip overscroll-y-none outline-none"
+              >
+                {children}
+              </SidebarInset>
+              {/* SETTINGS, MOUNTED ON EVERY DASHBOARD SCREEN AND OPEN ON NONE
               (#657). It draws nothing until `location.hash` names a section, so
               this costs one client component and no read; it lives beside
               `<main>` rather than inside it because the modal covers the screen
@@ -246,17 +235,16 @@ export default async function DashboardLayout({
               so the document survives it. Without an identity in the cache key,
               the next account to sign in on this tab was shown the previous
               one's settings while its own read was in flight (#673). */}
-                <SettingsModal
-                  visibleIds={settingsSectionsFor(user, isDiscovery).map(
-                    (section) => section.id
-                  )}
-                  serverRenderId={crypto.randomUUID()}
-                  scope={user.id}
-                />
-                {!org && <WikiGuide />}
-              </div>
+              <SettingsModal
+                visibleIds={settingsSectionsFor(user, isDiscovery).map(
+                  (section) => section.id
+                )}
+                serverRenderId={crypto.randomUUID()}
+                scope={user.id}
+              />
+              {!org && <WikiGuide />}
             </div>
-          </EvryShell>
+          </div>
         </HeaderProvider>
       </SidebarProvider>
     </ViewerCapabilitiesProvider>
