@@ -22,7 +22,7 @@ const SECRET_PATTERN = /\b(?:sk|pk)-(?:lf|live|test)-[a-z0-9._-]+\b/gi;
 const BEARER_PATTERN = /\bBearer\s+[a-z0-9._~+/=-]+/gi;
 const EMAIL_PATTERN = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
 
-/** Defense in depth. Evry's closed contract rejects these before this runs. */
+/** Defense in depth for Plant Intelligence trace exports. */
 export function maskLangfuseData(input: unknown): unknown {
   if (typeof input === "string") {
     return input
@@ -60,7 +60,6 @@ export function initializeLangfuseTracing(): LangfuseConfigState {
       exportMode: "immediate",
       mask: ({ data }: { data: unknown }) => maskLangfuseData(data),
       shouldExportSpan: ({ otelSpan }) =>
-        otelSpan.name.startsWith("evry.") ||
         otelSpan.name.startsWith("phase-engine."),
     });
     const provider = new NodeTracerProvider({

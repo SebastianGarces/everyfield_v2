@@ -216,7 +216,7 @@ export const tasks = pgTable(
     // A recurring chain may have only one live successor. The first instance
     // can omit `seriesId`; every minted successor carries it, and completion
     // closes the predecessor before the next insert. This is the database
-    // arbiter that makes owner and Evry retries/races converge.
+    // arbiter that makes concurrent retries converge.
     uniqueIndex("tasks_open_recurrence_series_unique_idx")
       .on(
         table.churchId,

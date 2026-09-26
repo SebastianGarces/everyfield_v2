@@ -1,3 +1,6 @@
+// Retired agent tables: retained to match applied migration history.
+// No alpha runtime reads or writes these tables. Drop only in an explicitly
+// approved forward migration after reviewing stored data and dependencies.
 import { sql } from "drizzle-orm";
 import {
   check,
