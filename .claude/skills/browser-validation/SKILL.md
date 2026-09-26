@@ -35,6 +35,30 @@ when those accounts were created. Do not re-key an existing account to make a te
 Seed only an explicitly owned disposable database; shared `.env.local` is not proof of ownership.
 `pnpm db:seed` wipes data. Prefer the scoped seed that owns the fixture.
 
+The accounts below exist only after the corresponding seed has run on the preview's database.
+
+| Account | Email | Credential source |
+| --- | --- | --- |
+| Empty-state planter | `planter1@everyfield.app` | Dev seed fixture password |
+| Network admin | `admin@everyfield.app` | `SEED_ADMIN_PASSWORD` in the preview's own `.env.local`; created by `--oversight-orgs-only` |
+| Sending church admin | `sending-church-admin@everyfield.app` | `SEED_ADMIN_PASSWORD` in the preview's own `.env.local`; created by `--oversight-orgs-only` |
+| Coach | `coach1@everyfield.app` | Dev seed fixture password |
+| Populated planter | `planter-dayspring@eval.phase-engine.everyfield.app` | Eval seed fixture password |
+| Second-church planter | `planter-evergreen@eval.phase-engine.everyfield.app` | Eval seed fixture password |
+
+For oversight fixtures, first check whether the private preview environment already records the
+password without printing it:
+
+```sh
+grep -E '^[[:space:]]*(export[[:space:]]+)?SEED_ADMIN_PASSWORD=' .env.local >/dev/null
+```
+
+If present, use the recorded value privately for login. Do not re-key. Only when provisioning new
+fixtures on an owned disposable database, choose and record a private password in that worktree's
+own `.env.local`, then run `pnpm exec tsx scripts/seed-dev-db.ts --oversight-orgs-only`. Never edit
+a symlink to the main environment or append onto a partial last line. A production snapshot does
+not copy this file; the recorded fixture credential stays available privately to the reviewer.
+
 For tenancy work, use two accounts from different churches. Switch accounts with the real sign-out
 flow or a fresh browser context, then return to `/login`. For registration, configure the private
 preview's beta code or follow a real invitation flow as appropriate to the acceptance criterion.
