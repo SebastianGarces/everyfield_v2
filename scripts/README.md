@@ -1,6 +1,6 @@
 # Script inventory
 
-Reviewed 2026-09-26 for #855. This covers tracked executable and support files in `scripts/`, `ops/`, and `.cursor/hooks/`, including their tests. The maintained inventory has 58 files, including 12 test files. Application regression suites and versioned SQL migrations remain in their owning directories.
+Reviewed 2026-09-26 for #855. This covers tracked executable and support files in `scripts/`, `ops/`, and `.cursor/hooks/`, including their tests. The maintained inventory has 57 files, including 12 test files. Application regression suites and versioned SQL migrations remain in their owning directories.
 
 ```sh
 node ops/script-inventory.mjs > /tmp/everyfield-script-inventory.json
@@ -32,6 +32,9 @@ git show a94276a01978e360ffa4cceba8c736dd8f16395c:<repository-relative-path>
 
 Evry runtime tools are retired separately in [PR #854](https://github.com/SebastianGarces/everyfield_v2/pull/854). The read-only legacy database audit and retirement boundary test remain; see [the retirement record](proofs/retired-agent-alpha.md).
 
+The former hosted-preview URL resolver has also been retired. Use the external Portless CLI
+and [local preview workflow](../ops/local-previews.md).
+
 ## Maintained tools
 
 The remaining one-off-looking runners have concrete dependencies or distinct current checks: discovery's database runner is required by its live suite; task, RSVP and leadership proofs exercise native persistence and races; mutation checks prove that regression guards detect deliberate breakage. The marketing contact repair preserves existing fixtures without reseeding their saved assessments.
@@ -61,7 +64,6 @@ The remaining one-off-looking runners have concrete dependencies or distinct cur
 | [`scripts/live-db-run.ts`](../scripts/live-db-run.ts) | CI/local live-test infrastructure and per-suite database isolation. |
 | [`scripts/live-db-stack.sh`](../scripts/live-db-stack.sh) | CI/local live-test infrastructure and per-suite database isolation. |
 | [`scripts/patch-contact-info.ts`](../scripts/patch-contact-info.ts) | Repairs existing marketing contacts without reseeding or discarding approved assessments. The seed handles new rows but does not replace this repair; backfill completion is unverified. |
-| [`scripts/preview-url.sh`](../scripts/preview-url.sh) | Current agent workflow utility, referenced by skills or worktree tests. |
 | [`scripts/proofs/team-leader-provenance-830.mjs`](../scripts/proofs/team-leader-provenance-830.mjs) | Native leadership and concurrent seat-removal proofs; see team-leader-provenance-native-830.md. |
 | [`scripts/proofs/team-leader-provenance-races-830.mjs`](../scripts/proofs/team-leader-provenance-races-830.mjs) | Native leadership and concurrent seat-removal proofs; see team-leader-provenance-native-830.md. |
 | [`scripts/proofs/team-leader-provenance-races-830.sh`](../scripts/proofs/team-leader-provenance-races-830.sh) | Native leadership and concurrent seat-removal proofs; see team-leader-provenance-native-830.md. |

@@ -24,7 +24,6 @@
 | `BETA_INVITE_CODE` | No | Private-beta register gate; unset = gate off (`register/actions.ts`). Not in `.env.example` |
 | `SENTRY_DSN` / `NEXT_PUBLIC_SENTRY_DSN` | No | Error tracking (server/client); unset = no-op |
 | `SENTRY_ORG` / `_PROJECT` / `_AUTH_TOKEN` | No | Build-time source-map upload (`next.config.ts`) |
-| `VERCEL_AUTOMATION_BYPASS_SECRET` | Local only | Preview deployment-protection bypass (`scripts/preview-url.sh --bypass`) |
 
 **Source:** `.env.example` + `grep process.env` across `src/`
 
@@ -58,3 +57,7 @@ All four nav lists live in `src/lib/navigation.ts`. There are no feature flags â
 | `wikiNavSections` | `isDisabled: true` marks unwritten articles | Not guarded â€” these hrefs are served by the catch-all `/wiki/[...slug]`, and the App Router walker skips dynamic segments by design |
 
 Why oversight is stricter: an oversight admin sees ONLY that sidebar, so a greyed or dead row leaves them no way back. A planter has the rest of the app.
+
+Local preview configuration lives in a private file passed to `portless preview up --config`.
+See `ops/local-previews.md` for explicit environment values, disposable data and lifecycle ownership.
+Production snapshots do not copy `.env.local`; development frameworks can load it.

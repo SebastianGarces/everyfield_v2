@@ -428,3 +428,7 @@ The guard is `ops/tests/requirement-ids.test.mjs`. Applies to every requirement 
 
 - Evry and Jev are excluded from alpha per Sebastian, 2026-09-26. No chat UI, routes, runtime, or eval tooling ships. Historical migrations and the corresponding unused schema declarations remain intact; removing the runtime does not authorize deleting stored conversations or rewriting the migration ledger. Native task safeguards, leadership locking and Plant Intelligence are retained. A future agent is a new implementation, not a continuation of the retired branches.
 - Langfuse remains Plant Intelligence infrastructure. Configuration is all-or-none with an explicit base URL and an isolated non-global OpenTelemetry provider; absent configuration makes no network call.
+
+## Local validation workflow
+
+- ⚖ Validate feature behavior on managed Portless previews of the selected worktree, with a clean final commit in production mode for runtime acceptance evidence; development mode is for iteration. Local hosting does not isolate application data, so use explicitly owned disposable fixtures and verify teardown. Automatic hosting deployments are limited to `main`; related fixes stay on one reviewable PR, and finished previews/worktrees are cleaned up explicitly (`ops/local-previews.md`).

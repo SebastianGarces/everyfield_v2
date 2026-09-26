@@ -1,6 +1,6 @@
 ---
 name: validate
-description: Functionally validate a change against the running thing — one browser look at the branch's Vercel preview for UI, or one real request asserting status and shape for backend. Use to prove an acceptance criterion actually works, not that it compiles. This is the DoD WORKS gate.
+description: Prove acceptance criteria against a local Portless production preview of the final commit, or a real backend harness. Use for functional validation before shipping a behavior change.
 ---
 
 # validate (the WORKS gate)
@@ -12,21 +12,23 @@ beats a ✅ that means "looked at the code". Validate; don't fix.
 
 ## Frontend / fullstack — one browser look
 
-Reach the preview per `.agents/skills/browser-validation/SKILL.md` (never `localhost`; re-fetch the
-URL after every push). Sign in with a seeded account — `planter1@everyfield.app` has zero people, so
-anything list-shaped needs an eval planter.
+Reach the Portless production-mode preview per `.agents/skills/browser-validation/SKILL.md` and
+verify its recorded SHA equals the final branch head. Sign in using that preview's fixture
+credentials. `planter1@everyfield.app` has zero people, so list-shaped work needs populated data.
+Docs-only changes use relevant document/config checks and mark browser validation not applicable.
 
 1. Drive the interaction the AC describes, then **assert the outcome** with the host browser's
    evaluate or DOM-inspection capability reading concrete DOM or state — one assertion per AC,
    minimum.
 2. One screenshot of the decisive state, in the session scratchpad, never in the working tree.
-3. Pull the console. **Any `error` fails the gate**, except the single Vercel preview-toolbar `403`.
+3. Pull the console. **Any `error` fails the gate**; diagnose it rather than granting a hosting exception.
 4. Run the host's Lighthouse/accessibility audit on the primary touched page:
    **accessibility ≥ 90** to pass. If the host exposes no automated audit, report that gate as
    unverified rather than inventing a score.
 5. While you are there, judge layout, hierarchy and copy — not only defects. Apply what you can and
    name what you leave.
-6. **Close the browser** before writing the report, and delete any stray `.png`.
+6. Close the tabs or contexts you opened. Keep evidence outside the worktree and follow the
+   Portless handoff/cleanup instructions. Report preview ID, URL, mode, SHA and cleanup status.
 
 ## Backend / API / data — one real request
 

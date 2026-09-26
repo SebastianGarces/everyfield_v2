@@ -257,7 +257,7 @@ test("an unrecorded password is called out, and never printed", () => {
 
   for (const [text, used] of [
     [undefined, "hunter2"], // no .env.local at all
-    ["VERCEL_AUTOMATION_BYPASS_SECRET=x\n", "hunter2"], // no such key
+    ["UNRELATED_VARIABLE=x\n", "hunter2"], // no such key
     ['SEED_ADMIN_PASSWORD="stale"\n', "hunter2"], // records a DIFFERENT one
   ] as const) {
     const notice = unrecordedPasswordNotice(text, used);

@@ -15,6 +15,12 @@ A platform purpose-built for the church planting journey. Helps church planters 
 - **Charts:** Recharts
 - **Drag & Drop:** Pragmatic DnD
 
+## Local validation
+
+Use [managed Portless previews](ops/local-previews.md) to validate feature worktrees. Development
+mode provides hot reload; production mode tests a frozen commit before review. CI remains required.
+Automatic hosting deployments are limited to `main`; a PR does not need a hosted preview.
+
 ## Prerequisites
 
 - [Node.js](https://nodejs.org/) >= 24 (CI runs Node 24)
@@ -57,7 +63,6 @@ Edit `.env.local` and fill in your values:
 | `RESEND_WEBHOOK_SECRET` | Webhook signing secret from Resend |
 | `EMAIL_FROM` | Sender address (e.g. `EveryField <notifications@yourdomain.com>`) |
 | `CRON_SECRET` | Auth token for the Phase Engine Vercel cron (`/api/phase-engine/assess`). Required in prod; set locally for manual runs |
-| `VERCEL_AUTOMATION_BYPASS_SECRET` | Deployment Protection bypass for preview browser validation (local only) |
 | `SENTRY_DSN`, `NEXT_PUBLIC_SENTRY_DSN`, `SENTRY_ORG`, `SENTRY_PROJECT`, `SENTRY_AUTH_TOKEN` | Sentry error tracking (optional — Sentry no-ops when unset) |
 
 See `.env.example` for the canonical list with per-variable notes.
@@ -78,13 +83,16 @@ The seed is not additive: it deletes **every** user and church first, so point
 `DATABASE_URL` at your own branch. It refuses outright on a database holding the
 alpha cohort's accounts (`src/lib/dev-seed/protected-database.ts`).
 
-### 6. Start the dev server
+### 6. Start a managed local preview
+
+Follow [local preview setup](ops/local-previews.md) to configure disposable services and a private
+config, then run:
 
 ```bash
-pnpm dev
+portless preview up --project /absolute/worktree --mode development --config /absolute/private.json --json
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+Open the returned URL. Commit and use production mode for final runtime validation.
 
 ## Scripts
 

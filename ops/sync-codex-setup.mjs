@@ -122,6 +122,17 @@ function ensureAgent(name) {
 }
 
 for (const skill of WORKFLOW_SKILLS) ensureSkillLinks(skill);
+// CLI-installed shared skills keep their canonical copy in .agents/skills.
+for (const name of ["portless-preview"]) {
+  const source = path.join(ROOT, ".agents", "skills", name);
+  if (!fs.existsSync(path.join(source, "SKILL.md"))) {
+    failures.push(`missing shared skill: ${relative(source)}`);
+    continue;
+  }
+  for (const host of [".claude", ".cursor"]) {
+    ensureLink(path.join(ROOT, host, "skills", name), source);
+  }
+}
 for (const agent of CUSTOM_AGENTS) ensureAgent(agent);
 
 if (failures.length > 0) {
