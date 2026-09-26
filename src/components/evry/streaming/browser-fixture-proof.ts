@@ -38,8 +38,11 @@ test("the preview fixture completes its keyboard lifecycle with one announcement
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
   const scheduled: Array<() => void> = [];
+  let notifyScheduled: (() => void) | undefined;
   t.mock.method(globalThis, "setTimeout", ((callback: () => void) => {
     scheduled.push(callback);
+    notifyScheduled?.();
+    notifyScheduled = undefined;
     return scheduled.length;
   }) as typeof setTimeout);
   t.mock.method(globalThis, "clearTimeout", (() => {}) as typeof clearTimeout);
@@ -160,9 +163,13 @@ test("the preview fixture completes its keyboard lifecycle with one announcement
           candidate.props.id === "streaming-fixture-recipient"
       ).length === 1
   );
+  // Plan hashing finishes asynchronously before the fixture schedules its timer.
+  const reviewScheduled = new Promise<void>((resolve) => {
+    notifyScheduled = resolve;
+  });
   await act(async () => {
     recipientForm.props.onSubmit({ preventDefault() {} });
-    await Promise.resolve();
+    await reviewScheduled;
   });
   assert.equal(activeElement, nodes.get("evry-work-status"));
   await act(() => scheduled.shift()?.());
