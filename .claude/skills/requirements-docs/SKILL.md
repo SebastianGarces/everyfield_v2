@@ -48,8 +48,9 @@ forms; all three are prohibited:
   saying "trust the code over this document" or "disregard the entity below" makes the FRD
   state two incompatible things and bets the reader notices the override.
 
-When a change to code adds or alters a rule agents must not break, that goes to
-`memory/invariants.md` — also not the FRD.
+Record changes to product intent in the owning `product-docs/decisions.md` entry and make the
+FRD correct. Keep external operational facts in memory. Behavior already established by code or
+tests needs no duplicate invariant.
 
 ## Two naming idioms, one rule behind them
 

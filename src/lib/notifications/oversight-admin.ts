@@ -36,9 +36,6 @@ import type { AssociationOrgType } from "@/db/schema";
  * recorded-relationship probe's `recipientOrgOf`, `invitationRelationship` and
  * `auditRelationship` (`./oversight-relationship.ts`).
  *
- * WHAT A THIRD KIND OF OVERSIGHT ORG COSTS: the probe and its observed tsc
- * output are recorded once, in memory/invariants/multi-tenancy.md.
- *
  * The rule that keeps that list short is here, though, because it is about this
  * table: a reader that merely ENUMERATES the rows compiles unchanged, and only
  * a reader that INDEXES them by kind pays. The parse FOLLOWS the union for the

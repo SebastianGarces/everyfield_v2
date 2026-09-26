@@ -31,8 +31,8 @@ import { teamTemplateOfferSummary } from "./team-template-offer";
  * with a list of people the planter may not even have imported yet, and it has
  * a home. The card links there rather than growing a second one.
  *
- * NOTHING SERVER-SIDE ROUND-TRIPS THROUGH `useState` here
- * (`memory/contracts/data-patterns.md`): the two pieces of state are the
+ * NOTHING SERVER-SIDE ROUND-TRIPS THROUGH `useState` here:
+ * the two pieces of state are the
  * in-flight press and the sentence to show if it failed. What was created is
  * read on the surface that owns it, after the redirect.
  */

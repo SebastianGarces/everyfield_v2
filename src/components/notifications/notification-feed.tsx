@@ -39,7 +39,7 @@ import { cn } from "@/lib/utils";
 //     whole Drizzle table graph — out of the client bundle. The two imports
 //     from `feed-view` are types, so they are erased and bring none of it.
 //
-// Read state is optimistic (memory/contracts/data-patterns.md): the row un-bolds
+// Read state is optimistic: the row un-bolds
 // the instant it is clicked, the server action reconciles, and a client
 // `router.refresh()` is what moves the count in the app shell's bell. The
 // refresh is the CLIENT's because only the caller knows whether it is staying —

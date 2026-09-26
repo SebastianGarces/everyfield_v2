@@ -15,7 +15,7 @@ Adapted from [mattpocock/skills](https://github.com/mattpocock/skills) (`grillin
 **Look up facts; ask only for decisions.** Anything discoverable from the repo costs no question.
 In order:
 
-1. `memory/` — `invariants.md`, `invariants/`, `contracts/` (see `memory/index.md`)
+1. The short `memory/invariants.md`, then only relevant decision topics/operational notes from `memory/index.md`
 2. `product-docs/features/<feature>/frd.md`
 3. The codebase, `gh issue view`, `git log`
 
@@ -23,8 +23,8 @@ In order:
 far easier to react to than an open prompt. Wait for the answer before asking the next.
 
 **Walk every branch** where a wrong guess changes what gets built. Two the repo will not settle for
-you: **tenancy, auth and permissions** — who can see and do this, beyond what `memory/invariants.md`
-already fixes — and **data shape**, because what gets persisted decides what can be built on top of
+you: **tenancy, auth and permissions** — who can see and do this, beyond what the current decisions, source and tests
+already fix — and **data shape**, because what gets persisted decides what can be built on top of
 it, and the schema is the hardest part to walk back.
 
 **Do not act until they confirm.** No files, no issues, no code. When the understanding is shared,

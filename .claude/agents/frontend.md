@@ -12,15 +12,15 @@ for everything else, trust your judgment and match the surrounding code.
 - **Next.js here is newer than your training data.** When an API, directive, or config option is
   in question, check `.agents/skills/next-best-practices/` (SKILL.md routes to per-topic files
   like `rsc-boundaries.md`, `hydration-error.md`) or search `.next-docs/`.
-- **Data sync conventions** (non-negotiable, `memory/contracts/data-patterns.md`): never store
-  server data in `useState`; never `useEffect` for data sync; `useOptimistic` + the server action
-  calling `refresh()` is the house pattern.
+- Read the short `memory/invariants.md` and relevant decisions via `memory/index.md`.
+  For data synchronization, read the owning component/action and tests; settings and notification
+  code retain the experiments behind their current patterns.
 - **New shadcn components come from the CLI** (`pnpm dlx shadcn@latest add <name>`), never
   hand-written. Style: new-york.
 - **`cursor-pointer` on every clickable** — including shadcn triggers and any `onClick` div.
 - **Design authority:** `DESIGN.md` at repo root. UI polish/a11y/typography/copy questions route
   through `.agents/skills/better-interface/`.
-- **Dates:** never format a `Date` without a pinned zone — use `src/lib/datetime.ts`
-  (`memory/invariants.md` → Date & Time Rendering).
+- **Dates:** use `src/lib/datetime.ts` and its tests for calendar/instant handling; church-time
+  product choices live in the decision register.
 - Proving a UI change works happens on the branch's Vercel preview, never `localhost:3000`
   (it serves the main checkout): `.agents/skills/browser-validation/SKILL.md`.

@@ -137,8 +137,7 @@ function oversightOrArms(
  * WHO ADMINISTERS THESE ORGS — the ONE definition of an oversight audience, in
  * SQL. One arm per row of `OVERSIGHT_ADMIN` (`./oversight-admin.ts`), in the
  * table's order, with the FK read off the row; why the pairing is a table, and
- * why an arm may not be widened to the FK alone, are in that header and in
- * `memory/invariants/multi-tenancy.md`.
+ * why an arm may not be widened to the FK alone, are in that header.
  *
  * NAMING NO ORG RETURNS `undefined` — "no recipients" — AND THE OVERLOADS, NOT
  * A COMMENT, MAKE THE CALLER FACE IT: drizzle's `and()` reads it as the

@@ -5,7 +5,7 @@
 //
 // Both panels arrive as ALREADY-RENDERED SERVER NODES. This component owns the
 // tab state and nothing else — no data, no fetching, no `useEffect` reaching
-// for the other tab when it is selected (memory/contracts/data-patterns.md).
+// for the other tab when it is selected.
 // The server rendered both when it rendered the page, so switching is instant
 // and the History tab is as fresh as the Tasks tab.
 //

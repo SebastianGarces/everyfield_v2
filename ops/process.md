@@ -29,8 +29,9 @@ Host setup is an adapter, not a second process: Codex specifics live in `ops/cod
    fleshed out carries `needs-spec` — the marker for "Sebastian and the agent still need to talk
    this through" (`.agents/skills/grilling/`). `needs-spec` issues never enter the frontier; the
    conversation turns them into `agent:queued` issues. In both cases, continue other work.
-3. **Read `memory/invariants.md` before mutating.** It holds facts about this codebase, not
-   ceremony. An invariant is never broken; a ⚖ ruling is never broken silently.
+3. **Read the short `memory/invariants.md` before editing.** Use `memory/index.md` for the
+   relevant decision topic or operational note, then read source and tests. Change a product
+   ruling explicitly; do not infer permission to change intent from implementation alone.
 4. **Build.** Branch off `origin/main`. In the Codex app, start isolated work in a managed
    worktree: `.worktreeinclude` copies `.env.local`, and the selected local environment must run
    `pnpm install`. When an agent or human creates the worktree from the shell, use
@@ -55,9 +56,9 @@ Host setup is an adapter, not a second process: Codex specifics live in `ops/cod
 ## Still true
 
 - The board is the system of record. Labels are canonical; status never lives in a file.
-- A change that adds or alters a rule updates `memory/` in the same change: one 1-3 sentence line
-  in `memory/invariants.md`, the why in `memory/invariants/<domain>.md` only when the source cannot
-  show it. A new route or table alone does not.
+- Update product intent in the owning decision entry and requirements in the same change.
+  Memory keeps only operational facts absent from source/tests; the core keeps cross-cutting
+  context. Do not add parallel prose for implementation details, test inventories or resolved bugs.
 - Never start a dev server. Never message a running workflow agent directly (it forks a duplicate);
   comment on its issue instead.
 - New UI components come from the shadcn CLI. Migrations run with `pnpm db:migrate`, never

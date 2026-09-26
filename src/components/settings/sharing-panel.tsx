@@ -17,7 +17,7 @@ import type { PrivacyFeatureKey } from "@/lib/auth/access";
 // beside the gate it describes) and the stored value. Nothing here decides what
 // sharing means, what it is called, or who may change it.
 //
-// State is `useOptimistic` over the prop, per memory/contracts/data-patterns.md:
+// State is `useOptimistic` over the prop, with server reconciliation:
 // the switch moves under the finger and the action reconciles. A failed write
 // surfaces as a toast and the optimistic value falls back to server truth on its
 // own, so a save that did not happen never looks like one that did — which for a

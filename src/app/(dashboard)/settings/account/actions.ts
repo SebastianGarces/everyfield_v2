@@ -83,7 +83,7 @@ import { getRequestIp } from "@/lib/auth/rate-limit";
 // The Account section renders the signed-in identity, and the sidebar renders
 // it too. `refresh()` re-renders the current tree INCLUDING its layouts, so the
 // address in the chrome — and the picture beside it — reconciles with the same
-// server state the write just produced (memory/contracts/data-patterns.md).
+// server state the write just produced.
 // Nothing here renders in a layout only, so there is no `revalidatePath` that
 // would do the job: the picture in the sidebar and the picture in the modal are
 // one render away from each other.

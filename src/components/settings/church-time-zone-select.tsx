@@ -23,8 +23,8 @@ import { groupedTimeZones } from "@/lib/datetime";
 // of zones is `Intl.supportedValuesOf("timeZone")` via `groupedTimeZones`
 // in datetime.ts; this component never decides what a valid zone is.
 //
-// State is `useOptimistic` over the prop, per
-// memory/contracts/data-patterns.md: the select moves under the finger and
+// State is `useOptimistic` over the prop, so
+// the select moves under the finger and
 // the action reconciles. A failed write surfaces as a toast and the
 // optimistic value falls back to server truth on its own.
 // ============================================================================

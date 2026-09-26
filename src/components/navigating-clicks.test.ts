@@ -126,7 +126,7 @@ test("TaskForm's form is wired through onSubmit, not action", () => {
 
 test("the actions those handlers call do not refresh the route being left", () => {
   // The other side of the same call. The refresh belongs to the caller that
-  // STAYS (memory/contracts/data-patterns.md), and neither of these actions has
+  // STAYS, and neither of these actions has
   // one: `createTaskAction`/`updateTaskAction` are reached only by `TaskForm`,
   // which always navigates away.
   //

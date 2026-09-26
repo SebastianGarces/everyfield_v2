@@ -57,8 +57,8 @@ import {
 // (`settings/association/actions.ts`) is ordered identically for the same
 // reason.
 //
-// `revalidatePath('/oversight/plants')` rather than `refresh()`
-// (`memory/contracts/data-patterns.md`): the mutation's visible effect is on
+// `revalidatePath('/oversight/plants')` rather than `refresh()`:
+// the mutation's visible effect is on
 // ANOTHER route — the plant drops out of the directory — and the current route
 // ceases to exist for this caller the moment the FK is null, so refreshing it in
 // place would re-render a 404. The dialog navigates to the directory on success.

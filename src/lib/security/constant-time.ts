@@ -4,7 +4,7 @@
 // ONE comparison path for every shared secret in the app. It lives here rather
 // than inside a route because `CRON_SECRET` authorises TWO public endpoints —
 // `/api/notifications/dispatch` and `/api/phase-engine/assess` (see
-// `memory/contracts/config.md`) — and a timing oracle on either one leaks the
+// `.env.example`) — and a timing oracle on either one leaks the
 // secret that opens both. A per-route copy is how one of them silently stays
 // vulnerable; ruled 2026-08-04 to share instead.
 // ============================================================================

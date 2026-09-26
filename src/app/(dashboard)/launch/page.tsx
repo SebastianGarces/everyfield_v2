@@ -4,8 +4,7 @@
 // A SERVER component. It reads the launch entity, its readiness, its journal and
 // its milestone history, and hands every one of them down as props; the only
 // client code on this page is the forms, the date card's disclosure and the tab
-// strip, and none of them owns server data
-// (memory/contracts/data-patterns.md).
+// strip, and none of them owns server data.
 //
 // HOW THE PAGE IS ORGANISED, and why (design pass, 2026-08-08):
 //
@@ -261,7 +260,7 @@ export default async function LaunchPage() {
           {showOutcomeEditor && launch && (
             // `key` on what is stored: a saved correction remounts the form on
             // the server's values instead of leaving the planter's old draft in
-            // the inputs (memory/contracts/data-patterns.md).
+            // the inputs.
             <OutcomeForm
               key={`${launch.attendanceCount}|${launch.decisionsCount}|${launch.outcomeNotes ?? ""}|${launch.captureTheDay ?? ""}`}
               mode="edit"

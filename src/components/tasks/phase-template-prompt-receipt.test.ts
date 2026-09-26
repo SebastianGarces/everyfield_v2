@@ -89,7 +89,7 @@ test("the action performs the decision rather than re-deciding it", () => {
     "this module writes exactly one cookie — the two-minute partial-import receipt"
   );
 
-  // `revalidatePath` is for OTHER pages (`memory/contracts/data-patterns.md`).
+  // `revalidatePath` is for OTHER pages.
   // The planter answering this prompt is ON /tasks, which is force-dynamic, so
   // the house `refresh()` is the whole of what is owed.
   assert.equal(

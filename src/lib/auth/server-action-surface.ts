@@ -620,7 +620,7 @@ export function parsingServerActionExports(): ServerActionExport[] {
 
 /**
  * The `(auth)` and `(marketing)` route groups: the product's two public groups
- * (`memory/entrypoints.md`), whose endpoints are unauthenticated by
+ * whose endpoints are unauthenticated by
  * construction. Everything else in `src/app` sits behind the `(dashboard)`
  * layout's guard and is inside the SESSION-FIRST claim.
  */

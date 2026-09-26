@@ -16,7 +16,7 @@ interface OutcomesPageProps {
  *
  * A plain server component: the breakdown is computed on the server and passed
  * down as props, so there is no client boundary and no server data in
- * `useState` (memory/contracts/data-patterns.md). Capture lives on the
+ * `useState`. Capture lives on the
  * Attendance tab, where the planter has the cards; this only reads.
  *
  * `getMeeting` runs first and its result is what `notFound()` rests on. The

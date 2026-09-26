@@ -229,7 +229,7 @@ test("step 3 is skippable, and skipping writes nothing", () => {
 });
 
 test("the step holds no server data in state", () => {
-  // memory/contracts/data-patterns.md. Every `useState` here is the planter's
+  // Every `useState` here is the planter's
   // own in-progress input or the outcome the action just reported back; server
   // data never round-trips through state, and nothing is SYNCED.
   assert.equal(/router\.refresh/.test(STEP_CODE), false);

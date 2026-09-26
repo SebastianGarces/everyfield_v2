@@ -6,8 +6,8 @@ import { useCallback, useSyncExternalStore } from "react";
  * F12 / OB-010 + OB-011 — "dismissible", as a hook.
  *
  * Web storage is an EXTERNAL STORE, so it is read with `useSyncExternalStore`
- * rather than `useState` + `useEffect` (`memory/contracts/data-patterns.md`:
- * effects are for external systems, not for holding a value the render needs).
+ * rather than `useState` + `useEffect`. Effects connect external systems;
+ * this hook reads a value the render needs.
  * Same mechanism the no-planter nudge has used since OB-004; this is the shared
  * version, because the two dismissals OB-010 and OB-011 add differ from it only
  * in their key and their lifetime.

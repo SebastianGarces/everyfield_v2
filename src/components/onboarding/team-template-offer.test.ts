@@ -223,7 +223,7 @@ test("the server half resolves both facts and hands them down", () => {
 });
 
 test("the client half never stores the declared phase, it only overrides it", () => {
-  // memory/contracts/data-patterns.md — server data arrives as props. The one
+  // Server data arrives as props. The one
   // piece of state is the answer step 3 just reported, which takes precedence
   // over a prop resolved before the declaration existed and is null on every
   // later visit.
@@ -475,7 +475,7 @@ test("no count is ever fused to the word after it", () => {
 // ----------------------------------------------------------------------------
 
 test("the screen holds no server data in state", () => {
-  // memory/contracts/data-patterns.md. The only state is the in-flight press
+  // The only state is the in-flight press
   // and the failure sentence; what was created is read on /teams, after the
   // redirect the action's revalidation feeds.
   assert.equal(/useEffect/.test(SCREEN_CODE), false);

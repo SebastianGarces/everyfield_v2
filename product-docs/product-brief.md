@@ -236,7 +236,7 @@ The following are explicitly out of scope for EveryField:
 
 ## Resolved Decisions
 
-This table holds **product-canon decisions only** — the ones that change what the product *is*. The full dated ledger, with the consequence of each ruling, is [`decisions.md`](./decisions.md). A new row here cites the issue number recorded there, so the two reconcile mechanically.
+This table holds **product-canon decisions only** — the ones that change what the product *is*. The current decision register, with rationale and provenance, is [`decisions.md`](./decisions.md). A new row here cites the issue number recorded there, so the two reconcile mechanically.
 
 | Decision | Resolution | Date |
 |----------|------------|------|

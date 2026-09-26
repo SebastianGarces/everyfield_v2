@@ -58,8 +58,7 @@ import { LeaveOrgDialog } from "@/app/(dashboard)/settings/association/leave-org
 //
 // NOTHING HERE IS COPIED INTO CLIENT STATE. The reads run per call, and the
 // moment an invitation is answered `refresh()` re-renders the layout, the modal
-// re-reads this view, and the row is simply gone
-// (`memory/contracts/data-patterns.md`).
+// re-reads this view, and the row is simply gone.
 //
 // ----------------------------------------------------------------------------
 // WHY EACH SECTION IS A SURFACE (design pass, #304 "UI ruling round 3")

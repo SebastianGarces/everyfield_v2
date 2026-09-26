@@ -28,8 +28,8 @@ import type { ResponseCardType } from "@/db/schema/meetings";
 // they just ticked people in on. So the control lives in the attendance row and
 // nowhere else: a second screen would mean matching names twice.
 //
-// STATE. `value` is server data and never enters `useState`
-// (memory/contracts/data-patterns.md). It arrives as a prop from the server
+// STATE. `value` is server data and never enters `useState`.
+// It arrives as a prop from the server
 // component, `useOptimistic` shows the pick instantly, and the server action
 // calls `revalidatePath`, which reconciles. There is no `useEffect` and no
 // `router.refresh()` here.

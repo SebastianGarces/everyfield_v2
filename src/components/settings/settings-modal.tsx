@@ -97,7 +97,7 @@ type SettingsModalProps = {
    * nothing else.
    *
    * It is how a settings write reconciles. Every action behind these controls
-   * calls `refresh()` (`memory/contracts/data-patterns.md`), which re-renders
+   * calls `refresh()`, which re-renders
    * the route's server components — including the layout that renders this — so
    * a new value arriving here IS the signal "the server has changed, read your
    * section again". Without it a section fetched once would sit at the value it
@@ -237,7 +237,7 @@ function SettingsDialog({
   // nothing.
   //
   // AN EFFECT, AND ON PURPOSE. This is not data SYNC — the read is keyed and the
-  // answer never reaches React state (`memory/contracts/data-patterns.md`) — it
+  // answer never reaches React state — it
   // is a WARM, and "when settings opens" is exactly the moment an effect names.
   // Spelling it during render would fire five reads on every `serverRenderId`
   // change instead, which is the burst after a write that #673 rules against:

@@ -65,7 +65,7 @@
 // guessed uuid render the identical page. The link still does not belong here —
 // a targeted invitee would be handed a URL that redeems nothing, and item 5
 // stands — but the reason is no longer "it leaks". See
-// memory/invariants/multi-tenancy.md.
+// product-docs/decisions.md#authority-and-invitations.
 //
 // ----------------------------------------------------------------------------
 // WHAT A PENDING ROW CARRIES INSTEAD: "Resend email" (OV-003b / #293, ruled
@@ -429,8 +429,8 @@ type ResendCooldown = NonNullable<ResendInvitationEmailState["cooldown"]>;
  * and the window itself still protects the INVITEE's inbox in every case,
  * which is the half that was always about the provider.
  *
- * The `useEffect` here is a TIMER, not data synchronization
- * (memory/contracts/data-patterns.md): it subscribes to the clock, an external
+ * The `useEffect` here is a TIMER, not data synchronization:
+ * it subscribes to the clock, an external
  * system, and touches nothing the server owns. Nothing about the invitation is
  * in local state — the row is still props, and the outcome is still the
  * transient action result.
@@ -543,8 +543,8 @@ function ResendEmailButton({
   const sentNotice = useRef<HTMLSpanElement>(null);
   const sent = Boolean(state.sent) && !pending;
 
-  // Not data synchronization — the repo's `useEffect` rule is about server data
-  // (memory/contracts/data-patterns.md), and nothing here reads or mirrors any.
+  // Not data synchronization — the repo's `useEffect` rule is about server data,
+  // and nothing here reads or mirrors any.
   // This is the one thing an effect is for: a DOM command that can only run
   // after the browser has committed the element it commands.
   useEffect(() => {

@@ -31,8 +31,8 @@ anything list-shaped needs an eval planter.
 ## Backend / API / data — one real request
 
 Prefer a `tsx` harness in the worktree, which imports the track's own code; use the preview for HTTP
-routes. Read the route or action source plus `memory/contracts/api.md` and `memory/contracts/db.md`
-for the expected shape first.
+routes. Read the route/action, its tests and the relevant product decision for the expected shape.
+Consult `memory/contracts/db.md` only for shared migration-ledger provenance.
 
 - Assert **status code and response shape** per AC, always including **one auth/permission case**
   and **one invalid-input case**.

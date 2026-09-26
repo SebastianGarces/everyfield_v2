@@ -54,7 +54,7 @@ import {
 // "Mark all read" buttons, and calls nothing after a row click, because the
 // destination's own render is a fresher read of the badge than a refresh of the
 // screen being left. The feed does not wait for either — it holds an optimistic
-// row state (memory/contracts/data-patterns.md) — so the visible effect is
+// row state — so the visible effect is
 // instant and the badge follows.
 //
 // SESSION FIRST, THEN THE PARSE (ruled 2026-08-10; extended repo-wide in round

@@ -29,8 +29,8 @@ and why — leave the operation in progress for a human.
      in the merge commit message.
    - **Never resolve to a third thing** — that is a change nobody reviewed. Take one side and raise
      the third thing separately.
-   - An elaboration added to `memory/invariants/<domain>.md` with no index line in
-     `memory/invariants.md` is not a conflict but an incomplete change: add the missing one-liner.
+   - Preserve current product intent in the decision register and unique operational facts in
+     memory. Do not resurrect deleted prose mirrors of code or tests during conflict resolution.
 
 3. **Finish**, run the cheap local smoke, then push and let the required check be the verdict:
 

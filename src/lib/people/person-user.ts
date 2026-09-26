@@ -35,7 +35,7 @@ import { users } from "@/db/schema/user";
 // login", for everyone the FK says nothing about, which is most of them. An
 // audience read that switched to the FK would silently shrink to one recipient
 // per plant. The bridge retires when every account-holding person carries the
-// FK, and that is a different issue (`memory/invariants/seats-and-tenancy.md`).
+// FK, and that is a different issue.
 //
 // Addresses are compared case-insensitively because `users.email` is stored
 // lowercased (`src/lib/invitations/core.ts`) while `persons.email` is typed by

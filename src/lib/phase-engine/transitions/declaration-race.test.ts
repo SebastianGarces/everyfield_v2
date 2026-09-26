@@ -24,7 +24,7 @@ import type { PlantFactSnapshot } from "@/lib/phase-engine/signals";
 // the planter never made, fabricated into the OB-005 audit trail. The lock and
 // the predicate are about different rows, so EvalPlanQual re-checks only
 // `churches` when the waiter unblocks and the subquery still answers from the
-// pre-wait snapshot (`memory/invariants/transactions-atomicity.md` → the
+// pre-wait snapshot (`src/lib/phase-engine/transitions/service.ts` → the
 // subquery trap).
 //
 // So the assertion has to be made against a real, REACHABLE database, and it

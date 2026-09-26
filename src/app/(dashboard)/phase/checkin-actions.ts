@@ -69,8 +69,7 @@ export async function saveCheckinAction(
 
     // `refresh()`, not `revalidatePath("/phase")`: the check-in changes nothing
     // off this page, and the card now DERIVES its answered state from the props
-    // this re-render carries (#634). The contract names the shape —
-    // memory/contracts/data-patterns.md.
+    // this re-render carries (#634). The server props supply the new state.
     refresh();
 
     return { success: true };

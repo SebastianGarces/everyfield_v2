@@ -407,7 +407,7 @@ test("the control is a real control — it calls the action", () => {
   // `<Button>`, so it renders a native `<button>` and `globals.css` gives it
   // the pointer — asserted once, in `src/components/ui/cursor-pointer.test.ts`.
   // The notice takes the address as a PROP from the server and holds no server
-  // data of its own (memory/contracts/data-patterns.md).
+  // data of its own.
   assert.doesNotMatch(NOTICE_SOURCE, /useState|useEffect/);
 });
 

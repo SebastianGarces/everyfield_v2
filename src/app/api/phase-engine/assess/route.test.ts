@@ -70,7 +70,7 @@ test("accepts a correct Bearer token", () => {
 // AC (#266): the comparison is constant-time here too, not only on the
 // notifications dispatcher.
 //
-// One CRON_SECRET authorises BOTH scheduled routes (memory/contracts/config.md),
+// One CRON_SECRET authorises BOTH scheduled routes (.env.example),
 // so a timing oracle on this endpoint leaks the key that opens the other one —
 // hardening a single route was worth nothing on its own. `timingSafeEqual`
 // throws a RangeError on unequal-length buffers, so the wrong-length cases are

@@ -18,7 +18,7 @@ For documentation rules and structure, see [Requirements Documentation Rules](..
 product-docs/
 ├── product-brief.md              # Vision, users, concepts, metrics
 ├── product-values.md             # How tradeoffs are decided (V1-V7) + what an FRD may contain
-├── decisions.md                  # The decision ledger: every dated ruling, once
+├── decisions.md                  # Current decisions, rationale and provenance
 ├── system-architecture.md        # Data model, integrations, cross-cutting services
 ├── core-data-contracts.md        # Shared entity contracts, referencing rules
 ├── launch-playbook.md            # Domain reference (source material)

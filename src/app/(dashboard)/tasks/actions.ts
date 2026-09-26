@@ -847,7 +847,7 @@ export async function importTaskTemplateAction(
 
     // The picker lives on /tasks, so the list under it reconciles through
     // `refresh()`; `revalidatePath` covers the same page for anyone who
-    // reaches the import from elsewhere (`memory/contracts/data-patterns.md`).
+    // reaches the import from elsewhere.
     refresh();
     revalidatePath("/tasks");
 
