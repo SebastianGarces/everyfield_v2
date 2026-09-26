@@ -27,9 +27,8 @@
 // It was DEAD CODE before this track. On main `resolveInvitationTarget` refused
 // every address that already had an account, so every creatable invitation was
 // open, `type` always followed `inviteAs`, and the label could never disagree
-// with the selection. #304 revives targeting and arms it — the same lesson
-// `memory/invariants/multi-tenancy.md` records: reviving a refused path
-// re-arms every conditional that was only safe because the path was dead.
+// with the selection. #304 revives targeting and arms it. Reviving a refused
+// path re-arms conditionals that were only safe because the path was dead.
 //
 // So the narrowing lives HERE, where it is one exported pure function that a
 // test can CALL. Both previous attempts were pinned by regexes over `page.tsx`

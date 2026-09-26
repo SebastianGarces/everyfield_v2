@@ -59,7 +59,7 @@ test("the optimistic value is never undone by hand", () => {
   // `useOptimistic` drops back to the props when the transition ends, so a
   // failed save returns the control to server truth on its own. A component
   // that started re-applying the previous value itself would be storing server
-  // data in client state — memory/contracts/data-patterns.md forbids it, and it
+  // data in client state — this test refuses it, and it
   // would go stale the moment the server revalidated.
   assert.match(CODE, /useOptimistic\(serverState, applyMatrixAction\)/);
   assert.doesNotMatch(CODE, /useState/);

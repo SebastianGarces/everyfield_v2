@@ -380,7 +380,7 @@ export function consumeRequestStatement(requestId: string, now: Date) {
  *   * `EXISTS (… consumed_at = $now)` re-asserts THE CLAIM — that statement one,
  *     in this batch, is what settled this request. Each statement in a
  *     `db.batch` sees the previous one's writes
- *     (`memory/invariants/transactions-atomicity.md`), so this reads the claim
+ *     (`src/db/index.ts`), so this reads the claim
  *     rather than a snapshot. WITHOUT IT the two statements can disagree inside
  *     one committed batch: a concurrent `requestEmailChange` that supersedes
  *     this row between the read above and this batch makes the claim match zero

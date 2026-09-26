@@ -33,7 +33,7 @@ import type { AccountSectionView } from "@/lib/settings/section-view";
 // `@/lib/settings/section-data` does the same two reads this file used to do
 // and hands them down. The live email-change request is still SERVER data
 // arriving as a prop, never something a form copies into `useState`
-// (`memory/contracts/data-patterns.md`) — `requestEmailChangeAction` calls
+// — `requestEmailChangeAction` calls
 // `refresh()`, and the modal re-reads this view against it.
 // ============================================================================
 

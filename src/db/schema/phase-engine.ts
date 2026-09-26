@@ -163,7 +163,7 @@ export const phaseTransitions = pgTable(
     // — but that predicate is a SNAPSHOT read of a DIFFERENT table than the one
     // the lock protects, so under READ COMMITTED EvalPlanQual re-checks only
     // `churches` when the waiter unblocks and both submitters pass the check
-    // (`memory/invariants/transactions-atomicity.md` → the subquery trap; raced
+    // (`src/lib/phase-engine/transitions/service.ts` → the subquery trap; raced
     // live on #306, 2 of 3 runs wrote a second row claiming a 5 → 3 move the
     // planter never made). The application-side guard is now `ON CONFLICT DO
     // NOTHING` inferred against THIS index, so the loser writes nothing at all

@@ -241,7 +241,7 @@ test("PE-022: the phase read is the ASSESSMENT's, so standings match the gates t
 
 test("PE-022: a launch day reads as the stored DAY, pinned to APP_TIME_ZONE", () => {
   // `launches.target_date` is a yyyy-mm-dd DAY, not an instant, and
-  // memory/invariants/dates-times.md forbids round-tripping it through a bare
+  // it must not round-trip through a bare
   // `Date`. The reading is pinned here so the single owner of that parse
   // (`parseTargetDate`) cannot be quietly replaced by a hand-rolled second one
   // without a test going red — the duplication this criterion once carried.

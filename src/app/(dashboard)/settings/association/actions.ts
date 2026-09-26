@@ -101,8 +101,8 @@ import {
 // `verifyInvitationAuthority` for the two answers, `leaveOversightOrgAs` for the
 // sever — so hiding the buttons is a courtesy, never the control.
 //
-// `refresh()` rather than `revalidatePath('/settings/association')`
-// (`memory/contracts/data-patterns.md`): answering an invitation changes the
+// `refresh()` rather than `revalidatePath('/settings/association')`:
+// answering an invitation changes the
 // dashboard reminder, which lives on another route, and the pending list on
 // this one. `refresh()` re-renders the current tree including its layouts,
 // which is what makes the reminder go away in the same round trip.

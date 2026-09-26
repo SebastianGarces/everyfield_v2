@@ -32,8 +32,8 @@
 // takes them from the module that declares them, exactly as `InvitationsList`
 // already does.
 //
-// `refresh()` rather than `revalidatePath`, per
-// memory/contracts/data-patterns.md — the list is server-rendered from props.
+// `refresh()` rather than `revalidatePath`, because
+// the list is server-rendered from props.
 // ============================================================================
 
 import { refresh } from "next/cache";

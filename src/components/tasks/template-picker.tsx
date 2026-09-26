@@ -29,7 +29,7 @@ import {
 // the plant's own stage is MARKED rather than moved, because reordering the
 // journey to put the present first hides how far along it is.
 //
-// NO SERVER DATA IN STATE (`memory/contracts/data-patterns.md`). The catalog is
+// NO SERVER DATA IN STATE. The catalog is
 // code, so it is imported, not fetched; the tasks it creates are read by the
 // list this sits above, which reconciles through the action's `refresh()`. The
 // three pieces of state here are all UI: which button is in flight, and which

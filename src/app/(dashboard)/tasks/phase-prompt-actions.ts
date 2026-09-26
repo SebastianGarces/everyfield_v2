@@ -143,8 +143,8 @@ export async function importPhaseTemplatesAction(
     if (decision.answeredTransitionId) {
       // An answered transition is exactly the case where `/tasks` changed: the
       // prompt comes down and the list gained tasks. `refresh()` and nothing
-      // else — the planter is ON the affected route, which is what
-      // `memory/contracts/data-patterns.md` reserves `revalidatePath` for.
+      // else — the planter is ON the affected route, while
+      // `revalidatePath` covers reads on other routes.
       refresh();
     }
 

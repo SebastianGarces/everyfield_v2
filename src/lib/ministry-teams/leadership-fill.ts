@@ -54,7 +54,7 @@ const SENIOR_PASTOR_ROLE_KEY = "senior_pastor";
  *
  * ONE READ, BOTH HALVES, and the join is what keeps them together: the seat
  * (`users.seat = 'owner'` in THIS church — neither half answers alone,
- * `memory/invariants/seats-and-tenancy.md`), the person row linked to that
+ * `src/lib/auth/tenancy.ts`), the person row linked to that
  * account, and the church's own recorded answer. `no_planter` and an
  * unanswered `NULL` both fail the `WHERE` and get no row, which is the ruling:
  * the role stays open and somebody fills it by hand.

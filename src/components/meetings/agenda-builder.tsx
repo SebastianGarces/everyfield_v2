@@ -11,7 +11,7 @@
 //
 //  1. The rows are NOT held in component state. The sections arrive as props
 //     from the server and `useOptimistic` shows the next array instantly while
-//     the action lands — the house pattern (memory/contracts/data-patterns.md).
+//     the action lands — the house pattern.
 //     The only `useState` is the "add a section" form, which is form input.
 //
 //  2. The title and minutes fields are UNCONTROLLED (`defaultValue` + a commit

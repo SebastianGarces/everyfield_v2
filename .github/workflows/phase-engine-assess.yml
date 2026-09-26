@@ -78,7 +78,7 @@ jobs:
           # send. It must be set to the IDENTICAL value in both places: this
           # repo's Actions secrets and the Vercel project's production
           # environment. It also opens /api/notifications/dispatch — one secret,
-          # two routes (memory/contracts/config.md).
+          # two routes (see their source and token checks).
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
           set -euo pipefail

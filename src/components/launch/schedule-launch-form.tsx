@@ -61,7 +61,7 @@ export function ScheduleLaunchForm({
   // Form state, not server state: the input's working value while the planter
   // types. The page gives this component a `key` of the stored date, so a
   // saved change remounts it rather than leaving a stale draft behind
-  // (memory/contracts/data-patterns.md — never sync props into state).
+  // (never sync props into state).
   const [value, setValue] = useState(targetDate ?? "");
   const [note, setNote] = useState("");
   const [confirming, setConfirming] = useState<

@@ -14,8 +14,7 @@
 //
 // SERVER DATA ARRIVES AS PROPS AND STAYS THERE. The only local state is
 // `useOptimistic`'s guess, reconciled by the action's `refresh()` — no
-// `useState` copy of the milestones, no `useEffect` syncing them
-// (memory/contracts/data-patterns.md).
+// `useState` copy of the milestones, no `useEffect` syncing them.
 // ============================================================================
 
 import { Check, CircleCheck, Loader2, RotateCcw } from "lucide-react";

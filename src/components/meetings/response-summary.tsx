@@ -11,8 +11,8 @@ import {
 //
 // A SERVER component with no state and no handlers. The figures are computed on
 // the server by `getMeetingResponseBreakdown`, so there is nothing here to
-// synchronise: no server data in `useState`, no `useEffect`
-// (memory/contracts/data-patterns.md). Capture lives on the Attendance tab,
+// synchronise: no server data in `useState`, no `useEffect`.
+// Capture lives on the Attendance tab,
 // where the planter has the cards in their hand; this only reads.
 //
 // TWO POPULATIONS, SAID SEPARATELY. The bars are the cards that came BACK, and

@@ -49,7 +49,7 @@ import { cn } from "@/lib/utils";
 // what they receive is not a control (#254). Which variant arrives is the
 // server's decision; this component just renders the one it was given.
 //
-// State: `useOptimistic` over the props, per memory/contracts/data-patterns.md.
+// State: `useOptimistic` over the props, as the server action reconciles.
 // The switch moves the instant it is pressed, the action reconciles, and its
 // `refresh()` re-renders this tree — including the layout's unread bell, which
 // an `in_app` change moves too (N-005 is applied at read time). Server data is

@@ -1197,7 +1197,7 @@ export async function clearResponseCardAction(
  *
  * It takes no actor — the church comes from the guard and `setMeetingAgenda`
  * puts it in the `WHERE`, so a meeting id from another tenant matches nothing.
- * `refresh()`, not `revalidatePath` (memory/contracts/data-patterns.md).
+ * `refresh()`, not `revalidatePath`.
  */
 export async function saveAgendaAction(
   meetingId: string,

@@ -77,7 +77,7 @@ export interface OutcomeFormProps {
    * What is currently on the record, in edit mode. Used to seed the draft only
    * — the page gives this component a `key` derived from the stored values, so
    * a saved correction REMOUNTS the form rather than leaving a stale draft
-   * behind (memory/contracts/data-patterns.md: never sync props into state).
+   * behind (never sync props into state).
    */
   initial?: {
     attendanceCount: number | null;

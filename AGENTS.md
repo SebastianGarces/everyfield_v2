@@ -18,8 +18,8 @@ Decisions, requirements, and rulings live in this repo (FRDs, `memory/`, the Git
 | Task | Read First |
 |------|------------|
 | Next.js APIs, components, config | `.next-docs/` |
-| Invariants, rulings, architectural intent, non-obvious semantics | `memory/` (TOC: `memory/index.md`) |
-| Before ANY mutation | `memory/invariants.md` (every rule, one line each) + the `memory/invariants/<domain>.md` files matching what you are touching |
+| Invariants, rulings, architectural intent, non-obvious semantics | `memory/index.md` routes to current decisions and operational notes |
+| Before ANY mutation | The short `memory/invariants.md`, then only relevant topics from `memory/index.md` and source/tests |
 | Updating `memory/` after a change | `memory/index.md` (same-change maintenance rules) |
 | Email/notification features | `.agents/skills/email-best-practices/`, `.agents/skills/resend/` |
 | UI/UX work — implementation, polish, accessibility, typography, color, copy | `.agents/skills/better-interface/` (coordinates the `better-*` suite) |
@@ -34,11 +34,11 @@ Decisions, requirements, and rulings live in this repo (FRDs, `memory/`, the Git
 | React performance patterns | `.agents/skills/vercel-react-best-practices/` |
 | The canonical word for a domain term — roles, plant, phase vs. stage, launch, oversight, association | `CONTEXT.md` at the repo root (the ubiquitous-language glossary; it names the deprecated synonyms too) |
 | Feature requirements | `product-docs/features/{feature-name}/frd.md` |
-| Dated product decisions (the ledger) | `product-docs/decisions.md` |
+| Current product decisions and their rationale | `product-docs/decisions.md` |
 | Product values — how tradeoffs are decided | `product-docs/product-values.md` |
 | What is built vs. still open | The board — `gh issue list --label feature`. **Not a file**; status never lives in the repo. |
 
-<!-- EVERYFIELD-MEMORY-START -->[Memory Index]|root:./memory|Holds what the code cannot tell you: invariants, rulings, non-obvious semantics, architectural intent. Read invariants.md before any mutation; for everything else the source is the source of truth. TOC: memory/index.md.<!-- EVERYFIELD-MEMORY-END -->
+<!-- EVERYFIELD-MEMORY-START -->[Memory Index]|root:./memory|Holds operational facts absent from source/tests. Read the short invariants.md before editing, then only relevant topics from memory/index.md. Product intent: product-docs/decisions.md. Mechanics: source/tests.<!-- EVERYFIELD-MEMORY-END -->
 
 <!-- EVERYFIELD-SKILLS-START -->[Skills Index]|root:./.agents/skills|One directory per skill. Read its SKILL.md first, then its reference files as needed. Enumerate with `ls .agents/skills/<name>/`.<!-- EVERYFIELD-SKILLS-END -->
 

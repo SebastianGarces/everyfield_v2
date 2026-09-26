@@ -234,8 +234,7 @@ export function followUpDueDate(meetingDate: Date): string {
  * whatever is MISSING and nothing else" has always claimed.
  *
  * The conflict clause is deliberately UNTARGETED. Naming an arbiter covers that
- * one index and re-raises the unique violation on any other
- * (`memory/invariants/transactions-atomicity.md`); bare `DO NOTHING` covers
+ * one index and re-raises the unique violation on any other; bare `DO NOTHING` covers
  * every unique index on the table, including a person who appears twice in one
  * register, which a targeted form would have raised mid-statement.
  *

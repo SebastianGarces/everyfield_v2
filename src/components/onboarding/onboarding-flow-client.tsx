@@ -116,8 +116,8 @@ export function OnboardingFlowClient({
   leadershipStatus: ChurchLeadershipStatus | null | undefined;
   /**
    * OB-015 / ruling 2026-08-09 — `churches.current_phase` as the server read it
-   * for this render. NOT a cached copy anything displays
-   * (`memory/contracts/data-patterns.md`): it is one of the two inputs to the
+   * for this render. NOT a cached copy anything displays:
+   * it is one of the two inputs to the
    * offer gate, it never enters state, and step 3's action revalidates the
    * dashboard so the next render carries the new value.
    */
@@ -241,7 +241,7 @@ export function OnboardingFlowClient({
    *
    * A history write is a side effect on an external system, which is what
    * `useEffect` is for. Nothing here copies server data into state
-   * (`memory/contracts/data-patterns.md`) — the flow reads FROM the URL.
+   * — the flow reads FROM the URL.
    */
   const desiredStepParam: OnboardingStepId | null = finishScreen.open
     ? null

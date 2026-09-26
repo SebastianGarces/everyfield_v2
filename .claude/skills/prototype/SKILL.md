@@ -9,7 +9,7 @@ A prose DECISION comment makes the reviewer *imagine* each option; a prototype l
 each one. Use it when **experiencing the options is what decides**.
 
 **Narrow trigger.** Prototype an owner-taste **UI direction** question. Rule behavior and policy
-questions yourself from `product-docs/product-values.md`, `CONTEXT.md` and `memory/invariants.md`
+questions yourself from `product-docs/product-values.md`, `CONTEXT.md` and the relevant entries in `product-docs/decisions.md`
 (see `ops/process.md`). Build the variants into the branch you are already on, or onto
 `codex/proto-<issue>-<slug>` served by a Portless development preview. No PR is needed just to
 create a preview. Share its local URL, bounded lease and evidence, then

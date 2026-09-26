@@ -24,7 +24,7 @@ import { Button } from "@/components/ui/button";
 // Whether the notice appears is the SERVER's decision (`isAddressSuppressed` in
 // `/settings`), so nothing here holds server data: the notice is rendered from
 // props, the action calls `refresh()`, and the re-render is what makes it
-// disappear (memory/contracts/data-patterns.md). `useTransition` is UI state —
+// disappear. `useTransition` is UI state —
 // "a request is in flight" — which is the legitimate kind.
 // ============================================================================
 

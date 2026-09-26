@@ -18,7 +18,7 @@ import {
 // component has no dismiss, and there is no other control on either surface that
 // makes the invitation go away.
 //
-// NO SERVER DATA IN STATE (`memory/contracts/data-patterns.md`). The invitation
+// NO SERVER DATA IN STATE. The invitation
 // arrives as props from a server component and is never copied into `useState`;
 // the only state here is UI state — a transition's pending flag and the last
 // refusal message. On success there is nothing to update locally: the action

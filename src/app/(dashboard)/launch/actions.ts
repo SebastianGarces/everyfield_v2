@@ -119,8 +119,8 @@ function toActionError(error: unknown, verb: string): ActionResult<never> {
 /**
  * What every launch write revalidates.
  *
- * `refresh()` for the page the planter is on (the house rule —
- * `memory/contracts/data-patterns.md`), plus the OTHER surfaces that show the
+ * `refresh()` for the page the planter is on, plus the OTHER surfaces that
+ * show the
  * same launch: the dashboard card (LS-005) reads the date, `/tasks` lists the
  * seeded `launch_prep` tasks, and `/phase` reads the countdown signal. Missing
  * one is how two surfaces come to disagree about the same day.

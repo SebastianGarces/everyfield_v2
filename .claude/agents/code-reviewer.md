@@ -45,8 +45,8 @@ idea is visible.
 
 ## This repo's known failure modes
 
-Check the diff against `memory/invariants.md` (every rule, one line each) and the
-`memory/invariants/<domain>.md` files covering what the diff touches; these are the recurring ones:
+Read the short `memory/invariants.md` and relevant decision topics from `memory/index.md`.
+Check behavior against the owning source and tests. Recurring review questions include:
 
 - Any `db.transaction()` call (throws at runtime on neon-http) or a multi-statement mutation
   without a real concurrency guard — SELECT-then-INSERT is not one.
@@ -74,7 +74,7 @@ finding.
 
 **`warnings`** — each with `kind` (`ruling` | `spec-question`). These never reach the fixer: you
 **rule on them yourself** from `product-docs/product-values.md`, `CONTEXT.md` and
-`memory/invariants.md`, and the ruling is copied verbatim into the PR body. A structural problem is
+the relevant entries in `product-docs/decisions.md`, and the ruling is copied verbatim into the PR body. A structural problem is
 never a warning — if it needs code changed, it is a finding.
 
 A few high-conviction structural findings beat a long list of cosmetic notes. Skip praise sections

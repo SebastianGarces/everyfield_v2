@@ -113,8 +113,7 @@ interface SubtaskListProps {
  *
  * Server data arrives as props and is never copied into `useState`. The only
  * local state is `useOptimistic`, so a tick lands instantly and is reconciled
- * when the action's `refresh()` re-renders the page with the true rows
- * (`memory/contracts/data-patterns.md`).
+ * when the action's `refresh()` re-renders the page with the true rows.
  */
 export function SubtaskList({
   parentTaskId,

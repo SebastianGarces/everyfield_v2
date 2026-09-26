@@ -18,7 +18,7 @@ import { OnboardingFlowClient } from "./onboarding-flow-client";
  * end of onboarding with no offer: their answer was on the church row the whole
  * time and nothing was reading it. Resolving both facts here makes the offer
  * state-driven — the same answer however the planter arrived — and keeps them
- * out of client state entirely (`memory/contracts/data-patterns.md`: server
+ * out of client state entirely (server
  * data flows through props).
  *
  * BOTH READS ARE CHEAP AT THIS POINT IN THE PRODUCT. `getCurrentUserChurch` is

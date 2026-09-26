@@ -84,8 +84,8 @@ import { isSharingFeature } from "@/lib/sharing/toggles";
 // ----------------------------------------------------------------------------
 //
 // Screen 2 says "changes save without a page navigation". Each control calls
-// its action directly and the component holds the optimistic value
-// (memory/contracts/data-patterns.md), so the switch moves under the finger and
+// its action directly and the component holds the optimistic value,
+// so the switch moves under the finger and
 // the server reconciles behind it.
 //
 // `refresh()` rather than `revalidatePath("/settings")`: turning a category off
@@ -324,7 +324,7 @@ export async function clearMyEmailSuppressionAction(): Promise<SuppressionAction
 
     // The notice is server-rendered from `isAddressSuppressed`, so the page has
     // to re-read to lose it — the same reconciliation the preference switches
-    // get (memory/contracts/data-patterns.md).
+    // get.
     refresh();
 
     return { success: true, cleared: cleared > 0 };
@@ -590,7 +590,7 @@ export async function setChurchInactivityThresholdsAction(
 // friendly error while a well-formed one threw, so the two answers told a
 // well-formed payload from a malformed one with no session at all.
 //
-// `refresh()` rather than `revalidatePath`, per memory/contracts/data-patterns.md:
+// `refresh()` rather than `revalidatePath`, with server reconciliation:
 // each switch holds an optimistic value and the server reconciles behind it.
 
 export type SharingActionResult =

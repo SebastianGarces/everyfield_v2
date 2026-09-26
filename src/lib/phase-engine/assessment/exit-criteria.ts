@@ -62,7 +62,7 @@
 import type { InsightAudience, PlantInsight } from "@/db/schema";
 import { formatDate } from "@/lib/datetime";
 // The one parser for `launches.target_date`. That column is a DAY, not an
-// instant, and memory/invariants/dates-times.md forbids round-tripping it
+// instant, and it must not round-trip
 // through a bare `Date` — countdown.ts's header records the two releases that
 // duplication already cost (#303, #338). This module reads the same day out of
 // the fact snapshot, so it reads it through the same owner.

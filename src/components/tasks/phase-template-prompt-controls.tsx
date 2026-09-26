@@ -73,8 +73,7 @@ import type {
 // uncontrolled server markup; `change` bubbles to the form, and the handler
 // counts what is checked right then. Holding a copy of the tick state in React
 // would be a second source of truth for something the DOM already knows
-// (`memory/contracts/data-patterns.md` — this is UI state, and the least of
-// it).
+// and does not need a second copy.
 //
 // …AND A SETTLED ACTION IS THE SECOND MOMENT THE DOM CHANGES BEHIND THE COUNT.
 // `change` is not the only writer of those checkboxes: REACT 19 RESETS AN
@@ -91,9 +90,9 @@ import type {
 // in the island, keyed on the two outcomes, calling the same
 // `tickedTemplateCount` the `change` handler calls. It is not `useEffect` for
 // data synchronisation,
-// which `memory/contracts/data-patterns.md` forbids: nothing here is server data
-// and no state is mirrored from props. It is the DOM-subscription case that file
-// names as the legitimate one — React mutated the checkboxes without telling us,
+// which would copy server data: nothing here is server data
+// and no state is mirrored from props. It subscribes to DOM changes.
+// React mutated the checkboxes without telling us,
 // and this reads them back.
 // ============================================================================
 
@@ -220,10 +219,8 @@ export function phaseTemplatePromptAlert(
  * that imported the constant from here would interpolate a reference object,
  * not a string. Props cross that boundary; module constants do not.
  *
- * `useEffect` for a `document.cookie` write is not the data synchronisation
- * `memory/contracts/data-patterns.md` forbids — nothing here is server data and
- * no state is mirrored. It is the browser-API side effect that file reserves the
- * hook for, and it is why `maxAge` is the backstop rather than the mechanism:
+ * `useEffect` writes to the browser cookie API; no server state is mirrored.
+ * `maxAge` is the backstop rather than the mechanism:
  * with JavaScript off the receipt simply expires on its own.
  */
 export function ClearReceiptCookie({ name }: { name: string }) {

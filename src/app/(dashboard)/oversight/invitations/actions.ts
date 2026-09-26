@@ -39,8 +39,8 @@
 // one would be a regression — this one lets the parse answer an anonymous
 // caller, that one lets a future non-action caller through unchecked.
 //
-// `refresh()` rather than `revalidatePath`, per
-// memory/contracts/data-patterns.md — the list is server-rendered from props
+// `refresh()` rather than `revalidatePath`, because
+// the list is server-rendered from props
 // and the server is what reconciles it.
 // ============================================================================
 

@@ -1,15 +1,18 @@
-# Memory Index
+# Memory index
 
-Memory holds what the code cannot tell you: invariants, rulings, and architectural intent. It deliberately does NOT mirror schemas, routes, file layouts or test names — the source is faster and never stale.
+Read [core memory](invariants.md) before editing. Then select the topic relevant to the change; do not read all memory or the entire decision register by default.
 
-| File | Purpose |
-|------|---------|
-| [invariants.md](invariants.md) | Every rule, one line each — **read before any mutation** |
-| [invariants/](invariants/) | Per-domain why and worked examples; read the file matching what you touch |
-| [entrypoints.md](entrypoints.md) | Where flows start |
-| [contracts/api.md](contracts/api.md) | Non-obvious route behaviours (cron, webhooks, tokened routes) |
-| [contracts/db.md](contracts/db.md) | Non-obvious column semantics and migration rules |
-| [contracts/config.md](contracts/config.md) | Configuration semantics and operational setup; values live in source |
-| [contracts/data-patterns.md](contracts/data-patterns.md) | Client/server data-sync conventions |
+| Question | Read |
+|---|---|
+| Product scope, deferred work, Evry retirement | [Scope and release](../product-docs/decisions.md#scope-and-release) |
+| Seats, coaching, discovery, invitations | [Authority and invitations](../product-docs/decisions.md#authority-and-invitations) |
+| Consent, sharing, oversight, personal data | [Privacy and oversight](../product-docs/decisions.md#privacy-and-oversight) |
+| Playbook, phases, intelligence, tasks | [Planting methodology](../product-docs/decisions.md#planting-methodology-and-intelligence) |
+| Settings, onboarding, design, local schedules | [Experience and scheduling](../product-docs/decisions.md#experience-and-scheduling) |
+| Why a known gap remains | [Accepted limitations](../product-docs/decisions.md#accepted-limitations) |
+| Local preview setup, disposable services and cleanup | [Local previews](../ops/local-previews.md) |
+| Shared database migration-ledger anomalies | [Database provenance](contracts/db.md) |
+| How a feature works | Its source and tests; no memory mirror |
+| Former invariant sections cited in older source/migration comments | [Historical invariants](https://github.com/SebastianGarces/everyfield_v2/blob/ddcb9129aa8a4d18b3e1d3e5a56828edc2419674/memory/invariants.md), not current instructions |
 
-There is **no size cap** (ruled 2026-08-15). The byte budget was removed because it had become a tax on every unrelated pass: it was re-pinned four times in two days, and each raise cost a compression negotiation that bought wording back rather than removing a rule. Size is still a real cost — `memory/` is read before source on almost every pass — so the discipline that made the cap work stays, now as review rather than as a test: **each rule is 1–3 sentences**, the *why* that is not derivable from source goes down into `memory/invariants/<domain>.md`, and nothing here mirrors what the source already says. A change that adds or alters a rule updates `memory/` in the same change (`ops/process.md`).
+Update product intent in the owning decision entry and requirements in the same change. Put only external operational facts in memory; remove them when superseded. Behavior already established by code or tests needs no parallel prose contract. The short core has no byte quota, but it is not an inventory of every rule. Historical wording remains in Git.

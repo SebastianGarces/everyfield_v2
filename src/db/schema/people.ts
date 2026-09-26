@@ -195,7 +195,7 @@ export const persons = pgTable(
      * says nothing about whose record it is.
      *
      * IT GRANTS NOTHING. Authority is the seat in its tenancy
-     * (`memory/invariants/seats-and-tenancy.md`) and this column is never read
+     * (`src/lib/auth/tenancy.ts`) and this column is never read
      * to widen one — it makes an account ADDRESSABLE as a person (assignable to
      * a team role, nameable as a team leader), which is a different question
      * from what that account may do.

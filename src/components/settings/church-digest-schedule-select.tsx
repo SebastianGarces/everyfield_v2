@@ -30,8 +30,8 @@ import {
 // Writing them separately would let a save land halfway and put the digest at
 // Wednesday 4 PM for one tick — a send time nobody chose.
 //
-// State is `useOptimistic` over the props, per
-// memory/contracts/data-patterns.md: both selects move under the finger and the
+// State is `useOptimistic` over the props, so
+// both selects move under the finger and the
 // action reconciles. A failed write surfaces as a toast and the optimistic
 // value falls back to server truth on its own.
 // ============================================================================

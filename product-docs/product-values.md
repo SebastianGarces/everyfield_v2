@@ -86,7 +86,7 @@ distrust, it is not a shortcut.
 
 A product decision is a ruling: dated, recorded in one ledger, and binding until a new
 ruling replaces it. Never relitigated by accident — and never immovable on purpose. This
-is the product-side mirror of R6 (`ops/process.md` § Rules bind at two strengths):
+follows the decision policy in `ops/process.md`:
 anyone (human or agent) who believes a
 ruling no longer serves the mission raises it openly; nobody deviates silently, and
 nobody treats a past decision as physics.

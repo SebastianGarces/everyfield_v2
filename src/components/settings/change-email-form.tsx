@@ -16,7 +16,7 @@
 //
 // THE LIVE REQUEST IS A PROP, not client state: the server section reads it and
 // the action calls `refresh()`, so "check your inbox" reconciles with the same
-// server state the write produced (memory/contracts/data-patterns.md). Asking
+// server state the write produced. Asking
 // again supersedes the last ask in the database, which is why there is no
 // Cancel control here to build or to keep honest.
 // ============================================================================

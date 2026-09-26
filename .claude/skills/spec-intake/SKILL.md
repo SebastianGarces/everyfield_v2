@@ -30,7 +30,7 @@ The front door of the factory. A loop is only as good as the target it is pointe
      --label agent:queued --parent <feature-issue> [--blocked-by <n>[,<n>]]
    ```
 7. **Rule any question that remains** from `product-docs/product-values.md`, `CONTEXT.md` and
-   `memory/invariants.md`; record the ruling in the body and queue the work. Convene a short
+   the relevant entries in `product-docs/decisions.md`; record the ruling in the body and queue the work. Convene a short
    consulate (2–3 perspectives, one synthesis) for a hard call. A product ruling also goes in
    `product-docs/decisions.md`. Two questions you do not rule: owner taste on **UI direction**
    (invoke the `prototype` skill and keep the work moving), and an item that is **not yet fleshed

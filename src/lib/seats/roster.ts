@@ -36,7 +36,7 @@
 // WHY THE REMOVAL IS ONE `db.batch` WITH THE MARKER LAST
 // ----------------------------------------------------------------------------
 // `db.transaction()` throws on neon-http; `db.batch([...])` is the only atomic
-// unit (`memory/invariants/transactions-atomicity.md`). The effects the FRD
+// unit (`src/db/index.ts`). The effects the FRD
 // pins are ordered so the CLEARING OF THE TENANCY IS THE LAST STATEMENT:
 //
 //   1. sessions deleted      — redo-safe, keyed on the account

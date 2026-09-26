@@ -34,7 +34,7 @@ The morning board plus the morning's rulings. Never starts build work.
 
 5. **Rule the open `decision` issues — do not just list them.** Read each issue and the evidence it
    links, then rule it from `product-docs/product-values.md`, `CONTEXT.md` and
-   `memory/invariants.md`; convene a short consulate (2–3 perspectives, one synthesis) for a hard
+   the relevant entries in `product-docs/decisions.md`; convene a short consulate (2–3 perspectives, one synthesis) for a hard
    call. Record the ruling in `product-docs/decisions.md`, amend the owning FRD, file whatever issues
    it creates, and close the decision issue with it. Put the call to the user only when it is a
    matter of their taste — and never nag a deferred one.

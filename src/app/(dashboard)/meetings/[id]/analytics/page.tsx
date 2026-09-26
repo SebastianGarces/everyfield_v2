@@ -33,8 +33,7 @@ interface AnalyticsPageProps {
  * figures are computed on the server, so the filter has to reach the server to
  * change them, and a shared or reloaded link then shows the same figures it
  * showed the person who sent it. That also keeps this page a plain server
- * component — no client boundary, no server data in `useState`
- * (memory/contracts/data-patterns.md).
+ * component — no client boundary, no server data in `useState`.
  *
  * With no `?type=` the view is exactly what it was before it became
  * filterable: completed vision meetings.

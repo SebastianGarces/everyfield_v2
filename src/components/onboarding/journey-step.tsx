@@ -33,8 +33,8 @@ import {
  * which is the acceptance criterion.
  *
  * NOTHING HERE IS SERVER DATA IN `useState`. The two selections and the typed
- * date are the planter's own input while they answer
- * (`memory/contracts/data-patterns.md`); the server's copy is written by the
+ * date are the planter's own input while they answer;
+ * the server's copy is written by the
  * action, which revalidates, and the step advances rather than re-reading.
  *
  * The step is skippable like every step after the first (OB-007): skipping
@@ -62,8 +62,7 @@ type JourneyError = { field: JourneyErrorField; message: string };
  * The refusal state: this plant had already declared its starting stage, so the
  * stage half of the submit wrote nothing (ruled 2026-08-09 — a re-declaration is
  * refused, never overwritten). It is the outcome of the planter's own submit,
- * held exactly like `error` is; it is not a copy of server data kept in sync
- * (`memory/contracts/data-patterns.md`).
+ * held exactly like `error` is; it is not a copy of server data kept in sync.
  */
 type JourneyRecorded = {
   /** The stage ON RECORD — the first declaration, not the one just submitted. */
