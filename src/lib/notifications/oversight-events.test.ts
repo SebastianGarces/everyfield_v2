@@ -49,9 +49,7 @@ test("the SQL predicate says exactly what isPhaseAdvance says", () => {
   // and the pair of columns it is between, which is the whole content of the
   // rule and the part that a careless edit reverses. A regression (3 → 2) fails
   // `to_phase > from_phase` for the same reason `isPhaseAdvance(3, 2)` is
-  // false — and the real-database half of this is
-  // `scripts/g3-oversight-model.ts` §6, which seeds a 3 → 2 row and asserts the
-  // digest counts zero phases for it.
+  // false. This test checks the generated predicate without a database.
   const { sql, params } = new PgDialect().sqlToQuery(phaseAdvanceCondition());
 
   assert.equal(

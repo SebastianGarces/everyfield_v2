@@ -1609,9 +1609,6 @@ export async function lookupInvitingOrgName(invitation: {
  * for; locking the invitation instead would not have helped, since the two
  * accepts are two different invitations.
  *
- * `scripts/g3-oversight-model.ts` §3d case H races accept-vs-accept on a real
- * database for exactly this.
- *
  * A SECOND ACCEPT NEVER REPLACES AN ASSOCIATION — ruled here, 2026-08-03
  * (#265; the sever rules are #274 / `product-docs/features/oversight/frd.md`
  * OV-007). Plant P accepted sending church A; nothing stops B's admin inviting

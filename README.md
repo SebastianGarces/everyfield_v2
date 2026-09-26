@@ -100,7 +100,6 @@ Open [http://localhost:3000](http://localhost:3000).
 | `pnpm test` | Run the test suite (Node test runner via tsx) |
 | `pnpm db:generate` | Generate Drizzle migrations from schema changes |
 | `pnpm db:migrate` | Apply pending migrations |
-| `pnpm db:push` | Push schema directly (skip migration files) — avoid; project policy is `db:migrate` (see `AGENTS.md`) |
 | `pnpm db:studio` | Open Drizzle Studio (database GUI) |
 | `pnpm db:seed` | Seed the database with dev data |
 | `pnpm db:clean` | Clean the database (remove seeded data) |

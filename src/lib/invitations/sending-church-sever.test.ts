@@ -42,8 +42,6 @@ import { assertInOrder, sourceReader } from "@/lib/testing/source-span";
 //
 // The executed half runs against no database on purpose: every refusal below
 // happens before the first query, which is exactly the property being claimed.
-// The end-to-end path (real rows, real audit, real notification) is
-// `scripts/g3-association-lifecycle.ts` §8.
 // ============================================================================
 
 const SENDING_CHURCH = "22222222-2222-4222-8222-222222222222";

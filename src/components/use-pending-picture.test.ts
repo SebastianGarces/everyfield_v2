@@ -16,9 +16,8 @@ import { stripComments } from "@/lib/testing/source-span";
 // not be, a catch that is present. A scan can hold all three, and each of them
 // was violated in the code this hook replaced.
 //
-// The behaviour these shapes protect is proven where it can be: both surfaces
-// are exercised by hand on the preview, and the underlying upload/remove path
-// has `scripts/prove-avatar-roundtrip.ts` against the real bucket.
+// Both picture surfaces still need browser validation on the branch preview.
+// auth/avatar.test.ts checks the upload/remove effect ordering independently.
 // ============================================================================
 
 const SOURCE = readFileSync(
