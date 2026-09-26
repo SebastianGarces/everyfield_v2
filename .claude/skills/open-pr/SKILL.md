@@ -15,6 +15,9 @@ host's `code-reviewer` custom agent on the staged and unstaged diff, apply every
 and re-run the relevant proof. The generated Codex role and the Claude source share the same review
 instructions; do not substitute an ad-hoc review prompt.
 
+Keep related fixes and review rounds on one PR. A coherent change may close multiple issues;
+creating a PR is not a prerequisite for local validation.
+
 1. Push the branch: `git push -u origin <branch>`.
 2. Build the body from the evidence bundle (template below) and open, or update, **the** PR for this
    branch — never a second one.
@@ -115,7 +118,11 @@ Report the conclusion of the **`Format, Lint, Typecheck, Build`** check *verbati
 
 ## 👀 Manual QA
 
-**Preview:** <url> → <exact path(s) to open>
+**Local preview:** <ID, URL, production mode, final SHA, exact paths, lease expiry or removed>
+
+**Reproduce:** <branch/worktree and Portless command; private config location, never secrets>.
+Local URLs work only on the host computer. If cleaned up, say so and retain the evidence and
+recreation instructions. Docs-only work says "not applicable".
 
 **Walk the happy path** (~N min)
 1. <concrete click-by-click step> — Expect: <what should happen>

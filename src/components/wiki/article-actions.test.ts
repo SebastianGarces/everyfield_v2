@@ -39,7 +39,7 @@ import { Callout } from "./callout";
 // downloaded file have to agree.
 //
 // The browser half of the acceptance criteria (print-media emulation, the
-// download event) is proved on the branch's Vercel preview by
+// download event) is proved on the branch's local Portless preview by
 // `.claude/skills/validate`.
 //
 // PREFER A BEHAVIOURAL ASSERTION TO A SOURCE GREP. Reading a file and matching

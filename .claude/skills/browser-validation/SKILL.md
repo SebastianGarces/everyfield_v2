@@ -1,125 +1,54 @@
 ---
 name: browser-validation
-description: Validate a feature branch in a real browser using its Vercel preview deployment. Use whenever an acceptance criterion describes something a user sees or clicks — before claiming a UI change works, and before opening a PR whose Definition of Done includes a functional/browser gate.
+description: Validate a feature worktree in a real browser through its managed local Portless URL. Use before claiming a visible or interactive change works and before shipping UI work.
 ---
 
-# Browser validation against preview deployments
+# Browser validation through Portless
 
-The one reference for reaching a preview. A Definition of Done must never report a browser gate as
-passed when no browser was involved — if you cannot validate, say so in the PR with the reason.
+Read `ops/local-previews.md` for EveryField's configuration and data requirements, and
+`.agents/skills/portless-preview/SKILL.md` for CLI lifecycle commands. A browser gate passes only
+when the browser exercised the changed behavior on the selected worktree's preview.
 
-`localhost:3000` serves the **main checkout**, so a pass obtained there is a pass for someone else's
-code, and you never start your own dev server (`AGENTS.md`). Every PR to `main` gets a preview
-deployment: the branch, built and served. Validate there.
+## Start and identify the preview
 
-## 1. Get the preview URL
+Use development mode for live iteration and hot reload. For final acceptance, commit the change,
+start a production-mode preview, and record its ID, URL, mode and SHA. Verify that SHA equals the
+branch head. Production snapshots omit ignored environment files, so use the private configuration
+described in `ops/local-previews.md`. No Git push is required.
 
-The push creates the preview, so the branch is all you need — and the look happens **before the PR
-exists**. Resolve it by branch, validate, and return the evidence to the ship pass, which writes the
-PR body afterwards.
+Open the exact URL returned by `portless preview up`, with the needed route appended. Do not use
+an existing server just because its port is familiar. After a code change, create a new production
+preview and repeat the affected assertions. Development preview metadata does not prove that live
+files still match its recorded commit.
 
-```bash
-./scripts/preview-url.sh --wait --bypass <branch>
-./scripts/preview-url.sh --wait --bypass <pr-number>   # amendment pass only, once a PR exists
-```
+## Sign in and choose data
 
-`--wait` blocks until the deployment is ready (~2 min). `--bypass` appends the protection-bypass
-parameters and is **required** — without it the browser lands on `vercel.com/login`. The secret is
-`VERCEL_AUTOMATION_BYPASS_SECRET` in `.env.local`; if the script says it is unset, stop and ask.
-Never disable deployment protection to get around it.
+Use the real login form for production-mode validation. Development-only account switching is
+convenient during iteration but does not prove authentication. Never set hosting environment flags
+or invent sessions to enable a test login. Use the credentials recorded for the preview's own
+fixture database; do not print secrets in tool output or evidence.
 
-**Re-run the script after every push** — an old URL serves old code and will happily "prove" a fix
-that is not there. The preview is a production build (no HMR, no source maps) and writes to the
-**shared development database**: prefer reading, and clean up what you write.
+Read `scripts/seed-dev-db.ts` and `scripts/seed-phase-engine-eval.ts` for fixture accounts.
+`planter1@everyfield.app` has no people, so list-shaped criteria need populated fixtures such as
+the eval planters. Oversight admin credentials come from the private `SEED_ADMIN_PASSWORD` used
+when those accounts were created. Do not re-key an existing account to make a test convenient.
+Seed only an explicitly owned disposable database; shared `.env.local` is not proof of ownership.
+`pnpm db:seed` wipes data. Prefer the scoped seed that owns the fixture.
 
-## 2. Navigate once with the bypass URL
+For tenancy work, use two accounts from different churches. Switch accounts with the real sign-out
+flow or a fresh browser context, then return to `/login`. For registration, configure the private
+preview's beta code or follow a real invitation flow as appropriate to the acceptance criterion.
+Mail-sending flows require an independently verified capture-only transport.
 
-Use the full URL as your **first** navigation. Vercel answers with a `Set-Cookie` redirect, so every
-later navigation can use plain paths:
+## Exercise, report and finish
 
-```
-navigate → https://everyfield-v2-<hash>.vercel.app?x-vercel-protection-bypass=…&x-vercel-set-bypass-cookie=true
-navigate → https://everyfield-v2-<hash>.vercel.app/people
-```
+Follow `.agents/skills/validate/SKILL.md` for assertions and audit requirements. Prove the
+interaction: an export test inspects the downloaded content, not just the button. Capture relevant
+console errors and do not dismiss them as hosting noise.
 
-## 3. Log in with a seeded account
-
-**The dev account switcher does not exist on previews** — it is gated on `NODE_ENV ===
-"development" && !process.env.VERCEL`. Log in through the real form; previews read the same
-development database as local dev.
-
-**The login form does carry a preview-only picker for the table below** (#684, superseding the UX
-half of #146). It is a searchable combobox: filter by name, email or note, pick an account, and it
-types the email and password into the two fields. A **Sign in as this account** button then appears,
-and pressing it presses the login form's own submit — the same POST, password check, rate limiting
-and session issuance a hand-typed login gets. The picker itself still owns no route, no server
-action, no cookie and no session, which is why it is allowed where the switcher is not; #146's hard
-half stands, and a change that gives previews a passwordless side door is a change to reject. The
-two oversight admins have no password in the repo, so they degrade rather than disappear: picking one
-fills the email, focuses the password field, and offers no button — type the password from the block
-below. It renders only on `VERCEL_ENV === "preview"`, so it is absent locally (use the switcher) and
-absent in production.
-
-| Account | Email | Password | Notes |
-|---|---|---|---|
-| Planter | `planter1@everyfield.app` | `password123` | **Church has 0 people** — fine for empty states, useless for anything list-shaped |
-| Network admin | `admin@everyfield.app` | read `SEED_ADMIN_PASSWORD` from `.env.local`; set it there and run `seed-dev-db.ts --oversight-orgs-only` (block below) | Owns "Dev Church Planting Network" — its `sending_network_id` is what `/oversight/invitations` needs |
-| Sending church admin | `sending-church-admin@everyfield.app` | read `SEED_ADMIN_PASSWORD` from `.env.local`; set it there and run `seed-dev-db.ts --oversight-orgs-only` (block below) | In "Dev Sending Church", which is in NO network — so `/settings/association` opens on its *answering* view |
-| Coach | `coach1@everyfield.app` | `password123` | |
-| Eval planter | `planter-dayspring@eval.phase-engine.everyfield.app` | `eval-password-123` | ~100 people, meetings, assessments |
-| Eval planter | `planter-evergreen@eval.phase-engine.everyfield.app` | `eval-password-123` | ~89 people, different church |
-
-`scripts/seed-dev-db.ts` and `scripts/seed-phase-engine-eval.ts` are the source of truth; this table
-follows them. **No in-repo constant may open an account on a database anyone else uses**, so the two
-oversight admins have no password here. Read it first; never re-key one someone else recorded.
-
-```bash
-# 1. Already recorded? A value here IS the password — use it and stop. The `-E` and the
-#    optional `export` matter: the seed accepts both spellings.
-grep -E '^[[:space:]]*(export[[:space:]]+)?SEED_ADMIN_PASSWORD=' .env.local
-
-# 2. Only if that printed nothing. printf with a leading newline, never `echo >>`, which
-#    appends onto a partial last line and silently corrupts both variables.
-printf '\nSEED_ADMIN_PASSWORD="<a password you choose>"\n' >> .env.local
-pnpm exec tsx scripts/seed-dev-db.ts --oversight-orgs-only
-```
-
-That mode deletes nothing — it upserts the two orgs and both admin rows — and refuses, with no
-override, on any database holding an alpha-cohort account. Point `DATABASE_URL` at the development
-branch a preview reads, never at production. If any other fixture is missing, re-run the scoped seed
-that owns it (`scripts/seed-*.ts`) rather than `pnpm db:seed`, whose wipe takes the rest with it.
-
-Use an eval planter whenever the criterion involves data, and check tenancy-sensitive work from
-**two** accounts in different churches.
-
-**Switching accounts:** there is no sign-out route and the session cookie is `httpOnly`, so clear at
-the context level and re-apply the bypass:
-
-```js
-await page.context().clearCookies();
-await page.goto('<preview>/login?x-vercel-protection-bypass=…&x-vercel-set-bypass-cookie=true');
-```
-
-**A fresh registration on a preview never goes through the beta gate.** `BETA_INVITE_CODE` is a
-Vercel *sensitive* variable: `vercel env pull` returns the literal `[REDACTED]`, so no agent can
-obtain it — do not burn time trying, and do not settle for post-state evidence because of it. The
-app's own bypass is the path: create an invitation from the network admin account (an invited
-registration skips the code via `hasValidInvitationBypass`), then register through the invite link.
-Proven on #378's validation: the full onboarding flow ran cold on a preview this way.
-
-## 4. Drive it and capture evidence
-
-The gate thresholds live in `.agents/skills/validate/SKILL.md`. Two facts belong here. Evidence is
-**the interaction, not the render**: "clicked Export, a CSV downloaded, it had N rows matching the
-filtered list", never "the Export button is present" — parse the file, do not photograph the click.
-And the one known console noise on previews is a single `Failed to load resource: 403` per page
-load, from the Vercel toolbar's `HEAD` request; verify that is what you have before dismissing it.
-
-## 5. Teardown (mandatory, PASS or FAIL)
-
-The last browser action is closing what you opened with the host's browser teardown control
-(`browser_close`, or `list_pages` followed by `close_page` for every page you created). A leaked
-browser outlives the agent and a long pass leaks until the machine is out of RAM;
-`scripts/cleanup-mcp-browsers.sh` only catches agents that died first. Delete any stray `.png` too,
-then return the outcome to the ship pass, which writes it into the PR body (on an amendment pass,
-edit the body in place).
+Retain the decisive evidence outside the worktree, with the tested commit and results. Close tabs
+or browser contexts created for this task on success and failure. If another reviewer needs the
+preview, hand off its identity, private configuration location, bounded lease and cleanup ownership.
+Otherwise stop it. Remove the worktree only when its users are finished and its changes are safely
+committed; verify cleanup as described in the Portless skill. Report an unavailable browser or
+missing configuration as unverified, never as a pass.

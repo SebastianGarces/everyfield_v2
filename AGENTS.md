@@ -4,7 +4,7 @@ Decisions, requirements, and rulings live in this repo (FRDs, `memory/`, the Git
 
 ## Hard conventions
 
-- **NEVER start a dev server.** One already runs on `localhost:3000` and it serves the **main checkout**, so it never contains your branch. Use the branch's Vercel preview: `.agents/skills/browser-validation/SKILL.md`.
+- **Validate the selected worktree through managed Portless previews.** Use development mode for hot reload and a clean, committed production-mode snapshot for final runtime evidence. Never use an unrelated server on `localhost:3000` as branch evidence. Start here: `ops/local-previews.md`; browser checks: `.agents/skills/browser-validation/SKILL.md`.
 - **Do not run `pnpm format`.** Claude and Codex `PostToolUse` hooks plus Cursor's `afterFileEdit` hook format every file you write, and CI runs `format:check`. `.prettierignore` excludes `*.md`, so unformatted markdown is deliberate.
 - **Cross-agent skills live in `.agents/skills/`.** Codex discovers that directory directly; Claude and Cursor use symlinks where their native directories require them. Claude-native workflow sources stay in `.claude/skills/` and `node ops/sync-codex-setup.mjs --write` exposes them to Codex and regenerates `.codex/agents/`.
 - **Agent edit hooks share the adapters in `ops/`.** Claude, Cursor, and Codex all run the same Prettier adapter; Claude and Codex also run the same worktree/pnpm guard. Do not add a host-only copy of either rule.
@@ -23,6 +23,7 @@ Decisions, requirements, and rulings live in this repo (FRDs, `memory/`, the Git
 | Updating `memory/` after a change | `memory/index.md` (same-change maintenance rules) |
 | Email/notification features | `.agents/skills/email-best-practices/`, `.agents/skills/resend/` |
 | UI/UX work — implementation, polish, accessibility, typography, color, copy | `.agents/skills/better-interface/` (coordinates the `better-*` suite) |
+| Local preview setup, modes, data isolation, cleanup | `ops/local-previews.md`, `.agents/skills/portless-preview/SKILL.md` |
 | Proving a UI change works in a browser | `.agents/skills/browser-validation/SKILL.md` |
 | A fuzzy ask, before writing a spec | `.agents/skills/grilling/SKILL.md` |
 | A direction question needing a ruling | `.agents/skills/prototype/SKILL.md` |

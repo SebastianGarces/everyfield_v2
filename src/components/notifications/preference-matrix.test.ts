@@ -11,7 +11,7 @@ import { sourceReader } from "@/lib/testing/source-span";
 // There is no DOM in this test runner — `pnpm test` is bare `node:test` over
 // `src/**/*.test.ts` — so a client component's guarantees are pinned the way
 // the rest of this repo pins them: against the source it ships. Rendering is
-// proved on the branch's Vercel preview by the frontend validation gate; what
+// proved on the branch's local Portless preview by the frontend validation gate; what
 // belongs HERE is the set of claims a future edit could silently break without
 // anyone noticing until a user does.
 //
