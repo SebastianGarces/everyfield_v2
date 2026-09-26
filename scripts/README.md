@@ -1,6 +1,6 @@
 # Script inventory
 
-Reviewed 2026-09-26 for #851. This covers tracked executable and support files in `scripts/`, `ops/`, and `.cursor/hooks/`, including their tests. Package commands are also emitted by the inventory command. Application modules, framework configuration and SQL migrations remain in their owning directories.
+Reviewed 2026-09-26 for #851 and updated for Evry retirement in #853. This covers tracked executable and support files in `scripts/`, `ops/`, and `.cursor/hooks/`, including their tests. Package commands are also emitted by the inventory command. Application modules, framework configuration and SQL migrations remain in their owning directories.
 
 Run from a checkout with the changes staged or committed:
 
@@ -25,12 +25,14 @@ The four files remain recoverable from Git history before this cleanup.
 
 Age, issue numbers and one-off names do not establish obsolescence. The proofs below still describe useful regression checks or release evidence. This inventory checks their purpose and references; it does not claim every manual proof was executed. Database writers, browser automation, paid model calls and the live feedback-to-GitHub proof were not run for this cleanup.
 
-102 retained files, including 20 test files and the new inventory command.
+86 retained files, including 16 test files and the inventory command.
 
 ### Scripts
 
 | File | Current use |
 | --- | --- |
+| [`scripts/audit-retired-agent-db.ts`](../scripts/audit-retired-agent-db.ts) | Read-only legacy agent table, foreign-key, and migration-ledger audit. |
+| [`scripts/retired-agent-boundary.test.ts`](../scripts/retired-agent-boundary.test.ts) | Prevent retired agent runtime from returning while preserving native alpha code and migrations. |
 | [`scripts/audit-benchmark-language.ts`](../scripts/audit-benchmark-language.ts) | Read-only audit of methodology benchmark wording in the database corpus. |
 | [`scripts/backfill-snapshot.ts`](../scripts/backfill-snapshot.ts) | Migration diagnostics and snapshot/order repair; referenced by migration tests, commands or invariants. |
 | [`scripts/check-document-exports.py`](../scripts/check-document-exports.py) | Generate document samples and inspect PDF, Word and spreadsheet exports offline. |
@@ -43,8 +45,6 @@ Age, issue numbers and one-off names do not establish obsolescence. The proofs b
 | [`scripts/discovery-db-endpoint.ts`](../scripts/discovery-db-endpoint.ts) | Run the discovery live suite with an owned database and local Neon endpoint. |
 | [`scripts/discovery-schema-delta.ts`](../scripts/discovery-schema-delta.ts) | Read-only SQL diff from an operator-selected snapshot to the current schema; reusable beyond discovery. |
 | [`scripts/embed-methodology-corpus.ts`](../scripts/embed-methodology-corpus.ts) | Refresh methodology embeddings after changes to the Playbook or database wiki corpus. |
-| [`scripts/evry-latency-report.ts`](../scripts/evry-latency-report.ts) | Current Evry latency fixture and model benchmark package commands. |
-| [`scripts/evry-model-benchmark.ts`](../scripts/evry-model-benchmark.ts) | Current Evry latency fixture and model benchmark package commands. |
 | [`scripts/export-document-catalog.ts`](../scripts/export-document-catalog.ts) | Generate document samples and inspect PDF, Word and spreadsheet exports offline. |
 | [`scripts/g3-association-lifecycle.ts`](../scripts/g3-association-lifecycle.ts) | Real database regression proofs. The historical G3 name alone does not make their assertions obsolete. |
 | [`scripts/g3-coach-invite-check.ts`](../scripts/g3-coach-invite-check.ts) | Capture an invitation URL for browser validation, verify the resulting account, and remove the fixture. |
@@ -80,12 +80,6 @@ Age, issue numbers and one-off names do not establish obsolescence. The proofs b
 | [`scripts/prove-avatar-column.sh`](../scripts/prove-avatar-column.sh) | Apply/rollback and database constraint proofs for retained versioned migrations. |
 | [`scripts/prove-avatar-roundtrip.ts`](../scripts/prove-avatar-roundtrip.ts) | Behavioral proofs for storage, settings redirects, wiki tenancy, task races and own RSVP permissions. |
 | [`scripts/prove-discovery-profile.mjs`](../scripts/prove-discovery-profile.mjs) | Run the discovery live suite with an owned database and local Neon endpoint. |
-| [`scripts/prove-evry-audit-migration.sh`](../scripts/prove-evry-audit-migration.sh) | Apply/rollback and database constraint proofs for retained versioned migrations. |
-| [`scripts/prove-evry-audit-migration.test.ts`](../scripts/prove-evry-audit-migration.test.ts) | Regression test for the adjacent script or operational contract; retained with the implementation it checks. |
-| [`scripts/prove-evry-conversation-migration.sh`](../scripts/prove-evry-conversation-migration.sh) | Apply/rollback and database constraint proofs for retained versioned migrations. |
-| [`scripts/prove-evry-conversation-migration.test.ts`](../scripts/prove-evry-conversation-migration.test.ts) | Regression test for the adjacent script or operational contract; retained with the implementation it checks. |
-| [`scripts/prove-evry-plan-migration.sh`](../scripts/prove-evry-plan-migration.sh) | Apply/rollback and database constraint proofs for retained versioned migrations. |
-| [`scripts/prove-evry-plan-migration.test.ts`](../scripts/prove-evry-plan-migration.test.ts) | Regression test for the adjacent script or operational contract; retained with the implementation it checks. |
 | [`scripts/prove-picture-key-fence.sh`](../scripts/prove-picture-key-fence.sh) | Mutation proof that regression guards reject broken sharing or leaked storage keys. |
 | [`scripts/prove-settings-hash.ts`](../scripts/prove-settings-hash.ts) | Behavioral proofs for storage, settings redirects, wiki tenancy, task races and own RSVP permissions. |
 | [`scripts/prove-wiki-migration.mjs`](../scripts/prove-wiki-migration.mjs) | Apply/rollback and database constraint proofs for retained versioned migrations. |
@@ -110,16 +104,6 @@ Age, issue numbers and one-off names do not establish obsolescence. The proofs b
 | --- | --- |
 | [`ops/board.sh`](../ops/board.sh) | Current issue/PR coordination and label setup, referenced by delivery skills and tests. |
 | [`ops/codex-session-context.sh`](../ops/codex-session-context.sh) | Current agent setup and hook adapters, referenced by host configuration and tests. |
-| [`ops/evry-cost-audit.mjs`](../ops/evry-cost-audit.mjs) | Current cost-audit and trace smoke package commands. |
-| [`ops/evry-cost-audit.test.mjs`](../ops/evry-cost-audit.test.mjs) | Regression test for the adjacent script or operational contract; retained with the implementation it checks. |
-| [`ops/evry-langfuse-smoke.test.ts`](../ops/evry-langfuse-smoke.test.ts) | Regression test for the adjacent script or operational contract; retained with the implementation it checks. |
-| [`ops/evry-langfuse-smoke.ts`](../ops/evry-langfuse-smoke.ts) | Current cost-audit and trace smoke package commands. |
-| [`ops/evry/communication-inventory.ts`](../ops/evry/communication-inventory.ts) | Generate and validate Evry capability inventories; support modules are imported by generators and tests. |
-| [`ops/evry/generate-communication-inventory.ts`](../ops/evry/generate-communication-inventory.ts) | Generate and validate Evry capability inventories; support modules are imported by generators and tests. |
-| [`ops/evry/generate-inventory.ts`](../ops/evry/generate-inventory.ts) | Generate and validate Evry capability inventories; support modules are imported by generators and tests. |
-| [`ops/evry/generate-people-inventory.ts`](../ops/evry/generate-people-inventory.ts) | Generate and validate Evry capability inventories; support modules are imported by generators and tests. |
-| [`ops/evry/inventory.ts`](../ops/evry/inventory.ts) | Generate and validate Evry capability inventories; support modules are imported by generators and tests. |
-| [`ops/evry/people-inventory.ts`](../ops/evry/people-inventory.ts) | Generate and validate Evry capability inventories; support modules are imported by generators and tests. |
 | [`ops/format-agent-edit.sh`](../ops/format-agent-edit.sh) | Current agent setup and hook adapters, referenced by host configuration and tests. |
 | [`ops/guard-worktree-pnpm-hook.sh`](../ops/guard-worktree-pnpm-hook.sh) | Current agent setup and hook adapters, referenced by host configuration and tests. |
 | [`ops/guard-worktree-pnpm.sh`](../ops/guard-worktree-pnpm.sh) | Current agent setup and hook adapters, referenced by host configuration and tests. |
@@ -146,4 +130,4 @@ Age, issue numbers and one-off names do not establish obsolescence. The proofs b
 
 The `scripts/proofs/*.test.mjs` files are retained with their proof helpers. The current package test globs include `scripts/**/*.test.ts` and `ops/**/*.test.mjs`, so these proof `.mjs` tests require an explicit `node --test scripts/proofs/*.test.mjs` invocation.
 
-All package commands are retained. Database setup, seeds, model evaluation and G3 commands still target existing tools. The `db:push` command remains subject to the repository prohibition on using it for migrations. No dependency or workflow configuration changed.
+Evry package commands and dedicated scripts were removed in #853 when the runtime was retired; see scripts/proofs/retired-agent-alpha.md. Other package commands are retained. Database setup, seeds, model evaluation and G3 commands still target existing tools. The `db:push` command remains subject to the repository prohibition on using it for migrations. No dependency or workflow configuration changed.

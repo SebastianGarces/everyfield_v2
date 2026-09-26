@@ -15,14 +15,10 @@ From the repository root:
 ```sh
 (
   set -e
-  trap './scripts/live-db-stack.sh down || true; ./ops/langfuse/manage.sh down || true' EXIT
+  trap './ops/langfuse/manage.sh down || true' EXIT
 
   ./ops/langfuse/manage.sh up
   ./ops/langfuse/manage.sh smoke
-  ./scripts/live-db-stack.sh up
-  DATABASE_URL="postgresql://postgres:postgres@localhost:55432/live_lib_evry_audit_audit_live" \
-    NEON_HTTP_PROXY_URL="http://localhost:4444/sql" \
-    pnpm evry:langfuse:smoke
 )
 ```
 
@@ -42,9 +38,7 @@ The default UI is <http://127.0.0.1:3210>. Read the generated admin password or 
 
 `smoke` sends one metadata-only OTLP/JSON span to the authenticated public endpoint with `everyfield.provider_calls=0`, then polls Observations API v2 until that exact trace ID is readable. It does not import an SDK, run an evaluation, or call a model provider. The trace is disposable and is deleted with the stack volumes by `down`.
 
-After that zero-provider infrastructure check, `pnpm evry:langfuse:smoke` exercises the application's captured ten-stage trace fixture against the same local service. The application smoke writes through the real audit seam, so it requires a disposable EveryField database with migrations applied through `0066`. `scripts/live-db-stack.sh up` creates the pgvector Postgres instance, Neon HTTP proxy, and freshly migrated database used above.
-
-Pass `DATABASE_URL` and `NEON_HTTP_PROXY_URL` on the smoke command as shown. Do not add or change `DATABASE_URL` in `.env.local` for this check. The outer subshell registers one `EXIT` trap before either stack starts. The trap runs both down commands after success, failure, or interruption, and both down commands are safe to repeat.
+The retired Evry application smoke has been removed. Plant Intelligence remains the application's tracing consumer. The infrastructure smoke above needs no EveryField database or model-provider key. Its `EXIT` trap shuts down the disposable stack after success, failure, or interruption.
 
 Application integration can use the same local values:
 
