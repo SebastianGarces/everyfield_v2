@@ -17,6 +17,9 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
+# Private local preview configuration
+.preview.local.json
+
 # Local env files
 .env
 /ops/langfuse/.env

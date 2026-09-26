@@ -5,7 +5,7 @@ description: One autonomous pass over the board's frontier — take the unblocke
 
 # dispatch
 
-One unattended pass over the frontier, to PRs on auto-merge, with no human in the loop for its
+One unattended pass over the frontier, to reviewed PRs merged after green CI, with no human in the loop for its
 duration. **You run the process yourself** — read `ops/process.md` first; it is the authority for the
 loop, and this skill only adds the guard, the pass shape, and the report.
 
@@ -45,7 +45,10 @@ Pick what this pass will build. Two or three issues is a normal pass; prefer iss
 `## Likely files` do not overlap, and take at most one issue that will mint a migration — two
 migrations in one pass collide on the journal number.
 
-## 3. Build each picked issue
+## 3. Build each coherent change
+
+Related issues may share one branch and PR when they form one reviewable outcome. Claim every
+included issue, keep follow-up fixes on that PR, and keep unrelated changes separate.
 
 Per `ops/process.md`, in order:
 
@@ -53,18 +56,19 @@ Per `ops/process.md`, in order:
    read the label back with `gh issue view <n> --json labels`.
 2. **Worktree** — use the current checkout when the host already placed this task in a managed
    Codex worktree. Otherwise run
-   `scripts/worktree-add.sh -b feature/<slug> <path> origin/main`, never raw `git worktree add`.
+   `scripts/worktree-add.sh -b codex/<slug> <path> origin/main`, never raw `git worktree add`.
    A fresh worktree has no `node_modules`: run `pnpm install` in it.
 3. **Implement** — use one subagent per genuinely file-disjoint workstream and inherit the host's
    configured model unless the user explicitly requested an override. An issue
    labelled `agent:changes-requested` keeps its existing branch and PR: resume it, read the PR's
    review threads, and re-validate rather than recutting.
-4. **Prove it works, once** — the branch's Vercel preview, never `localhost:3000`
-   (`.agents/skills/browser-validation/`). Backend work gets one real request asserting status and
-   shape.
+4. **Prove the changed behavior** using a Portless production-mode snapshot of the final commit
+   (`ops/local-previews.md`, `.agents/skills/browser-validation/`). Use development mode while
+   iterating. Backend work gets real requests asserting status and shape. Docs-only work uses
+   relevant document/config checks and needs no app deployment.
 5. **Ship** — open the PR per `.agents/skills/open-pr/`, `Closes #<issue>` per issue, evidence in the
-   body, then enable auto-merge and move on. A migration in the diff owes its scratch-DB transcripts
-   and DDL delta.
+   body, then wait for CI and perform the explicit merge after the current merge-hold check. Never
+   arm auto-merge. A migration in the diff owes its scratch-DB transcripts and DDL delta.
 
 If something fails, fix it and go again. No attempt cap, no handing the work back.
 
@@ -72,8 +76,9 @@ If something fails, fix it and go again. No attempt cap, no handing the work bac
 
 1. **PRs opened** — number, title, and whether each merged on green CI.
 2. **What failed** — issue, what failed, and what you did about it.
-3. **Surviving worktrees** — one line each with the branch it holds. They are the only re-runnable
-   copy of an unmerged branch; do not remove them.
+3. **Preview cleanup** — stop completed previews and remove clean secondary worktrees once all
+   users are finished, following `ops/local-previews.md`. Commits remain on the retained branches.
+   Report surviving previews/worktrees, their owner and lease, and any incomplete cleanup.
 4. **Browser sweep** — run `scripts/cleanup-mcp-browsers.sh` and report its output line. It catches
    browsers whose agent died before teardown; run it only at a pass boundary.
 

@@ -144,9 +144,9 @@ export const SEED_ADMIN_PASSWORD_ENV = "SEED_ADMIN_PASSWORD";
  *
  * `.env.local` is the route: gitignored and machine-local (so it is not an
  * in-repo constant), symlinked into every worktree by `scripts/worktree-env.sh`,
- * already holding `VERCEL_AUTOMATION_BYPASS_SECRET` — which browser validation
- * needs anyway — and loaded by `scripts/seed-dev-db.ts` before it reads the
- * variable, so recording the value IS how the mode is run.
+ * and loaded by `scripts/seed-dev-db.ts` before it reads the variable. For local
+ * previews, configure the worktree with its own disposable database and recorded
+ * fixture password before seeding; do not mutate the linked shared env file.
  *
  * Passing the password inline still writes a real credential. What it does not
  * do is leave a route behind, so the mode says so rather than exiting 0 as

@@ -1,6 +1,6 @@
 ---
 name: prototype
-description: Build two or three live, throwaway prototypes of competing directions so an owner-taste ruling becomes "try them, pick one" instead of "read prose and imagine". Use when a question is a UI DIRECTION question the owner's taste decides. UI variants live behind the prototype switcher on a preview deployment; behavior questions get a throwaway CLI outside the app.
+description: Build two or three live, throwaway prototypes of competing directions so an owner-taste ruling becomes "try them, pick one" instead of "read prose and imagine". Use when a question is a UI DIRECTION question the owner's taste decides. UI variants live behind the prototype switcher on a local Portless preview; behavior questions get a throwaway CLI outside the app.
 ---
 
 # prototype — turn a direction question into a decision
@@ -11,7 +11,8 @@ each one. Use it when **experiencing the options is what decides**.
 **Narrow trigger.** Prototype an owner-taste **UI direction** question. Rule behavior and policy
 questions yourself from `product-docs/product-values.md`, `CONTEXT.md` and the relevant entries in `product-docs/decisions.md`
 (see `ops/process.md`). Build the variants into the branch you are already on, or onto
-`proto/<issue>-<slug>` opened as a draft PR so the push creates a preview. Post the options, then
+`codex/proto-<issue>-<slug>` served by a Portless development preview. No PR is needed just to
+create a preview. Share its local URL, bounded lease and evidence, then
 carry on with other work — never idle waiting for the ruling.
 
 ## Shared discipline
@@ -31,9 +32,11 @@ All candidates live in the **same branch**, all in the DOM, selected by CSS keye
 on `<html>`, so switching is instant and comparison is honest. The harness is
 `src/components/prototype-switcher.tsx` (`PrototypeSwitcher` + `prototypeInitScript`) — **read its
 docblock; it is the full pattern.** Diverge on structure (layout, hierarchy, affordances), not
-styling, and stub any variant interaction that would mutate data — the preview writes to the shared
-development database. Get the URL with `./scripts/preview-url.sh --wait --bypass <pr-number>`; see
-`.agents/skills/browser-validation/SKILL.md` for logins and the bypass cookie.
+styling. Use owned disposable data for mutating interactions. Start the chosen worktree with
+Portless development mode per `ops/local-previews.md`; the returned URL works on this computer.
+See `.agents/skills/browser-validation/SKILL.md` for login and data requirements. Renew the lease
+for owner review and clean up after the decision. The chosen implementation still needs final
+production-mode validation after removing the prototype controls.
 
 ## Behavior directions (rare — only when the call is irreversible)
 

@@ -21,6 +21,7 @@ for everything else, trust your judgment and match the surrounding code.
   through `.agents/skills/better-interface/`.
 - **Dates:** use `src/lib/datetime.ts` and its tests for calendar/instant handling; church-time
   product choices live in the decision register.
-- Proving a UI change works happens on the branch's Vercel preview, never `localhost:3000`
-  (it serves the main checkout): `.agents/skills/browser-validation/SKILL.md`.
+- Prove UI changes on the selected worktree's Portless preview. Use development mode for hot
+  reload and production mode at the final commit for acceptance evidence. Start with
+  `ops/local-previews.md` and `.agents/skills/browser-validation/SKILL.md`.
 '''

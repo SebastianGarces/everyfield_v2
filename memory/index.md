@@ -10,6 +10,7 @@ Read [core memory](invariants.md) before editing. Then select the topic relevant
 | Playbook, phases, intelligence, tasks | [Planting methodology](../product-docs/decisions.md#planting-methodology-and-intelligence) |
 | Settings, onboarding, design, local schedules | [Experience and scheduling](../product-docs/decisions.md#experience-and-scheduling) |
 | Why a known gap remains | [Accepted limitations](../product-docs/decisions.md#accepted-limitations) |
+| Local preview setup, disposable services and cleanup | [Local previews](../ops/local-previews.md) |
 | Shared database migration-ledger anomalies | [Database provenance](contracts/db.md) |
 | How a feature works | Its source and tests; no memory mirror |
 | Former invariant sections cited in older source/migration comments | [Historical invariants](https://github.com/SebastianGarces/everyfield_v2/blob/ddcb9129aa8a4d18b3e1d3e5a56828edc2419674/memory/invariants.md), not current instructions |
