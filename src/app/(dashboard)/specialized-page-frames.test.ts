@@ -75,7 +75,7 @@ const SPECIALIZED_ROUTE_FAMILIES: readonly SpecializedRouteFamily[] = [
     markers: [/PageCanvas/, /WorkspacePanel/, /min-h-full/],
   },
   {
-    routes: ["/wiki", "/wiki/[...slug]", "/wiki/progress"],
+    routes: ["/wiki", "/wiki/[...slug]", "/wiki/progress", "/wiki/search"],
     owner: "src/app/(dashboard)/wiki/layout.tsx",
     composition: "context-free-split",
     markers: [
@@ -228,10 +228,10 @@ function collectPageRoutes(
   return routes.sort();
 }
 
-test("all 34 specialized surfaces declare their ruled composition and owner", () => {
+test("all 35 specialized surfaces declare their ruled composition and owner", () => {
   const routes = SPECIALIZED_ROUTE_FAMILIES.flatMap((family) => family.routes);
 
-  assert.equal(routes.length, 34);
+  assert.equal(routes.length, 35);
   assert.equal(
     new Set(routes).size,
     routes.length,
