@@ -1,5 +1,6 @@
 import { HeaderBreadcrumbs } from "@/components/header";
 import { verifySession } from "@/lib/auth/session";
+import { mergedPersonDestination } from "@/lib/people/merge";
 import { getPerson } from "@/lib/people/service";
 import { notFound, redirect } from "next/navigation";
 
@@ -22,6 +23,8 @@ export default async function PersonLayout({
   const person = await getPerson(user.churchId, id);
 
   if (!person) {
+    const destination = await mergedPersonDestination(user.churchId, id);
+    if (destination) redirect(`/people/${destination}`);
     notFound();
   }
 

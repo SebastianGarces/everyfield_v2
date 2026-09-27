@@ -1,5 +1,7 @@
 "use server";
 
+import { z } from "zod";
+
 import {
   buildExportFilename,
   serializePeopleToCsv,
@@ -142,18 +144,26 @@ export async function previewImportAction(
  */
 export async function executeBulkImportAction(
   rows: ImportRow[],
-  duplicateResolutions: Record<number, "skip" | "create">
+  duplicateResolutions: Record<number, "skip" | "create" | "review">
 ): Promise<ActionResult<ImportSummary>> {
   return withChurchSession(
     "people.write",
     "executeBulkImportAction",
     { fallback: "Failed to execute import" },
     async ({ user, churchId }) => {
+      const resolutions = z
+        .record(z.string().regex(/^\d+$/), z.enum(["skip", "create", "review"]))
+        .safeParse(duplicateResolutions);
+      if (!resolutions.success)
+        return {
+          success: false,
+          error: "Choose a valid action for each duplicate row.",
+        };
       const summary = await executeBulkImport(
         churchId,
         user.id,
         rows,
-        duplicateResolutions
+        resolutions.data
       );
 
       revalidatePath("/people");

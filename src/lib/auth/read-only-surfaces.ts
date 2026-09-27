@@ -302,6 +302,7 @@ export const READ_ONLY_SURFACE_CHECKLIST: readonly ChecklistRow[] = [
     verdict: "fixed-here",
     gatedIn: [
       "src/components/people/person-header.tsx",
+      "src/components/people/merge-review.tsx",
       "src/components/people/note-form.tsx",
       "src/components/people/assessments-tabs.tsx",
       "src/components/people/skills-list.tsx",
@@ -312,7 +313,7 @@ export const READ_ONLY_SURFACE_CHECKLIST: readonly ChecklistRow[] = [
     ],
     survives:
       "Editing and deleting a note the viewer wrote themselves stays authorship-gated as it was; it is not a seat question.",
-    note: "There is no assign-to-team control on the teams tab — the tab renders memberships and a read link to /teams.",
+    note: "There is no assign-to-team control on the teams tab — the tab renders memberships and a read link to /teams. Duplicate review renders plain values for read-only seats, with no selection or confirmation controls.",
   },
   {
     surface: "Meetings (list)",
