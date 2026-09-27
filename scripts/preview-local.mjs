@@ -305,6 +305,8 @@ if (command === "exec") {
   });
   state.ready = true;
   save(state);
+  const { NODE_OPTIONS: preload, ...previewEnv } = state.env;
+  const withRuntime = (args) => ["env", `NODE_OPTIONS=${preload}`, ...args];
   const config = {
     install: [
       "env",
@@ -314,10 +316,24 @@ if (command === "exec") {
       "install",
       "--frozen-lockfile",
     ],
-    dev: ["pnpm", "exec", "next", "dev", "--hostname", "127.0.0.1"],
-    build: ["pnpm", "exec", "next", "build"],
-    start: ["pnpm", "exec", "next", "start", "--hostname", "127.0.0.1"],
-    env: { ...state.env, NEXT_PUBLIC_APP_URL: "${PREVIEW_URL}" },
+    dev: withRuntime([
+      "pnpm",
+      "exec",
+      "next",
+      "dev",
+      "--hostname",
+      "127.0.0.1",
+    ]),
+    build: withRuntime(["pnpm", "exec", "next", "build"]),
+    start: withRuntime([
+      "pnpm",
+      "exec",
+      "next",
+      "start",
+      "--hostname",
+      "127.0.0.1",
+    ]),
+    env: { ...previewEnv, NEXT_PUBLIC_APP_URL: "${PREVIEW_URL}" },
     healthPath: "/login",
     healthStatus: 200,
     timeoutSeconds: 600,
