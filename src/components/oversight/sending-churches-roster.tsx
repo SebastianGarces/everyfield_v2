@@ -26,10 +26,6 @@
 // leads the card in ink at the weight its content deserves; the table is the
 // breakdown behind it.
 //
-// NO ROW LINKS. There is no per-sending-church page in alpha, and a nav item or
-// row that leads nowhere is a 404 with no way back (#260, the rule the sidebar
-// lives under). The one link on the surface is the empty state's, to a page
-// that exists.
 // ============================================================================
 
 import Link from "next/link";
@@ -123,7 +119,12 @@ export function SendingChurchesRoster({
                   className="last:border-b-0"
                 >
                   <TableCell className="text-foreground py-3 pl-6 font-medium">
-                    {sendingChurch.name}
+                    <Link
+                      href={`/oversight/sending-churches/${sendingChurch.sendingChurchId}`}
+                      className="cursor-pointer underline underline-offset-4"
+                    >
+                      {sendingChurch.name}
+                    </Link>
                   </TableCell>
                   {/*
                     A zero is rendered as "0", never as an em dash or a blank:

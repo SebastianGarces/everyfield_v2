@@ -1,6 +1,8 @@
 import { db } from "@/db";
-import { persons, type Person } from "@/db/schema";
-import { and, eq, ilike, isNull, ne, or, sql } from "drizzle-orm";
+import { persons } from "@/db/schema";
+import { and, asc, eq, gt, isNull, ne, or, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
+import { duplicatePredicates } from "./duplicate-match";
 import { getTagsForPeople } from "./tags";
 import {
   toPersonForClient,
@@ -37,57 +39,38 @@ export async function findDuplicateMatches(
     baseConditions.push(ne(persons.id, excludePersonId));
   }
 
-  // 1. Check for exact email match
-  let exactRow: Person | null = null;
-  const normalizedEmail = input.email?.trim().toLowerCase();
-  if (normalizedEmail && normalizedEmail !== "") {
-    const emailMatches = await db
-      .select()
-      .from(persons)
-      .where(and(...baseConditions, ilike(persons.email, normalizedEmail)))
-      .limit(1);
-
-    exactRow = emailMatches[0] ?? null;
-  }
-
-  // 2. Check for potential matches (fuzzy name + phone)
-  const fuzzyConditions: ReturnType<typeof ilike>[] = [];
-
-  // Name match: same first AND last name (case-insensitive)
-  if (input.firstName && input.lastName) {
-    const nameMatch = and(
-      ilike(persons.firstName, input.firstName.trim()),
-      ilike(persons.lastName, input.lastName.trim())
-    );
-    if (nameMatch) {
-      fuzzyConditions.push(nameMatch);
+  const match = duplicatePredicates(
+    {
+      email: sql`${persons.email}`,
+      firstName: sql`${persons.firstName}`,
+      lastName: sql`${persons.lastName}`,
+      phone: sql`${persons.phone}`,
+    },
+    {
+      email: sql`${input.email ?? null}`,
+      firstName: sql`${input.firstName ?? null}`,
+      lastName: sql`${input.lastName ?? null}`,
+      phone: sql`${input.phone ?? null}`,
     }
-  }
-
-  // Phone match: last 4 digits
-  const normalizedPhone = input.phone?.replace(/\D/g, "");
-  if (normalizedPhone && normalizedPhone.length >= 4) {
-    const last4 = normalizedPhone.slice(-4);
-    fuzzyConditions.push(
-      sql`RIGHT(REGEXP_REPLACE(${persons.phone}, '[^0-9]', '', 'g'), 4) = ${last4}`
-    );
-  }
-
-  let fuzzyRows: Person[] = [];
-  if (fuzzyConditions.length > 0) {
-    fuzzyRows = await db
-      .select()
-      .from(persons)
-      .where(
-        and(
-          ...baseConditions,
-          // Exclude the exact match from potential matches
-          exactRow ? ne(persons.id, exactRow.id) : undefined,
-          or(...fuzzyConditions)
-        )
+  );
+  const [exactRow = null] = await db
+    .select()
+    .from(persons)
+    .where(and(...baseConditions, match.email))
+    .orderBy(asc(persons.id))
+    .limit(1);
+  const fuzzyRows = await db
+    .select()
+    .from(persons)
+    .where(
+      and(
+        ...baseConditions,
+        exactRow ? ne(persons.id, exactRow.id) : undefined,
+        or(match.name, match.phone)
       )
-      .limit(5);
-  }
+    )
+    .orderBy(asc(persons.id))
+    .limit(5);
 
   return { exactMatch: exactRow, potentialMatches: fuzzyRows };
 }
@@ -135,5 +118,69 @@ export async function checkForDuplicates(
     potentialMatches: potentialMatches.map((match) =>
       toPersonForClient({ ...match, tags: tagMap.get(match.id) ?? [] })
     ),
+  };
+}
+
+/** Stable pair ordering and bounded pages, without leaking account/photo keys. */
+export async function listDuplicatePairs(
+  churchId: string,
+  after?: string,
+  personId?: string
+) {
+  const other = alias(persons, "duplicate_person");
+  const match = duplicatePredicates(
+    {
+      email: sql`${persons.email}`,
+      firstName: sql`${persons.firstName}`,
+      lastName: sql`${persons.lastName}`,
+      phone: sql`${persons.phone}`,
+    },
+    {
+      email: sql`${other.email}`,
+      firstName: sql`${other.firstName}`,
+      lastName: sql`${other.lastName}`,
+      phone: sql`${other.phone}`,
+    }
+  );
+  const key = sql<string>`${persons.id}::text || '/' || ${other.id}::text`;
+  const rows = await db
+    .select({
+      left: persons,
+      right: other,
+      email: sql<boolean>`coalesce(${match.email}, false)`,
+      name: sql<boolean>`coalesce(${match.name}, false)`,
+      phone: sql<boolean>`coalesce(${match.phone}, false)`,
+      key,
+    })
+    .from(persons)
+    .innerJoin(
+      other,
+      and(
+        eq(other.churchId, churchId),
+        isNull(other.deletedAt),
+        gt(other.id, persons.id),
+        match.any
+      )
+    )
+    .where(
+      and(
+        eq(persons.churchId, churchId),
+        isNull(persons.deletedAt),
+        after ? gt(key, after) : undefined,
+        personId
+          ? or(eq(persons.id, personId), eq(other.id, personId))
+          : undefined
+      )
+    )
+    .orderBy(asc(persons.id), asc(other.id))
+    .limit(26);
+  const page = rows.slice(0, 25);
+  return {
+    pairs: page.map(({ left, right, ...row }) => ({
+      ...row,
+      left: toPersonForClient(left),
+      right: toPersonForClient(right),
+    })),
+    next: rows.length > 25 ? page.at(-1)!.key : null,
   };
 }

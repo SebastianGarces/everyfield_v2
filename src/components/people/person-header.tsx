@@ -39,6 +39,7 @@ import {
   Star,
   Trash,
 } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
 import { BackgroundCheckBadge } from "./background-check-badge";
 import { StatusChangeModal } from "./status-change-modal";
@@ -150,6 +151,11 @@ export function PersonHeader({
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                <DropdownMenuItem asChild>
+                  <Link href={`/people/duplicates?person=${person.id}`}>
+                    Review potential duplicates
+                  </Link>
+                </DropdownMenuItem>
                 <DropdownMenuItem onClick={onEdit}>
                   <Pencil className="mr-2 h-4 w-4" />
                   Edit Profile

@@ -104,6 +104,12 @@ const SPECIALIZED_ROUTE_FAMILIES: readonly SpecializedRouteFamily[] = [
     markers: [/PageCanvas/, /WorkspacePanel/],
   },
   {
+    routes: ["/communication/templates/new"],
+    owner: "src/app/(dashboard)/communication/templates/new/page.tsx",
+    composition: "attached-workspace",
+    markers: [/PageCanvas/, /WorkspacePanel/],
+  },
+  {
     routes: ["/communication/templates/[id]/edit"],
     owner: "src/app/(dashboard)/communication/templates/[id]/edit/page.tsx",
     composition: "attached-workspace",
@@ -132,6 +138,12 @@ const SPECIALIZED_ROUTE_FAMILIES: readonly SpecializedRouteFamily[] = [
     owner: "src/app/(dashboard)/oversight/plants/[id]/page.tsx",
     composition: "attached-delegated",
     markers: [/PageCanvas/, /PlantDetail/, /attachedContext/],
+  },
+  {
+    routes: ["/oversight/sending-churches/[id]"],
+    owner: "src/app/(dashboard)/oversight/sending-churches/[id]/page.tsx",
+    composition: "attached-workspace",
+    markers: [/PageCanvas/, /WorkspacePanel/],
   },
   {
     routes: [
@@ -172,6 +184,8 @@ const STAGE_3_PRIMARY_ROUTES = [
   "/oversight/sending-churches",
   "/people",
   "/people/new",
+  "/people/duplicates",
+  "/people/duplicates/[leftId]/[rightId]",
   "/phase",
   "/tasks",
   "/tasks/new",
@@ -228,10 +242,10 @@ function collectPageRoutes(
   return routes.sort();
 }
 
-test("all 35 specialized surfaces declare their ruled composition and owner", () => {
+test("all 37 specialized surfaces declare their ruled composition and owner", () => {
   const routes = SPECIALIZED_ROUTE_FAMILIES.flatMap((family) => family.routes);
 
-  assert.equal(routes.length, 35);
+  assert.equal(routes.length, 37);
   assert.equal(
     new Set(routes).size,
     routes.length,
