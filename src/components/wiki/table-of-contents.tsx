@@ -8,6 +8,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import { List } from "lucide-react";
+import Link from "next/link";
 import { cn } from "@/lib/utils";
 import {
   activeHeadingId,
@@ -130,7 +131,7 @@ function TocLinks({
         const isActive = heading.id === activeId;
         return (
           <li key={`${heading.id}-${index}`}>
-            <a
+            <Link
               href={`#${heading.id}`}
               data-testid={entryTestId}
               data-active={isActive ? "true" : "false"}
@@ -144,7 +145,7 @@ function TocLinks({
               )}
             >
               {heading.text}
-            </a>
+            </Link>
           </li>
         );
       })}

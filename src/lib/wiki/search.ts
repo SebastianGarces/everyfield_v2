@@ -2,6 +2,7 @@ import { sql, and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { wikiArticles } from "@/db/schema";
 import { notOverriddenByChurch, visibleToChurch } from "./get-articles";
+import { WIKI_SEARCH_PAGE_SIZE, type WikiSearchParams } from "./search-params";
 
 // ============================================================================
 // Wiki search — the same corpus the reader can open (#317, #411)
@@ -73,7 +74,11 @@ const SEARCH_LIMIT = 10;
  * is: the tenancy predicate can then be rendered with `.toSQL()` and asserted
  * without a database (`tenancy.test.ts`).
  */
-export function searchArticlesQuery(query: string, churchId: string | null) {
+export function searchArticlesQuery(
+  query: string,
+  churchId: string | null,
+  options?: WikiSearchParams
+) {
   // Build the tsvector expression (matches the GIN index)
   const searchVector = sql`(
     setweight(to_tsvector('english', ${wikiArticles.title}), 'A') ||
@@ -95,18 +100,38 @@ export function searchArticlesQuery(query: string, churchId: string | null) {
       sectionId: wikiArticles.sectionId,
       readTimeMinutes: wikiArticles.readTimeMinutes,
       rank: sql<number>`ts_rank(${searchVector}, ${searchQuery})`,
+      snippet: sql<string>`ts_headline('english', concat_ws(' ', ${wikiArticles.title}, ${wikiArticles.excerpt}, ${wikiArticles.content}), ${searchQuery}, 'StartSel=, StopSel=, MaxWords=35, MinWords=15, MaxFragments=2')`,
+      total: sql<number>`count(*) over()::int`,
     })
     .from(wikiArticles)
     .where(
       and(
         sql`${searchVector} @@ ${searchQuery}`,
         eq(wikiArticles.status, "published"),
+        options?.type ? eq(wikiArticles.contentType, options.type) : undefined,
+        options?.phase !== undefined
+          ? eq(wikiArticles.phase, options.phase)
+          : undefined,
         visibleToChurch(churchId),
         notOverriddenByChurch(churchId)
       )
     )
-    .orderBy(sql`ts_rank(${searchVector}, ${searchQuery}) DESC`)
-    .limit(SEARCH_LIMIT);
+    .orderBy(
+      options?.sort === "recent"
+        ? sql`${wikiArticles.updatedAt} DESC`
+        : sql`ts_rank(${searchVector}, ${searchQuery}) DESC`,
+      wikiArticles.id
+    )
+    .limit(options ? options.page * WIKI_SEARCH_PAGE_SIZE : SEARCH_LIMIT);
+}
+
+export async function searchWikiPage(
+  params: WikiSearchParams,
+  churchId: string | null
+) {
+  if (!params.q) return { results: [], total: 0 };
+  const results = await searchArticlesQuery(params.q, churchId, params);
+  return { results, total: results[0]?.total ?? 0 };
 }
 
 /**

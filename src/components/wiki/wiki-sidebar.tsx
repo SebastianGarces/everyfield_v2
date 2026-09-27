@@ -66,8 +66,8 @@ export function WikiSidebar({
         </div>
       ))}
 
-      {/* Resources placeholder if no resources group exists */}
-      {!groups.some((g) => g.slug === "resources") && (
+      {/* The catalog is shared with Documents, including in mobile navigation. */}
+      {
         <>
           <Separator />
           <div>
@@ -75,10 +75,13 @@ export function WikiSidebar({
               Resources
             </div>
             <div className="text-muted-foreground space-y-0.5 text-sm">
-              <div className="flex items-center justify-between gap-2 rounded-md px-2 py-1 opacity-50">
-                <span>Templates & Downloads</span>
-                <span className="text-xs">(coming soon)</span>
-              </div>
+              <Link
+                href="/documents"
+                className="hover:bg-muted hover:text-foreground block rounded-md px-2 py-1"
+                onClick={(event) => closeAfterNavigation(event, onNavigate)}
+              >
+                Templates &amp; Downloads
+              </Link>
               <div className="flex items-center justify-between gap-2 rounded-md px-2 py-1 opacity-50">
                 <span>Training Library</span>
                 <span className="text-xs">(coming soon)</span>
@@ -86,7 +89,7 @@ export function WikiSidebar({
             </div>
           </div>
         </>
-      )}
+      }
 
       {/* Bookmarks */}
       <Separator />

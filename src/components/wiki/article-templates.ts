@@ -56,11 +56,10 @@ import {
  */
 export const ARTICLE_TEMPLATE_IDS: Readonly<Record<string, readonly string[]>> =
   {
-    // Commitment — the three documents this section exists to explain.
+    // Commitment — only the catalog documents this section describes.
     "core-group/commitment/the-three-key-documents": [
       "commitment-card",
       "member-expectations",
-      "launch-team-commitment",
     ],
     "core-group/commitment/core-group-commitments-explained": [
       "commitment-card",
