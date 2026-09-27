@@ -8,6 +8,12 @@
 // revalidation — lives in ./action-shell.ts.
 // ============================================================================
 
+import { z } from "zod";
+import {
+  searchLeaderCandidates,
+  type LeaderCandidate,
+} from "@/lib/ministry-teams/leader-candidates";
+
 import {
   listTeams,
   createTeam,
@@ -160,6 +166,23 @@ export async function updateTeamAction(
   );
 }
 
+export async function searchLeaderCandidatesAction(
+  query: string
+): Promise<ActionResult<LeaderCandidate[]>> {
+  return withChurch(
+    "teams.write",
+    "Failed to search eligible leaders",
+    async ({ churchId }) => {
+      const parsed = z.string().trim().max(200).safeParse(query);
+      if (!parsed.success) return fieldErrorResult(parsed.error);
+      return {
+        success: true,
+        data: await searchLeaderCandidates(churchId, parsed.data),
+      };
+    }
+  );
+}
+
 export async function assignTeamLeaderAction(
   teamId: string,
   personId: string
@@ -168,7 +191,16 @@ export async function assignTeamLeaderAction(
     "teams.write",
     "Failed to assign leader",
     async ({ churchId, userId }) => {
-      const team = await assignTeamLeader(churchId, teamId, personId, userId);
+      const parsed = z
+        .object({ teamId: z.string().uuid(), personId: z.string().uuid() })
+        .safeParse({ teamId, personId });
+      if (!parsed.success) return fieldErrorResult(parsed.error);
+      const team = await assignTeamLeader(
+        churchId,
+        parsed.data.teamId,
+        parsed.data.personId,
+        userId
+      );
       revalidateTeamSurfaces();
       return { success: true, data: team };
     }

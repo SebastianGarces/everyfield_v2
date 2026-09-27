@@ -1,141 +1,298 @@
 "use client";
 
-import { Users } from "lucide-react";
-import Link from "next/link";
-
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent } from "@/components/ui/card";
-import { cn } from "@/lib/utils";
-import { LEADERSHIP_TEAM_KEY } from "@/lib/ministry-teams/role-templates";
+import { useId, useRef, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
 import {
-  TEAM_ICONS,
-  teamStaffingDisplay,
-} from "@/lib/ministry-teams/team-display";
-import type { TeamWithStats } from "@/lib/ministry-teams/service";
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  drawOrgChart,
+  type ChartTeam,
+} from "@/lib/ministry-teams/org-chart-model";
 
-interface OrgChartViewProps {
-  teams: TeamWithStats[];
+function download(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export function OrgChartView({ teams }: OrgChartViewProps) {
-  // The root is the LEADERSHIP TEMPLATE, matched on `template_key` and not on
-  // the display name (ruling 2026-08-12, #378): the team is called
-  // "Leadership" now, and the substring test against its name that used to be
-  // here would have dropped the root the moment it was renamed, leaving a chart
-  // of ten peers with nothing to say so.
-  const rootTeam = teams.find((t) => t.templateKey === LEADERSHIP_TEAM_KEY);
-  const otherTeams = teams.filter((t) => t.templateKey !== LEADERSHIP_TEAM_KEY);
-
+export function OrgChartView({ teams }: { teams: ChartTeam[] }) {
+  const id = useId();
+  const [scope, setScope] = useState("all");
+  const [zoom, setZoom] = useState(1);
+  const [exporting, setExporting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const viewport = useRef<HTMLDivElement>(null);
+  const svg = useRef<SVGSVGElement>(null);
+  const drag = useRef<{
+    x: number;
+    y: number;
+    left: number;
+    top: number;
+  } | null>(null);
+  const drawing = drawOrgChart(teams, scope === "all" ? undefined : scope);
+  const selectedTeams =
+    scope === "all" ? teams : teams.filter((team) => team.id === scope);
+  function fit() {
+    if (!viewport.current) return;
+    setZoom(
+      Math.min(
+        1,
+        viewport.current.clientWidth / drawing.width,
+        viewport.current.clientHeight / drawing.height
+      )
+    );
+    viewport.current.scrollTo(0, 0);
+  }
+  function pan(x: number, y: number) {
+    viewport.current?.scrollBy({ left: x, top: y });
+  }
+  function exportImage() {
+    if (!svg.current) return;
+    const copy = svg.current.cloneNode(true) as SVGSVGElement;
+    copy.setAttribute("width", String(drawing.width));
+    copy.setAttribute("height", String(drawing.height));
+    copy.removeAttribute("style");
+    download(
+      new Blob([new XMLSerializer().serializeToString(copy)], {
+        type: "image/svg+xml;charset=utf-8",
+      }),
+      "team-org-chart.svg"
+    );
+  }
+  async function exportPdf() {
+    setError(null);
+    setExporting(true);
+    try {
+      const { orgChartPdf } = await import("./org-chart-pdf");
+      download(
+        await orgChartPdf(selectedTeams, scope === "all"),
+        "team-org-chart.pdf"
+      );
+    } catch {
+      setError("Could not export the PDF. Try again.");
+    } finally {
+      setExporting(false);
+    }
+  }
+  if (!teams.length)
+    return <p className="text-muted-foreground">No teams to display yet.</p>;
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Organization Chart</h2>
-        <Badge variant="outline" className="text-xs">
-          {teams.length} teams
-        </Badge>
-      </div>
-
-      <div className="flex flex-col items-center gap-6">
-        {/* Root: the Leadership team */}
-        {rootTeam && (
-          <>
-            <OrgNode team={rootTeam} isRoot />
-            {/* Connector line */}
-            <div className="bg-border h-8 w-px" />
-            {/* Horizontal connector */}
-            <div className="bg-border h-px w-full max-w-4xl" />
-          </>
-        )}
-
-        {/* Child teams in a grid */}
-        <div className="grid w-full max-w-6xl gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-          {otherTeams.map((team) => (
-            <div key={team.id} className="flex flex-col items-center gap-2">
-              {rootTeam && <div className="bg-border h-4 w-px" />}
-              <OrgNode team={team} />
-            </div>
-          ))}
+    <section
+      className="flex min-h-0 flex-1 flex-col gap-3"
+      aria-label="Team organization chart"
+    >
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="space-y-1">
+          <Label htmlFor={`${id}-scope`}>Chart scope</Label>
+          <Select
+            value={scope}
+            onValueChange={(value) => {
+              setScope(value);
+              setZoom(1);
+              viewport.current?.scrollTo(0, 0);
+            }}
+          >
+            <SelectTrigger id={`${id}-scope`} className="w-60">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Teams</SelectItem>
+              {teams.map((team) => (
+                <SelectItem key={team.id} value={team.id}>
+                  {team.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex flex-wrap gap-2" aria-label="Chart controls">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setZoom((value) => Math.max(0.1, value / 1.25))}
+          >
+            Zoom out
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setZoom((value) => Math.min(2, value * 1.25))}
+          >
+            Zoom in
+          </Button>
+          <Button variant="outline" size="sm" onClick={fit}>
+            Fit chart
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setZoom(1);
+              viewport.current?.scrollTo(0, 0);
+            }}
+          >
+            Reset
+          </Button>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={exportImage}>
+            Export image
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={exportPdf}
+            disabled={exporting}
+          >
+            {exporting ? "Exporting…" : "Export PDF"}
+          </Button>
         </div>
       </div>
-    </div>
-  );
-}
-
-function OrgNode({
-  team,
-  isRoot = false,
-}: {
-  team: TeamWithStats;
-  isRoot?: boolean;
-}) {
-  const Icon = TEAM_ICONS[team.icon ?? ""] ?? Users;
-  const staffing = teamStaffingDisplay(team.filledRoles, team.totalRoles);
-
-  return (
-    <Link href={`/teams/${team.id}`} className="w-full">
-      <Card
-        className={cn(
-          "cursor-pointer py-0 shadow-sm transition-all duration-200 hover:shadow-md",
-          isRoot && "border-primary/30 bg-primary/5"
-        )}
+      <p id={`${id}-help`} className="text-muted-foreground text-xs">
+        {selectedTeams.length === 1
+          ? "1 team"
+          : `${selectedTeams.length} teams`}{" "}
+        · {Math.round(zoom * 100)}% · Drag empty chart space, scroll, or focus
+        the chart and use arrow keys to pan. Select a name to open its details.
+      </p>
+      {error && (
+        <p role="alert" className="text-destructive text-sm">
+          {error}
+        </p>
+      )}
+      <div
+        ref={viewport}
+        tabIndex={0}
+        role="region"
+        aria-label="Scrollable organization chart"
+        aria-describedby={`${id}-help`}
+        className="focus-visible:outline-ring min-h-64 flex-1 touch-pan-x touch-pan-y overflow-auto rounded-lg border bg-white focus-visible:outline-2 focus-visible:outline-offset-2"
+        onKeyDown={(event) => {
+          if (event.target !== event.currentTarget) return;
+          const delta: Record<string, [number, number]> = {
+            ArrowLeft: [-80, 0],
+            ArrowRight: [80, 0],
+            ArrowUp: [0, -80],
+            ArrowDown: [0, 80],
+          };
+          if (delta[event.key]) {
+            event.preventDefault();
+            pan(...delta[event.key]);
+          }
+        }}
+        onPointerDown={(event) => {
+          if (
+            event.pointerType !== "mouse" ||
+            event.button !== 0 ||
+            (event.target as Element).closest("a")
+          )
+            return;
+          drag.current = {
+            x: event.clientX,
+            y: event.clientY,
+            left: event.currentTarget.scrollLeft,
+            top: event.currentTarget.scrollTop,
+          };
+          event.currentTarget.setPointerCapture(event.pointerId);
+        }}
+        onPointerMove={(event) => {
+          if (drag.current)
+            event.currentTarget.scrollTo(
+              drag.current.left - event.clientX + drag.current.x,
+              drag.current.top - event.clientY + drag.current.y
+            );
+        }}
+        onPointerUp={() => {
+          drag.current = null;
+        }}
+        onPointerCancel={() => {
+          drag.current = null;
+        }}
       >
-        <CardContent className="flex flex-col items-center gap-2 p-4 text-center">
-          <div
-            className={cn(
-              "flex h-10 w-10 items-center justify-center rounded-lg",
-              isRoot
-                ? "bg-primary text-primary-foreground"
-                : "bg-muted text-muted-foreground"
-            )}
-          >
-            <Icon className="h-5 w-5" />
-          </div>
-          <div>
-            <p className={cn("text-sm font-semibold", isRoot && "text-base")}>
-              {team.name}
-            </p>
-            {team.leaderName ? (
-              <div className="mt-1 flex items-center justify-center gap-1">
-                <Avatar className="h-4 w-4">
-                  <AvatarFallback className="text-[8px]">
-                    {team.leaderName
-                      .split(" ")
-                      .map((n) => n[0])
-                      .join("")}
-                  </AvatarFallback>
-                </Avatar>
-                <span className="text-muted-foreground text-xs">
-                  {team.leaderName}
-                </span>
-              </div>
+        <svg
+          ref={svg}
+          xmlns="http://www.w3.org/2000/svg"
+          width={drawing.width * zoom}
+          height={drawing.height * zoom}
+          viewBox={`0 0 ${drawing.width} ${drawing.height}`}
+          style={{ maxWidth: "none" }}
+          role="group"
+          aria-label={
+            scope === "all"
+              ? "All Teams organization chart"
+              : `${selectedTeams[0]?.name} organization chart`
+          }
+        >
+          <rect width={drawing.width} height={drawing.height} fill="white" />
+          {drawing.lines.map((line, index) => (
+            <line key={index} {...line} stroke="#94a3b8" strokeWidth={1.5} />
+          ))}
+          {drawing.boxes.map((box) => {
+            const content = (
+              <g>
+                <rect
+                  x={box.x}
+                  y={box.y}
+                  width={box.width}
+                  height={box.height}
+                  rx={8}
+                  fill={box.fill}
+                  stroke="#64748b"
+                  strokeDasharray={box.kind === "vacancy" ? "4 3" : undefined}
+                />
+                <text
+                  x={box.x + 14}
+                  y={box.y + 23}
+                  fill="#0f172a"
+                  fontFamily="monospace"
+                  fontSize={14}
+                  fontWeight={600}
+                >
+                  {box.title.map((line, index) => (
+                    <tspan x={box.x + 14} dy={index ? 19 : 0} key={index}>
+                      {line}
+                    </tspan>
+                  ))}
+                </text>
+                <text
+                  x={box.x + 14}
+                  y={box.y + 27 + box.title.length * 19}
+                  fill="#475569"
+                  fontFamily="monospace"
+                  fontSize={12}
+                >
+                  {box.subtitle.map((line, index) => (
+                    <tspan x={box.x + 14} dy={index ? 17 : 0} key={index}>
+                      {line}
+                    </tspan>
+                  ))}
+                </text>
+              </g>
+            );
+            return box.href ? (
+              <a
+                key={box.key}
+                href={box.href}
+                aria-label={`${box.title.join(" ")}, ${box.subtitle.join(" ")}`}
+                className="cursor-pointer focus-visible:outline-2 focus-visible:outline-blue-700"
+              >
+                {content}
+              </a>
             ) : (
-              <p className="text-muted-foreground mt-1 text-xs italic">
-                No leader
-              </p>
-            )}
-          </div>
-          <Badge
-            variant="secondary"
-            className={cn(
-              "text-[10px]",
-              staffing.kind === "configured" &&
-                staffing.percentage === 100 &&
-                "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-400",
-              staffing.kind === "configured" &&
-                staffing.percentage < 60 &&
-                "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400",
-              staffing.kind === "configured" &&
-                staffing.percentage < 40 &&
-                "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-400"
-            )}
-          >
-            {staffing.kind === "no_roles"
-              ? staffing.label
-              : `${team.filledRoles}/${team.totalRoles} roles`}
-          </Badge>
-        </CardContent>
-      </Card>
-    </Link>
+              <g key={box.key}>{content}</g>
+            );
+          })}
+        </svg>
+      </div>
+    </section>
   );
 }
