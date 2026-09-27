@@ -130,7 +130,9 @@ export function LeaderAssignDialog({
               ? "Searching…"
               : people.length === 50
                 ? "Showing 50 eligible people. Search to narrow the list."
-                : `${people.length} eligible people`}
+                : people.length === 1
+                  ? "1 eligible person"
+                  : `${people.length} eligible people`}
           </p>
           <RadioGroup
             aria-label="Eligible team leaders"

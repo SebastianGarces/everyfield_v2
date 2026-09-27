@@ -116,7 +116,7 @@ export function drawOrgChart(
         x,
         y,
         team.name,
-        `${team.roles.length} roles`,
+        team.roles.length === 1 ? "1 role" : `${team.roles.length} roles`,
         `/teams/${team.id}`,
         "team"
       ) + 20;

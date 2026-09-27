@@ -158,9 +158,11 @@ export function OrgChartView({ teams }: { teams: ChartTeam[] }) {
         </div>
       </div>
       <p id={`${id}-help`} className="text-muted-foreground text-xs">
-        {selectedTeams.length} teams · {Math.round(zoom * 100)}% · Drag empty
-        chart space, scroll, or focus the chart and use arrow keys to pan.
-        Select a name to open its details.
+        {selectedTeams.length === 1
+          ? "1 team"
+          : `${selectedTeams.length} teams`}{" "}
+        · {Math.round(zoom * 100)}% · Drag empty chart space, scroll, or focus
+        the chart and use arrow keys to pan. Select a name to open its details.
       </p>
       {error && (
         <p role="alert" className="text-destructive text-sm">
