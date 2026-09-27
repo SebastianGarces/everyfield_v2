@@ -14,6 +14,7 @@ import { Mail, SearchX } from "lucide-react";
 import { getCurrentUserChurch, verifySession } from "@/lib/auth/session";
 import {
   getCommunications,
+  getHistoryFilterAvailability,
   resolveSubjects,
 } from "@/lib/communication/service";
 import {
@@ -59,9 +60,10 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
   const filters = parseCommunicationFilters(params);
   const { page, limit } = filters;
 
-  const [church, { communications, total }] = await Promise.all([
+  const [church, { communications, total }, available] = await Promise.all([
     getCurrentUserChurch(),
     getCommunications(user.churchId, filters),
+    getHistoryFilterAvailability(user.churchId),
   ]);
 
   // Resolve merge field variables in subjects for display
@@ -112,7 +114,7 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
 
           <div className="min-h-0 flex-1 overflow-auto p-4 sm:p-6">
             <div className="mb-4">
-              <HistoryFilters />
+              <HistoryFilters available={available} />
             </div>
 
             {communications.length === 0 ? (
