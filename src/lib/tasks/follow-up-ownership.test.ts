@@ -1,7 +1,9 @@
+import { parseTaskListSearchParams } from "./list-params";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  filterFollowUpTasks,
   NEEDS_OWNER_LABEL,
   countFollowUpOwnership,
   groupByOwner,
@@ -23,6 +25,8 @@ import {
 
 function task(over: Partial<OpenFollowUpTask> = {}): OpenFollowUpTask {
   return {
+    status: "not_started",
+    priority: "medium",
     taskId: "t1",
     title: "Follow up with Sara",
     dueDate: null,
@@ -189,5 +193,74 @@ test("the one-click list is the contacts nobody is covering (Q1)", () => {
   assert.deepEqual(
     unowned.map((c) => c.personId),
     ["p2", "p3"]
+  );
+});
+
+test("assignment filters exclude incompatible categories and compose status/priority/inclusive dates", () => {
+  const rows = [
+    task({
+      taskId: "a",
+      dueDate: "2026-09-01",
+      priority: "high",
+      status: "blocked",
+    }),
+    task({
+      taskId: "b",
+      dueDate: "2026-09-30",
+      priority: "high",
+      status: "blocked",
+    }),
+    task({
+      taskId: "c",
+      dueDate: "2026-08-31",
+      priority: "high",
+      status: "blocked",
+    }),
+    task({ taskId: "d", dueDate: null, priority: "high", status: "blocked" }),
+    task({
+      taskId: "e",
+      dueDate: "2026-09-10",
+      priority: "low",
+      status: "not_started",
+    }),
+  ];
+  assert.deepEqual(
+    filterFollowUpTasks(
+      rows,
+      parseTaskListSearchParams({ category: "vision_meeting" })
+    ),
+    []
+  );
+  const matching = filterFollowUpTasks(
+    rows,
+    parseTaskListSearchParams({
+      category: "follow_up",
+      priority: "high",
+      status: "blocked",
+      dueDateFrom: "2026-09-01",
+      dueDateTo: "2026-09-30",
+    })
+  );
+  assert.deepEqual(
+    matching.map((row) => row.taskId),
+    ["a", "b"]
+  );
+  assert.equal(
+    groupByOwner(matching).flatMap((group) => group.tasks).length,
+    2
+  );
+  assert.equal(
+    filterFollowUpTasks(rows, parseTaskListSearchParams({})).length,
+    5
+  );
+  assert.equal(
+    filterFollowUpTasks(
+      rows,
+      parseTaskListSearchParams({
+        dueDateFrom: "2026-09-30",
+        dueDateTo: "2026-09-01",
+      })
+    ).length,
+    0
   );
 });

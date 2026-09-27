@@ -569,6 +569,8 @@ test("training rate is null when there are required programs but no committed pe
 
 function followUpTask(over: Partial<OpenFollowUpTask> = {}): OpenFollowUpTask {
   return {
+    status: "not_started",
+    priority: "medium",
     taskId: "ft1",
     title: "Follow up",
     dueDate: null,

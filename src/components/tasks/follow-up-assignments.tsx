@@ -53,6 +53,7 @@ export interface UncoveredContact {
 }
 
 interface FollowUpAssignmentsProps {
+  filtered?: boolean;
   groups: FollowUpOwnerGroup[];
   uncovered: UncoveredContact[];
   assignees: FollowUpAssignee[];
@@ -118,6 +119,7 @@ function AssigneeSelect({
 
 export function FollowUpAssignments({
   groups,
+  filtered = false,
   uncovered,
   assignees,
 }: FollowUpAssignmentsProps) {
@@ -167,7 +169,9 @@ export function FollowUpAssignments({
 
         {uncoveredWithTask === 0 && uncovered.length === 0 ? (
           <p className="text-muted-foreground text-sm">
-            Every open follow-up has a committed member on it.
+            {filtered
+              ? "No unowned follow-up tasks match these filters. Contacts without tasks are shown when filters are cleared."
+              : "Every open follow-up has a committed member on it."}
           </p>
         ) : (
           <ul className="divide-border divide-y">
