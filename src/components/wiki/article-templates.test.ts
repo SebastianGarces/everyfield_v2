@@ -30,6 +30,19 @@ const ARTICLE_WITHOUT_TEMPLATES = "discovery/finding-a-coach-mentor";
 /** An article that does, and the id it leads with. */
 const ARTICLE_WITH_TEMPLATES = "core-group/commitment/the-three-key-documents";
 
+test("Core Group documents never substitute the Launch Team agreement", () => {
+  assert.deepEqual(
+    getArticleTemplates(ARTICLE_WITH_TEMPLATES).map((template) => template.id),
+    ["commitment-card", "member-expectations"]
+  );
+  assert.ok(
+    getArticleTemplates(
+      "launch-team/launch-date/transitioning-to-launch-team"
+    ).some((template) => template.id === "launch-team-commitment")
+  );
+  assert.ok(getTemplateById("launch-team-commitment"));
+});
+
 // ----------------------------------------------------------------------------
 // Unknown ids are dropped, never rendered
 // ----------------------------------------------------------------------------
@@ -103,7 +116,7 @@ test("no article lists the same template twice", () => {
 test("an article with related templates resolves them in authored order", () => {
   assert.deepEqual(
     getArticleTemplates(ARTICLE_WITH_TEMPLATES).map((t) => t.id),
-    ["commitment-card", "member-expectations", "launch-team-commitment"]
+    ["commitment-card", "member-expectations"]
   );
 });
 

@@ -17,7 +17,7 @@ interface PageCanvasOwner {
   scrollLayout: ScrollLayout;
   compositions: readonly CanvasComposition[];
   portaledSibling?: "PersonEditDialog";
-  siblingWorkspaceException?: "coaching-peer-cards";
+  siblingWorkspaceException?: "coaching-records";
 }
 
 /**
@@ -42,11 +42,15 @@ const AUTHENTICATED_PAGE_CANVAS_OWNERS = [
     compositions: ["lone-workspace"],
   },
   {
-    owner: "src/app/(dashboard)/coaching/[churchId]/page.tsx",
-    routes: ["/coaching/[churchId]"],
+    owner: "src/app/(dashboard)/coaching/[churchId]/coaching-frame.tsx",
+    routes: [
+      "/coaching/[churchId]",
+      "/coaching/[churchId]/[collection]",
+      "/coaching/[churchId]/[collection]/[recordId]",
+    ],
     scrollLayout: "flow",
     compositions: ["sibling-surfaces"],
-    siblingWorkspaceException: "coaching-peer-cards",
+    siblingWorkspaceException: "coaching-records",
   },
   {
     owner: "src/app/(dashboard)/communication/[id]/page.tsx",
@@ -273,7 +277,7 @@ const AUTHENTICATED_PAGE_CANVAS_OWNERS = [
   },
   {
     owner: "src/app/(dashboard)/wiki/layout.tsx",
-    routes: ["/wiki", "/wiki/[...slug]", "/wiki/progress"],
+    routes: ["/wiki", "/wiki/[...slug]", "/wiki/progress", "/wiki/search"],
     scrollLayout: "fixed-default",
     compositions: ["fixed-internal-scroll"],
   },
@@ -484,16 +488,21 @@ function assertComposition(
         "flow",
         `${label} must let its peer surfaces grow in canvas flow`
       );
-      if (owner.siblingWorkspaceException === "coaching-peer-cards") {
+      if (owner.siblingWorkspaceException === "coaching-records") {
         assert.equal(
           owner.owner,
-          "src/app/(dashboard)/coaching/[churchId]/page.tsx",
+          "src/app/(dashboard)/coaching/[churchId]/coaching-frame.tsx",
           "only coaching may mix a WorkspacePanel with peer cards"
         );
         assert.deepEqual(
           opening.directElements,
-          ["WorkspacePanel", "Card", "Card"],
-          `${label} must preserve the coaching summary and its two peer cards`
+          ["WorkspacePanel"],
+          `${label} must preserve the coaching summary before its delegated record content`
+        );
+        assert.match(
+          readFileSync(path.join(process.cwd(), owner.owner), "utf8"),
+          /<\/WorkspacePanel>\s*\{children\}/,
+          "coaching record content must remain in the same flowing canvas"
         );
       } else {
         assert.equal(

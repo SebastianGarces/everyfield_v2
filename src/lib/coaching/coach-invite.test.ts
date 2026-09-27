@@ -272,7 +272,7 @@ test("the coach read is gated by the ASSIGNMENT and by no share_* toggle", () =>
   const body = COACH_READ.after("export async function readCoachedPlant");
   assert.ok(
     body.indexOf("coachesPlant(user.id, churchId)") <
-      body.indexOf("listPeople"),
+      body.indexOf(".from(churches)"),
     "the plant is read before the assignment is checked"
   );
   assert.match(
@@ -284,9 +284,10 @@ test("the coach read is gated by the ASSIGNMENT and by no share_* toggle", () =>
 test("the coach read returns the plant's OWN records, not aggregates", () => {
   // AC 7 (i), and the line that separates this reader from `@/lib/oversight/read`,
   // whose own header forbids exactly what this one requires.
-  assert.match(COACH_READ.code, /people: PersonForClient\[\]/);
-  assert.match(COACH_READ.code, /listPeople\(churchId/);
-  assert.match(COACH_READ.code, /listTasks\(churchId/);
+  assert.match(COACH_READ.code, /firstName: persons.firstName/);
+  assert.match(COACH_READ.code, /name: tasks.title/);
+  assert.match(COACH_READ.code, /from\(churchMeetings\)/);
+  assert.match(COACH_READ.code, /from\(ministryTeams\)/);
 });
 
 test("the two reaches read two different lists of church ids", () => {

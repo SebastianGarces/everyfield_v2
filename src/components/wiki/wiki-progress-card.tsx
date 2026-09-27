@@ -15,7 +15,7 @@
 // Constraints this file is written against:
 //
 // 1. NO CLIENT BOUNDARY, NO SERVER IMPORTS. There is no `"use client"` here and
-//    nothing imported at value level reaches the database. `wikiHref` comes
+//    nothing imported at value level reaches the database. `wikiResumeHref` comes
 //    from `@/lib/wiki/href` — the deliberately dependency-free module — and not
 //    from the `@/lib/wiki` barrel, which re-exports the DB-backed progress
 //    queries.
@@ -36,7 +36,7 @@ import { ArrowRight, Check } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { wikiHref } from "@/lib/wiki/href";
+import { wikiResumeHref } from "@/lib/wiki/resume";
 import type { ArticleType } from "@/lib/wiki/types";
 
 /** One row of the "By Section" list: a wiki category and how far it is read. */
@@ -196,7 +196,7 @@ export function WikiProgressCard({
                       <ArrowRight className="ml-2 h-4 w-4" />
                     </span>
                   ) : (
-                    <Link href={wikiHref(lastInProgress.slug)}>
+                    <Link href={wikiResumeHref(lastInProgress.slug)}>
                       Continue
                       <ArrowRight className="ml-2 h-4 w-4" />
                     </Link>
