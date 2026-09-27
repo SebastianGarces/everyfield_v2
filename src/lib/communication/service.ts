@@ -79,6 +79,21 @@ export interface GetCommunicationsOptions {
   search?: string;
 }
 
+/** Distinct stored values across this plant's whole history, independent of filters and paging. */
+export async function getHistoryFilterAvailability(churchId: string) {
+  const values = await db
+    .selectDistinct({
+      channel: communications.channel,
+      status: communications.status,
+    })
+    .from(communications)
+    .where(eq(communications.churchId, churchId));
+  return {
+    channels: [...new Set(values.map((row) => row.channel))],
+    statuses: [...new Set(values.map((row) => row.status))],
+  };
+}
+
 /**
  * List communications for a church with pagination and optional filters.
  * `total` reflects the same filters, so pagination stays consistent.

@@ -14,12 +14,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { CommunicationChannel } from "@/db/schema/communication";
 import {
-  communicationChannels,
-  communicationStatuses,
-} from "@/db/schema/communication";
-import { COMMUNICATION_STATUS_LABELS } from "@/lib/communication/status-display";
+  historyFilterOptions,
+  type HistoryFilterAvailability,
+} from "@/lib/communication/history-options";
 
 import type { HistoryFilterSelection } from "./history-filters-presentation";
 import {
@@ -30,25 +28,15 @@ import {
   toStatusFilter,
 } from "./history-filters-presentation";
 
-// Keyed by the union, not by `string`: a renamed or typo'd option is a compile
-// error here instead of a control that renders its own raw value as a label.
-const CHANNEL_LABELS: Record<CommunicationChannel, string> = {
-  email: "Email",
-  sms: "SMS",
-  both: "Email + SMS",
-};
-
-// Status labels are keyed by the union for the same reason, but they live in
-// `@/lib/communication/status-display` because this dropdown is not the only
-// place they are read: the hub and the history table label the same statuses on
-// their badges, and four private copies are how `logged` (COM-020) reached the
-// UI as a raw lowercase token.
-
 /**
  * Message history filters. All state lives in the URL so the server component
  * re-queries on every change and the view stays shareable.
  */
-export function HistoryFilters() {
+export function HistoryFilters({
+  available,
+}: {
+  available: HistoryFilterAvailability;
+}) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -66,6 +54,14 @@ export function HistoryFilters() {
     search: currentSearch,
     hasFilters,
   } = useMemo(() => deriveHistoryFilterState(searchParams), [searchParams]);
+
+  const options = historyFilterOptions(available, {
+    channel: currentChannel === ALL_FILTER_VALUE ? undefined : currentChannel,
+    status: currentStatus === ALL_FILTER_VALUE ? undefined : currentStatus,
+  });
+  const hasHistoricalOptions = [...options.channels, ...options.statuses].some(
+    (option) => option.historical
+  );
 
   // The pushed URL is REBUILT from the validated state above, never copied from
   // the incoming search params — junk the server already dropped must not ride
@@ -132,7 +128,7 @@ export function HistoryFilters() {
         <SelectTrigger
           aria-label="Filter by channel"
           data-testid="history-channel-filter"
-          className="h-9 w-[150px] cursor-pointer text-sm"
+          className="h-9 w-[220px] max-w-full cursor-pointer text-sm"
         >
           <SelectValue placeholder="Channel" />
         </SelectTrigger>
@@ -140,13 +136,13 @@ export function HistoryFilters() {
           <SelectItem value={ALL_FILTER_VALUE} className="cursor-pointer">
             All channels
           </SelectItem>
-          {communicationChannels.map((channel) => (
+          {options.channels.map((channel) => (
             <SelectItem
-              key={channel}
-              value={channel}
+              key={channel.value}
+              value={channel.value}
               className="cursor-pointer"
             >
-              {CHANNEL_LABELS[channel]}
+              {channel.label}
             </SelectItem>
           ))}
         </SelectContent>
@@ -161,7 +157,7 @@ export function HistoryFilters() {
         <SelectTrigger
           aria-label="Filter by status"
           data-testid="history-status-filter"
-          className="h-9 w-[150px] cursor-pointer text-sm"
+          className="h-9 w-[220px] max-w-full cursor-pointer text-sm"
         >
           <SelectValue placeholder="Status" />
         </SelectTrigger>
@@ -169,9 +165,13 @@ export function HistoryFilters() {
           <SelectItem value={ALL_FILTER_VALUE} className="cursor-pointer">
             All statuses
           </SelectItem>
-          {communicationStatuses.map((status) => (
-            <SelectItem key={status} value={status} className="cursor-pointer">
-              {COMMUNICATION_STATUS_LABELS[status]}
+          {options.statuses.map((status) => (
+            <SelectItem
+              key={status.value}
+              value={status.value}
+              className="cursor-pointer"
+            >
+              {status.label}
             </SelectItem>
           ))}
         </SelectContent>
@@ -188,6 +188,12 @@ export function HistoryFilters() {
           <X className="h-3.5 w-3.5" aria-hidden="true" />
           Clear
         </Button>
+      )}
+      {hasHistoricalOptions && (
+        <p className="text-muted-foreground w-full text-xs">
+          Historical filters describe stored records. SMS and scheduled sending
+          are not available.
+        </p>
       )}
     </div>
   );
