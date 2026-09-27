@@ -1,4 +1,4 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { persons, type Person } from "@/db/schema";
@@ -161,4 +161,14 @@ export async function setPersonPhoto(
   }
 
   return toPersonForClient(updated);
+}
+
+/** Compare stored photos without exposing either storage key to merge clients. */
+export function personPhotosDiffer(left: Person, right: Person): boolean {
+  return left.photoUrl !== right.photoUrl;
+}
+
+/** Copy the chosen stored value inside the merge transaction, never a client key. */
+export function personPhotoMergeAssignment(churchId: string, chosenId: string) {
+  return sql`${sql.identifier(persons.photoUrl.name)}=(select ${persons.photoUrl} from ${persons} where ${persons.id}=${chosenId} and ${persons.churchId}=${churchId})`;
 }

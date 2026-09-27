@@ -25,7 +25,7 @@ export const mergeFields = [
   },
   { key: "source", label: "Source", columns: ["source", "sourceDetails"] },
   { key: "notes", label: "Notes", columns: ["notes"] },
-  { key: "photo", label: "Photo", columns: ["photoUrl"] },
+  { key: "photo", label: "Photo", columns: [] },
   {
     key: "household",
     label: "Household and role",
@@ -92,9 +92,7 @@ export function mergeFieldText(profile: MergeProfile, key: MergeField): string {
   const field = mergeFields.find((field) => field.key === key)!;
   return (
     field.columns
-      .map((column) =>
-        column === "photoUrl" ? undefined : profile.person[column]
-      )
+      .map((column) => profile.person[column])
       .filter((value) => value !== null && value !== "")
       .join(" · ") || "Not recorded"
   );

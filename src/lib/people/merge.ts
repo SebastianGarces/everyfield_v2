@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { households, personMerges, persons } from "@/db/schema";
 import { lockPlantLeadership } from "@/lib/ministry-teams/leadership-lock";
 import { toPersonForClient } from "./types";
+import { personPhotoMergeAssignment, personPhotosDiffer } from "./person-photo";
 import { blockerArray, mergeChecks } from "./merge-checks";
 import { personMergeReferences } from "./merge-references";
 import {
@@ -68,9 +69,11 @@ export async function getMergeReview(
     right: profile(right),
     conflicts: mergeFields
       .filter((field) =>
-        field.columns.some(
-          (column) => left.person[column] !== right.person[column]
-        )
+        field.key === "photo"
+          ? personPhotosDiffer(left.person, right.person)
+          : field.columns.some(
+              (column) => left.person[column] !== right.person[column]
+            )
       )
       .map((field) => field.key),
     blockers: details.rows[0].left.filter((message) =>
@@ -151,15 +154,18 @@ export async function mergePeople(
         ${table === "tasks" ? sql`and child.related_type='person'` : table === "notifications" ? sql`and child.entity_type='person'` : sql``}
         ${table === "person_tags" ? sql`and not exists(select 1 from person_tags kept where kept.person_id=${survivorId} and kept.tag_id=child.tag_id)` : sql``}`);
   });
-  const assignments = mergeFields.flatMap((field) =>
-    field.columns.map((column) => {
-      const chosenId =
-        (input.choices[field.key] ?? input.survivor) === "left"
-          ? input.leftId
-          : input.rightId;
-      return sql`${sql.identifier(persons[column].name)}=(select ${persons[column]} from ${persons} where ${persons.id}=${chosenId})`;
-    })
-  );
+  const assignments = mergeFields.flatMap((field) => {
+    const chosenId =
+      (input.choices[field.key] ?? input.survivor) === "left"
+        ? input.leftId
+        : input.rightId;
+    return field.key === "photo"
+      ? [personPhotoMergeAssignment(churchId, chosenId)]
+      : field.columns.map(
+          (column) =>
+            sql`${sql.identifier(persons[column].name)}=(select ${persons[column]} from ${persons} where ${persons.id}=${chosenId})`
+        );
+  });
   await db.batch([
     lockPlantLeadership(churchId),
     db.execute(

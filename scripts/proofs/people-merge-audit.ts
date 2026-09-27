@@ -83,6 +83,61 @@ async function main() {
       choices: Object.fromEntries(mergeFields.map((f) => [f.key, "right"])),
     };
   };
+  for (const [label, leftPhoto, rightPhoto, photoChoice] of [
+    [
+      "right-photo",
+      "private/merge-left.png",
+      "private/merge-right.png",
+      "right",
+    ],
+    ["left-photo", "private/merge-left.png", "private/merge-right.png", "left"],
+    ["clear-photo", "private/merge-left.png", null, "right"],
+    ["same-photo", "private/merge-same.png", "private/merge-same.png", "left"],
+  ] as const) {
+    const photoLeft = await create(`Photo ${label} left`, {
+      photoUrl: leftPhoto,
+    });
+    const photoRight = await create(`Photo ${label} right`, {
+      photoUrl: rightPhoto,
+    });
+    const review = await getMergeReview(churchId, photoLeft.id, photoRight.id);
+    assert.ok(review);
+    assert.equal(review.conflicts.includes("photo"), leftPhoto !== rightPhoto);
+    const payload = JSON.stringify(review);
+    assert.ok(!payload.includes("private/"));
+    assert.ok(!payload.includes('"photoUrl"'));
+    assert.ok(payload.includes(`/api/people/${photoLeft.id}/photo`));
+    const input = await inputFor(photoLeft.id, photoRight.id);
+    if (leftPhoto !== rightPhoto) {
+      delete input.choices.photo;
+      assert.equal((await mergePeopleAction(input)).success, false);
+      const unchanged = await db
+        .select()
+        .from(persons)
+        .where(eq(persons.id, photoLeft.id));
+      assert.equal(unchanged[0].photoUrl, leftPhoto);
+      assert.equal(unchanged[0].deletedAt, null);
+    }
+    input.choices.photo = photoChoice;
+    assert.equal((await mergePeopleAction(input)).success, true);
+    const [survivor] = await db
+      .select()
+      .from(persons)
+      .where(eq(persons.id, photoLeft.id));
+    const [source] = await db
+      .select()
+      .from(persons)
+      .where(eq(persons.id, photoRight.id));
+    assert.equal(
+      survivor.photoUrl,
+      photoChoice === "left" ? leftPhoto : rightPhoto
+    );
+    assert.equal(source.photoUrl, rightPhoto);
+    assert.ok(source.deletedAt);
+  }
+  console.log(
+    "PASS: photo conflicts require a side; left/right/null/same stored photo choices persist atomically; review exposes only authenticated routes and no private storage keys."
+  );
   const left = await create("Keep", {
     email: `pair-${key}@example.test`,
     notes: "Kept original note",
