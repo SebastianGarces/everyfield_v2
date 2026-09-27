@@ -48,6 +48,7 @@ export const dynamic = "force-dynamic";
 
 type Props = {
   params: Promise<{ slug: string[] }>;
+  searchParams: Promise<{ resume?: string | string[] }>;
 };
 
 /**
@@ -118,7 +119,7 @@ export async function generateMetadata({ params }: Props) {
   };
 }
 
-export default async function WikiPage({ params }: Props) {
+export default async function WikiPage({ params, searchParams }: Props) {
   const { slug } = await params;
   const slugPath = slug.join("/");
   const churchId = await readerChurchId();
@@ -127,7 +128,13 @@ export default async function WikiPage({ params }: Props) {
   const article = await getArticle(slugPath, churchId);
 
   if (article) {
-    return <ArticleView article={article} churchId={churchId} />;
+    return (
+      <ArticleView
+        article={article}
+        churchId={churchId}
+        resume={(await searchParams).resume === "1"}
+      />
+    );
   }
 
   // Otherwise, try to render section index
@@ -144,22 +151,26 @@ export default async function WikiPage({ params }: Props) {
 async function ArticleView({
   article,
   churchId,
+  resume,
 }: {
   article: ArticleWithRelated;
   churchId: string | null;
+  resume: boolean;
 }) {
   // The navigation read is scoped to the same church as the article itself, so
   // the footer can never advertise a title this reader is not allowed to open
   // (`memory/invariants.md` → Multi-Tenancy).
   const { user } = await getCurrentSession();
-  const [content, bookmarked, navigation, existingVote] = await Promise.all([
-    compileArticle(article),
-    isBookmarked(article.slug),
-    getArticleNavigation(article.slug, article.relatedArticleSlugs, churchId),
-    user?.churchId
-      ? getArticleFeedbackForUser(user.churchId, user.id, article.slug)
-      : Promise.resolve(null),
-  ]);
+  const [content, bookmarked, navigation, existingVote, progress] =
+    await Promise.all([
+      compileArticle(article),
+      isBookmarked(article.slug),
+      getArticleNavigation(article.slug, article.relatedArticleSlugs, churchId),
+      user?.churchId
+        ? getArticleFeedbackForUser(user.churchId, user.id, article.slug)
+        : Promise.resolve(null),
+      getArticlesProgress([article.slug]),
+    ]);
   const breadcrumbs = getBreadcrumbs(article.slug, article.title);
 
   // Headings come off the MDX source, not the compiled output — `compileMDX`
@@ -169,7 +180,11 @@ async function ArticleView({
   const headings = extractHeadings(article.content);
 
   return (
-    <ProgressTracker slug={article.slug}>
+    <ProgressTracker
+      slug={article.slug}
+      resume={resume}
+      initialProgress={progress.get(article.slug)}
+    >
       <div className="flex flex-col gap-6 @min-[65rem]/wiki-content:flex-row @min-[65rem]/wiki-content:items-start @min-[65rem]/wiki-content:gap-8">
         {/*
           `data-print-root` is the one thing the print stylesheet keeps

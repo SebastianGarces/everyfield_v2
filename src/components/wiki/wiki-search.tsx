@@ -21,6 +21,8 @@ import { Kbd } from "@/components/ui/kbd";
 // component (`search-request.ts` says so for the same reason).
 import type { SearchResult } from "@/lib/wiki/search";
 import { wikiHref } from "@/lib/wiki/href";
+import { wikiSearchHref } from "@/lib/wiki/search-params";
+import Link from "next/link";
 import {
   SEARCH_UNAVAILABLE_MESSAGE,
   runWikiSearch,
@@ -312,6 +314,21 @@ export function WikiSearch({
               </CommandGroup>
             )}
           </CommandList>
+
+          <Link
+            href={wikiSearchHref({
+              q: query.trim(),
+              sort: "relevance",
+              page: 1,
+            })}
+            className="block border-t px-4 py-3 text-sm font-medium hover:underline"
+            onClick={() => {
+              onOpenChange(false);
+              onNavigate?.();
+            }}
+          >
+            View all results
+          </Link>
 
           {/* Footer with keyboard hints */}
           <div className="text-muted-foreground flex items-center justify-between border-t px-3 py-2 text-xs">
