@@ -230,11 +230,18 @@ test("the roster links only to a page that exists", () => {
   const hrefs = [...source.matchAll(/href="([^"]+)"/g)].map(
     (match) => match[1]
   );
-  // There is no per-sending-church page in alpha, so no row may link to one.
   assert.deepEqual(hrefs, ["/oversight/invitations"]);
+  assert.match(
+    source,
+    /href=\{`\/oversight\/sending-churches\/\$\{sendingChurch.sendingChurchId\}`\}/
+  );
   assert.ok(
-    !source.includes("/oversight/sending-churches/"),
-    "a row links into a per-sending-church route that does not exist"
+    read(
+      path.join(
+        ROOT,
+        "src/app/(dashboard)/oversight/sending-churches/[id]/page.tsx"
+      )
+    )
   );
 });
 
