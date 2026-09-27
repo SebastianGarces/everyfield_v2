@@ -1,5 +1,7 @@
 "use client";
 
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -18,6 +20,8 @@ import {
 } from "@/db/schema";
 import {
   TASK_LIST_VIEWS,
+  TASK_SORT_LABELS,
+  hasTaskFilters,
   parseTaskListQuery,
   taskListParamsCleared,
   taskListParamsWith,
@@ -94,10 +98,7 @@ export function TaskFilters() {
   const currentStatus = selected.status ?? [];
   const currentPriority = selected.priority ?? [];
   const currentCategory = selected.category ?? [];
-  const hasFilters =
-    currentStatus.length > 0 ||
-    currentPriority.length > 0 ||
-    currentCategory.length > 0;
+  const hasFilters = hasTaskFilters(selected);
   const updateParam = (key: TaskListParamKey, value: string | null) =>
     navigate((current) => taskListParamsWith(current, key, value).toString());
   const clearFilters = () =>
@@ -128,21 +129,23 @@ export function TaskFilters() {
         ))}
       </div>
 
-      {/* Show completed toggle */}
-      <button
-        aria-pressed={selected.showCompleted}
-        className={cn(
-          "cursor-pointer rounded-md border px-3 py-1.5 text-xs font-medium transition-colors",
-          selected.showCompleted
-            ? "bg-primary text-primary-foreground"
-            : "hover:bg-muted"
-        )}
-        onClick={() =>
-          updateParam("completed", selected.showCompleted ? null : "true")
-        }
-      >
-        Show Completed
-      </button>
+      {/* Assignments contains open follow-ups only. */}
+      {selected.view !== "assignments" && (
+        <button
+          aria-pressed={selected.showCompleted}
+          className={cn(
+            "cursor-pointer rounded-md border px-3 py-1.5 text-xs font-medium transition-colors",
+            selected.showCompleted
+              ? "bg-primary text-primary-foreground"
+              : "hover:bg-muted"
+          )}
+          onClick={() =>
+            updateParam("completed", selected.showCompleted ? null : "true")
+          }
+        >
+          Show Completed
+        </button>
+      )}
 
       <div className="text-border mx-1">|</div>
 
@@ -244,6 +247,106 @@ export function TaskFilters() {
         </SelectContent>
       </Select>
 
+      <div className="flex flex-wrap items-center gap-2">
+        <Label htmlFor="task-due-from" className="text-xs">
+          Due from
+        </Label>
+        <Input
+          id="task-due-from"
+          type="date"
+          className="h-8 w-[150px] text-xs"
+          value={selected.dueDateFrom ?? ""}
+          onChange={(event) =>
+            updateParam("dueDateFrom", event.target.value || null)
+          }
+          aria-invalid={selected.invalidDateRange}
+          aria-describedby={
+            selected.invalidDateRange ? "task-date-error" : undefined
+          }
+        />
+        <Label htmlFor="task-due-to" className="text-xs">
+          Due through
+        </Label>
+        <Input
+          id="task-due-to"
+          type="date"
+          className="h-8 w-[150px] text-xs"
+          value={selected.dueDateTo ?? ""}
+          onChange={(event) =>
+            updateParam("dueDateTo", event.target.value || null)
+          }
+          aria-invalid={selected.invalidDateRange}
+          aria-describedby={
+            selected.invalidDateRange ? "task-date-error" : undefined
+          }
+        />
+      </div>
+      {selected.invalidDateRange && (
+        <p
+          id="task-date-error"
+          role="alert"
+          className="text-destructive w-full text-sm"
+        >
+          The end date must be on or after the start date.
+        </p>
+      )}
+      {selected.view !== "assignments" && (
+        <>
+          <Select
+            value={selected.sortBy}
+            onValueChange={(value) => updateParam("sortBy", value)}
+          >
+            <SelectTrigger
+              aria-label="Sort tasks by"
+              className="h-8 w-[130px] cursor-pointer text-xs"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {Object.entries(TASK_SORT_LABELS).map(([value, label]) => (
+                <SelectItem
+                  key={value}
+                  value={value}
+                  className="cursor-pointer"
+                >
+                  {label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select
+            value={selected.sortDir}
+            onValueChange={(value) => updateParam("sortDir", value)}
+          >
+            <SelectTrigger
+              aria-label="Sort direction"
+              className="h-8 w-[130px] cursor-pointer text-xs"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="asc" className="cursor-pointer">
+                {selected.sortBy === "priority"
+                  ? "Urgent first"
+                  : selected.sortBy === "due_date"
+                    ? "Earliest first"
+                    : selected.sortBy === "created_at"
+                      ? "Oldest first"
+                      : "A to Z"}
+              </SelectItem>
+              <SelectItem value="desc" className="cursor-pointer">
+                {selected.sortBy === "priority"
+                  ? "Low first"
+                  : selected.sortBy === "due_date"
+                    ? "Latest first"
+                    : selected.sortBy === "created_at"
+                      ? "Newest first"
+                      : "Z to A"}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </>
+      )}
       {/* Clear filters */}
       {hasFilters && (
         <Button

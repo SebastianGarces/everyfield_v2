@@ -179,6 +179,8 @@ export async function listOpenFollowUpTasks(
     .select({
       taskId: tasks.id,
       title: tasks.title,
+      status: tasks.status,
+      priority: tasks.priority,
       dueDate: tasks.dueDate,
       relatedType: tasks.relatedType,
       relatedId: tasks.relatedId,
@@ -207,6 +209,8 @@ export async function listOpenFollowUpTasks(
   return rows.map((row) => ({
     taskId: row.taskId,
     title: row.title,
+    status: row.status,
+    priority: row.priority,
     dueDate: row.dueDate,
     contactId: row.relatedType === "person" ? row.relatedId : null,
     assignedToId: row.assignedToId,
