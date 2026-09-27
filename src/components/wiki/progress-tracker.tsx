@@ -54,6 +54,10 @@ export function ProgressTracker({
     let timer: ReturnType<typeof setTimeout> | undefined;
     let frame = 0;
 
+    // Native fragment targeting handles decoding and malformed hashes. Wait for
+    // layout before placing it, just as for saved progress, so a streamed page
+    // or reload can find a heading that did not exist at initial navigation.
+    const fragment = article.querySelector<HTMLElement>(":target");
     const consumed = window.history.state?.wikiResume;
     const shouldRestore =
       resume &&
@@ -69,7 +73,7 @@ export function ProgressTracker({
         ""
       );
     };
-    if (shouldRestore) {
+    if (fragment || shouldRestore) {
       cancelRestore = scheduleReadingRestore(
         [
           document.fonts.ready,
@@ -80,12 +84,16 @@ export function ProgressTracker({
         () => {
           frame = requestAnimationFrame(() => {
             if (userInteracted) return;
-            consumeResume();
-            container.scrollTop = resumeScrollTop(
-              initialPosition,
-              container.scrollHeight,
-              container.clientHeight
-            );
+            if (fragment) {
+              fragment.scrollIntoView({ block: "start" });
+            } else {
+              consumeResume();
+              container.scrollTop = resumeScrollTop(
+                initialPosition,
+                container.scrollHeight,
+                container.clientHeight
+              );
+            }
           });
         }
       );
