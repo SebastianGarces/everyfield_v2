@@ -16,6 +16,8 @@
  * line here and saying out loud who may call it.
  */
 export const CAPABILITY_BY_EXPORT: Readonly<Record<string, string>> = {
+  "src/app/(dashboard)/people/duplicates/actions.ts → mergePeopleAction":
+    "people.write",
   "src/app/(dashboard)/communication/actions.ts → createTemplateAction":
     "communication.send",
   "src/app/(dashboard)/communication/actions.ts → deleteTemplateAction":
