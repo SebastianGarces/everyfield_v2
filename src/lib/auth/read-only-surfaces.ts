@@ -379,6 +379,7 @@ export const READ_ONLY_SURFACE_CHECKLIST: readonly ChecklistRow[] = [
     gatedIn: [
       "src/app/(dashboard)/teams/page.tsx",
       "src/components/ministry-teams/teams-dashboard.tsx",
+      "src/components/ministry-teams/team-detail-header.tsx",
       "src/components/ministry-teams/team-write-context.tsx",
       "src/components/ministry-teams/members-roles-tab.tsx",
       "src/components/ministry-teams/responsibilities-tab.tsx",

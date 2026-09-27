@@ -191,11 +191,28 @@ test("list workspaces have one intentional scrolling content region", () => {
       /<WorkspacePanel className="flex h-full flex-col overflow-hidden">/,
       `${relativePath} must constrain its list to the workspace panel`
     );
-    assert.match(
-      source,
-      /className="min-h-0 flex-1[^"]*overflow-auto[^"]*"/,
-      `${relativePath} must make the list body the scroll owner`
-    );
+    if (relativePath === "teams/org-chart/page.tsx") {
+      assert.match(
+        source,
+        /className="flex min-h-0 flex-1 flex-col p-4 sm:p-6"/
+      );
+      assert.doesNotMatch(source, /overflow-auto/);
+      const chart = readFileSync(
+        join(process.cwd(), "src/components/ministry-teams/org-chart-view.tsx"),
+        "utf8"
+      );
+      assert.match(
+        chart,
+        /tabIndex=\{0\}[\s\S]*?aria-label="Scrollable organization chart"[\s\S]*?className="[^"]*overflow-auto/
+      );
+      assert.equal([...chart.matchAll(/overflow-auto/g)].length, 1);
+    } else {
+      assert.match(
+        source,
+        /className="min-h-0 flex-1[^"]*overflow-auto[^"]*"/,
+        `${relativePath} must make the list body the scroll owner`
+      );
+    }
     assert.doesNotMatch(
       source,
       /className="bg-card[^"]*shadow-sm"/,
