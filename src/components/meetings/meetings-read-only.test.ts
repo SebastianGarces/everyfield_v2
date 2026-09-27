@@ -365,7 +365,7 @@ test("a Member cannot toggle somebody else's RSVP from the guest list", () => {
     "the RSVP toggle is `updateRsvpStatusAction` — meetings.write — and is staff recording somebody ELSE's answer, so it hides with the rest"
   );
   assert.ok(
-    controlLabels(admin).includes("Change RSVP for Ada Lovelace"),
+    controlLabels(admin).includes("Change RSVP for Ada Lovelace, Confirmed"),
     "an Admin still records a guest's answer"
   );
 });

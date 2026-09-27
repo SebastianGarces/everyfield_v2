@@ -1,5 +1,6 @@
 "use client";
 
+import { hasVisionFeature } from "@/lib/meetings/vision-features";
 import { cn } from "@/lib/utils";
 import {
   FileText,
@@ -35,7 +36,8 @@ export function MeetingTabs({
 }: MeetingTabsProps) {
   const pathname = usePathname();
   const isCompleted = meetingStatus === "completed";
-  const isVision = meetingType === "vision_meeting";
+  const meeting = { type: meetingType, status: meetingStatus };
+  const isVision = hasVisionFeature(meeting, "outcomes");
   const base = `/meetings/${meetingId}`;
 
   const tabs: TabDefinition[] = [
@@ -71,7 +73,7 @@ export function MeetingTabs({
       icon: ClipboardList,
     });
 
-    if (isCompleted) {
+    if (hasVisionFeature(meeting, "evaluation")) {
       tabs.push(
         {
           id: "evaluation",

@@ -1,3 +1,4 @@
+import { hasVisionFeature } from "@/lib/meetings/vision-features";
 import { redirect } from "next/navigation";
 import { notFound } from "next/navigation";
 import { verifySession } from "@/lib/auth/session";
@@ -23,12 +24,12 @@ export default async function LogisticsPage({ params }: LogisticsPageProps) {
   if (!user.churchId) redirect("/dashboard");
 
   const { id } = await params;
-  const [meeting, checklist, checklistSummary] = await Promise.all([
-    getMeeting(user.churchId, id),
+  const meeting = await getMeeting(user.churchId, id);
+  if (!meeting || !hasVisionFeature(meeting, "logistics")) notFound();
+
+  const [checklist, checklistSummary] = await Promise.all([
     getChecklist(user.churchId, id),
     getChecklistSummary(user.churchId, id),
   ]);
-
-  if (!meeting) notFound();
   return <MaterialsChecklist items={checklist} summary={checklistSummary} />;
 }
