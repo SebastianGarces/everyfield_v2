@@ -242,10 +242,10 @@ function collectPageRoutes(
   return routes.sort();
 }
 
-test("all 36 specialized surfaces declare their ruled composition and owner", () => {
+test("all 37 specialized surfaces declare their ruled composition and owner", () => {
   const routes = SPECIALIZED_ROUTE_FAMILIES.flatMap((family) => family.routes);
 
-  assert.equal(routes.length, 36);
+  assert.equal(routes.length, 37);
   assert.equal(
     new Set(routes).size,
     routes.length,
