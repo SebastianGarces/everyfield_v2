@@ -92,7 +92,8 @@ test("Plant Intelligence keeps approved standalone context and sibling surfaces"
 
 test("detail routes attach server-known trails to their first surface", () => {
   const plant = routeSource("oversight/plants/[id]/page.tsx");
-  const coaching = routeSource("coaching/[churchId]/page.tsx");
+  const coaching = routeSource("coaching/[churchId]/coaching-frame.tsx");
+  const coachingLanding = routeSource("coaching/[churchId]/page.tsx");
   const plantDetail = readFileSync(
     join(process.cwd(), "src/components/oversight/plant-detail.tsx"),
     "utf8"
@@ -100,7 +101,7 @@ test("detail routes attach server-known trails to their first surface", () => {
 
   for (const [relativePath, source] of [
     ["oversight/plants/[id]/page.tsx", plant],
-    ["coaching/[churchId]/page.tsx", coaching],
+    ["coaching/[churchId]/coaching-frame.tsx", coaching],
   ] as const) {
     assert.match(source, /contextAttachment="attached"/);
     assert.match(source, /contextItems=\{breadcrumbs\}/);
@@ -127,14 +128,31 @@ test("detail routes attach server-known trails to their first surface", () => {
 
   assertInOrder(
     coaching,
-    "coaching/[churchId]/page.tsx",
-    [
-      "<WorkspacePanel",
-      "<CardTitle>People</CardTitle>",
-      "<CardTitle>Tasks</CardTitle>",
-    ],
-    "the attached coaching header, People, and Tasks remain sibling surfaces"
+    "coaching/[churchId]/coaching-frame.tsx",
+    ["<WorkspacePanel", "</WorkspacePanel>", "{children}"],
+    "the attached coaching header and delegated records remain sibling surfaces"
   );
+  for (const relativePath of [
+    "coaching/[churchId]/page.tsx",
+    "coaching/[churchId]/[collection]/page.tsx",
+    "coaching/[churchId]/[collection]/[recordId]/page.tsx",
+  ]) {
+    const source = routeSource(relativePath);
+    assert.match(source, /import \{ CoachingFrame \} from [^;]+coaching-frame/);
+    assert.match(source, /<CoachingFrame plant=\{/);
+    assert.doesNotMatch(source, /<PageCanvas/);
+  }
+  assert.match(coaching, /label: plant.churchName/);
+  assert.match(coaching, /label: title/);
+  assert.match(coachingLanding, /Object.entries\(coachedCollections\)\.map/);
+  assert.match(coachingLanding, /<Card key=\{key\}>/);
+  assert.match(coachingLanding, /\{collection.label\}/);
+  const collections = readFileSync(
+    join(process.cwd(), "src/lib/coaching/collections.ts"),
+    "utf8"
+  );
+  for (const label of ["People", "Tasks", "Meetings", "Ministry teams"])
+    assert.ok(collections.includes(`label: "${label}"`));
 });
 
 test("Wiki keeps no shell context and its proven independent-pane height contract", () => {

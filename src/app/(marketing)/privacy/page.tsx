@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { settingsSectionUrl } from "@/lib/settings/sections";
 
 export const metadata: Metadata = {
   title: "Privacy — EveryField",
@@ -55,8 +56,8 @@ export default function PrivacyPage() {
           that plant&rsquo;s people, tasks, meetings and ministry teams. This
           access comes from the coach assignment, independently of oversight
           sharing switches. Ending the assignment in{" "}
-          <Link href="/settings/team">team settings</Link> withdraws that
-          coach&rsquo;s access. Personal planter check-ins are not shared with
+          <Link href={settingsSectionUrl("team")}>team settings</Link> withdraws
+          that coach's access. Personal planter check-ins are not shared with
           coaches.
         </p>
         <p>
