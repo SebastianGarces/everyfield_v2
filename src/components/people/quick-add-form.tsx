@@ -47,7 +47,6 @@ export function QuickAddForm({ children }: QuickAddFormProps) {
   const [open, setOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [duplicates, setDuplicates] = useState<DuplicateCheck | null>(null);
-  const [skipDuplicateCheck, setSkipDuplicateCheck] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
   const [submitAction, setSubmitAction] = useState<"save" | "saveAndAdd">(
@@ -61,7 +60,6 @@ export function QuickAddForm({ children }: QuickAddFormProps) {
   function resetForm() {
     formRef.current?.reset();
     setDuplicates(null);
-    setSkipDuplicateCheck(false);
     setError(null);
     setFieldErrors({});
     setSubmitAction("save");
@@ -75,7 +73,11 @@ export function QuickAddForm({ children }: QuickAddFormProps) {
     setOpen(newOpen);
   }
 
-  async function handleSubmit(formData: FormData) {
+  async function handleSubmit(
+    formData: FormData,
+    skipCheck = false,
+    reviewId?: string
+  ) {
     setError(null);
     setFieldErrors({});
     const intent =
@@ -93,7 +95,7 @@ export function QuickAddForm({ children }: QuickAddFormProps) {
 
     startTransition(async () => {
       // Step 1: Check for duplicates (unless user chose to skip)
-      if (!skipDuplicateCheck) {
+      if (!skipCheck) {
         const dupResult = await checkForDuplicatesAction(data);
         if (dupResult.success) {
           const { exactMatch, potentialMatches } = dupResult.data;
@@ -121,6 +123,11 @@ export function QuickAddForm({ children }: QuickAddFormProps) {
       });
 
       router.refresh();
+      if (reviewId) {
+        handleOpenChange(false);
+        router.push(`/people/duplicates/${reviewId}/${result.data.id}`);
+        return;
+      }
 
       if (intent === "saveAndAdd") {
         // Clear form but keep dialog open
@@ -135,12 +142,11 @@ export function QuickAddForm({ children }: QuickAddFormProps) {
   }
 
   function handleCreateAnyway() {
-    setSkipDuplicateCheck(true);
     setDuplicates(null);
     // Re-submit the form
     if (formRef.current) {
       const formData = new FormData(formRef.current);
-      handleSubmit(formData);
+      handleSubmit(formData, true);
     }
   }
 
@@ -274,6 +280,10 @@ export function QuickAddForm({ children }: QuickAddFormProps) {
             <DuplicateWarning
               duplicates={duplicates}
               onCreateAnyway={handleCreateAnyway}
+              onCreateForReview={(personId) => {
+                if (formRef.current)
+                  handleSubmit(new FormData(formRef.current), true, personId);
+              }}
               isSubmitting={isPending}
             />
           )}

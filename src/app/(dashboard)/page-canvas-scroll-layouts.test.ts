@@ -189,6 +189,18 @@ const AUTHENTICATED_PAGE_CANVAS_OWNERS = [
     compositions: ["sibling-surfaces"],
   },
   {
+    owner: "src/app/(dashboard)/people/duplicates/page.tsx",
+    routes: ["/people/duplicates"],
+    scrollLayout: "flow",
+    compositions: ["lone-workspace"],
+  },
+  {
+    owner: "src/app/(dashboard)/people/duplicates/[leftId]/[rightId]/page.tsx",
+    routes: ["/people/duplicates/[leftId]/[rightId]"],
+    scrollLayout: "flow",
+    compositions: ["lone-workspace"],
+  },
+  {
     owner: "src/app/(dashboard)/people/new/page.tsx",
     routes: ["/people/new"],
     scrollLayout: "flow",

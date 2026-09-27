@@ -118,6 +118,9 @@ export default async function PeoplePage({ searchParams }: PeoplePageProps) {
               </div>
               <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
                 {canWrite && <ImportWizard />}
+                <Button variant="outline" asChild>
+                  <Link href="/people/duplicates">Potential duplicates</Link>
+                </Button>
                 <ExportButton />
                 {canWrite && <QuickAddForm />}
                 {canWrite && (

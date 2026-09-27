@@ -168,6 +168,8 @@ const STAGE_3_PRIMARY_ROUTES = [
   "/oversight/sending-churches",
   "/people",
   "/people/new",
+  "/people/duplicates",
+  "/people/duplicates/[leftId]/[rightId]",
   "/phase",
   "/tasks",
   "/tasks/new",
