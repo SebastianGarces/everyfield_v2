@@ -2,8 +2,9 @@
 
 import { Download, Eye, FileText } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
+import { DocumentPreviewPanel } from "./document-preview";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -127,6 +128,13 @@ export function GenerateDialog({
   });
   const [format, setFormat] = useState<DocumentFormat>(template.formats[0]);
 
+  const [showPreview, setShowPreview] = useState(false);
+  const previewButton = useRef<HTMLButtonElement>(null);
+  function closePreview() {
+    setShowPreview(false);
+    previewButton.current?.focus();
+  }
+
   const missingRequired = template.mergeFields.some(
     (f) => f.required && !values[f.key]?.trim()
   );
@@ -145,19 +153,18 @@ export function GenerateDialog({
     anchor.remove();
   }
 
-  function handlePreview() {
-    window.open(
-      buildUrl(template.id, "pdf", values, true),
-      "_blank",
-      "noopener"
-    );
-  }
-
-  const canPreview = template.formats.includes("pdf");
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg" data-testid="generate-dialog">
+      <DialogContent
+        className={`max-h-[90dvh] overflow-y-auto ${showPreview ? "sm:max-w-5xl" : "sm:max-w-lg"}`}
+        data-testid="generate-dialog"
+        onEscapeKeyDown={(event) => {
+          if (showPreview) {
+            event.preventDefault();
+            closePreview();
+          }
+        }}
+      >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <FileText className="text-muted-foreground h-5 w-5" />
@@ -222,19 +229,25 @@ export function GenerateDialog({
           )}
         </div>
 
-        <DialogFooter className="gap-2 sm:gap-2">
-          {canPreview && (
-            <Button
-              type="button"
-              variant="outline"
-              className="cursor-pointer"
-              onClick={handlePreview}
-              disabled={missingRequired}
-            >
-              <Eye className="mr-2 h-4 w-4" />
-              Preview
-            </Button>
-          )}
+        {showPreview && (
+          <DocumentPreviewPanel
+            url={buildUrl(template.id, format, values, true)}
+            format={format}
+            onClose={closePreview}
+          />
+        )}
+        <DialogFooter className="bg-background sticky bottom-0 gap-2 py-2 sm:gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            className="cursor-pointer"
+            ref={previewButton}
+            onClick={() => setShowPreview(true)}
+            disabled={missingRequired}
+          >
+            <Eye className="mr-2 h-4 w-4" />
+            Preview
+          </Button>
           <Button
             type="button"
             className="cursor-pointer"

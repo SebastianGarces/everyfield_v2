@@ -10,6 +10,7 @@ import {
   type DocumentMergeValues,
 } from "@/lib/documents";
 import { resolveDocumentMergeContext } from "@/lib/documents/merge-context";
+import { previewDocumentBytes } from "@/lib/documents/preview";
 import { canRenderDocument, renderDocument } from "@/lib/documents/render";
 import {
   generatedDocumentFilename,
@@ -81,9 +82,15 @@ export async function GET(
 
   const values = resolveMergeValues(template, context.merge, provided);
 
+  const preview = request.nextUrl.searchParams.get("preview") === "1";
   let file: Buffer;
   try {
     file = await renderDocument(format, templateId, values);
+    if (preview && format !== "pdf") {
+      return NextResponse.json(await previewDocumentBytes(format, file), {
+        headers: { "Cache-Control": "no-store" },
+      });
+    }
   } catch (error) {
     console.error(
       `[documents] failed to render ${templateId} (${format}):`,
@@ -95,13 +102,9 @@ export async function GET(
     );
   }
 
-  // Two independent questions off one flag. `preview` decides whether this
-  // request WRITES: a look never records, whatever format it asked for.
-  // `inline` decides how it is DELIVERED, and only a PDF can be shown in a
-  // browser tab — a .docx preview still downloads. Deriving the write from
-  // `inline` recorded every non-PDF preview.
+  // Preview never writes history or storage. Office previews returned safe
+  // content above; PDF keeps the browser's native inline viewer.
   const { mime } = FORMAT_OUTPUT[format];
-  const preview = request.nextUrl.searchParams.get("preview") === "1";
   const inline = preview && format === "pdf";
 
   if (!preview) {

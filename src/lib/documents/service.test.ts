@@ -443,8 +443,9 @@ test("the generation route records after render, and a preview does not record",
     handler,
     "GET /api/documents/[templateId]",
     [
-      "file = await renderDocument(format, templateId, values);",
       'request.nextUrl.searchParams.get("preview") === "1"',
+      "file = await renderDocument(format, templateId, values);",
+      "if (!preview) {",
       "await recordGeneratedDocument(",
     ],
     "bytes are rendered first; persist is gated off preview so a look does not write history"
