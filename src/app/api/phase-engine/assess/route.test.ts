@@ -513,11 +513,10 @@ test("a GitHub Actions schedule ticks the assessment run twice a day", () => {
     /\/api\/phase-engine\/assess/,
     "the workflow does not call the assess route"
   );
-  // Without the bearer the route fails closed and every tick 401s.
   assert.match(
     workflow,
-    /Authorization: Bearer \$CRON_SECRET/,
-    "the workflow does not send the CRON_SECRET bearer"
+    /run: node scripts\/phase-engine-assess\.mjs/,
+    "the workflow must invoke the response-checking command exercised by its request tests"
   );
 });
 
