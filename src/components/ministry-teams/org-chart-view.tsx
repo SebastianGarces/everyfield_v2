@@ -245,13 +245,7 @@ export function OrgChartView({ teams }: { teams: ChartTeam[] }) {
                   width={box.width}
                   height={box.height}
                   rx={8}
-                  fill={
-                    box.kind === "team"
-                      ? "#eff6ff"
-                      : box.kind === "vacancy"
-                        ? "#f8fafc"
-                        : "white"
-                  }
+                  fill={box.fill}
                   stroke="#64748b"
                   strokeDasharray={box.kind === "vacancy" ? "4 3" : undefined}
                 />

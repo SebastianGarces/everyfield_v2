@@ -1,3 +1,4 @@
+import { teamStaffingDisplay } from "./team-display";
 import { LEADERSHIP_TEAM_KEY } from "./role-templates";
 
 export interface ChartPerson {
@@ -26,6 +27,7 @@ export interface ChartBox {
   title: string[];
   subtitle: string[];
   href: string | null;
+  fill: string;
   kind: "team" | "person" | "vacancy";
 }
 export interface ChartLine {
@@ -90,7 +92,8 @@ export function drawOrgChart(
     title: string,
     subtitle: string,
     href: string | null,
-    kind: ChartBox["kind"]
+    kind: ChartBox["kind"],
+    fill = kind === "vacancy" ? "#f8fafc" : "white"
   ) => {
     const titleLines = chartTextLines(title),
       subtitleLines = chartTextLines(subtitle);
@@ -105,20 +108,36 @@ export function drawOrgChart(
       subtitle: subtitleLines,
       href,
       kind,
+      fill,
     });
     return height;
   };
   function teamColumn(team: ChartTeam, x: number, y: number) {
     const start = y;
+    const filled = team.roles.filter((role) => role.person !== null).length;
+    const staffing = teamStaffingDisplay(filled, team.roles.length);
+    const fill =
+      staffing.kind === "no_roles"
+        ? "#eff6ff"
+        : staffing.level === "red"
+          ? "#fee2e2"
+          : staffing.level === "yellow"
+            ? "#fef3c7"
+            : staffing.percentage === 100
+              ? "#dcfce7"
+              : "#eff6ff";
     y +=
       add(
         `team-${team.id}`,
         x,
         y,
         team.name,
-        team.roles.length === 1 ? "1 role" : `${team.roles.length} roles`,
+        staffing.kind === "no_roles"
+          ? staffing.label
+          : `${filled}/${team.roles.length} roles`,
         `/teams/${team.id}`,
-        "team"
+        "team",
+        fill
       ) + 20;
     y +=
       add(

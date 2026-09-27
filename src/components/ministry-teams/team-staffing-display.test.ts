@@ -29,7 +29,26 @@ function card(overrides: Partial<TeamCardViewTeam> = {}): string {
 function orgNode(overrides: Partial<TeamCardViewTeam> = {}): string {
   return renderToStaticMarkup(
     createElement(OrgChartView, {
-      teams: [{ ...TEAM, ...overrides, templateKey: "worship" }] as never,
+      teams: [
+        {
+          id: TEAM.id,
+          name: TEAM.name,
+          templateKey: "worship",
+          leader: null,
+          roles: Array.from(
+            { length: overrides.totalRoles ?? 0 },
+            (_, index) => ({
+              id: `role-${index}`,
+              name: `Role ${index}`,
+              leadership: false,
+              person:
+                index < (overrides.filledRoles ?? 0)
+                  ? { id: `person-${index}`, name: `Person ${index}` }
+                  : null,
+            })
+          ),
+        },
+      ],
     })
   );
 }
@@ -49,7 +68,7 @@ test("a team without roles is a neutral display state", () => {
   const chart = orgNode();
   assert.match(chart, /No roles defined/);
   assert.doesNotMatch(chart, /0\/0 roles/);
-  assert.doesNotMatch(chart, /bg-red-100/);
+  assert.doesNotMatch(chart, /fill="#fee2e2"/);
 });
 
 test("configured teams keep their staffing thresholds, counts, and warning colors", () => {
@@ -61,7 +80,7 @@ test("configured teams keep their staffing thresholds, counts, and warning color
       percentage: 33,
       cardLevel: "red",
       cardColor: "bg-red-500",
-      orgChartColor: "bg-red-100",
+      orgChartColor: "#fee2e2",
     },
     {
       name: "exactly 40%",
@@ -70,7 +89,7 @@ test("configured teams keep their staffing thresholds, counts, and warning color
       percentage: 40,
       cardLevel: "yellow",
       cardColor: "bg-yellow-500",
-      orgChartColor: "bg-amber-100",
+      orgChartColor: "#fef3c7",
     },
     {
       name: "below 60%",
@@ -79,7 +98,7 @@ test("configured teams keep their staffing thresholds, counts, and warning color
       percentage: 50,
       cardLevel: "yellow",
       cardColor: "bg-yellow-500",
-      orgChartColor: "bg-amber-100",
+      orgChartColor: "#fef3c7",
     },
     {
       name: "exactly 60%",
@@ -97,7 +116,7 @@ test("configured teams keep their staffing thresholds, counts, and warning color
       percentage: 100,
       cardLevel: "green",
       cardColor: "bg-green-500",
-      orgChartColor: "bg-green-100",
+      orgChartColor: "#dcfce7",
     },
   ] as const;
 
@@ -128,9 +147,9 @@ test("configured teams keep their staffing thresholds, counts, and warning color
       new RegExp(`${configured.filledRoles}/${configured.totalRoles} roles`)
     );
     if (configured.orgChartColor) {
-      assert.match(chart, new RegExp(configured.orgChartColor));
+      assert.match(chart, new RegExp(`fill="${configured.orgChartColor}"`));
     } else {
-      assert.doesNotMatch(chart, /bg-(?:red|amber|green)-100/);
+      assert.doesNotMatch(chart, /fill="(?:#fee2e2|#fef3c7|#dcfce7)"/);
     }
   }
 });
