@@ -37,6 +37,7 @@
 
 import type { TaskCategory, TaskPriority, TaskStatus } from "@/db/schema";
 import {
+  isCalendarDate,
   taskCategorySchema,
   taskPrioritySchema,
   taskStatusSchema,
@@ -64,7 +65,11 @@ export type TaskListParamKey =
   | "completed"
   | "status"
   | "priority"
-  | "category";
+  | "category"
+  | "sortBy"
+  | "sortDir"
+  | "dueDateFrom"
+  | "dueDateTo";
 
 /** Is this URL value one of the views? Narrowing, so no caller casts. */
 function isTaskListView(value: unknown): value is TaskListView {
@@ -117,10 +122,12 @@ export function taskListParamsWith(
 export function taskListParamsCleared(
   current: URLSearchParams | string
 ): URLSearchParams {
-  const { view, showCompleted } = parseTaskListQuery(current);
+  const { view, showCompleted, sortBy, sortDir } = parseTaskListQuery(current);
   const kept = new URLSearchParams();
   if (view !== "my_tasks") kept.set("view", view);
   if (showCompleted) kept.set("completed", "true");
+  if (sortBy !== "due_date") kept.set("sortBy", sortBy);
+  if (sortDir !== "asc") kept.set("sortDir", sortDir);
   return kept;
 }
 
@@ -144,7 +151,36 @@ function canonicalTaskListParams(current: URLSearchParams): URLSearchParams {
   for (const key of ["status", "priority", "category"] as const) {
     for (const value of parsed[key] ?? []) result.append(key, value);
   }
+  if (parsed.dueDateFrom) result.set("dueDateFrom", parsed.dueDateFrom);
+  if (parsed.dueDateTo) result.set("dueDateTo", parsed.dueDateTo);
   return result;
+}
+
+export const TASK_SORT_LABELS = {
+  due_date: "Due date",
+  priority: "Priority",
+  status: "Status",
+  created_at: "Created",
+  title: "Title",
+} as const;
+export const taskSortSchema = z.enum([
+  "due_date",
+  "priority",
+  "status",
+  "created_at",
+  "title",
+]);
+export type TaskSortBy = z.infer<typeof taskSortSchema>;
+const calendarDateSchema = z.string().refine(isCalendarDate);
+
+export function hasTaskFilters(parsed: TaskListSearchParams): boolean {
+  return !!(
+    parsed.status?.length ||
+    parsed.priority?.length ||
+    parsed.category?.length ||
+    parsed.dueDateFrom ||
+    parsed.dueDateTo
+  );
 }
 
 export interface TaskListSearchParams {
@@ -155,6 +191,11 @@ export interface TaskListSearchParams {
   priority?: TaskPriority[];
   category?: TaskCategory[];
   cursor?: string;
+  sortBy: TaskSortBy;
+  sortDir: "asc" | "desc";
+  dueDateFrom?: string;
+  dueDateTo?: string;
+  invalidDateRange: boolean;
 }
 
 /**
@@ -196,7 +237,17 @@ export function parseTaskListSearchParams(params: {
   const status = parseEnumParam(params.status, taskStatusSchema);
   // The cursor reaches a UUID column; malformed bookmarks start at page one.
   const cursor = z.string().uuid().safeParse(params.cursor);
+  const dueDateFrom = calendarDateSchema.safeParse(params.dueDateFrom);
+  const dueDateTo = calendarDateSchema.safeParse(params.dueDateTo);
   return {
+    sortBy: taskSortSchema.catch("due_date").parse(params.sortBy),
+    sortDir: z.enum(["asc", "desc"]).catch("asc").parse(params.sortDir),
+    dueDateFrom: dueDateFrom.success ? dueDateFrom.data : undefined,
+    dueDateTo: dueDateTo.success ? dueDateTo.data : undefined,
+    invalidDateRange:
+      dueDateFrom.success &&
+      dueDateTo.success &&
+      dueDateFrom.data > dueDateTo.data,
     // The same list the toggle writes from, so a view can never be writable
     // and unreadable — which is exactly what `all` was (#660).
     view: isTaskListView(params.view) ? params.view : "my_tasks",

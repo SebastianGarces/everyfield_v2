@@ -1,3 +1,4 @@
+import { listTaskRelationOptions } from "@/lib/tasks/relations";
 import { notFound, redirect } from "next/navigation";
 
 import { HeaderBreadcrumbs } from "@/components/header";
@@ -72,7 +73,7 @@ function getRelatedUrl(
     case "person":
       return `/people/${relatedId}`;
     case "meeting":
-      return `/meetings/${relatedId}/evaluation`;
+      return `/meetings/${relatedId}`;
     case "team":
       return `/teams/${relatedId}`;
     default:
@@ -124,6 +125,7 @@ export default async function TaskDetailPage({ params }: TaskDetailPageProps) {
     subtasks,
     prerequisites,
     prerequisiteCandidates,
+    relationOptions,
   ] = await Promise.all([
     db
       .select({
@@ -140,6 +142,9 @@ export default async function TaskDetailPage({ params }: TaskDetailPageProps) {
     listSubtasks(user.churchId, id),
     listTaskPrerequisites(user.churchId, id),
     listPrerequisiteCandidates(user.churchId, id),
+    holdsSeatFor(user, "tasks.write")
+      ? listTaskRelationOptions(user.churchId)
+      : Promise.resolve([]),
   ]);
 
   // AS-020. Editing a task is `tasks.write`, so the edit form is not OFFERED to
@@ -362,6 +367,7 @@ export default async function TaskDetailPage({ params }: TaskDetailPageProps) {
                 </CardHeader>
                 <CardContent>
                   <TaskForm
+                    relationOptions={relationOptions}
                     task={task}
                     users={churchUsers}
                     followUpAssignees={followUpAssignees}

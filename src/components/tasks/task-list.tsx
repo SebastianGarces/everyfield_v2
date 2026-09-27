@@ -4,7 +4,10 @@ import { loadMoreTasksAction } from "@/app/(dashboard)/tasks/actions";
 import { useCan } from "@/components/shared/viewer-capabilities";
 import { Button } from "@/components/ui/button";
 import { addCalendarDays, toCalendarDate } from "@/lib/datetime";
-import type { SearchParamValue } from "@/lib/tasks/list-params";
+import {
+  parseTaskListSearchParams,
+  type SearchParamValue,
+} from "@/lib/tasks/list-params";
 import type { TaskListRow } from "@/lib/tasks/service";
 import { ListChecks, Loader2 } from "lucide-react";
 import { useState } from "react";
@@ -243,7 +246,13 @@ export function TaskList({
   // `now` is the server's single clock read, threaded in, so this recompute
   // decides the same buckets the server-rendered markup did
   // (`memory/invariants.md` → Date & Time Rendering).
-  const groups = groupTasksByDueDate(tasks, now);
+  const { sortBy, sortDir } = parseTaskListSearchParams(searchParams);
+  const groups: TaskGroup[] =
+    sortBy === "due_date" &&
+    sortDir === "asc" &&
+    !tasks.some((task) => task.status === "complete")
+      ? groupTasksByDueDate(tasks, now)
+      : [{ label: `Tasks (${tasks.length})`, tasks, variant: "later" }];
 
   return (
     <TaskSelectionProvider>

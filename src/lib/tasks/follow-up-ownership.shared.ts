@@ -18,6 +18,8 @@
 // not the relationship with the contact — the CRM person record is untouched.
 // ============================================================================
 
+import type { TaskListSearchParams } from "./list-params";
+import type { TaskStatus, TaskPriority } from "@/db/schema";
 import type { PersonStatus } from "@/db/schema";
 
 /**
@@ -54,6 +56,8 @@ export interface FollowUpAssignee {
 export interface OpenFollowUpTask {
   taskId: string;
   title: string;
+  status: TaskStatus;
+  priority: TaskPriority;
   dueDate: string | null;
   /** The contact this follow-up is about, when it names one. */
   contactId: string | null;
@@ -226,4 +230,21 @@ export function groupByOwner(
   );
 
   return [needsOwner, ...rest];
+}
+
+/** Filter task rows only. Contacts without a task have no task filter values. */
+export function filterFollowUpTasks(
+  rows: readonly OpenFollowUpTask[],
+  filters: TaskListSearchParams
+): OpenFollowUpTask[] {
+  return rows.filter(
+    (row) =>
+      (!filters.category || filters.category.includes(OWNED_TASK_CATEGORY)) &&
+      (!filters.status || filters.status.includes(row.status)) &&
+      (!filters.priority || filters.priority.includes(row.priority)) &&
+      (!filters.dueDateFrom ||
+        (row.dueDate !== null && row.dueDate >= filters.dueDateFrom)) &&
+      (!filters.dueDateTo ||
+        (row.dueDate !== null && row.dueDate <= filters.dueDateTo))
+  );
 }

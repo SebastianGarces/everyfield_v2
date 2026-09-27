@@ -1,3 +1,4 @@
+import { requireVisionFeature } from "./vision-access";
 import { db } from "@/db";
 import {
   churchMeetings,
@@ -145,10 +146,10 @@ async function getAttendanceCountsForMeetings(
     })
     .from(meetingAttendance)
     .where(
-      sql`${meetingAttendance.meetingId} IN (${sql.join(
-        meetingIds.map((id) => sql`${id}::uuid`),
-        sql`, `
-      )})`
+      and(
+        inArray(meetingAttendance.meetingId, meetingIds),
+        eq(meetingAttendance.status, "attended")
+      )
     )
     .groupBy(meetingAttendance.meetingId);
 
@@ -847,7 +848,8 @@ export async function getAttendanceSummary(
     .where(
       and(
         eq(meetingAttendance.churchId, churchId),
-        eq(meetingAttendance.meetingId, meetingId)
+        eq(meetingAttendance.meetingId, meetingId),
+        eq(meetingAttendance.status, "attended")
       )
     );
 
@@ -1228,6 +1230,8 @@ export async function createEvaluation(
   userId: string,
   data: EvaluationCreateInput
 ): Promise<MeetingEvaluation> {
+  await requireVisionFeature(churchId, meetingId, "evaluation");
+
   // Summed and divided over the ONE factor list, never over a hand-written
   // eight: the divisor was the literal `8` here and in the form's preview, so a
   // ninth factor would have stored an average the planter could see was wrong
@@ -1383,6 +1387,18 @@ export async function updateChecklistItem(
   itemId: string,
   data: ChecklistItemUpdateInput
 ): Promise<MeetingChecklistItem> {
+  const [item] = await db
+    .select({ meetingId: meetingChecklistItems.meetingId })
+    .from(meetingChecklistItems)
+    .where(
+      and(
+        eq(meetingChecklistItems.churchId, churchId),
+        eq(meetingChecklistItems.id, itemId)
+      )
+    )
+    .limit(1);
+  if (!item) throw new Error("Checklist item not found");
+  await requireVisionFeature(churchId, item.meetingId, "logistics");
   const updateData: Record<string, unknown> = {
     updatedAt: new Date(),
   };

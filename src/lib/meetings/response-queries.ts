@@ -1,3 +1,4 @@
+import { requireVisionFeature } from "./vision-access";
 import { and, desc, eq, exists, or, sql } from "drizzle-orm";
 
 import { db } from "@/db";
@@ -83,6 +84,7 @@ export async function recordMeetingResponse(
     recordedById?: string | null;
   }
 ): Promise<MeetingResponse> {
+  await requireVisionFeature(churchId, meetingId, "outcomes");
   const [attending] = await attendanceRowQuery(
     churchId,
     meetingId,
@@ -142,6 +144,7 @@ export async function clearMeetingResponse(
   meetingId: string,
   personId: string
 ): Promise<void> {
+  await requireVisionFeature(churchId, meetingId, "outcomes");
   await meetingResponseDeleteQuery(churchId, meetingId, personId);
 }
 

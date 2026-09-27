@@ -1,3 +1,8 @@
+import {
+  assertTaskRelation,
+  MANAGED_TASK_RELATION_ERROR,
+  TASK_RELATION_ERROR,
+} from "./relations";
 import { taskStructureLockStatement } from "./structure-lock";
 import { db } from "@/db";
 import {
@@ -54,6 +59,7 @@ import {
 } from "./notifications";
 import { toCalendarDate } from "@/lib/datetime";
 import { blockedTaskIdsAmong } from "./dependencies";
+import type { TaskSortBy } from "./list-params";
 import { assertMayOwnFollowUp } from "./follow-up-ownership";
 import { mayActOnTaskRow } from "./own-duty";
 import {
@@ -93,12 +99,7 @@ export interface ListTasksOptions {
 }
 
 /** The orders `/tasks` can be read in. */
-export type TaskSortBy =
-  | "due_date"
-  | "priority"
-  | "status"
-  | "created_at"
-  | "title";
+export type { TaskSortBy } from "./list-params";
 
 /** The columns a sort key is computed from — every list row has them. */
 export interface TaskSortableRow {
@@ -791,6 +792,7 @@ export async function createTask(
   data: TaskCreateInput,
   recurrence?: TaskRecurrencePatch
 ): Promise<Task> {
+  await assertTaskRelation(churchId, data.relatedType, data.relatedId);
   const parentTaskId = data.parentTaskId || null;
 
   // One level only, and the parent has to be ours. Checked before the insert
@@ -859,6 +861,23 @@ export async function updateTask(
     throw new Error("Task not found");
   }
 
+  // A relation patch always supplies its complete pair. A partial patch resolved
+  // from a stale read can combine another writer's type with this writer's id.
+  const hasRelationPatch =
+    data.relatedType !== undefined || data.relatedId !== undefined;
+  if (hasRelationPatch) {
+    if (data.relatedType === undefined || data.relatedId === undefined)
+      throw new Error(TASK_RELATION_ERROR);
+    if (
+      existing.completionEvent &&
+      (data.relatedType !== existing.relatedType ||
+        data.relatedId !== existing.relatedId)
+    ) {
+      throw new Error(MANAGED_TASK_RELATION_ERROR);
+    }
+    await assertTaskRelation(churchId, data.relatedType, data.relatedId);
+  }
+
   // Re-parenting is the other way a second level of nesting could appear, so
   // it runs the same check as create — plus the "already has subtasks" arm,
   // which only an update can trip.
@@ -911,10 +930,10 @@ export async function updateTask(
   if (data.assignedToId !== undefined)
     updateData.assignedToId = data.assignedToId ?? null;
   if (data.category !== undefined) updateData.category = data.category ?? null;
-  if (data.relatedType !== undefined)
+  if (hasRelationPatch) {
     updateData.relatedType = data.relatedType ?? null;
-  if (data.relatedId !== undefined)
     updateData.relatedId = data.relatedId ?? null;
+  }
   if (data.parentTaskId !== undefined)
     updateData.parentTaskId = data.parentTaskId ?? null;
 

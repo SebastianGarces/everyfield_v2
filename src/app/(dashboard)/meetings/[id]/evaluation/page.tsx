@@ -1,3 +1,4 @@
+import { hasVisionFeature } from "@/lib/meetings/vision-features";
 import { notFound, redirect } from "next/navigation";
 
 import {
@@ -35,16 +36,16 @@ export default async function EvaluationPage({ params }: EvaluationPageProps) {
   if (!user.churchId) redirect("/dashboard");
 
   const { id } = await params;
-  const [meeting, evaluation, allAttendees, trend] = await Promise.all([
-    getMeeting(user.churchId, id),
+  const meeting = await getMeeting(user.churchId, id);
+  if (!meeting || !hasVisionFeature(meeting, "evaluation")) notFound();
+
+  const [evaluation, allAttendees, trend] = await Promise.all([
     getEvaluation(user.churchId, id),
     listAttendees(user.churchId, id),
     // VM-016c: the history the comparison is drawn from. Church-scoped inside
     // the query, so this can never reach another church's scores.
     getEvaluationTrend(user.churchId, EVALUATION_COMPARISON_WINDOW),
   ]);
-
-  if (!meeting) notFound();
 
   // Filter to only people who actually attended
   const attendedPeople: AttendeeForNotes[] = allAttendees

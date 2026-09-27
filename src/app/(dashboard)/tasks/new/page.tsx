@@ -1,3 +1,4 @@
+import { listTaskRelationOptions } from "@/lib/tasks/relations";
 import { redirect } from "next/navigation";
 
 import { HeaderBreadcrumbs } from "@/components/header";
@@ -30,19 +31,24 @@ export default async function NewTaskPage() {
 
   // Fetch church users for the assignee selector, plus the subset of them a
   // FOLLOW-UP may be assigned to — committed members only (#470 D2).
-  const [churchUsers, followUpAssignees, prerequisiteCandidates] =
-    await Promise.all([
-      db
-        .select({
-          id: users.id,
-          name: users.name,
-          email: users.email,
-        })
-        .from(users)
-        .where(eq(users.churchId, user.churchId)),
-      listFollowUpAssignees(user.churchId),
-      listPrerequisiteCandidates(user.churchId),
-    ]);
+  const [
+    churchUsers,
+    followUpAssignees,
+    prerequisiteCandidates,
+    relationOptions,
+  ] = await Promise.all([
+    db
+      .select({
+        id: users.id,
+        name: users.name,
+        email: users.email,
+      })
+      .from(users)
+      .where(eq(users.churchId, user.churchId)),
+    listFollowUpAssignees(user.churchId),
+    listPrerequisiteCandidates(user.churchId),
+    listTaskRelationOptions(user.churchId),
+  ]);
   const breadcrumbs = [
     { label: "Tasks", href: "/tasks" },
     { label: "New Task" },
@@ -62,6 +68,7 @@ export default async function NewTaskPage() {
             Create New Task
           </h1>
           <TaskForm
+            relationOptions={relationOptions}
             users={churchUsers}
             followUpAssignees={followUpAssignees}
             prerequisiteCandidates={prerequisiteCandidates}

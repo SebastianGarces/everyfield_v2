@@ -1,5 +1,9 @@
 "use server";
 
+import {
+  TASK_RELATION_ERROR,
+  MANAGED_TASK_RELATION_ERROR,
+} from "@/lib/tasks/relations";
 import { requireSeat } from "@/lib/auth/seats";
 import { SeatRefusalError } from "@/lib/auth/seat-rules";
 import type { Task } from "@/db/schema";
@@ -79,6 +83,8 @@ import { refresh, revalidatePath } from "next/cache";
  * so provider and constraint text can never reach the browser.
  */
 const USER_FACING_SERVICE_ERRORS = new Set<string>([
+  TASK_RELATION_ERROR,
+  MANAGED_TASK_RELATION_ERROR,
   SUBTASK_PARENT_MISSING_ERROR,
   SUBTASK_SELF_ERROR,
   SUBTASK_DEPTH_ERROR,
@@ -299,6 +305,11 @@ export async function updateTaskAction(
     }
 
     const rawData = formDataToObject(formData);
+    // Empty relation fields are an explicit clear; omitted fields preserve the link.
+    for (const key of ["relatedType", "relatedId"]) {
+      if (Object.hasOwn(rawData, key) && rawData[key] === undefined)
+        rawData[key] = null;
+    }
     const parsed = taskUpdateSchema.safeParse(rawData);
 
     if (!parsed.success) {
