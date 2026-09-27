@@ -193,6 +193,12 @@ const AUTHENTICATED_PAGE_CANVAS_OWNERS = [
     compositions: ["sibling-surfaces"],
   },
   {
+    owner: "src/app/(dashboard)/oversight/sending-churches/[id]/page.tsx",
+    routes: ["/oversight/sending-churches/[id]"],
+    scrollLayout: "flow",
+    compositions: ["lone-workspace"],
+  },
+  {
     owner: "src/app/(dashboard)/oversight/sending-churches/page.tsx",
     routes: ["/oversight/sending-churches"],
     scrollLayout: "flow",
