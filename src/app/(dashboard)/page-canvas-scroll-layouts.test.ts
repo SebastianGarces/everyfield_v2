@@ -77,6 +77,12 @@ const AUTHENTICATED_PAGE_CANVAS_OWNERS = [
     compositions: ["fixed-internal-scroll"],
   },
   {
+    owner: "src/app/(dashboard)/communication/templates/new/page.tsx",
+    routes: ["/communication/templates/new"],
+    scrollLayout: "fixed",
+    compositions: ["fixed-internal-scroll"],
+  },
+  {
     owner: "src/app/(dashboard)/communication/templates/[id]/edit/page.tsx",
     routes: ["/communication/templates/[id]/edit"],
     scrollLayout: "fixed",

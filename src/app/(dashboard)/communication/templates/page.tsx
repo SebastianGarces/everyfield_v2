@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { Mail, Pencil } from "lucide-react";
+import { Mail, Pencil, Plus } from "lucide-react";
 
 import { HeaderBreadcrumbs } from "@/components/header";
 import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
@@ -35,9 +35,6 @@ export default async function TemplatesPage() {
   // both routes are now refused on this same verb, so leaving the buttons up
   // would only send a Member into a redirect.
   //
-  // THERE IS NO "NEW TEMPLATE" CONTROL TO HIDE. `createTemplateAction` and
-  // `forkTemplateAction` have no UI call site at all: a church-owned template
-  // comes into being when somebody saves an edit to a system one.
   const canSend = holdsSeatFor(user, "communication.send");
 
   const templates = await getTemplates(user.churchId);
@@ -66,15 +63,23 @@ export default async function TemplatesPage() {
       >
         <WorkspacePanel className="flex h-full flex-col overflow-hidden">
           <div className="space-y-6 border-b p-4 pb-4 sm:p-6 sm:pb-4">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
                 <h1 className="text-3xl font-bold tracking-tight">
                   Message Templates
                 </h1>
                 <p className="text-muted-foreground">
-                  Pre-built templates for common communications
+                  Platform and church templates for common communications
                 </p>
               </div>
+              {canSend && (
+                <Button asChild>
+                  <Link href="/communication/templates/new">
+                    <Plus className="mr-2 h-4 w-4" />
+                    Create Template
+                  </Link>
+                </Button>
+              )}
             </div>
           </div>
 
