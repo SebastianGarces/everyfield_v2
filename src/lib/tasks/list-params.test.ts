@@ -29,6 +29,11 @@ test("the defaults are the ones the page shipped with", () => {
     priority: undefined,
     category: undefined,
     cursor: undefined,
+    sortBy: "due_date",
+    sortDir: "asc",
+    dueDateFrom: undefined,
+    dueDateTo: undefined,
+    invalidDateRange: false,
   });
 });
 
@@ -275,5 +280,50 @@ test("turning completed rows off removes complete but preserves other statuses a
   assert.equal(
     taskListParamsWith("status=complete", "completed", null).toString(),
     ""
+  );
+});
+
+test("sort choice survives filter, view and clear changes while cursors reset", () => {
+  let query =
+    "view=all&sortBy=priority&sortDir=desc&cursor=d435a320-7b16-4f99-b4cd-b496ea28c665";
+  query = taskListParamsWith(query, "dueDateFrom", "2026-09-01").toString();
+  query = taskListParamsWith(query, "priority", "high").toString();
+  query = taskListParamsWith(query, "view", "my_tasks").toString();
+  const parsed = parseTaskListQuery(query);
+  assert.equal(parsed.sortBy, "priority");
+  assert.equal(parsed.sortDir, "desc");
+  assert.equal(parsed.dueDateFrom, "2026-09-01");
+  assert.equal(parsed.cursor, undefined);
+  const cleared = parseTaskListQuery(taskListParamsCleared(query));
+  assert.equal(cleared.sortBy, "priority");
+  assert.equal(cleared.sortDir, "desc");
+  assert.equal(cleared.dueDateFrom, undefined);
+  assert.equal(cleared.priority, undefined);
+});
+
+test("malformed dates/sorts default safely, and inverted ranges remain visibly invalid", () => {
+  const invalid = parseTaskListSearchParams({
+    sortBy: "constructor",
+    sortDir: "sideways",
+    dueDateFrom: "2026-02-31",
+    dueDateTo: ["2026-09-02"],
+  });
+  assert.equal(invalid.sortBy, "due_date");
+  assert.equal(invalid.sortDir, "asc");
+  assert.equal(invalid.dueDateFrom, undefined);
+  assert.equal(invalid.dueDateTo, undefined);
+  const inverted = parseTaskListSearchParams({
+    dueDateFrom: "2026-09-30",
+    dueDateTo: "2026-09-01",
+  });
+  assert.equal(inverted.invalidDateRange, true);
+  assert.equal(inverted.dueDateFrom, "2026-09-30");
+  assert.equal(inverted.dueDateTo, "2026-09-01");
+  assert.equal(
+    parseTaskListSearchParams({
+      dueDateFrom: "2028-02-29",
+      dueDateTo: "2028-02-29",
+    }).invalidDateRange,
+    false
   );
 });

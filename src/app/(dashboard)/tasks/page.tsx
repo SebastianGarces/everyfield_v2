@@ -12,10 +12,13 @@ import { Button } from "@/components/ui/button";
 import { holdsSeatFor } from "@/lib/auth/seat-rules";
 import { verifySession } from "@/lib/auth/session";
 import {
+  hasTaskFilters,
   parseTaskListSearchParams,
   type TaskListView,
 } from "@/lib/tasks/list-params";
 import { readTaskListPage, taskListScope } from "@/lib/tasks/list-page";
+import { filterFollowUpTasks } from "@/lib/tasks/follow-up-ownership.shared";
+import { toCalendarDate } from "@/lib/datetime";
 import { taskListSubtitle } from "@/lib/tasks/presentation";
 import { getTaskCounts } from "@/lib/tasks/service";
 import { TEMPLATES_LINK_LABEL, TEMPLATES_ROUTE } from "@/lib/tasks/templates";
@@ -86,7 +89,28 @@ export default async function TasksPage({ searchParams }: TasksPageProps) {
       listFollowUpAssignees(user.churchId),
     ]);
 
-  const ownerGroups = groupByOwner(openFollowUps);
+  const assignmentTasks = filterFollowUpTasks(openFollowUps, parsed);
+  const ownerGroups = groupByOwner(assignmentTasks);
+  const today = toCalendarDate(now);
+  const displayedCounts =
+    view === "assignments"
+      ? {
+          notStarted: assignmentTasks.filter(
+            (task) => task.status === "not_started"
+          ).length,
+          inProgress: assignmentTasks.filter(
+            (task) => task.status === "in_progress"
+          ).length,
+          blocked: assignmentTasks.filter((task) => task.status === "blocked")
+            .length,
+          overdue: assignmentTasks.filter(
+            (task) => task.dueDate && task.dueDate < today
+          ).length,
+          complete: 0,
+          checklistTotal: 0,
+          checklistComplete: 0,
+        }
+      : counts;
   const uncovered = selectUnownedContacts(followUpContacts, openFollowUps).map(
     (contact) => {
       const idleDays = Math.floor(
@@ -103,7 +127,8 @@ export default async function TasksPage({ searchParams }: TasksPageProps) {
   );
   // What the banner counts is what "Needs owner" holds: a follow-up whose task
   // nobody live owns, plus a contact with no task at all.
-  const needsOwnerCount = ownerGroups[0].tasks.length + uncovered.length;
+  const needsOwnerCount =
+    groupByOwner(openFollowUps)[0].tasks.length + uncovered.length;
   const breadcrumbs = [{ label: "Tasks" }];
 
   return (
@@ -173,36 +198,40 @@ export default async function TasksPage({ searchParams }: TasksPageProps) {
           */}
             <div className="space-y-1">
               <div className="flex flex-wrap items-center gap-2">
-                {counts.overdue > 0 && (
+                {displayedCounts.overdue > 0 && (
                   <Badge variant="destructive" className="text-xs tabular-nums">
-                    {counts.overdue} overdue
+                    {displayedCounts.overdue} overdue
                   </Badge>
                 )}
                 <Badge variant="outline" className="text-xs tabular-nums">
-                  {counts.notStarted + counts.inProgress + counts.blocked}{" "}
+                  {displayedCounts.notStarted +
+                    displayedCounts.inProgress +
+                    displayedCounts.blocked}{" "}
                   active
                 </Badge>
-                {counts.blocked > 0 && (
+                {displayedCounts.blocked > 0 && (
                   <Badge
                     variant="outline"
                     className="text-destructive text-xs tabular-nums"
                   >
-                    {counts.blocked} blocked
+                    {displayedCounts.blocked} blocked
                   </Badge>
                 )}
-                <Badge variant="outline" className="text-xs tabular-nums">
-                  {counts.complete} completed
-                </Badge>
+                {view !== "assignments" && (
+                  <Badge variant="outline" className="text-xs tabular-nums">
+                    {displayedCounts.complete} completed
+                  </Badge>
+                )}
               </div>
 
-              {counts.checklistTotal > 0 && (
+              {displayedCounts.checklistTotal > 0 && (
                 <p
                   className="text-muted-foreground text-xs"
                   data-testid="checklist-summary"
                 >
-                  Checklists: {counts.checklistComplete} of{" "}
-                  {counts.checklistTotal}{" "}
-                  {counts.checklistTotal === 1 ? "item" : "items"} done
+                  Checklists: {displayedCounts.checklistComplete} of{" "}
+                  {displayedCounts.checklistTotal}{" "}
+                  {displayedCounts.checklistTotal === 1 ? "item" : "items"} done
                 </p>
               )}
             </div>
@@ -247,11 +276,13 @@ export default async function TasksPage({ searchParams }: TasksPageProps) {
             {view === "assignments" ? (
               <FollowUpAssignments
                 groups={ownerGroups}
-                uncovered={uncovered}
+                uncovered={hasTaskFilters(parsed) ? [] : uncovered}
+                filtered={hasTaskFilters(parsed)}
                 assignees={assignees}
               />
             ) : (
               <TaskList
+                key={JSON.stringify(parsed)}
                 tasks={result.tasks}
                 total={result.total}
                 nextCursor={result.nextCursor}

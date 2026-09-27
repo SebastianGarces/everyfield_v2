@@ -61,6 +61,8 @@ export function taskListScope(
     status: parsed.status,
     priority: parsed.priority,
     category: parsed.category,
+    dueDateFrom: parsed.dueDateFrom,
+    dueDateTo: parsed.dueDateTo,
     assignedToId: parsed.view === "my_tasks" ? userId : undefined,
   };
 }
@@ -83,8 +85,8 @@ export async function readTaskListPage(
     ...taskListScope(userId, parsed),
     includeCompleted: parsed.showCompleted,
     cursor: cursor ?? parsed.cursor,
-    sortBy: "due_date",
-    sortDir: "asc",
+    sortBy: parsed.sortBy,
+    sortDir: parsed.sortDir,
     limit: TASKS_PAGE_SIZE,
   });
 

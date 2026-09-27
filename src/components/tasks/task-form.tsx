@@ -1,5 +1,18 @@
 "use client";
 
+import type { TaskRelationOption } from "@/lib/tasks/relations";
+import {
+  Command,
+  CommandEmpty,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -251,6 +264,7 @@ interface TaskFormProps {
    * will refuse.
    */
   followUpAssignees?: { id: string; name: string | null; email: string }[];
+  relationOptions?: TaskRelationOption[];
   prerequisiteCandidates?: PrerequisiteCandidate[];
   prerequisiteIds?: string[];
 }
@@ -259,6 +273,7 @@ export function TaskForm({
   task,
   users = [],
   followUpAssignees = [],
+  relationOptions = [],
   prerequisiteCandidates = [],
   prerequisiteIds = [],
 }: TaskFormProps) {
@@ -527,6 +542,12 @@ export function TaskForm({
         </div>
       )}
 
+      <TaskRelationField
+        task={task}
+        options={relationOptions}
+        disabled={isPending}
+      />
+
       {/* Prerequisites (T-015) */}
       <div>
         <TaskPrerequisitesField
@@ -620,5 +641,130 @@ export function TaskForm({
         </Button>
       </div>
     </form>
+  );
+}
+
+/** One optional relation; omitted fields on an untouched edit preserve legacy links. */
+export function TaskRelationField({
+  task,
+  options,
+  disabled,
+}: {
+  task?: Task;
+  options: TaskRelationOption[];
+  disabled?: boolean;
+}) {
+  const [type, setType] = useState<string>(task?.relatedType ?? "none");
+  const [id, setId] = useState(task?.relatedId ?? "");
+  const [changed, setChanged] = useState(false);
+  const [open, setOpen] = useState(false);
+  const selected = options.find(
+    (option) => option.type === type && option.id === id
+  );
+  const managed = !!task?.completionEvent;
+  return (
+    <div className="space-y-2">
+      <Label id="task-relation-label">Related to</Label>
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <Select
+          value={type}
+          disabled={disabled || managed}
+          onValueChange={(value) => {
+            setType(value);
+            setId("");
+            setChanged(true);
+          }}
+        >
+          <SelectTrigger
+            aria-labelledby="task-relation-label"
+            className="cursor-pointer sm:w-36"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="none" className="cursor-pointer">
+              None
+            </SelectItem>
+            <SelectItem value="person" className="cursor-pointer">
+              Person
+            </SelectItem>
+            <SelectItem value="meeting" className="cursor-pointer">
+              Meeting
+            </SelectItem>
+            <SelectItem value="team" className="cursor-pointer">
+              Team
+            </SelectItem>
+            {type === "facility" && (
+              <SelectItem value="facility" disabled>
+                Facility
+              </SelectItem>
+            )}
+          </SelectContent>
+        </Select>
+        {type !== "none" && (
+          <Popover open={open} onOpenChange={setOpen}>
+            <PopoverTrigger asChild>
+              <Button
+                type="button"
+                variant="outline"
+                role="combobox"
+                aria-expanded={open}
+                aria-label={`Choose related ${type}`}
+                disabled={disabled || managed || type === "facility"}
+                className="min-w-0 justify-start truncate sm:flex-1"
+              >
+                {selected?.label ??
+                  (id ? "Linked record unavailable" : `Choose ${type}…`)}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent
+              className="w-[min(400px,calc(100vw-2rem))] p-0"
+              align="start"
+            >
+              <Command>
+                <CommandInput
+                  placeholder={`Search ${type}…`}
+                  aria-label={`Search related ${type}`}
+                />
+                <CommandList>
+                  <CommandEmpty>No matches.</CommandEmpty>
+                  {options
+                    .filter((option) => option.type === type)
+                    .map((option) => (
+                      <CommandItem
+                        key={option.id}
+                        value={`${option.label} ${option.id}`}
+                        className="cursor-pointer"
+                        onSelect={() => {
+                          setId(option.id);
+                          setChanged(true);
+                          setOpen(false);
+                        }}
+                      >
+                        {option.label}
+                      </CommandItem>
+                    ))}
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
+        )}
+      </div>
+      {managed && (
+        <p className="text-muted-foreground text-xs">
+          This link is managed by the meeting that created the task.
+        </p>
+      )}
+      {!managed && (!task || changed) && (
+        <>
+          <input
+            type="hidden"
+            name="relatedType"
+            value={type === "none" ? "" : type}
+          />
+          <input type="hidden" name="relatedId" value={id} />
+        </>
+      )}
+    </div>
   );
 }
