@@ -172,7 +172,7 @@ export function QuickAddForm({ children }: QuickAddFormProps) {
           </Button>
         )}
       </DialogTrigger>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Quick Add Person</DialogTitle>
           <DialogDescription>
@@ -187,7 +187,11 @@ export function QuickAddForm({ children }: QuickAddFormProps) {
           </DialogDescription>
         </DialogHeader>
 
-        <form ref={formRef} onSubmit={handleFormSubmit} className="space-y-4">
+        <form
+          ref={formRef}
+          onSubmit={handleFormSubmit}
+          className="min-w-0 space-y-4"
+        >
           {/* Name row */}
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">

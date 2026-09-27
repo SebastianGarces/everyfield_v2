@@ -23,9 +23,9 @@ function PersonSummary({
   isSubmitting?: boolean;
 }) {
   return (
-    <div className="flex items-center justify-between gap-2 rounded-md border p-2 text-sm">
-      <div className="min-w-0 flex-1">
-        <p className="font-medium">
+    <div className="flex w-full min-w-0 flex-wrap items-center gap-2 rounded-md border p-2 text-sm">
+      <div className="min-w-0 basis-full">
+        <p className="font-medium break-words">
           {person.firstName} {person.lastName}
         </p>
         <p className="text-muted-foreground truncate">
@@ -38,6 +38,7 @@ function PersonSummary({
           type="button"
           variant="outline"
           size="sm"
+          className="h-auto min-h-8 max-w-full py-2 whitespace-normal"
           disabled={isSubmitting}
           onClick={() => onReview(person.id)}
         >
@@ -72,7 +73,7 @@ export function DuplicateWarning({
         <Alert variant="destructive">
           <AlertTriangle className="h-4 w-4" />
           <AlertTitle>Exact match found</AlertTitle>
-          <AlertDescription className="mt-2 space-y-2">
+          <AlertDescription className="mt-2 min-w-0 space-y-2">
             <p>A person with the same email address already exists:</p>
             <PersonSummary
               person={exactMatch}
@@ -88,13 +89,13 @@ export function DuplicateWarning({
         <Alert>
           <Users className="h-4 w-4" />
           <AlertTitle>Potential duplicates</AlertTitle>
-          <AlertDescription className="mt-2 space-y-2">
+          <AlertDescription className="mt-2 min-w-0 space-y-2">
             <p>
               {potentialMatches.length === 1
                 ? "1 person with a similar name or phone was found:"
                 : `${potentialMatches.length} people with similar names or phones were found:`}
             </p>
-            <div className="space-y-1">
+            <div className="w-full min-w-0 space-y-1">
               {potentialMatches.map((person) => (
                 <PersonSummary
                   key={person.id}
@@ -115,7 +116,7 @@ export function DuplicateWarning({
           contacts.
         </p>
       )}
-      <div className="flex justify-end gap-2">
+      <div className="flex flex-wrap justify-end gap-2">
         <Button variant="ghost" size="sm" asChild>
           <Link href="/people/duplicates">Review existing duplicates</Link>
         </Button>
