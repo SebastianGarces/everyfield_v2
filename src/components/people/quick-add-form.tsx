@@ -73,7 +73,7 @@ export function QuickAddForm({ children }: QuickAddFormProps) {
     setOpen(newOpen);
   }
 
-  async function handleSubmit(
+  function handleSubmit(
     formData: FormData,
     skipCheck = false,
     reviewId?: string
@@ -122,12 +122,12 @@ export function QuickAddForm({ children }: QuickAddFormProps) {
         description: `${result.data.firstName} ${result.data.lastName} has been added.`,
       });
 
-      router.refresh();
       if (reviewId) {
         handleOpenChange(false);
         router.push(`/people/duplicates/${reviewId}/${result.data.id}`);
         return;
       }
+      router.refresh();
 
       if (intent === "saveAndAdd") {
         // Clear form but keep dialog open
@@ -150,13 +150,16 @@ export function QuickAddForm({ children }: QuickAddFormProps) {
     }
   }
 
-  function handleSubmitCapture(event: React.FormEvent<HTMLFormElement>) {
+  function handleFormSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (isPending) return;
     const nativeEvent = event.nativeEvent as SubmitEvent;
     const submitter = nativeEvent.submitter as HTMLButtonElement | null;
     const intent = submitter?.value === "saveAndAdd" ? "saveAndAdd" : "save";
 
     submitActionRef.current = intent;
     setSubmitAction(intent);
+    handleSubmit(new FormData(event.currentTarget));
   }
 
   return (
@@ -184,12 +187,7 @@ export function QuickAddForm({ children }: QuickAddFormProps) {
           </DialogDescription>
         </DialogHeader>
 
-        <form
-          ref={formRef}
-          onSubmitCapture={handleSubmitCapture}
-          action={(formData) => handleSubmit(formData)}
-          className="space-y-4"
-        >
+        <form ref={formRef} onSubmit={handleFormSubmit} className="space-y-4">
           {/* Name row */}
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
