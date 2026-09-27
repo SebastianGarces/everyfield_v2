@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isRichTextEmpty, toRichTextHtml } from "@/lib/rich-text/format";
 import {
   communicationChannels,
   communicationStatuses,
@@ -27,16 +28,24 @@ export type ComposeMessageInput = z.infer<typeof composeMessageSchema>;
 // ---------------------------------------------------------------------------
 
 export const createTemplateSchema = z.object({
-  name: z.string().min(1, "Template name is required").max(255),
+  name: z.string().trim().min(1, "Template name is required").max(255),
   description: z.string().max(1000).optional(),
   category: z.enum(templateCategories),
   channel: z.enum(communicationChannels).default("email"),
   subject: z.string().max(500).optional(),
-  body: z.string().min(1, "Template body is required"),
+  body: z
+    .string()
+    .refine(
+      (body) => !isRichTextEmpty(toRichTextHtml(body)),
+      "Template body is required"
+    ),
 });
 export type CreateTemplateInput = z.infer<typeof createTemplateSchema>;
 
-export const updateTemplateSchema = createTemplateSchema.partial();
+export const updateTemplateSchema = createTemplateSchema.partial().extend({
+  // An omitted patch field must stay omitted, including the creation default.
+  channel: z.enum(communicationChannels).optional(),
+});
 export type UpdateTemplateInput = z.infer<typeof updateTemplateSchema>;
 
 // ---------------------------------------------------------------------------

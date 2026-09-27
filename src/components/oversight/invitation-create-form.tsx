@@ -73,8 +73,10 @@ export function InvitationCreateForm({
       <CardHeader>
         <CardTitle>Invite an organization</CardTitle>
         <CardDescription>
-          Send an invitation to a church planter&rsquo;s email address. They
-          decide whether to accept — nothing is associated until they do.
+          {inviteAs === "sending_church"
+            ? "Send an invitation to a sending church contact’s email address."
+            : "Send an invitation to a church planter’s email address."}{" "}
+          They decide whether to accept — nothing is associated until they do.
         </CardDescription>
       </CardHeader>
       <form action={formAction}>
@@ -99,7 +101,11 @@ export function InvitationCreateForm({
                 type="email"
                 inputMode="email"
                 autoComplete="off"
-                placeholder="planter@example.com"
+                placeholder={
+                  inviteAs === "sending_church"
+                    ? "contact@example.com"
+                    : "planter@example.com"
+                }
                 required
                 value={inviteeEmail}
                 onChange={(event) => setInviteeEmail(event.target.value)}

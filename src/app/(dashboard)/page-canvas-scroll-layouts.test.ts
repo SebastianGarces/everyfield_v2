@@ -77,6 +77,12 @@ const AUTHENTICATED_PAGE_CANVAS_OWNERS = [
     compositions: ["fixed-internal-scroll"],
   },
   {
+    owner: "src/app/(dashboard)/communication/templates/new/page.tsx",
+    routes: ["/communication/templates/new"],
+    scrollLayout: "fixed",
+    compositions: ["fixed-internal-scroll"],
+  },
+  {
     owner: "src/app/(dashboard)/communication/templates/[id]/edit/page.tsx",
     routes: ["/communication/templates/[id]/edit"],
     scrollLayout: "fixed",
@@ -185,6 +191,12 @@ const AUTHENTICATED_PAGE_CANVAS_OWNERS = [
     routes: ["/oversight/plants"],
     scrollLayout: "flow",
     compositions: ["sibling-surfaces"],
+  },
+  {
+    owner: "src/app/(dashboard)/oversight/sending-churches/[id]/page.tsx",
+    routes: ["/oversight/sending-churches/[id]"],
+    scrollLayout: "flow",
+    compositions: ["lone-workspace"],
   },
   {
     owner: "src/app/(dashboard)/oversight/sending-churches/page.tsx",

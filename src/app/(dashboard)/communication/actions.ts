@@ -15,9 +15,12 @@ import {
   deleteTemplate,
   forkTemplate,
 } from "@/lib/communication/templates";
-import { composeMessageSchema } from "@/lib/validations/communication";
+import {
+  composeMessageSchema,
+  createTemplateSchema,
+  updateTemplateSchema,
+} from "@/lib/validations/communication";
 import type {
-  CreateTemplateInput,
   UpdateTemplateInput,
   TemplateFilters,
 } from "@/lib/validations/communication";
@@ -148,11 +151,14 @@ export async function getTemplatesAction(filters?: TemplateFilters) {
   return getTemplates(user.churchId, filters);
 }
 
-export async function createTemplateAction(input: CreateTemplateInput) {
+export async function createTemplateAction(input: unknown) {
   const { user } = await requireSeat("communication.send");
   if (!user.churchId) redirect("/dashboard");
 
-  const template = await createTemplate(user.churchId, input);
+  const parsed = createTemplateSchema.parse(input);
+  if (parsed.channel !== "email")
+    throw new Error("Only email templates can be created.");
+  const template = await createTemplate(user.churchId, parsed);
   revalidatePath("/communication/templates");
   return template;
 }
@@ -164,7 +170,11 @@ export async function updateTemplateAction(
   const { user } = await requireSeat("communication.send");
   if (!user.churchId) redirect("/dashboard");
 
-  const template = await updateTemplate(id, user.churchId, input);
+  const template = await updateTemplate(
+    id,
+    user.churchId,
+    updateTemplateSchema.parse(input)
+  );
   revalidatePath("/communication/templates");
   return template;
 }

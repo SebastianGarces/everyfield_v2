@@ -1,36 +1,62 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Save, Loader2, RotateCcw } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
+import {
+  RichTextEditor,
+  type RichTextEditorHandle,
+} from "@/components/shared/rich-text-editor";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  templateCategories,
+  type TemplateCategory,
+} from "@/db/schema/communication";
+import { createTemplateSchema } from "@/lib/validations/communication";
+import { toRichTextHtml } from "@/lib/rich-text/format";
 import { Label } from "@/components/ui/label";
 import { MergeFieldInserter } from "@/components/communication/merge-field-inserter";
 import { EmailPreview } from "@/components/communication/email-preview";
 import {
   updateTemplateAction,
+  createTemplateAction,
   deleteTemplateAction,
 } from "@/app/(dashboard)/communication/actions";
 import type { MessageTemplate } from "@/db/schema/communication";
 
 interface TemplateEditorProps {
-  template: MessageTemplate;
+  template?: MessageTemplate;
 }
 
 export function TemplateEditor({ template }: TemplateEditorProps) {
   const router = useRouter();
-  const [name, setName] = useState(template.name);
-  const [description, setDescription] = useState(template.description ?? "");
-  const [subject, setSubject] = useState(template.subject ?? "");
-  const [body, setBody] = useState(template.bodyHtml ?? template.body);
+  const [name, setName] = useState(template?.name ?? "");
+  const [description, setDescription] = useState(template?.description ?? "");
+  const [subject, setSubject] = useState(template?.subject ?? "");
+  const [body, setBody] = useState(
+    toRichTextHtml(template?.bodyHtml ?? template?.body ?? "")
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const isForked = !!template.sourceTemplateId;
-  const isSystem = template.isSystem;
+  const [category, setCategory] = useState<TemplateCategory>(
+    template?.category ?? "other"
+  );
+  const bodyRef = useRef<RichTextEditorHandle>(null);
+  const [fieldErrors, setFieldErrors] = useState<
+    Record<string, string[] | undefined>
+  >({});
+  const isForked = !!template?.sourceTemplateId;
+  const isSystem = template?.isSystem;
 
   // --------------------------------------------------------------------------
   // BOTH BUTTONS LEAVE, SO NEITHER REFRESHES (#228, #526, #529)
@@ -52,15 +78,25 @@ export function TemplateEditor({ template }: TemplateEditorProps) {
   // way out, re-enabling Save while the push is in flight invites a second write
   // of a template the reader has stopped looking at.
   const handleSave = async () => {
+    setError(null);
+    const parsed = createTemplateSchema.safeParse({
+      name,
+      description,
+      category,
+      subject,
+      body,
+      channel: template?.channel ?? "email",
+    });
+    if (!parsed.success) {
+      setFieldErrors(parsed.error.flatten().fieldErrors);
+      return;
+    }
     setSaving(true);
     setError(null);
+    setFieldErrors({});
     try {
-      await updateTemplateAction(template.id, {
-        name,
-        description: description || undefined,
-        subject: subject || undefined,
-        body,
-      });
+      if (template) await updateTemplateAction(template.id, parsed.data);
+      else await createTemplateAction(parsed.data);
       router.push("/communication/templates");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save");
@@ -70,6 +106,7 @@ export function TemplateEditor({ template }: TemplateEditorProps) {
 
   const handleReset = async () => {
     if (
+      !template ||
       !isForked ||
       !confirm(
         "Reset this template to the platform default? Your customizations will be lost."
@@ -87,13 +124,13 @@ export function TemplateEditor({ template }: TemplateEditorProps) {
   };
 
   const handleInsertMergeField = (token: string) => {
-    setBody((prev: string) => prev + token);
+    bodyRef.current?.insertText(token);
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col lg:flex-row">
+    <div className="flex h-full min-h-0 flex-col overflow-auto lg:flex-row lg:overflow-hidden">
       {/* Left panel: Editor */}
-      <div className="min-w-0 flex-1 overflow-auto p-4 sm:p-6 lg:border-r">
+      <div className="min-w-0 shrink-0 p-4 sm:p-6 lg:flex-1 lg:overflow-auto lg:border-r">
         <div className="mx-auto max-w-2xl space-y-6">
           {isSystem && (
             <div className="border-primary/30 bg-primary/5 rounded-lg border p-3">
@@ -129,7 +166,19 @@ export function TemplateEditor({ template }: TemplateEditorProps) {
               id="name"
               value={name}
               onChange={(e) => setName(e.target.value)}
+              aria-invalid={!!fieldErrors.name}
+              aria-describedby={fieldErrors.name ? "name-error" : undefined}
+              maxLength={255}
             />
+            {fieldErrors.name && (
+              <p
+                id="name-error"
+                role="alert"
+                className="text-destructive text-sm"
+              >
+                {fieldErrors.name[0]}
+              </p>
+            )}
           </div>
 
           {/* Description */}
@@ -137,10 +186,32 @@ export function TemplateEditor({ template }: TemplateEditorProps) {
             <Label htmlFor="description">Description</Label>
             <Input
               id="description"
+              maxLength={1000}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Brief description of when to use this template..."
             />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="category">Category</Label>
+            <Select
+              value={category}
+              onValueChange={(value) => setCategory(value as TemplateCategory)}
+            >
+              <SelectTrigger id="category">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {templateCategories.map((value) => (
+                  <SelectItem key={value} value={value}>
+                    {value
+                      .replaceAll("_", " ")
+                      .replace(/\b\w/g, (char) => char.toUpperCase())}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           {/* Subject */}
@@ -148,6 +219,7 @@ export function TemplateEditor({ template }: TemplateEditorProps) {
             <Label htmlFor="subject">Subject Line</Label>
             <Input
               id="subject"
+              maxLength={500}
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
               placeholder="Email subject..."
@@ -157,12 +229,18 @@ export function TemplateEditor({ template }: TemplateEditorProps) {
           {/* Body */}
           <div className="space-y-2">
             <Label htmlFor="body">Message Body</Label>
-            <Textarea
+            <RichTextEditor
+              ref={bodyRef}
               id="body"
+              aria-label="Message Body"
               value={body}
-              onChange={(e) => setBody(e.target.value)}
-              className="min-h-[280px] resize-y font-mono text-sm"
+              onChange={setBody}
             />
+            {fieldErrors.body && (
+              <p role="alert" className="text-destructive text-sm">
+                {fieldErrors.body[0]}
+              </p>
+            )}
           </div>
 
           {/* Merge fields */}
@@ -205,7 +283,7 @@ export function TemplateEditor({ template }: TemplateEditorProps) {
       </div>
 
       {/* Right panel: Live Preview */}
-      <div className="hidden w-[42%] max-w-[30rem] min-w-[22rem] shrink-0 lg:block">
+      <div className="h-96 shrink-0 lg:h-full lg:w-[42%] lg:max-w-[30rem] lg:min-w-[22rem]">
         <EmailPreview subject={subject} body={body} />
       </div>
     </div>
