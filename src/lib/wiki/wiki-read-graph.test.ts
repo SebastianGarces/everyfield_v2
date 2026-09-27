@@ -42,6 +42,7 @@ const WIKI_ENTRIES = [
   ["app", "(dashboard)", "wiki", "layout.tsx"],
   ["app", "(dashboard)", "wiki", "page.tsx"],
   ["app", "(dashboard)", "wiki", "progress", "page.tsx"],
+  ["app", "(dashboard)", "wiki", "search", "page.tsx"],
   ["app", "(dashboard)", "wiki", "[...slug]", "page.tsx"],
 ].map((segments) => path.join(SRC, ...segments));
 
@@ -137,4 +138,14 @@ test("the wiki barrel does not re-serve the two action modules", () => {
   assert.ok(!/from "\.\/bookmarks"/.test(barrel));
   assert.ok(!/from "\.\/progress"/.test(barrel));
   assert.match(barrel, /export \* from "\.\/reads"/);
+});
+
+test("crawler-previewable Wiki pages do not call throwing session guards", () => {
+  for (const entry of WIKI_ENTRIES) {
+    assert.doesNotMatch(
+      codeOf(entry),
+      /\b(?:requireSeat|verifySession)\s*\(/,
+      `${rel(entry)} must render the global corpus for a session-less crawler`
+    );
+  }
 });

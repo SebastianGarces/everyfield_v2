@@ -1,140 +1,147 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { updateProgress, recordView } from "@/lib/wiki/progress";
+import {
+  readingPosition,
+  resumeScrollTop,
+  scheduleReadingRestore,
+} from "@/lib/wiki/resume";
+import type { WikiProgressStatus } from "@/db/schema";
+
+// History entries survive Back/Forward, while a full reload gets a new document.
+const resumeDocumentId = crypto.randomUUID();
 
 interface ProgressTrackerProps {
   slug: string;
   children: React.ReactNode;
-  /** Scroll percentage threshold to mark as completed (0-1) */
+  resume?: boolean;
+  initialProgress?: {
+    status: WikiProgressStatus;
+    scrollPosition: number | null;
+  };
   completionThreshold?: number;
-  /** Debounce delay for scroll position updates (ms) */
   debounceMs?: number;
 }
 
-/**
- * Wraps article content and tracks reading progress.
- * - Records view on mount (sets to in_progress if not completed)
- * - Tracks scroll position with debouncing
- * - Auto-marks completed when user scrolls past threshold
- */
 export function ProgressTracker({
   slug,
   children,
+  resume = false,
+  initialProgress,
   completionThreshold = 0.85,
   debounceMs = 1500,
 }: ProgressTrackerProps) {
-  const lastSavedPosition = useRef(0);
-  const isCompleted = useRef(false);
-  const hasScrolled = useRef(false);
-  const debounceTimer = useRef<NodeJS.Timeout | null>(null);
-  const maxScrollPosition = useRef(0);
+  const initialPosition = readingPosition(initialProgress?.scrollPosition);
+  const initiallyCompleted = initialProgress?.status === "completed";
 
-  // Record view on mount
   useEffect(() => {
-    recordView(slug);
+    void recordView(slug);
+    const article = document.querySelector("article");
+    if (!article) return;
+    let parent = article.parentElement;
+    while (
+      parent &&
+      !["auto", "scroll"].includes(window.getComputedStyle(parent).overflowY)
+    )
+      parent = parent.parentElement;
+    const container = parent ?? document.documentElement;
+    const scrollTarget = parent ?? window;
+    let userInteracted = false;
+    let completed = initiallyCompleted;
+    let lastSaved = initialPosition;
+    let maxPosition = initialPosition;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let frame = 0;
 
-    // Reset refs for new article
-    lastSavedPosition.current = 0;
-    isCompleted.current = false;
-    hasScrolled.current = false;
-    maxScrollPosition.current = 0;
-  }, [slug]);
-
-  // Scroll tracking
-  useEffect(() => {
-    // Find the scrollable container - look for overflow-y-auto ancestor
-    const findScrollableContainer = (): HTMLElement | Window => {
-      let element = document.querySelector("article")?.parentElement;
-      while (element) {
-        const style = window.getComputedStyle(element);
-        if (style.overflowY === "auto" || style.overflowY === "scroll") {
-          return element;
+    // Native fragment targeting handles decoding and malformed hashes. Wait for
+    // layout before placing it, just as for saved progress, so a streamed page
+    // or reload can find a heading that did not exist at initial navigation.
+    const fragment = article.querySelector<HTMLElement>(":target");
+    const consumed = window.history.state?.wikiResume;
+    const shouldRestore =
+      resume &&
+      !window.location.hash &&
+      !(consumed?.slug === slug && consumed?.document === resumeDocumentId);
+    let cancelRestore = () => {};
+    const consumeResume = () => {
+      window.history.replaceState(
+        {
+          ...window.history.state,
+          wikiResume: { slug, document: resumeDocumentId },
+        },
+        ""
+      );
+    };
+    if (fragment || shouldRestore) {
+      cancelRestore = scheduleReadingRestore(
+        [
+          document.fonts.ready,
+          ...Array.from(article.querySelectorAll("img"), (image) =>
+            image.decode()
+          ),
+        ],
+        () => {
+          frame = requestAnimationFrame(() => {
+            if (userInteracted) return;
+            if (fragment) {
+              fragment.scrollIntoView({ block: "start" });
+            } else {
+              consumeResume();
+              container.scrollTop = resumeScrollTop(
+                initialPosition,
+                container.scrollHeight,
+                container.clientHeight
+              );
+            }
+          });
         }
-        element = element.parentElement;
-      }
-      return window;
+      );
+    }
+    const noteInteraction = () => {
+      if (!userInteracted && shouldRestore) consumeResume();
+      userInteracted = true;
+      cancelRestore();
+      cancelAnimationFrame(frame);
     };
-
-    const scrollContainer = findScrollableContainer();
-    const isWindow = scrollContainer === window;
-
-    const calculateScrollProgress = () => {
-      let scrollTop: number;
-      let scrollHeight: number;
-      let clientHeight: number;
-
-      if (isWindow) {
-        scrollTop = window.scrollY;
-        scrollHeight = document.documentElement.scrollHeight;
-        clientHeight = window.innerHeight;
-      } else {
-        const el = scrollContainer as HTMLElement;
-        scrollTop = el.scrollTop;
-        scrollHeight = el.scrollHeight;
-        clientHeight = el.clientHeight;
-      }
-
-      const scrollableHeight = scrollHeight - clientHeight;
-      if (scrollableHeight <= 50) return 0;
-      return Math.min(scrollTop / scrollableHeight, 1);
-    };
-
     const handleScroll = () => {
-      hasScrolled.current = true;
-      const position = calculateScrollProgress();
-
-      // Track maximum scroll position
-      if (position > maxScrollPosition.current) {
-        maxScrollPosition.current = position;
-      }
-
-      // Already marked complete, skip
-      if (isCompleted.current) return;
-
-      // Clear existing timer
-      if (debounceTimer.current) {
-        clearTimeout(debounceTimer.current);
-      }
-
-      // Check if we've crossed the completion threshold
+      if (!userInteracted || completed) return;
+      const height = container.scrollHeight - container.clientHeight;
+      if (height <= 50) return;
+      const position = Math.max(0, Math.min(container.scrollTop / height, 1));
+      maxPosition = Math.max(maxPosition, position);
+      clearTimeout(timer);
       if (position >= completionThreshold) {
-        isCompleted.current = true;
-        updateProgress(slug, { status: "completed", scrollPosition: 1 });
-        return;
-      }
-
-      // Debounce intermediate saves
-      if (Math.abs(position - lastSavedPosition.current) >= 0.1) {
-        debounceTimer.current = setTimeout(() => {
-          lastSavedPosition.current = position;
-          updateProgress(slug, { scrollPosition: position });
+        completed = true;
+        void updateProgress(slug, { status: "completed", scrollPosition: 1 });
+      } else if (Math.abs(position - lastSaved) >= 0.1) {
+        timer = setTimeout(() => {
+          lastSaved = position;
+          void updateProgress(slug, { scrollPosition: position });
         }, debounceMs);
       }
     };
-
-    scrollContainer.addEventListener("scroll", handleScroll, { passive: true });
-
+    scrollTarget.addEventListener("scroll", handleScroll, { passive: true });
+    for (const event of ["wheel", "touchstart", "pointerdown", "keydown"])
+      container.addEventListener(event, noteInteraction, { passive: true });
     return () => {
-      scrollContainer.removeEventListener("scroll", handleScroll);
-
-      if (debounceTimer.current) {
-        clearTimeout(debounceTimer.current);
-      }
-
-      // Save final state on unmount
-      if (hasScrolled.current && !isCompleted.current) {
-        const finalPosition = maxScrollPosition.current;
-        if (finalPosition > 0) {
-          if (finalPosition >= completionThreshold) {
-            updateProgress(slug, { status: "completed", scrollPosition: 1 });
-          } else if (finalPosition > lastSavedPosition.current) {
-            updateProgress(slug, { scrollPosition: finalPosition });
-          }
-        }
-      }
+      cancelRestore();
+      cancelAnimationFrame(frame);
+      clearTimeout(timer);
+      scrollTarget.removeEventListener("scroll", handleScroll);
+      for (const event of ["wheel", "touchstart", "pointerdown", "keydown"])
+        container.removeEventListener(event, noteInteraction);
+      if (userInteracted && !completed && maxPosition > lastSaved)
+        void updateProgress(slug, { scrollPosition: maxPosition });
     };
-  }, [slug, completionThreshold, debounceMs]);
+  }, [
+    slug,
+    resume,
+    initialPosition,
+    initiallyCompleted,
+    completionThreshold,
+    debounceMs,
+  ]);
 
   return <>{children}</>;
 }
