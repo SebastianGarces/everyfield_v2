@@ -135,5 +135,6 @@ export function formEntries(
  */
 export function revalidateTeamSurfaces(): void {
   revalidatePath("/teams");
+  revalidatePath("/teams/org-chart");
   revalidatePath("/teams/[teamId]", "layout");
 }

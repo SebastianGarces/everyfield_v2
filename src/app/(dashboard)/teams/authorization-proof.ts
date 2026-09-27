@@ -19,6 +19,7 @@ let storedTeam: string | null = X;
 let leaderUserId: string | null = USER;
 let activeTrainee = true;
 let writes = 0;
+let candidateReads = 0;
 const dialect = new PgDialect();
 const database = {
   select() {
@@ -125,6 +126,17 @@ mock.module("@/lib/people/service", {
   namedExports: { listPeople: async () => ({ people: [] }) },
 });
 
+mock.module("@/lib/ministry-teams/leader-candidates", {
+  namedExports: {
+    searchLeaderCandidates: async (churchId: string, query: string) => {
+      assert.equal(churchId, CHURCH);
+      assert.equal(query, "eligible");
+      candidateReads++;
+      return [];
+    },
+  },
+});
+
 function form(values: Record<string, string> = {}) {
   const data = new FormData();
   for (const [key, value] of Object.entries(values)) data.set(key, value);
@@ -223,10 +235,62 @@ async function main() {
     exports
       .filter(
         (name) =>
-          !["listTeamsAction", "searchTeamCandidatesAction"].includes(name)
+          ![
+            "listTeamsAction",
+            "searchTeamCandidatesAction",
+            "searchLeaderCandidatesAction",
+          ].includes(name)
       )
       .sort()
   );
+  // Candidate search is a read endpoint with the same seat gate as appointment.
+  for (const [seat, allowed] of [
+    ["owner", true],
+    ["admin", true],
+    ["member", false],
+    [null, false],
+  ] as const) {
+    actor = {
+      id: USER,
+      seat,
+      churchId: CHURCH,
+      sendingChurchId: null,
+      sendingNetworkId: null,
+    };
+    candidateReads = 0;
+    const result = await a.searchLeaderCandidatesAction(" eligible ");
+    assert.equal(result.success, allowed);
+    assert.equal(candidateReads, allowed ? 1 : 0);
+    assert.equal(writes, 0);
+  }
+  actor = {
+    id: USER,
+    seat: "owner",
+    churchId: null,
+    sendingChurchId: CHURCH,
+    sendingNetworkId: null,
+  };
+  candidateReads = 0;
+  assert.equal(
+    (await a.searchLeaderCandidatesAction("eligible")).success,
+    false
+  );
+  assert.equal(candidateReads, 0);
+  actor = null;
+  await assert.rejects(() => a.searchLeaderCandidatesAction("eligible"));
+  assert.equal(candidateReads, 0);
+  actor = {
+    id: USER,
+    seat: "owner",
+    churchId: CHURCH,
+    sendingChurchId: null,
+    sendingNetworkId: null,
+  };
+  assert.equal(
+    (await a.searchLeaderCandidatesAction("x".repeat(201))).success,
+    false
+  );
+  assert.equal(candidateReads, 0);
   let assertions = 0;
   for (const [name, own, call] of cases) {
     for (const viewer of [

@@ -298,6 +298,8 @@ export const CAPABILITY_BY_EXPORT: Readonly<Record<string, string>> = {
     "teams.own",
   "src/app/(dashboard)/teams/actions.ts → removeMemberAction": "teams.own",
   "src/app/(dashboard)/teams/actions.ts → searchTeamCandidatesAction": "read",
+  "src/app/(dashboard)/teams/actions.ts → searchLeaderCandidatesAction":
+    "teams.write",
   "src/app/(dashboard)/teams/actions.ts → setResponsibilityCompleteAction":
     "teams.own",
   "src/app/(dashboard)/teams/actions.ts → updateResponsibilityAction":

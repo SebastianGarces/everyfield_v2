@@ -1,5 +1,8 @@
 "use client";
 
+import { useCan } from "@/components/shared/viewer-capabilities";
+import { LeaderAssignDialog } from "./leader-assign-dialog";
+
 import { Users } from "lucide-react";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -14,6 +17,7 @@ interface TeamDetailHeaderProps {
 }
 
 export function TeamDetailHeader({ team }: TeamDetailHeaderProps) {
+  const canAppoint = useCan("teams.write");
   const Icon = TEAM_ICONS[team.icon ?? ""] ?? Users;
   const staffing = staffingPercent(team.filledRoles, team.totalRoles);
 
@@ -77,6 +81,13 @@ export function TeamDetailHeader({ team }: TeamDetailHeaderProps) {
                 </span>
               )}
             </div>
+            {canAppoint && (
+              <LeaderAssignDialog
+                teamId={team.id}
+                leaderId={team.leaderId}
+                leaderName={team.leaderName}
+              />
+            )}
             <div className="flex items-center gap-3">
               <span className="text-muted-foreground text-sm">Staffing:</span>
               <Progress

@@ -4,7 +4,7 @@ import { HeaderBreadcrumbs } from "@/components/header";
 import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
 import { OrgChartView } from "@/components/ministry-teams/org-chart-view";
 import { verifySession } from "@/lib/auth/session";
-import { listTeams } from "@/lib/ministry-teams/service";
+import { getOrgChart } from "@/lib/ministry-teams/org-chart";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +20,7 @@ export default async function OrgChartPage() {
     redirect("/dashboard");
   }
 
-  const teams = await listTeams(user.churchId);
+  const teams = await getOrgChart(user.churchId);
 
   return (
     <>
@@ -42,7 +42,7 @@ export default async function OrgChartPage() {
               </p>
             </div>
           </div>
-          <div className="min-h-0 flex-1 overflow-auto p-4 sm:p-6">
+          <div className="flex min-h-0 flex-1 flex-col p-4 sm:p-6">
             <OrgChartView teams={teams} />
           </div>
         </WorkspacePanel>
