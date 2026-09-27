@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import {
   downloadCsvTemplateAction,
   executeBulkImportAction,
@@ -16,6 +18,13 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
 import {
   Table,
@@ -27,6 +36,7 @@ import {
 } from "@/components/ui/table";
 import type {
   ImportPreview,
+  ImportResolution,
   ImportRow,
   ImportSummary,
 } from "@/lib/people/types";
@@ -56,7 +66,7 @@ export function ImportWizard({ children }: ImportWizardProps) {
   const [summary, setSummary] = useState<ImportSummary | null>(null);
   const [importProgress, setImportProgress] = useState(0);
   const [duplicateResolutions, setDuplicateResolutions] = useState<
-    Record<number, "skip" | "create">
+    Record<number, ImportResolution>
   >({});
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -132,7 +142,7 @@ export function ImportWizard({ children }: ImportWizardProps) {
       setPreview(result.data);
 
       // Default all duplicate rows to "skip"
-      const defaultResolutions: Record<number, "skip" | "create"> = {};
+      const defaultResolutions: Record<number, ImportResolution> = {};
       for (const row of result.data.duplicateRows) {
         defaultResolutions[row.rowNumber] = "skip";
       }
@@ -189,16 +199,19 @@ export function ImportWizard({ children }: ImportWizardProps) {
     });
   }
 
-  function toggleDuplicateResolution(rowNumber: number) {
+  function changeDuplicateResolution(
+    rowNumber: number,
+    resolution: ImportResolution
+  ) {
     setDuplicateResolutions((prev) => ({
       ...prev,
-      [rowNumber]: prev[rowNumber] === "skip" ? "create" : "skip",
+      [rowNumber]: resolution,
     }));
   }
 
   const totalToImport = preview
     ? preview.validRows.length +
-      Object.values(duplicateResolutions).filter((v) => v === "create").length
+      Object.values(duplicateResolutions).filter((v) => v !== "skip").length
     : 0;
 
   return (
@@ -232,7 +245,7 @@ export function ImportWizard({ children }: ImportWizardProps) {
             totalToImport={totalToImport}
             isPending={isPending}
             error={error}
-            onToggleResolution={toggleDuplicateResolution}
+            onResolutionChange={changeDuplicateResolution}
             onImport={handleImport}
             onBack={() => {
               setStep("upload");
@@ -355,16 +368,16 @@ function PreviewStep({
   totalToImport,
   isPending,
   error,
-  onToggleResolution,
+  onResolutionChange,
   onImport,
   onBack,
 }: {
   preview: ImportPreview;
-  duplicateResolutions: Record<number, "skip" | "create">;
+  duplicateResolutions: Record<number, ImportResolution>;
   totalToImport: number;
   isPending: boolean;
   error: string | null;
-  onToggleResolution: (rowNumber: number) => void;
+  onResolutionChange: (rowNumber: number, resolution: ImportResolution) => void;
   onImport: () => void;
   onBack: () => void;
 }) {
@@ -425,6 +438,11 @@ function PreviewStep({
         {preview.duplicateRows.length > 0 && (
           <div>
             <h4 className="mb-2 text-sm font-medium">Potential Duplicates</h4>
+            <p className="text-muted-foreground mb-3 text-sm">
+              Create and review saves a new contact and offers a side-by-side
+              review after import. You must confirm the merge separately.
+              Cancelling the review leaves both contacts.
+            </p>
             <Table>
               <TableHeader>
                 <TableRow>
@@ -440,7 +458,9 @@ function PreviewStep({
                     key={row.rowNumber}
                     row={row}
                     resolution={duplicateResolutions[row.rowNumber] ?? "skip"}
-                    onToggle={() => onToggleResolution(row.rowNumber)}
+                    onChange={(resolution) =>
+                      onResolutionChange(row.rowNumber, resolution)
+                    }
                   />
                 ))}
               </TableBody>
@@ -566,6 +586,27 @@ function ResultsStep({
         </div>
       </div>
 
+      {summary.reviewPairs?.length ? (
+        <div className="space-y-2">
+          <p>
+            These contacts were created for review. Choose details and confirm
+            each merge separately; cancelling leaves both contacts.
+          </p>
+          <ul>
+            {summary.reviewPairs.map((pair) => (
+              <li key={pair.createdId}>
+                <Link
+                  className="underline underline-offset-4"
+                  onClick={onClose}
+                  href={`/people/duplicates/${pair.matchId}/${pair.createdId}`}
+                >
+                  Review {pair.displayName}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       <DialogFooter>
         <Button onClick={onClose}>Done</Button>
       </DialogFooter>
@@ -598,11 +639,11 @@ function InvalidRowDisplay({ row }: { row: ImportRow }) {
 function DuplicateRowDisplay({
   row,
   resolution,
-  onToggle,
+  onChange,
 }: {
   row: ImportRow;
-  resolution: "skip" | "create";
-  onToggle: () => void;
+  resolution: ImportResolution;
+  onChange: (resolution: ImportResolution) => void;
 }) {
   const match = row.duplicates.exactMatch ?? row.duplicates.potentialMatches[0];
   const matchLabel = row.duplicates.exactMatch
@@ -624,13 +665,30 @@ function DuplicateRowDisplay({
         )}
       </TableCell>
       <TableCell>
-        <Button variant="ghost" size="sm" onClick={onToggle}>
-          {resolution === "skip" ? (
-            <span className="text-muted-foreground text-xs">Skip</span>
-          ) : (
-            <span className="text-xs">Create</span>
-          )}
-        </Button>
+        <Select
+          value={resolution}
+          onValueChange={(value) =>
+            onChange(
+              value === "review"
+                ? "review"
+                : value === "create"
+                  ? "create"
+                  : "skip"
+            )
+          }
+        >
+          <SelectTrigger
+            aria-label={`Duplicate action for row ${row.rowNumber}`}
+            className="w-48 cursor-pointer"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="skip">Skip</SelectItem>
+            <SelectItem value="create">Create new</SelectItem>
+            <SelectItem value="review">Create and review merge</SelectItem>
+          </SelectContent>
+        </Select>
       </TableCell>
     </TableRow>
   );

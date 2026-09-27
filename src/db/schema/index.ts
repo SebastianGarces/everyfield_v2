@@ -27,3 +27,5 @@ export * from "./evry-eve";
 
 export * from "./discovery-profile";
 export * from "./leadership-version";
+
+export * from "./person-merges";
