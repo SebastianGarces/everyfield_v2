@@ -1,105 +1,132 @@
-// ============================================================================
-// WHAT A COACH READS — the plant's OWN records, gated by the assignment and by
-// nothing else (AS-008 / AS-011, #496).
-//
-// ----------------------------------------------------------------------------
-// THE GATE IS THE ASSIGNMENT, AND `share_*` IS NOT CONSULTED
-// ----------------------------------------------------------------------------
-//
-// `canAccessFeatureData` is deliberately absent from this module. The six
-// `share_*` toggles gate what OVERSIGHT may pull out of a plant — a reach the
-// plant did not ask for and can withdraw. A coach's reach is one the plant
-// GRANTED, by name, in `coach_assignments`, and withdrawing it is ending the
-// assignment rather than flipping a toggle. Consulting the toggles here would
-// make a plant's decision to keep its people private silently revoke the
-// coaching it had just asked for.
-//
-// (`canAccessFeatureData` would in fact answer `true` for a coach anyway, by way
-// of `isChurchLevelUser` — a coach names no tenancy. Calling it would be a
-// no-op that reads like a gate, which is worse than not calling it.)
-//
-// ----------------------------------------------------------------------------
-// OWN RECORDS, NOT AGGREGATES — the difference from `@/lib/oversight/read`
-// ----------------------------------------------------------------------------
-//
-// The oversight reader's header states three rules, and the third is "AGGREGATES
-// ONLY: no name, email, address or person id in any SELECT". This module is the
-// other side of that line on purpose: a coach sees the people, by name, because
-// coaching a plant you cannot see is not coaching. The two readers never share a
-// query, and neither reads the other's list of church ids — the oversight one
-// starts from the ORG, this one from the ASSIGNMENTS. An account that holds both
-// reaches therefore gets both answers, each in its own scope, from its own
-// consent.
-//
-// ----------------------------------------------------------------------------
-// READ ONLY, AND STRUCTURALLY SO
-// ----------------------------------------------------------------------------
-//
-// There is no write here and there is no guard against one either, because none
-// is reachable: every write verb in `@/lib/auth/seat-rules` is
-// `tenancy: "plant"`, which demands a non-null `users.church_id`, and a coach
-// has none. An account that coaches while holding a seat elsewhere passes those
-// verbs only for ITS OWN plant, which this module never names.
-// ============================================================================
-
-import { eq } from "drizzle-orm";
-
+// Assignment consent is independent of oversight sharing. Explicit projections
+// exclude account credentials, storage keys and personal planter check-ins.
+import { and, asc, eq, isNull } from "drizzle-orm";
+import { z } from "zod";
 import { db } from "@/db";
-import { churches, type Church, type User } from "@/db/schema";
-import { listPeople } from "@/lib/people/service";
-import type { PersonForClient } from "@/lib/people/types";
-import { listTasks, type TaskListRow } from "@/lib/tasks/service";
-
+import {
+  churches,
+  persons,
+  tasks,
+  churchMeetings,
+  ministryTeams,
+  type User,
+} from "@/db/schema";
 import { coachesPlant } from "./assignments";
+import { COACHED_PAGE_SIZE, type CoachedCollection } from "./collections";
 
-/** How many rows a coaching view opens with. Enough to be useful, not a report. */
-const COACHED_PAGE_SIZE = 25;
-
-export type CoachedPlant = {
-  churchId: string;
-  churchName: string;
-  currentPhase: Church["currentPhase"];
-  people: PersonForClient[];
-  peopleTotal: number;
-  tasks: TaskListRow[];
-};
-
-/**
- * Read an assigned plant, or `null`.
- *
- * `null` covers every reason alike — no such plant, no assignment, an assignment
- * that has been ended — so a coach probing church ids learns which plants exist
- * exactly as fast as they learn nothing.
- *
- * THE ASSIGNMENT IS CHECKED FIRST AND THE READS ARE NOT STARTED WITHOUT IT. The
- * same rule the oversight reader keeps for a withheld section: a refused read is
- * not issued and then discarded, it is not issued.
- */
 export async function readCoachedPlant(
   user: Pick<User, "id">,
   churchId: string
-): Promise<CoachedPlant | null> {
+) {
+  if (!z.uuid().safeParse(churchId).success) return null;
   if (!(await coachesPlant(user.id, churchId))) return null;
-
   const [church] = await db
-    .select({ name: churches.name, currentPhase: churches.currentPhase })
+    .select({
+      churchId: churches.id,
+      churchName: churches.name,
+      currentPhase: churches.currentPhase,
+    })
     .from(churches)
     .where(eq(churches.id, churchId))
     .limit(1);
+  return church ?? null;
+}
+export type CoachedPlant = NonNullable<
+  Awaited<ReturnType<typeof readCoachedPlant>>
+>;
+export type CoachedRow = { id: string; name: string; status: string };
 
-  if (!church) return null;
-
-  const [people, tasks] = await Promise.all([
-    listPeople(churchId, { limit: COACHED_PAGE_SIZE }),
-    listTasks(churchId, { limit: COACHED_PAGE_SIZE }),
-  ]);
-
+export async function readCoachedCollection(
+  user: Pick<User, "id">,
+  churchId: string,
+  collection: CoachedCollection,
+  page: number
+) {
+  const plant = await readCoachedPlant(user, churchId);
+  if (
+    !plant ||
+    !Number.isSafeInteger(page) ||
+    page < 1 ||
+    (page - 1) * COACHED_PAGE_SIZE > 2147483647
+  )
+    return null;
+  const offset = (page - 1) * COACHED_PAGE_SIZE;
+  const limit = COACHED_PAGE_SIZE + 1;
+  let rows: CoachedRow[];
+  // Every order ends with the unique ID, including names/dates that tie.
+  switch (collection) {
+    case "people": {
+      const people = await db
+        .select({
+          id: persons.id,
+          firstName: persons.firstName,
+          lastName: persons.lastName,
+          status: persons.status,
+        })
+        .from(persons)
+        .where(and(eq(persons.churchId, churchId), isNull(persons.deletedAt)))
+        .orderBy(asc(persons.lastName), asc(persons.firstName), asc(persons.id))
+        .limit(limit)
+        .offset(offset);
+      rows = people.map((person) => ({
+        id: person.id,
+        name: `${person.firstName} ${person.lastName}`,
+        status: person.status,
+      }));
+      break;
+    }
+    case "tasks":
+      rows = await db
+        .select({ id: tasks.id, name: tasks.title, status: tasks.status })
+        .from(tasks)
+        .where(
+          and(
+            eq(tasks.churchId, churchId),
+            isNull(tasks.deletedAt),
+            isNull(tasks.parentTaskId)
+          )
+        )
+        .orderBy(asc(tasks.title), asc(tasks.id))
+        .limit(limit)
+        .offset(offset);
+      break;
+    case "meetings": {
+      const meetings = await db
+        .select({
+          id: churchMeetings.id,
+          title: churchMeetings.title,
+          type: churchMeetings.type,
+          status: churchMeetings.status,
+        })
+        .from(churchMeetings)
+        .where(eq(churchMeetings.churchId, churchId))
+        .orderBy(asc(churchMeetings.datetime), asc(churchMeetings.id))
+        .limit(limit)
+        .offset(offset);
+      rows = meetings.map((meeting) => ({
+        id: meeting.id,
+        name: meeting.title || `${meeting.type} meeting`,
+        status: meeting.status,
+      }));
+      break;
+    }
+    case "teams":
+      rows = await db
+        .select({
+          id: ministryTeams.id,
+          name: ministryTeams.name,
+          status: ministryTeams.status,
+        })
+        .from(ministryTeams)
+        .where(eq(ministryTeams.churchId, churchId))
+        .orderBy(asc(ministryTeams.name), asc(ministryTeams.id))
+        .limit(limit)
+        .offset(offset);
+  }
   return {
-    churchId,
-    churchName: church.name,
-    currentPhase: church.currentPhase,
-    people: people.people,
-    peopleTotal: people.total,
-    tasks: tasks.tasks,
+    plant,
+    rows: rows.slice(0, COACHED_PAGE_SIZE),
+    hasNext: rows.length > COACHED_PAGE_SIZE,
+    page,
   };
 }

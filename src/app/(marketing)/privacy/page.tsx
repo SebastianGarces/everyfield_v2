@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { settingsSectionUrl } from "@/lib/settings/sections";
 
 export const metadata: Metadata = {
   title: "Privacy — EveryField",
@@ -12,7 +13,7 @@ export default function PrivacyPage() {
     <section className="lp-legal">
       <div className="lp-legal-inner">
         <h1>Privacy</h1>
-        <p className="lp-legal-date">Last updated 1 August 2026</p>
+        <p className="lp-legal-date">Last updated 27 September 2026</p>
         <p className="lp-legal-lead">
           You are putting your church&rsquo;s people into this. Here is what we
           store, where it goes, and what we will never do with it — in plain
@@ -51,11 +52,23 @@ export default function PrivacyPage() {
 
         <h2>Who can see your plant&rsquo;s data</h2>
         <p>
-          Your records are scoped to your church. A coach, a sending church, or
-          a network sees only what you turn on — every sharing toggle starts
-          off, and you are the one who changes it. Even with sharing on,
-          oversight sees aggregate health, never individual people&rsquo;s
-          records.
+          Your records are scoped to your church. An assigned coach can read
+          that plant&rsquo;s people, tasks, meetings and ministry teams. This
+          access comes from the coach assignment, independently of oversight
+          sharing switches. Ending the assignment in{" "}
+          <Link href={settingsSectionUrl("team")}>team settings</Link> withdraws
+          that coach's access. Personal planter check-ins are not shared with
+          coaches.
+        </p>
+        <p>
+          Sending churches and networks receive aggregate feature data only when
+          you enable the corresponding oversight sharing switches. A
+          self-started plant begins with sharing off. A plant created through an
+          organization invitation begins with sharing on, after that invitation
+          explains the consent. You can change those choices later. Even with
+          sharing on, oversight does not receive individual people&rsquo;s
+          records. Basic portfolio facts and relationship notices follow their
+          own association rules.
         </p>
 
         <h2>Plant intelligence and the model provider</h2>

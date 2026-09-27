@@ -140,8 +140,12 @@ const SPECIALIZED_ROUTE_FAMILIES: readonly SpecializedRouteFamily[] = [
     markers: [/PageCanvas/, /PlantDetail/, /attachedContext/],
   },
   {
-    routes: ["/coaching/[churchId]"],
-    owner: "src/app/(dashboard)/coaching/[churchId]/page.tsx",
+    routes: [
+      "/coaching/[churchId]",
+      "/coaching/[churchId]/[collection]",
+      "/coaching/[churchId]/[collection]/[recordId]",
+    ],
+    owner: "src/app/(dashboard)/coaching/[churchId]/coaching-frame.tsx",
     composition: "attached-workspace",
     markers: [/PageCanvas/, /WorkspacePanel/],
   },
@@ -230,10 +234,10 @@ function collectPageRoutes(
   return routes.sort();
 }
 
-test("all 34 specialized surfaces declare their ruled composition and owner", () => {
+test("all 36 specialized surfaces declare their ruled composition and owner", () => {
   const routes = SPECIALIZED_ROUTE_FAMILIES.flatMap((family) => family.routes);
 
-  assert.equal(routes.length, 34);
+  assert.equal(routes.length, 36);
   assert.equal(
     new Set(routes).size,
     routes.length,
@@ -641,7 +645,7 @@ test("attached context shares the full or centered workspace width", () => {
     ["meetings/new/page.tsx", "max-w-2xl"],
     ["people/new/page.tsx", "max-w-2xl"],
     ["tasks/[id]/page.tsx", "max-w-4xl"],
-    ["coaching/[churchId]/page.tsx", "max-w-6xl"],
+    ["coaching/[churchId]/coaching-frame.tsx", "max-w-5xl"],
   ] as const) {
     const source = readFileSync(
       path.join(DASHBOARD_APP_ROOT, relativePath),
