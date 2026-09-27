@@ -973,7 +973,7 @@ This feature integrates with cross-cutting services defined in [System Architect
 
 | Data | Contract | Consumers |
 |------|----------|-----------|
-| **Article completion** | Exposes `WikiProgress` by `user_id` for oversight progress metrics | Dashboard aggregation |
+| **Article completion** | Exposes plant-level completion aggregates by phase when Wiki progress sharing is enabled | Oversight aggregation |
 | **Template links** | Exposes `WikiTemplate.id` for document generation context | Document generation flow |
 | **Contextual help** | Exposes article lookup by `slug` and `phase` for in-app help | Platform-wide contextual help system |
 
@@ -1092,15 +1092,15 @@ The wiki should appear contextually throughout the platform:
 Coaches can view wiki progress and bookmarks for their assigned churches. This includes per-article completion status, overall phase completion percentages, and bookmark lists. Access is read-only.
 
 ### Sending Church Admin Access
-Sending church admins can see aggregate wiki completion rates across their plants — specifically, the percentage of articles completed per phase for each church plant they have sent.
+Sending church seats can see aggregate wiki completion rates for their associated plants that share Wiki progress — specifically, the percentage of articles completed per phase.
 
 ### Network Admin Access
-Network admins can see aggregate wiki completion rates across all plants in their network, enabling comparison of content engagement across the portfolio.
+Network seats can see aggregate wiki completion rates for plants in their network that share Wiki progress, enabling comparison of content engagement across the portfolio.
 
 ### Privacy Controls
-- Wiki data is **not subject to privacy toggles** since it tracks content consumption, not church-specific operational data
-- Wiki progress metrics (articles read, phase completion %) are always visible to oversight roles
-- No per-feature privacy toggle is needed for wiki
+- Oversight wiki aggregates require the plant’s **Wiki progress** sharing toggle. Sharing is off by default for self-started plants; invitation-origin defaults follow the shared consent contract in Church Settings. Later associations preserve the plant’s choices.
+- The shared scope is aggregate completion by phase, not individual reading history, bookmarks or individual-record drilldown.
+- A reader’s access to their own progress and bookmarks is independent of oversight sharing. Named coach access follows the plant’s explicit assignment consent, independently of the oversight toggle; turning on Wiki progress sharing does not grant a coaching assignment or individual-record access.
 
 ---
 

@@ -1,23 +1,29 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { encodeWikiSlug, wikiHref } from "./href";
+import { encodeWikiSlug, wikiHref, wikiSlugFromPageParams } from "./href";
+import { getDynamicParam } from "next/dist/shared/lib/router/utils/get-dynamic-param";
 
-// ----------------------------------------------------------------------------
-// Stand-in for the router's half of the round trip.
-//
-// `/wiki/[...slug]` is a catch-all: Next splits the request path on `/` and
-// percent-DECODES each segment before handing them over, and the page rebuilds
-// the lookup key with `slug.join("/")` (see `src/app/(dashboard)/wiki/
-// [...slug]/page.tsx`). Recreating that here is what turns "the href is encoded"
-// into the claim that actually matters — "the href still resolves to the article".
-// ----------------------------------------------------------------------------
+// Exercise the installed router, not an assumed encoding contract: Next 16.3
+// re-encodes interpolated params before passing them to a page.
 
 /** Given an href produced by `wikiHref`, recover the slug the page will look up. */
 function resolveSlugFromHref(href: string): string {
   const prefix = "/wiki/";
   assert.ok(href.startsWith(prefix), `href must be under ${prefix}: ${href}`);
-  return href.slice(prefix.length).split("/").map(decodeURIComponent).join("/");
+  const interpolated = href
+    .slice(prefix.length)
+    .split("/")
+    .map(decodeURIComponent);
+  const param = getDynamicParam(
+    { slug: interpolated },
+    "slug",
+    "c",
+    null,
+    null
+  );
+  assert.ok(Array.isArray(param.value));
+  return wikiSlugFromPageParams(param.value);
 }
 
 // ----------------------------------------------------------------------------
