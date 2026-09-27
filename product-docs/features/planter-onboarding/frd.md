@@ -23,7 +23,7 @@ Onboarding is the guided flow a planter goes through when creating their church,
 
 The flow has one job: after ~3 minutes, the platform knows *who leads the plant, where it is, when it hopes to launch, and what stage of the journey it is in* — and the planter knows the fastest path to value (import your people, read your phase's guidance).
 
-Onboarding is a **church-creation-time flow, not a wizard prison**: every step after the name is skippable, the flow is resumable, and everything captured here is editable later in church settings.
+Onboarding is a **church-creation-time flow, not a wizard prison**: every step after the name is skippable, the flow is resumable, and onboarding answers remain correctable through their owning capabilities.
 
 ### Design principles
 
@@ -92,7 +92,7 @@ One flow, four steps. Step 1 creates the church; steps 2–4 update it.
 | OB-005 | Journey-stage declaration sets `current_phase` directly, recorded as an initial declaration distinct from a transition; no fabricated history. |
 | OB-006 | Step 4 opens the same CSV import wizard and quick-add People/CRM owns — one implementation, not a second copy. |
 | OB-007 | Every step after step 1 is skippable; the flow is resumable at the first incomplete step. |
-| OB-008 | Everything captured is editable later in church settings (settings surface is a separate feature; this FRD only requires that no onboarding answer is permanent). |
+| OB-008 | Onboarding answers remain correctable: church profile details through Church settings, the leadership answer through the dashboard leadership step, phase through Plant Intelligence, and the launch date through Launch. Corrections respect [Accounts & Seats](../accounts-and-seats/frd.md), leadership-answer authority, and the [Launch](../launch/frd.md) outcome lifecycle. Correcting onboarding does not grant ownership transfer or create a second launch-date control. |
 | OB-014 | The contextual wiki Guide is configured for the onboarding steps — at minimum the journey-stage step, whose entry surfaces phase-discernment articles (config-only: entries in the same route-pattern → slugs guide config the wiki owns). |
 
 ### Should Have
@@ -124,6 +124,7 @@ One flow, four steps. Step 1 creates the church; steps 2–4 update it.
 7. All flow controls are keyboard-accessible and every clickable element has `cursor-pointer`.
 8. On the journey-stage step, opening the Guide shows the configured phase-discernment articles in the floating panel.
 9. A planter declaring phase 3 who accepts the team-template offer lands on a dashboard where the teams surface shows the template teams and roles; a planter declaring phase 0 is never shown the offer.
+10. An authorized account can correct onboarding answers through the owning capabilities named in OB-008; later corrections preserve the applicable seat, leadership and launch-outcome rules.
 
 ---
 
@@ -148,7 +149,9 @@ Schema changes ⇒ requirement issues carrying them are `risk:high` per board co
 - **Launch**: the launch-date step schedules the launch through the Launch feature's rail rather than writing a date on the church row — the launch entity is the only owner of the launch date. Onboarding owns the question, not the storage.
 - **Documents & countdown surfaces**: read the launch date from the launch entity.
 - **Oversight**: declared phase appears wherever current phase appears; no new oversight surface.
-- **Church settings** (separate feature): the permanent edit surface for everything captured here.
+- **Church settings**: owns later church-profile edits.
+- **Dashboard leadership step**: owns re-entry to the leadership answer under its leadership authorization rules.
+- **Plant Intelligence**: owns phase changes after the initial declaration.
 
 ---
 
