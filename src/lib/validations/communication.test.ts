@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { parseCommunicationFilters } from "./communication";
+import {
+  parseCommunicationFilters,
+  createTemplateSchema,
+  updateTemplateSchema,
+} from "./communication";
 
 // ----------------------------------------------------------------------------
 // The message-history URL is user-editable and bookmarkable, so parsing must be
@@ -101,4 +105,60 @@ test("unrelated params are ignored", () => {
   });
 
   assert.equal(filters.channel, "email");
+});
+
+test("custom template validation rejects blank visible content and preserves rich merge tokens", () => {
+  const input = {
+    name: "Welcome",
+    category: "other",
+    channel: "email",
+    subject: "Hi {{first_name}}",
+    body: "<p><strong>Welcome</strong> {{first_name}}</p>",
+  };
+  for (const body of [
+    "",
+    "  ",
+    "<p><br></p>",
+    "<p>&nbsp;</p>",
+    "<script>alert(1)</script>",
+    "<style>body{color:red}</style>",
+  ]) {
+    assert.equal(
+      createTemplateSchema.safeParse({ ...input, body }).success,
+      false
+    );
+    assert.equal(updateTemplateSchema.safeParse({ body }).success, false);
+  }
+  assert.equal(
+    createTemplateSchema.safeParse({ ...input, name: "  " }).success,
+    false
+  );
+  assert.equal(createTemplateSchema.parse(input).body, input.body);
+  assert.equal(
+    createTemplateSchema.parse({ ...input, name: " Welcome " }).name,
+    "Welcome"
+  );
+});
+
+test("template boundary schemas strip forged tenancy and system metadata but preserve authorized content", () => {
+  const attack = {
+    name: "Custom",
+    category: "announcement",
+    channel: "email",
+    body: "Hello",
+    churchId: "foreign",
+    isSystem: true,
+    sourceTemplateId: "foreign-source",
+  };
+  const expected = {
+    name: "Custom",
+    category: "announcement",
+    channel: "email",
+    body: "Hello",
+  };
+  assert.deepEqual(createTemplateSchema.parse(attack), expected);
+  assert.deepEqual(updateTemplateSchema.parse(attack), expected);
+  assert.deepEqual(updateTemplateSchema.parse({ subject: "Corrected" }), {
+    subject: "Corrected",
+  });
 });
