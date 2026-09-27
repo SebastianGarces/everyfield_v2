@@ -75,7 +75,7 @@ const SPECIALIZED_ROUTE_FAMILIES: readonly SpecializedRouteFamily[] = [
     markers: [/PageCanvas/, /WorkspacePanel/, /min-h-full/],
   },
   {
-    routes: ["/wiki", "/wiki/[...slug]", "/wiki/progress"],
+    routes: ["/wiki", "/wiki/[...slug]", "/wiki/progress", "/wiki/search"],
     owner: "src/app/(dashboard)/wiki/layout.tsx",
     composition: "context-free-split",
     markers: [

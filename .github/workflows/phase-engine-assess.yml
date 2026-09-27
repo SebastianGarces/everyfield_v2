@@ -28,8 +28,8 @@
 # by the next tick, oldest first. A missed tick costs staleness, never data.
 #
 # Scheduled workflows run from the DEFAULT BRANCH only. Editing this file on a
-# branch changes nothing until it merges to main, and it cannot be tested by
-# pushing — use the Run workflow button (workflow_dispatch) once it is on main.
+# branch changes nothing until it merges to main. Test the shared command
+# against local fixtures; never trigger production just to verify reporting.
 
 name: Phase engine assess
 
@@ -45,10 +45,9 @@ on:
   # Manual tick, for verifying the wiring and after an outage.
   workflow_dispatch:
 
-# No repository contents are read and nothing is written back — this workflow
-# only makes an outbound HTTP call. Least privilege for a job holding a
-# production credential.
-permissions: {}
+# Read the shared response-checking command; no repository writes are needed.
+permissions:
+  contents: read
 
 concurrency:
   group: phase-engine-assess
@@ -67,6 +66,12 @@ jobs:
     # minutes is generous against a cold start and still bounded.
     timeout-minutes: 10
     steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
       - name: Tick the assessment run
         env:
           # The stable production alias, not a per-deployment URL: those change
@@ -80,46 +85,4 @@ jobs:
           # environment. It also opens /api/notifications/dispatch — one secret,
           # two routes (see their source and token checks).
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
-        run: |
-          set -euo pipefail
-
-          # A hard failure, not a skip. An unset secret here means no plant is
-          # ever re-assessed and every /phase read silently goes stale — the
-          # failure nobody notices, because the last good snapshot keeps
-          # rendering.
-          if [ -z "${CRON_SECRET:-}" ]; then
-            echo "::error::CRON_SECRET is not set in this repository's Actions secrets. The assessment run cannot authenticate, so NO plants are being re-assessed. Set it to the same value as the Vercel project's production CRON_SECRET."
-            exit 1
-          fi
-
-          # Status and body are captured separately so the body prints on
-          # success AND on failure. It is the run summary — selected, assessed,
-          # skipped, deferred, rateLimited, failed, tpmLimit — which is what
-          # makes a bad tick diagnosable from the Actions log alone. It carries
-          # church ids and counts, no secrets and no personal data.
-          #
-          # The `if !` form rather than `|| echo 000`: curl ALREADY prints 000
-          # for %{http_code} when it never got a response, so the fallback would
-          # concatenate to "000000" and miss its own case below.
-          #
-          # --max-time 320 sits just past the route's 300s function ceiling, so
-          # the curl outlives the run it is waiting on and reports the real
-          # status instead of a timeout of its own.
-          if ! status=$(curl -sS -o response.json -w '%{http_code}' --max-time 320 \
-            -H "Authorization: Bearer $CRON_SECRET" \
-            "$ASSESS_URL"); then
-            status="000"
-          fi
-
-          echo "HTTP $status from $ASSESS_URL"
-          echo "Response:"
-          cat response.json 2>/dev/null || echo "(no response body)"
-          echo
-
-          case "$status" in
-            2??) echo "Assessment run completed. A non-zero 'deferred' or 'skipped' is NORMAL — those plants stay dirty and are first in line on the next tick." ;;
-            000) echo "::error::No HTTP response — the request failed or timed out. Nothing is lost: every plant this tick did not assess is still dirty and is re-selected by the next one."; exit 1 ;;
-            401) echo "::error::401 Unauthorized. This repo's CRON_SECRET does not match the one in the Vercel production environment (the route fails closed when its own copy is unset)."; exit 1 ;;
-            404) echo "::error::404 Not Found. The assess route is not present in the current production deployment — check that the branch adding it has merged and deployed."; exit 1 ;;
-            *)   echo "::error::Assessment run failed with HTTP $status. No plant is left half-written — a failed run leaves the last good snapshot in place and the plant dirty."; exit 1 ;;
-          esac
+        run: node scripts/phase-engine-assess.mjs

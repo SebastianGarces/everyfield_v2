@@ -47,7 +47,7 @@ export default async function WikiLayout({
     >
       {/* Preserve the route's declared context state for nested consumers even
           though the ruled Wiki workspace renders no visible context row. */}
-      <HeaderBreadcrumbs items={WIKI_BREADCRUMBS} />
+      {user && <HeaderBreadcrumbs items={WIKI_BREADCRUMBS} />}
       <SplitWorkspace className="grid-rows-[minmax(0,1fr)]">
         {/* The secondary navigation needs its own surface beside the article
             workspace. CSS alone could not separate it while the old sidebar

@@ -279,7 +279,7 @@ const AUTHENTICATED_PAGE_CANVAS_OWNERS = [
   },
   {
     owner: "src/app/(dashboard)/wiki/layout.tsx",
-    routes: ["/wiki", "/wiki/[...slug]", "/wiki/progress"],
+    routes: ["/wiki", "/wiki/[...slug]", "/wiki/progress", "/wiki/search"],
     scrollLayout: "fixed-default",
     compositions: ["fixed-internal-scroll"],
   },
