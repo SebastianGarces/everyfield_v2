@@ -25,43 +25,66 @@ For another project, run `portless preview skill install --project /absolute/pro
 `--global` for your Codex installation. Update the managed copy through the installer. EveryField
 requirements belong in this document, not a fork of the generic skill.
 
-There is no checked-in, automatically safe EveryField environment. Copy the example below to a
-private file outside the worktree, replace placeholders, and pass it explicitly with `--config`.
-`.preview.local.json` is also ignored, but a file inside a removed worktree will be deleted.
-The commands are argv arrays. Keep processes in the foreground and let Portless allocate `PORT`.
+## Provision an owned local stack
 
-```json
-{
-  "install": ["pnpm", "install", "--frozen-lockfile"],
-  "dev": ["pnpm", "exec", "next", "dev", "--hostname", "127.0.0.1"],
-  "build": ["pnpm", "exec", "next", "build"],
-  "start": ["pnpm", "exec", "next", "start", "--hostname", "127.0.0.1"],
-  "env": {
-    "NEXT_TELEMETRY_DISABLED": "1",
-    "NEXT_PUBLIC_APP_URL": "${PREVIEW_URL}",
-    "DATABASE_URL": "<connection to this preview's disposable Neon database>",
-    "RESEND_API_KEY": "<credential for an owned capture-only service>",
-    "RESEND_BASE_URL": "<verified capture-only service URL>"
-  },
-  "healthPath": "/login",
-  "healthStatus": 200,
-  "timeoutSeconds": 600
-}
+With Node 24+, pnpm 10 and Docker running, remove the inherited `.env.local` link from the selected
+worktree without reading or changing its target. Then run from that worktree:
+
+```sh
+node scripts/preview-local.mjs up /private/tmp/everyfield-my-task-runtime
 ```
 
-This is a configuration template, not provisioned infrastructure. Add feature-specific variables
-from `.env.example` deliberately. Mail flows may also require a fixture sender and a private
-`UNSUBSCRIBE_TOKEN_SECRET`. Omit production credentials, scheduler tokens, feedback GitHub tokens,
-Sentry upload tokens and unrelated integrations. Do not paste configuration or secrets into PRs.
+The directory must not exist. This command creates labelled Docker pgvector, Neon HTTP and
+migration websocket proxies, a loopback-only capture email service, private credentials, migrated
+schema, role/data fixtures and a private Portless config. It ignores inherited database and mail
+configuration and refuses worktrees containing `.env*` files other than `.env.example`. It applies
+versioned migrations through `pnpm db:migrate`; it never repairs migration history.
+
+Each task uses a different runtime directory. `ownership.json` records the resource names and
+private configuration. `fixtures.json` contains fixture identifiers, local login credentials and
+valid/expired token paths. Both files are private, not PR attachments. The fixtures include two
+plants, planter/Admin/Member accounts, an assignment-only coach, network/sending-church readers,
+people/tasks, completed/planning meetings, tags, skills, a household, logistics, sent-message
+history and invitation/RSVP states. Fixture seeding never contacts a shared database.
+
+```sh
+portless preview up --project "$PWD" --mode development --config /private/tmp/everyfield-my-task-runtime/preview.json --json
+# Commit changes and make the worktree clean before the final proof:
+portless preview up --project "$PWD" --mode production --config /private/tmp/everyfield-my-task-runtime/preview.json --json
+# Run a backend proof with only the stack's private environment:
+node scripts/preview-local.mjs exec /private/tmp/everyfield-my-task-runtime pnpm exec tsx scripts/my-proof.ts
+```
+
+The runtime adapter is copied into the private directory under its SHA256 and checks that hash on
+every start. Each process resolves the database driver from its own worktree or production snapshot.
+Portless's installer and IPC worker receive no preload; only dev/build/start receive it. Record the
+adapter hash and toolkit commit alongside the tested application commit. A sibling worktree may
+invoke the committed toolkit by absolute path from its own working directory; each invocation still
+provisions separate services and data.
+
+Mail is captured by a local HTTP server with no delivery client or forwarding implementation.
+Read its `/messages` endpoint from the reported loopback URL. No upload storage is provisioned;
+upload flows remain unverified until separately owned scratch storage is configured. Scheduled
+production services, provider credentials, telemetry credentials and feedback publishing are omitted.
+
+If the local HTTPS CA is untrusted and installing it has not been authorized, use the documented
+Portless disposable HTTP mode. Choose a distinct supervisor directory/port and keep those settings
+for all operations against that supervisor:
+
+```sh
+export PORTLESS_PREVIEW_DIR=/private/tmp/everyfield-preview-http
+export PORTLESS_PREVIEW_PORT=1356
+export PORTLESS_PREVIEW_HTTP=1
+```
+
+Do not click through a browser certificate warning. URLs ending in `.localhost` stay local.
 
 ## Own the data and side effects
 
-Portless's SQLite registry tracks processes, leases and cleanup; it is not the application's
-Postgres database. The current application uses Neon's HTTP driver. Use an explicitly owned
-disposable Neon database for now. The local Postgres/HTTP proxy in `scripts/live-db-stack.sh`
-is wired into test runners, not the Next.js application. A full local application database and
-mail provisioning adapter remains separate work; do not claim it exists or silently fall back
-to the shared database.
+Portless tracks app processes; the local runner owns database and capture-mail resources.
+The HTTP proxy preserves the application's Neon HTTP transport. The migration websocket proxy
+permits only its own Postgres container. Driver overrides live in the explicitly loaded verification
+adapter, never in application request modules.
 
 Worktrees initially inherit `.env.local` from the main checkout: shell creation links it, while
 Codex-managed creation copies it. Before development mode, replace that link or copied file in
@@ -72,7 +95,7 @@ omitted values can still come from files. Production snapshots omit ignored/untr
 Portless forwards only its small host allowlist plus the configuration's explicit `env` values.
 
 Apply migrations with `pnpm db:migrate` and seed against that disposable database using its private
-environment. Migrations and fixtures are not run automatically by this template. Never reset,
+environment. The local runner applies them to its new disposable database during `up`. Never reset,
 re-key or seed a shared database to satisfy a preview. For email tests, verify that the server-side
 transport captures messages and cannot deliver externally; a dummy API key or browser interception
 is not isolation. Configure scratch storage when exercising uploads. Keep scheduled work disabled.
@@ -146,3 +169,20 @@ One PR should deliver one reviewable outcome. Related issues can share it; fixes
 stay on it. Local iteration needs neither new PRs nor repeated pushes. Production still builds
 when work lands on `main`, so grouping related work reduces those builds without combining
 unrelated changes into a difficult review.
+
+## Remove the local stack
+
+First stop every Portless preview that uses the stack. Preserve evidence outside its private
+runtime directory, then run cleanup twice to prove it is idempotent:
+
+```sh
+node scripts/preview-local.mjs down /private/tmp/everyfield-my-task-runtime
+node scripts/preview-local.mjs down /private/tmp/everyfield-my-task-runtime
+```
+
+Cleanup checks directory identity and Docker ownership labels before removing resources. It never
+adopts a pre-existing directory. Failed setup leaves its ownership record for this same cleanup
+command; do not reuse a partially provisioned stack. Keep the private directory until every caller
+has finished. Portless `down` alone does not remove this manually provisioned database/mail stack.
+
+Owned Docker previews cap Postgres at 512 MiB / 1 CPU (including a 256 MiB data tmpfs), the HTTP proxy at 128 MiB / 0.5 CPU, and the websocket proxy at 64 MiB / 0.5 CPU. Swap is disabled for these containers; capture mail uses a 64 MiB Node heap. Stop superseded stacks before building a replacement preview.
