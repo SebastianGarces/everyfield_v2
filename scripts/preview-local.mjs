@@ -303,6 +303,16 @@ if (command === "exec") {
     env: { ...envFor(state), EVERYFIELD_PREVIEW_WS_ENDPOINT: wsEndpoint },
     stdio: "inherit",
   });
+  run(
+    "pnpm",
+    [
+      "exec",
+      "tsx",
+      join(toolkit, "scripts/preview-fixtures.ts"),
+      join(directory, "fixtures.json"),
+    ],
+    { cwd: root, env: envFor(state), stdio: "inherit" }
+  );
   state.ready = true;
   save(state);
   const { NODE_OPTIONS: preload, ...previewEnv } = state.env;

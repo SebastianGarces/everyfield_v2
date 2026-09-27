@@ -12,6 +12,30 @@ import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 
 const runner = resolve("scripts/preview-local.mjs");
+test("a modified copied runtime fails its content hash before loading a database", () => {
+  const temp = mkdtempSync(join(tmpdir(), "preview-runtime-"));
+  const file = join(temp, "runtime.mjs");
+  writeFileSync(
+    file,
+    readFileSync(resolve("scripts/preview-runtime.mjs"), "utf8") +
+      "\n// changed\n"
+  );
+  try {
+    const result = spawnSync(
+      process.execPath,
+      ["--import", file, "-e", "process.exit(0)"],
+      {
+        encoding: "utf8",
+        env: { ...process.env, EVERYFIELD_PREVIEW_RUNTIME_HASH: "wrong-hash" },
+      }
+    );
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /AssertionError/);
+    assert.doesNotMatch(result.stderr, /MODULE_NOT_FOUND/);
+  } finally {
+    rmSync(temp, { recursive: true });
+  }
+});
 test("provisioning refuses a pre-existing directory and preserves unrelated files", () => {
   const temp = mkdtempSync(join(tmpdir(), "preview-safety-"));
   const target = join(temp, "unrelated");

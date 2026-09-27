@@ -12,7 +12,18 @@ import {
   sendingChurches,
   sendingNetworks,
   coachAssignments,
+  userInvitations,
+  meetingConfirmationTokens,
+  communications,
+  communicationRecipients,
+  households,
+  tags,
+  personTags,
+  skillsInventory,
+  meetingChecklistItems,
+  feedback,
 } from "../src/db/schema";
+import { eq } from "drizzle-orm";
 import { hashPassword } from "../src/lib/auth/password";
 
 async function main() {
@@ -150,6 +161,120 @@ async function main() {
         .onConflictDoNothing();
     }
   }
+  const churchId = id("primary"),
+    ownerId = id("owner"),
+    personId = id("primary-person-0");
+  const token = (name: string) =>
+    createHash("sha256")
+      .update(password + name)
+      .digest("hex");
+  for (const kind of ["seat", "coach"] as const) {
+    for (const state of ["valid", "expired"] as const) {
+      const key = `${kind}-${state}`;
+      await db
+        .insert(userInvitations)
+        .values({
+          id: id(key),
+          churchId,
+          kind,
+          seat: kind === "seat" ? "member" : null,
+          inviteeEmail: `${key}@example.test`,
+          inviterUserId: ownerId,
+          tokenHash: createHash("sha256").update(token(key)).digest("hex"),
+          expiresAt: new Date(
+            Date.now() + (state === "valid" ? 7 : -7) * 86400000
+          ),
+        })
+        .onConflictDoNothing();
+    }
+  }
+  for (const [index, state] of ["valid", "expired"].entries()) {
+    await db
+      .insert(meetingConfirmationTokens)
+      .values({
+        id: id(`rsvp-${state}`),
+        token: token(`rsvp-${state}`),
+        churchId,
+        meetingId: id("primary-planning"),
+        personId: id(`primary-person-${index}`),
+        expiresAt: new Date(
+          Date.now() + (state === "valid" ? 7 : -7) * 86400000
+        ),
+      })
+      .onConflictDoNothing();
+  }
+  await db
+    .insert(households)
+    .values({ id: id("household"), churchId, name: "Preview household" })
+    .onConflictDoNothing();
+  await db
+    .update(persons)
+    .set({ householdId: id("household"), householdRole: "head" })
+    .where(eq(persons.id, personId));
+  await db
+    .insert(tags)
+    .values({ id: id("tag"), churchId, name: "Preview tag" })
+    .onConflictDoNothing();
+  await db
+    .insert(personTags)
+    .values({ id: id("person-tag"), churchId, personId, tagId: id("tag") })
+    .onConflictDoNothing();
+  await db
+    .insert(skillsInventory)
+    .values({
+      id: id("skill"),
+      churchId,
+      personId,
+      skillCategory: "tech",
+      skillName: "Audio",
+      proficiency: "intermediate",
+    })
+    .onConflictDoNothing();
+  await db
+    .insert(meetingChecklistItems)
+    .values({
+      id: id("logistics"),
+      churchId,
+      meetingId: id("primary-planning"),
+      itemName: "Preview welcome table",
+      category: "setup",
+    })
+    .onConflictDoNothing();
+  await db
+    .insert(communications)
+    .values({
+      id: id("sent-message"),
+      churchId,
+      subject: "Preview sent message",
+      body: "Disposable message history fixture",
+      bodyHtml: "<p>Disposable message history fixture</p>",
+      status: "sent",
+      sentAt: new Date("2026-01-01"),
+      recipientCount: 1,
+      createdById: ownerId,
+    })
+    .onConflictDoNothing();
+  await db
+    .insert(communicationRecipients)
+    .values({
+      id: id("recipient"),
+      churchId,
+      communicationId: id("sent-message"),
+      personId,
+      email: "primary-0@example.test",
+      status: "delivered",
+    })
+    .onConflictDoNothing();
+  await db
+    .insert(feedback)
+    .values({
+      id: id("feedback"),
+      churchId,
+      userId: ownerId,
+      description: "Disposable feedback review fixture",
+      category: "suggestion",
+    })
+    .onConflictDoNothing();
   const manifest = {
     database: identity.name,
     password,
@@ -164,6 +289,17 @@ async function main() {
     primaryTaskId: id("primary-task-0"),
     planningMeetingId: id("primary-planning"),
     completedMeetingId: id("primary-completed"),
+    sentMessageId: id("sent-message"),
+    paths: {
+      coach: `/coaching/${churchId}`,
+      sentMessage: `/communication/${id("sent-message")}`,
+      validRsvp: `/rsvp/${token("rsvp-valid")}`,
+      expiredRsvp: `/rsvp/${token("rsvp-expired")}`,
+      validSeatInvitation: `/seat-invitation?invitation=${token("seat-valid")}`,
+      expiredSeatInvitation: `/seat-invitation?invitation=${token("seat-expired")}`,
+      validCoachInvitation: `/coach-invitation?invitation=${token("coach-valid")}`,
+      expiredCoachInvitation: `/coach-invitation?invitation=${token("coach-expired")}`,
+    },
   };
   writeFileSync(output, JSON.stringify(manifest, null, 2) + "\n", {
     mode: 0o600,
