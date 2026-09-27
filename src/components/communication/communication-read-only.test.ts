@@ -325,3 +325,24 @@ test("the template CATALOG stays readable — only its two controls go", () => {
     );
   }
 });
+
+test("the template-create route refuses a reader before exposing the form", () => {
+  const create = page(
+    "src/app/(dashboard)/communication/templates/new/page.tsx"
+  );
+  assertInOrder(
+    create.code,
+    "communication/templates/new/page.tsx",
+    [
+      'if (!holdsSeatFor(user, "communication.send"))',
+      'redirect("/communication/templates")',
+      "<TemplateEditor",
+    ],
+    "new templates share the editor's write authority"
+  );
+  const header = TEMPLATES.span(
+    "{canSend && (",
+    '<div className="min-h-0 flex-1'
+  );
+  assert.match(header, /href="\/communication\/templates\/new"/);
+});

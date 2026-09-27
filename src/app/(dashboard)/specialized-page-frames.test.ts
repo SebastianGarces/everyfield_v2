@@ -104,6 +104,12 @@ const SPECIALIZED_ROUTE_FAMILIES: readonly SpecializedRouteFamily[] = [
     markers: [/PageCanvas/, /WorkspacePanel/],
   },
   {
+    routes: ["/communication/templates/new"],
+    owner: "src/app/(dashboard)/communication/templates/new/page.tsx",
+    composition: "attached-workspace",
+    markers: [/PageCanvas/, /WorkspacePanel/],
+  },
+  {
     routes: ["/communication/templates/[id]/edit"],
     owner: "src/app/(dashboard)/communication/templates/[id]/edit/page.tsx",
     composition: "attached-workspace",
