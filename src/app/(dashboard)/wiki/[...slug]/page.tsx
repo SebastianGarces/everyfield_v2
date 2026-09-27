@@ -11,6 +11,7 @@ import {
   isBookmarked,
   getBookmarkedSlugs,
   wikiHref,
+  wikiSlugFromPageParams,
   getArticleFeedbackForUser,
 } from "@/lib/wiki";
 import { extractHeadings } from "@/lib/wiki/toc";
@@ -121,7 +122,7 @@ export async function generateMetadata({ params }: Props) {
 
 export default async function WikiPage({ params, searchParams }: Props) {
   const { slug } = await params;
-  const slugPath = slug.join("/");
+  const slugPath = wikiSlugFromPageParams(slug);
   const churchId = await readerChurchId();
 
   // Try to get article first

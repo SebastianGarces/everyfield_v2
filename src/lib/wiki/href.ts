@@ -53,8 +53,9 @@
 //
 // `/wiki/[...slug]` is a catch-all, so `/` must stay a live separator while
 // every other unsafe byte is escaped. That means encoding per SEGMENT, never
-// the whole path. Next decodes route params, so the segments the page reassembles
-// with `slug.join("/")` are byte-identical to the stored slug — the link resolves.
+// the whole path. Next 16.3 re-encodes page params after decoding the URL;
+// `wikiSlugFromPageParams` reverses that page-boundary encoding once. Metadata
+// params remain decoded and must not pass through that adapter.
 //
 // This module is deliberately dependency-free (no DB, no `next/*`) so client
 // components, server components and the node:test harness can all import it.
@@ -92,4 +93,14 @@ export function encodeWikiSlug(slug: string): string {
  */
 export function wikiHref(slug: string): string {
   return `/wiki/${encodeWikiSlug(slug)}`;
+}
+
+/**
+ * Decode the encoded segments Next 16.3 passes to a page, exactly once.
+ * `getDynamicParam().value` re-encodes interpolated params before supplying
+ * page props; metadata receives the raw interpolated params instead. Keep
+ * this at the page boundary, never in a stored-slug read or metadata lookup.
+ */
+export function wikiSlugFromPageParams(segments: string[]): string {
+  return segments.map(decodeURIComponent).join("/");
 }
