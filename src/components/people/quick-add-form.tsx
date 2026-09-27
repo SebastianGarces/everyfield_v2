@@ -47,7 +47,6 @@ export function QuickAddForm({ children }: QuickAddFormProps) {
   const [open, setOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [duplicates, setDuplicates] = useState<DuplicateCheck | null>(null);
-  const [skipDuplicateCheck, setSkipDuplicateCheck] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
   const [submitAction, setSubmitAction] = useState<"save" | "saveAndAdd">(
@@ -61,7 +60,6 @@ export function QuickAddForm({ children }: QuickAddFormProps) {
   function resetForm() {
     formRef.current?.reset();
     setDuplicates(null);
-    setSkipDuplicateCheck(false);
     setError(null);
     setFieldErrors({});
     setSubmitAction("save");
@@ -75,7 +73,11 @@ export function QuickAddForm({ children }: QuickAddFormProps) {
     setOpen(newOpen);
   }
 
-  async function handleSubmit(formData: FormData) {
+  function handleSubmit(
+    formData: FormData,
+    skipCheck = false,
+    reviewId?: string
+  ) {
     setError(null);
     setFieldErrors({});
     const intent =
@@ -93,7 +95,7 @@ export function QuickAddForm({ children }: QuickAddFormProps) {
 
     startTransition(async () => {
       // Step 1: Check for duplicates (unless user chose to skip)
-      if (!skipDuplicateCheck) {
+      if (!skipCheck) {
         const dupResult = await checkForDuplicatesAction(data);
         if (dupResult.success) {
           const { exactMatch, potentialMatches } = dupResult.data;
@@ -120,6 +122,11 @@ export function QuickAddForm({ children }: QuickAddFormProps) {
         description: `${result.data.firstName} ${result.data.lastName} has been added.`,
       });
 
+      if (reviewId) {
+        handleOpenChange(false);
+        router.push(`/people/duplicates/${reviewId}/${result.data.id}`);
+        return;
+      }
       router.refresh();
 
       if (intent === "saveAndAdd") {
@@ -135,22 +142,24 @@ export function QuickAddForm({ children }: QuickAddFormProps) {
   }
 
   function handleCreateAnyway() {
-    setSkipDuplicateCheck(true);
     setDuplicates(null);
     // Re-submit the form
     if (formRef.current) {
       const formData = new FormData(formRef.current);
-      handleSubmit(formData);
+      handleSubmit(formData, true);
     }
   }
 
-  function handleSubmitCapture(event: React.FormEvent<HTMLFormElement>) {
+  function handleFormSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (isPending) return;
     const nativeEvent = event.nativeEvent as SubmitEvent;
     const submitter = nativeEvent.submitter as HTMLButtonElement | null;
     const intent = submitter?.value === "saveAndAdd" ? "saveAndAdd" : "save";
 
     submitActionRef.current = intent;
     setSubmitAction(intent);
+    handleSubmit(new FormData(event.currentTarget));
   }
 
   return (
@@ -163,7 +172,7 @@ export function QuickAddForm({ children }: QuickAddFormProps) {
           </Button>
         )}
       </DialogTrigger>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Quick Add Person</DialogTitle>
           <DialogDescription>
@@ -180,9 +189,8 @@ export function QuickAddForm({ children }: QuickAddFormProps) {
 
         <form
           ref={formRef}
-          onSubmitCapture={handleSubmitCapture}
-          action={(formData) => handleSubmit(formData)}
-          className="space-y-4"
+          onSubmit={handleFormSubmit}
+          className="min-w-0 space-y-4"
         >
           {/* Name row */}
           <div className="grid grid-cols-2 gap-4">
@@ -274,6 +282,10 @@ export function QuickAddForm({ children }: QuickAddFormProps) {
             <DuplicateWarning
               duplicates={duplicates}
               onCreateAnyway={handleCreateAnyway}
+              onCreateForReview={(personId) => {
+                if (formRef.current)
+                  handleSubmit(new FormData(formRef.current), true, personId);
+              }}
               isSubmitting={isPending}
             />
           )}

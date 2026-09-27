@@ -302,6 +302,7 @@ export const READ_ONLY_SURFACE_CHECKLIST: readonly ChecklistRow[] = [
     verdict: "fixed-here",
     gatedIn: [
       "src/components/people/person-header.tsx",
+      "src/components/people/merge-review.tsx",
       "src/components/people/note-form.tsx",
       "src/components/people/assessments-tabs.tsx",
       "src/components/people/skills-list.tsx",
@@ -312,7 +313,7 @@ export const READ_ONLY_SURFACE_CHECKLIST: readonly ChecklistRow[] = [
     ],
     survives:
       "Editing and deleting a note the viewer wrote themselves stays authorship-gated as it was; it is not a seat question.",
-    note: "There is no assign-to-team control on the teams tab — the tab renders memberships and a read link to /teams.",
+    note: "There is no assign-to-team control on the teams tab — the tab renders memberships and a read link to /teams. Duplicate review renders plain values for read-only seats, with no selection or confirmation controls.",
   },
   {
     surface: "Meetings (list)",
@@ -402,9 +403,10 @@ export const READ_ONLY_SURFACE_CHECKLIST: readonly ChecklistRow[] = [
       "src/app/(dashboard)/communication/compose/page.tsx",
       "src/app/(dashboard)/communication/templates/page.tsx",
       "src/app/(dashboard)/communication/templates/[id]/edit/page.tsx",
+      "src/app/(dashboard)/communication/templates/new/page.tsx",
       "src/components/communication/resend-non-openers.tsx",
     ],
-    note: "The compose and template-edit ROUTES are refused, not merely unlinked: a hidden button that leaves a reachable URL is a screen a Member still walks into and is refused at submit. There is no 'new template' control to hide — templates are forked server-side on first edit. THE HEADER IS PART OF THE ROW TOO (#666): the hub's subtitle read \"Send messages and track communication with your people\" to every seat, which is the Dashboard row's #659 finding on a second surface — a call to action is a write affordance in sentence form, and the sweep's first pass read this row as being about buttons. Both capability-matched sentences now live in `src/lib/communication/presentation.ts`, tested, and `readsAsAnImperative` (below the types in this file) is the shared rule — applied by a scan over every dashboard page's subtitle, which is what stops the next surface being found by hand. History and Templates come out clean under it: their subtitles state a count and describe the list, and name no verb.",
+    note: "The compose and template-edit ROUTES are refused, not merely unlinked: a hidden button that leaves a reachable URL is a screen a Member still walks into and is refused at submit. Create Template is hidden on the same verb, and its route is refused. Editing a system template still forks it on first save. THE HEADER IS PART OF THE ROW TOO (#666): the hub's subtitle read \"Send messages and track communication with your people\" to every seat, which is the Dashboard row's #659 finding on a second surface — a call to action is a write affordance in sentence form, and the sweep's first pass read this row as being about buttons. Both capability-matched sentences now live in `src/lib/communication/presentation.ts`, tested, and `readsAsAnImperative` (below the types in this file) is the shared rule — applied by a scan over every dashboard page's subtitle, which is what stops the next surface being found by hand. History and Templates come out clean under it: their subtitles state a count and describe the list, and name no verb.",
   },
   {
     surface: "Documents",

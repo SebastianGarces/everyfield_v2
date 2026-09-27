@@ -324,7 +324,10 @@ export type ImportPreview = {
 /**
  * Summary of completed import
  */
+export type ImportResolution = "skip" | "create" | "review";
+
 export type ImportSummary = {
+  reviewPairs?: { createdId: string; matchId: string; displayName: string }[];
   created: number;
   skipped: number;
   errors: number;

@@ -345,8 +345,9 @@ export async function executeBulkImport(
   churchId: string,
   userId: string,
   rows: ImportRow[],
-  duplicateResolutions: Record<number, "skip" | "create">
+  duplicateResolutions: Record<number, "skip" | "create" | "review">
 ): Promise<ImportSummary> {
+  const reviewPairs: NonNullable<ImportSummary["reviewPairs"]> = [];
   let created = 0;
   let skipped = 0;
   let errors = 0;
@@ -373,7 +374,23 @@ export async function executeBulkImport(
     try {
       // The service owns the insert, the person.created emit and the
       // person_created activity (ruling 410-2A) — no duplicated write path.
-      await createPerson(churchId, userId, parseResult.data, "bulk_import");
+      const matches =
+        resolution === "review"
+          ? await findDuplicateMatches(churchId, parseResult.data)
+          : null;
+      const match = matches?.exactMatch ?? matches?.potentialMatches[0];
+      const person = await createPerson(
+        churchId,
+        userId,
+        parseResult.data,
+        "bulk_import"
+      );
+      if (match)
+        reviewPairs.push({
+          createdId: person.id,
+          matchId: match.id,
+          displayName: `${person.firstName} ${person.lastName}`,
+        });
 
       created++;
     } catch {
@@ -381,5 +398,10 @@ export async function executeBulkImport(
     }
   }
 
-  return { created, skipped, errors };
+  return {
+    created,
+    skipped,
+    errors,
+    ...(reviewPairs.length ? { reviewPairs } : {}),
+  };
 }
