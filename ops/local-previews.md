@@ -184,3 +184,5 @@ Cleanup checks directory identity and Docker ownership labels before removing re
 adopts a pre-existing directory. Failed setup leaves its ownership record for this same cleanup
 command; do not reuse a partially provisioned stack. Keep the private directory until every caller
 has finished. Portless `down` alone does not remove this manually provisioned database/mail stack.
+
+Owned Docker previews cap Postgres at 512 MiB / 1 CPU (including a 256 MiB data tmpfs), the HTTP proxy at 128 MiB / 0.5 CPU, and the websocket proxy at 64 MiB / 0.5 CPU. Swap is disabled for these containers; capture mail uses a 64 MiB Node heap. Stop superseded stacks before building a replacement preview.
