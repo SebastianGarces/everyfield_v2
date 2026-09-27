@@ -24,7 +24,7 @@ sharing is the plant's opt-in.
   an empty state that says why it is hidden and that the plant controls it — never a bare blank.
 - Manages invitations (create, list with status including declined, revoke) — and can remove a
   plant from the org, behind an explicit confirmation, with the plant notified.
-- A network admin additionally sees a roster of the network's member sending churches.
+- Network Owners, Admins and Members additionally see a roster of the network's member sending churches and can open each member's detail to browse its plants within their network.
 
 **Planter**:
 
@@ -43,7 +43,8 @@ sharing is the plant's opt-in.
 | `/oversight/plants` | oversight admins | Directory: plant name, location, planter, phase, launch countdown, association provenance |
 | `/oversight/plants/[id]` | oversight admins | Per-plant detail: privacy-gated aggregate sections; explain-why empty states; **Remove from org** action (confirm + notify) |
 | `/oversight/invitations` | oversight admins | Create / pending list / revoke; declined visible as status |
-| `/oversight/sending-churches` | network admins only | Roster: member sending church, plant count, pending invitations |
+| `/oversight/sending-churches` | network Owners, Admins and Members | Roster: linked member sending church, plant count, pending invitations |
+| `/oversight/sending-churches/[id]` | network Owners, Admins and Members | Member sending church name, count and directory of its plants within the caller's network; links to privacy-gated plant detail |
 | Settings → association area | planter | Pending invitations (accept / decline), current associations, **Leave org** action (confirm + notify) |
 | Dashboard | planter | Persistent reminder card while an invitation is unanswered |
 
@@ -65,7 +66,7 @@ sharing is the plant's opt-in.
 | OV-007a | Must | Planter's sever: from the association area the planter ends one of the plant's own two associations, naming **which kind** — sending church or network — rather than an organization's identity. |
 | OV-007b | Must | Org's sever: from the plant detail page an admin removes a named plant from their own sending church or network; the plant leaves the plants directory and the plant's planter is notified. |
 | OV-008 | Must | Association audit: an `association_events` record is written on every accept and on every disassociation (either side), **for every invitation type — including a sending church joining a network**. Expand-only; no read UI required for alpha beyond OV-011. |
-| OV-009 | Must | Sending-churches roster at `/oversight/sending-churches` for network admins: member sending church, plant count, pending invitations. |
+| OV-009 | Must | Sending-churches roster at `/oversight/sending-churches` for network Owners, Admins and Members: linked member sending church, plant count, pending invitations. Each member detail shows its name and the count and list of its plants within the caller's network, with links to aggregate-only, privacy-gated plant detail. An empty member has an explanatory empty state. Unrelated organizations and plants are not disclosed. All network seats have the same read scope; relationship actions retain Accounts & Seats authority. |
 | OV-010 | Must | Permissions: only the plant's **planter** may accept an invitation or sever the plant's association; only the **org's admin** may sever from the org side. Non-planter members of the target church can do neither. *Why:* binding the plant to an oversight org is a plant-level decision, the same authority rule as the sharing toggles; and severing is deliberately two-sided so an association created in error has a repair path either party can invoke. |
 | OV-011 | Should | Association history section on the plant detail page, read from `association_events`. |
 | OV-012 | Must | Sending-church answering surface: a sending-church **admin** whose church has a pending `sending_church_to_network` invitation can accept or decline it in-app from their association/settings area; non-admin members are rejected server-side. Every invitation type addressed to a registered account has an in-app answering surface. |
@@ -84,8 +85,8 @@ sharing is the plant's opt-in.
   type-to-confirm dialog; afterwards the plant leaves the org's directory and the other side is
   notified. Both writes produce an `association_events` row.
 - A `team_member` of the target church attempting to accept or sever is rejected.
-- A network admin sees their member sending churches; a sending-church admin cannot reach
-  `/oversight/sending-churches`.
+- Network Owners, Admins and Members can open a member sending church by keyboard from the roster and see the same plants within their network, including an explanatory empty state. A sending-church account cannot reach the network-only roster or member details; foreign and unknown member identifiers disclose nothing.
+- Sending-church detail links open the same aggregate-only plant pages as the plants directory. Sharing-off sections remain withheld, and Members see no relationship-management controls.
 
 ## Data entities (feature-owned)
 

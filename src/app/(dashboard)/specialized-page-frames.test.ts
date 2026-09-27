@@ -134,6 +134,12 @@ const SPECIALIZED_ROUTE_FAMILIES: readonly SpecializedRouteFamily[] = [
     markers: [/PageCanvas/, /PlantDetail/, /attachedContext/],
   },
   {
+    routes: ["/oversight/sending-churches/[id]"],
+    owner: "src/app/(dashboard)/oversight/sending-churches/[id]/page.tsx",
+    composition: "attached-workspace",
+    markers: [/PageCanvas/, /WorkspacePanel/],
+  },
+  {
     routes: ["/coaching/[churchId]"],
     owner: "src/app/(dashboard)/coaching/[churchId]/page.tsx",
     composition: "attached-workspace",
@@ -224,10 +230,10 @@ function collectPageRoutes(
   return routes.sort();
 }
 
-test("all 32 specialized surfaces declare their ruled composition and owner", () => {
+test("all 33 specialized surfaces declare their ruled composition and owner", () => {
   const routes = SPECIALIZED_ROUTE_FAMILIES.flatMap((family) => family.routes);
 
-  assert.equal(routes.length, 32);
+  assert.equal(routes.length, 33);
   assert.equal(
     new Set(routes).size,
     routes.length,
