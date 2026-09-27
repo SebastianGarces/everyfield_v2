@@ -9,11 +9,7 @@ import { requireSeat } from "@/lib/auth/seats";
 import { rethrowUnauthorized } from "@/lib/auth/unauthorized";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import {
-  churchMeetings,
-  meetingAttendance,
-  responseStatuses,
-} from "@/db/schema/meetings";
+import { churchMeetings, meetingAttendance } from "@/db/schema/meetings";
 import { personActivities } from "@/db/schema/people";
 // Statically imported, not `await import(…)` per call. Six actions below each
 // lazy-imported one of these — including `responseStatuses`, which arrived by a
@@ -35,7 +31,7 @@ import type {
   MeetingChecklistItem,
   MeetingEvaluation,
 } from "@/db/schema";
-import type { ResponseStatus } from "@/db/schema/meetings";
+import { adminRsvpSchema } from "@/lib/meetings/admin-rsvp";
 import { createPerson } from "@/lib/people/service";
 import { setMeetingAgenda } from "@/lib/meetings/service";
 import {
@@ -835,18 +831,19 @@ export async function updateRsvpStatusAction(
   personId: string,
   status: string
 ): Promise<ActionResult<null>> {
+  const { user } = await requireSeat("meetings.write");
   try {
-    const { user } = await requireSeat("meetings.write");
     if (!user.churchId) return { success: false, error: "No church" };
 
-    if (!responseStatuses.includes(status as ResponseStatus)) {
+    const parsed = adminRsvpSchema.safeParse(status);
+    if (!parsed.success) {
       return { success: false, error: "Invalid status" };
     }
     await updateRsvpStatus(
       user.churchId,
       meetingId,
       personId,
-      status as ResponseStatus
+      parsed.data === "pending" ? null : parsed.data
     );
     revalidatePath(`/meetings/${meetingId}`);
     return { success: true, data: null };

@@ -1,5 +1,15 @@
 "use client";
 
+import { toast } from "sonner";
+import { ADMIN_RSVP_CHOICES, type AdminRsvp } from "@/lib/meetings/admin-rsvp";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuLabel,
+} from "@/components/ui/dropdown-menu";
 import { useState, useTransition, useCallback } from "react";
 import Link from "next/link";
 import {
@@ -100,7 +110,7 @@ const rsvpBadge: Record<
  * The RSVP badge, which is a READ of `responseStatus` and nothing else.
  *
  * Lifted out because it renders on both sides of the write gate — inside the
- * toggle for a viewer who may change the answer, and bare for one who may not.
+ * menu for a viewer who may change the answer, and bare for one who may not.
  * Two copies of the markup would drift the moment a third response status
  * exists.
  */
@@ -146,13 +156,7 @@ export function GuestList({
 }: GuestListProps) {
   const [isPending, startTransition] = useTransition();
 
-  // AS-020. EVERY control on this card is `meetings.write`, THE RSVP TOGGLE
-  // INCLUDED — and that one is the trap. AS-006 keeps "a Member's own RSVP",
-  // but this toggle is not it: it is staff recording somebody ELSE's answer
-  // (`updateRsvpStatusAction` → `meetings.write` in `capability-map.ts`), and a
-  // Member's own RSVP is answered from the emailed link at `/rsvp/[token]`, a
-  // page outside `(dashboard)` that holds no session at all. So it hides with
-  // the rest, and the badge stays as the read it always was.
+  // This is administrative RSVP, separate from a Member's own response.
   const canWrite = useCan("meetings.write");
   const canSend = useCan("communication.send");
 
@@ -218,18 +222,25 @@ export function GuestList({
     });
   };
 
-  const handleRsvpToggle = (personId: string, current: string | null) => {
-    // Cycle: null -> confirmed -> declined -> null
-    let next: string;
-    if (!current || !["confirmed", "declined"].includes(current)) {
-      next = "confirmed";
-    } else if (current === "confirmed") {
-      next = "declined";
-    } else {
-      next = "confirmed";
-    }
+  const handleRsvpChange = (personId: string, status: AdminRsvp) => {
     startTransition(async () => {
-      await updateRsvpStatusAction(meetingId, personId, next);
+      try {
+        const result = await updateRsvpStatusAction(
+          meetingId,
+          personId,
+          status
+        );
+        if (!result.success)
+          toast.error("Could not update RSVP", { description: result.error });
+        else
+          toast.success(
+            status === "pending"
+              ? "RSVP reset to Pending"
+              : `RSVP changed to ${status}`
+          );
+      } catch {
+        toast.error("Could not update RSVP. Please try again.");
+      }
     });
   };
 
@@ -513,24 +524,49 @@ export function GuestList({
                     </div>
 
                     {/* RSVP Status — the badge is the READ and it always
-                        renders; only the toggle around it is the write. */}
+                        renders; only the menu around it is the write. */}
                     <div className="col-span-2">
                       {canWrite ? (
-                        <button
-                          type="button"
-                          className="cursor-pointer"
-                          onClick={() =>
-                            handleRsvpToggle(
-                              guest.personId,
-                              guest.responseStatus
-                            )
-                          }
-                          disabled={isPending}
-                          aria-label={`Change RSVP for ${guest.firstName} ${guest.lastName}`}
-                          title="Click to change RSVP status"
-                        >
-                          {rsvpBadgeFor(rsvp)}
-                        </button>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <button
+                              type="button"
+                              className="focus-visible:outline-ring cursor-pointer rounded-sm py-1 focus-visible:outline-2"
+                              disabled={isPending}
+                              aria-label={`Change RSVP for ${guest.firstName} ${guest.lastName}, ${rsvp?.label ?? "Pending"}`}
+                            >
+                              {rsvpBadgeFor(rsvp)}
+                            </button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="start">
+                            <DropdownMenuLabel>
+                              RSVP for {guest.firstName} {guest.lastName}
+                            </DropdownMenuLabel>
+                            <DropdownMenuRadioGroup
+                              value={
+                                rsvp
+                                  ? (guest.responseStatus ?? "pending")
+                                  : "pending"
+                              }
+                            >
+                              {ADMIN_RSVP_CHOICES.map((choice) => (
+                                <DropdownMenuRadioItem
+                                  key={choice.value}
+                                  value={choice.value}
+                                  disabled={isPending}
+                                  onSelect={() =>
+                                    handleRsvpChange(
+                                      guest.personId,
+                                      choice.value
+                                    )
+                                  }
+                                >
+                                  {choice.label}
+                                </DropdownMenuRadioItem>
+                              ))}
+                            </DropdownMenuRadioGroup>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       ) : (
                         rsvpBadgeFor(rsvp)
                       )}

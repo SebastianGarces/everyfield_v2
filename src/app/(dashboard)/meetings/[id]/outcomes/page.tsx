@@ -1,3 +1,4 @@
+import { hasVisionFeature } from "@/lib/meetings/vision-features";
 import { notFound, redirect } from "next/navigation";
 
 import { ResponseSummary } from "@/components/meetings/response-summary";
@@ -31,7 +32,7 @@ export default async function OutcomesPage({ params }: OutcomesPageProps) {
 
   const { id } = await params;
   const meeting = await getMeeting(user.churchId, id);
-  if (!meeting) notFound();
+  if (!meeting || !hasVisionFeature(meeting, "outcomes")) notFound();
 
   const breakdown = await getMeetingResponseBreakdown(user.churchId, id);
 

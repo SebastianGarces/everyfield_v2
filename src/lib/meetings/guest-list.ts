@@ -325,9 +325,9 @@ export async function updateRsvpStatus(
   churchId: string,
   meetingId: string,
   personId: string,
-  status: ResponseStatus
+  status: Extract<ResponseStatus, "confirmed" | "declined"> | null
 ): Promise<void> {
-  await db
+  const [updated] = await db
     .update(meetingAttendance)
     .set({
       responseStatus: status,
@@ -339,5 +339,7 @@ export async function updateRsvpStatus(
         eq(meetingAttendance.meetingId, meetingId),
         eq(meetingAttendance.personId, personId)
       )
-    );
+    )
+    .returning({ id: meetingAttendance.id });
+  if (!updated) throw new Error("Guest not found");
 }
