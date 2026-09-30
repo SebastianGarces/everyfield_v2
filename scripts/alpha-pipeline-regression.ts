@@ -32,6 +32,14 @@ async function main() {
       taskStatus: "complete",
     },
     {
+      name: "waived",
+      status: "core_group",
+      expect: 0,
+      due: "2026-09-29",
+      taskStatus: "no_longer_needed",
+    },
+    { name: "multiple", status: "launch_team", expect: 1, due: "2026-10-01" },
+    {
       name: "foreign-task",
       status: "prospect",
       expect: 0,
@@ -80,20 +88,30 @@ async function main() {
           .returning();
         parent = t.id;
       }
-      await db
-        .insert(tasks)
-        .values({
-          churchId: "foreign" in row ? f.foreignChurchId : f.primaryChurchId,
-          title: "Regression " + row.name,
-          createdById: actor,
-          category: "follow_up",
-          relatedType: "person",
-          relatedId: p.id,
-          dueDate: row.due,
-          status: "taskStatus" in row ? row.taskStatus : "not_started",
-          parentTaskId: parent,
-          deletedAt: "deleted" in row ? now : null,
-        });
+      await db.insert(tasks).values({
+        churchId: "foreign" in row ? f.foreignChurchId : f.primaryChurchId,
+        title: "Regression " + row.name,
+        createdById: actor,
+        category: "follow_up",
+        relatedType: "person",
+        relatedId: p.id,
+        dueDate: row.due,
+        status: "taskStatus" in row ? row.taskStatus : "not_started",
+        parentTaskId: parent,
+        deletedAt: "deleted" in row ? now : null,
+      });
+      if (row.name === "multiple")
+        await db
+          .insert(tasks)
+          .values({
+            churchId: f.primaryChurchId,
+            title: "Regression additional overdue",
+            createdById: actor,
+            category: "follow_up",
+            relatedType: "person",
+            relatedId: p.id,
+            dueDate: "2026-09-28",
+          });
     }
   }
   const pipeline = await getPipelineData(f.primaryChurchId);
