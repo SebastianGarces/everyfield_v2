@@ -30,7 +30,9 @@ async function main() {
   const output = process.argv[2];
   assert(output, "Private manifest path required");
   const namespace = randomUUID();
-  const password = randomBytes(24).toString("base64url");
+  const password =
+    process.env.ALPHA_LOCAL_TEST_PASSWORD ??
+    randomBytes(24).toString("base64url");
   const passwordHash = await hashPassword(password);
   const [plant] = await db
     .insert(churches)
