@@ -1,11 +1,13 @@
 import { db } from "@/db";
-import { tasks } from "@/db/schema";
+import { tasks, churchMeetings } from "@/db/schema";
 import { and, eq, isNull } from "drizzle-orm";
 
 export interface FollowUpTaskOutcome {
   status: string;
   createdAt: Date;
   followUpStartedAt: Date | null;
+  /** Joined meeting ID: null for missing or foreign-plant provenance. */
+  followUpMeetingId: string | null;
   completedAt: Date | null;
 }
 
@@ -13,22 +15,37 @@ export interface FollowUpTaskOutcome {
 export function getFollowUpTaskOutcomes(
   churchId: string
 ): Promise<FollowUpTaskOutcome[]> {
-  return db
-    .select({
-      status: tasks.status,
-      createdAt: tasks.createdAt,
-      followUpStartedAt: tasks.followUpStartedAt,
-      completedAt: tasks.completedAt,
-    })
-    .from(tasks)
-    .where(
-      and(
-        eq(tasks.churchId, churchId),
-        eq(tasks.category, "follow_up"),
-        isNull(tasks.parentTaskId),
-        isNull(tasks.deletedAt)
+  return followUpTaskOutcomesQuery(churchId);
+}
+
+export function followUpTaskOutcomesQuery(churchId: string) {
+  return (
+    db
+      .select({
+        status: tasks.status,
+        createdAt: tasks.createdAt,
+        followUpStartedAt: tasks.followUpStartedAt,
+        followUpMeetingId: churchMeetings.id,
+        completedAt: tasks.completedAt,
+      })
+      .from(tasks)
+      // Keep historical/soft-deleted meetings as evidence; never join across plants.
+      .leftJoin(
+        churchMeetings,
+        and(
+          eq(tasks.followUpMeetingId, churchMeetings.id),
+          eq(churchMeetings.churchId, churchId)
+        )
       )
-    );
+      .where(
+        and(
+          eq(tasks.churchId, churchId),
+          eq(tasks.category, "follow_up"),
+          isNull(tasks.parentTaskId),
+          isNull(tasks.deletedAt)
+        )
+      )
+  );
 }
 
 /** Matured obligations only: pending work under48h cannot count as failure. */
@@ -46,7 +63,11 @@ export function computeFollowUpTaskMetrics(
       taskWaivedCount++;
       continue;
     }
-    if (row.followUpStartedAt === null) {
+    if (
+      row.followUpMeetingId === null ||
+      row.followUpStartedAt === null ||
+      !Number.isFinite(row.followUpStartedAt.getTime())
+    ) {
       taskUnmeasuredCount++;
       continue;
     }

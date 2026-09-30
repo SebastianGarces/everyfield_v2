@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   computeFollowUpTaskMetrics,
   computeContactFreshness,
+  followUpTaskOutcomesQuery,
 } from "./follow-up-task-metrics";
 const createdAt = new Date("2026-09-01T00:00:00Z");
 const asOf = new Date("2026-09-04T00:00:00Z");
@@ -13,36 +14,42 @@ test("48h completion excludes waiver, recent tasks and missing completion eviden
         {
           status: "complete",
           createdAt,
+          followUpMeetingId: "verified-meeting",
           followUpStartedAt: createdAt,
           completedAt: new Date("2026-09-03T00:00:00Z"),
         },
         {
           status: "complete",
           createdAt,
+          followUpMeetingId: "verified-meeting",
           followUpStartedAt: createdAt,
           completedAt: new Date("2026-09-03T00:00:01Z"),
         },
         {
           status: "complete",
           createdAt,
+          followUpMeetingId: "verified-meeting",
           followUpStartedAt: createdAt,
           completedAt: null,
         },
         {
           status: "not_started",
           createdAt,
+          followUpMeetingId: "verified-meeting",
           followUpStartedAt: createdAt,
           completedAt: null,
         },
         {
           status: "no_longer_needed",
           createdAt,
+          followUpMeetingId: "verified-meeting",
           followUpStartedAt: createdAt,
           completedAt: null,
         },
         {
           status: "complete",
           createdAt: new Date("2026-09-03T00:00:01Z"),
+          followUpMeetingId: "verified-meeting",
           followUpStartedAt: new Date("2026-09-03T00:00:01Z"),
           completedAt: asOf,
         },
@@ -68,12 +75,14 @@ test("late finalization still measures from the meeting; missing origin is unmea
         {
           status: "complete",
           createdAt: new Date("2026-09-03T00:00:00Z"),
+          followUpMeetingId: "verified-meeting",
           followUpStartedAt: createdAt,
           completedAt: new Date("2026-09-03T01:00:00Z"),
         },
         {
           status: "complete",
           createdAt,
+          followUpMeetingId: "verified-meeting",
           followUpStartedAt: null,
           completedAt: new Date("2026-09-02T01:00:00Z"),
         },
@@ -118,4 +127,50 @@ test("contact query scopes both tenant sides and excludes unsuccessful evidence"
     query.params.filter((value) => value === "alpha-church").length >= 3
   );
   assert.ok(query.params.includes(asOf.toISOString()));
+});
+
+test("a start timestamp alone or missing start never proves a generating meeting", () => {
+  const result = computeFollowUpTaskMetrics(
+    [
+      {
+        status: "complete",
+        createdAt,
+        followUpMeetingId: null,
+        followUpStartedAt: createdAt,
+        completedAt: asOf,
+      },
+      {
+        status: "complete",
+        createdAt,
+        followUpMeetingId: "verified-meeting",
+        followUpStartedAt: null,
+        completedAt: asOf,
+      },
+      {
+        status: "complete",
+        createdAt,
+        followUpMeetingId: null,
+        followUpStartedAt: null,
+        completedAt: asOf,
+      },
+    ],
+    asOf
+  );
+  assert.equal(result.taskMeasurableCount, 0);
+  assert.equal(result.taskCompletedWithin48HoursCount, 0);
+  assert.equal(result.taskUnmeasuredCount, 3);
+});
+test("meeting provenance lookup explicitly scopes the joined meeting to the plant", () => {
+  const query = followUpTaskOutcomesQuery("alpha-church").toSQL();
+  assert.match(query.sql, /left join "church_meetings"/);
+  assert.ok(
+    query.sql.includes(
+      '"tasks"."follow_up_meeting_id" = "church_meetings"."id"'
+    )
+  );
+  assert.ok(query.sql.includes('"church_meetings"."church_id"'));
+  assert.equal(
+    query.params.filter((value) => value === "alpha-church").length,
+    2
+  );
 });
