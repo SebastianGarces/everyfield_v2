@@ -29,6 +29,17 @@ export default async function CheckinHistoryPage() {
           {rows.length === 0 && <p>No check-ins yet.</p>}
           {rows.map((row) => (
             <section key={row.id} className="space-y-3">
+              <div className="rounded-md border p-4 text-sm">
+                <h2 className="font-medium">
+                  Saved answer · week of {row.weekStart.slice(0, 10)}
+                </h2>
+                {CHECKIN_DIMENSIONS.map((d) => (
+                  <p key={d.key}>
+                    {d.label}: {row[d.key]}
+                  </p>
+                ))}
+                {row.note && <p className="whitespace-pre-wrap">{row.note}</p>}
+              </div>
               <PlanterCheckinCard
                 historyId={row.id}
                 weekLabel={row.weekStart.slice(0, 10)}

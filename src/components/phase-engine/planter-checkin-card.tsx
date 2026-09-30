@@ -221,7 +221,11 @@ export function PlanterCheckinCard({
             // land here, so the ring only ever appears right after that press.
             tabIndex={-1}
             role="group"
-            aria-label="This week's check-in"
+            aria-label={
+              weekLabel
+                ? `Check-in for week of ${weekLabel}`
+                : "This week's check-in"
+            }
             className="space-y-4"
           >
             {CHECKIN_DIMENSIONS.map((dimension) => (
@@ -275,14 +279,17 @@ export function PlanterCheckinCard({
             ))}
 
             <div className="space-y-1.5">
-              <Label htmlFor="checkin-note" className="text-sm font-medium">
+              <Label
+                htmlFor={`${checkinId}-note`}
+                className="text-sm font-medium"
+              >
                 Anything you want to say to yourself?
                 <span className="text-muted-foreground ml-2 font-normal">
                   Optional
                 </span>
               </Label>
               <Textarea
-                id="checkin-note"
+                id={`${checkinId}-note`}
                 value={draft.note}
                 onChange={(event) =>
                   setEditing({ ...draft, note: event.target.value })
