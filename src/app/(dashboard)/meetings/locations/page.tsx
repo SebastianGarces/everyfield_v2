@@ -1,6 +1,7 @@
 import { listRecordCorrections } from "@/lib/corrections/history";
 import Link from "next/link";
-import { requireSeat } from "@/lib/auth/seats";
+import { holdsSeatFor } from "@/lib/auth/seat-rules";
+import { verifySession } from "@/lib/auth/session";
 import { listLocations } from "@/lib/meetings/locations";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,8 +20,10 @@ export default async function LocationsPage({
 }: {
   searchParams: Promise<{ error?: string; archived?: string }>;
 }) {
-  const { user } = await requireSeat("meetings.write");
-  if (!user.churchId) redirect("/meetings");
+  const { user } = await verifySession();
+  if (!user.churchId || !holdsSeatFor(user, "meetings.write")) {
+    redirect("/meetings");
+  }
   const { error, archived } = await searchParams;
   const locations = await listLocations(user.churchId, archived === "1");
   const histories = new Map(
