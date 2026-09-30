@@ -21,6 +21,16 @@ import {
 } from "@/lib/tasks/service";
 import { SeatRefusalError } from "@/lib/auth/seat-rules";
 async function main() {
+  const target = new URL(process.env.DATABASE_URL!);
+  assert.ok(
+    target.hostname === "localhost" || target.hostname === "127.0.0.1",
+    "Proof requires owned loopback database"
+  );
+  assert.equal(
+    target.pathname,
+    "/alpha_waiver",
+    "Proof refuses any database except owned alpha_waiver"
+  );
   const [church] = await db
     .insert(churches)
     .values({

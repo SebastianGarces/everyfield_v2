@@ -24,6 +24,24 @@ test("waived is settled without being complete, visible under closed tasks", () 
 import { followUpMeetingInstant } from "./events";
 test("meeting provenance resolves church wall time, with ambiguous DST Unknown", () => {
   const wall = new Date("2026-09-01T18:12:34.567Z");
+  const winter = new Date("2026-01-15T18:00:00Z");
+  assert.equal(
+    followUpMeetingInstant(winter, "America/Chicago")?.toISOString(),
+    "2026-01-16T00:00:00.000Z"
+  );
+  assert.equal(
+    followUpMeetingInstant(winter, "America/New_York")?.toISOString(),
+    "2026-01-15T23:00:00.000Z"
+  );
+  const acrossDST = followUpMeetingInstant(
+    new Date("2026-03-07T18:00:00Z"),
+    "America/Chicago"
+  )!;
+  assert.equal(
+    new Date(acrossDST.getTime() + 48 * 60 * 60 * 1000).toISOString(),
+    "2026-03-10T00:00:00.000Z"
+  );
+
   assert.equal(
     followUpMeetingInstant(wall, "UTC")?.toISOString(),
     "2026-09-01T18:12:34.567Z"
