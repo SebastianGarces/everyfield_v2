@@ -6562,6 +6562,76 @@
       },
       "isRLSEnabled": false
     },
+    "public.task_status_history": {
+      "name": "task_status_history",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "task_id": {
+          "name": "task_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "church_id": {
+          "name": "church_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "previous_status": {
+          "name": "previous_status",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "changed_at": {
+          "name": "changed_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "task_status_history_task_id_tasks_id_fk": {
+          "name": "task_status_history_task_id_tasks_id_fk",
+          "tableFrom": "task_status_history",
+          "tableTo": "tasks",
+          "columnsFrom": ["task_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "task_status_history_church_id_churches_id_fk": {
+          "name": "task_status_history_church_id_churches_id_fk",
+          "tableFrom": "task_status_history",
+          "tableTo": "churches",
+          "columnsFrom": ["church_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.tasks": {
       "name": "tasks",
       "schema": "",
@@ -6672,6 +6742,24 @@
           "primaryKey": false,
           "notNull": false
         },
+        "follow_up_meeting_id": {
+          "name": "follow_up_meeting_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "follow_up_started_at": {
+          "name": "follow_up_started_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "follow_up_obligation_key": {
+          "name": "follow_up_obligation_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "completed_by_id": {
           "name": "completed_by_id",
           "type": "uuid",
@@ -6706,6 +6794,27 @@
         }
       },
       "indexes": {
+        "tasks_follow_up_obligation_unique_idx": {
+          "name": "tasks_follow_up_obligation_unique_idx",
+          "columns": [
+            {
+              "expression": "church_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "follow_up_obligation_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "tasks_church_id_idx": {
           "name": "tasks_church_id_idx",
           "columns": [
@@ -6947,7 +7056,7 @@
             }
           ],
           "isUnique": true,
-          "where": "\"tasks\".\"is_recurring\" and \"tasks\".\"status\" <> 'complete' and \"tasks\".\"deleted_at\" is null",
+          "where": "\"tasks\".\"is_recurring\" and \"tasks\".\"status\" not in ('complete', 'no_longer_needed') and \"tasks\".\"deleted_at\" is null",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -9556,6 +9665,13 @@
           "type": "varchar(20)",
           "primaryKey": false,
           "notNull": true
+        },
+        "edit_history": {
+          "name": "edit_history",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
         },
         "note": {
           "name": "note",
@@ -12812,6 +12928,6 @@
     "tables": {},
     "columns": {}
   },
-  "id": "faec6b1e-2875-4f3b-acdf-0f210bc61176",
-  "prevId": "ff6433a0-2383-4fd0-9e95-31e54b077e29"
+  "id": "7cf7216d-faed-435a-aada-25bb0bebf808",
+  "prevId": "1bbb5614-9a0a-478b-b246-82596d58d5eb"
 }
