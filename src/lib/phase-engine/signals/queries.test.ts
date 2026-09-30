@@ -326,7 +326,7 @@ test("no open follow-ups is unknown, never 100%", () => {
   assert.deepEqual(followUp.points, []);
 });
 
-test("a reading the newest snapshot could not answer is dated as older", () => {
+test("a current unknown contact cohort is never filled by an older percentage", () => {
   // The trap this pins: `value` is the newest AVAILABLE reading, not the newest
   // reading. A plant that clears its follow-up queue makes the newer snapshot
   // unable to answer the rate at all (zero denominator is unknown, never 100%),
@@ -352,9 +352,13 @@ test("a reading the newest snapshot could not answer is dated as older", () => {
   assert.ok(trends);
 
   const followUp = metric(trends.metrics, "contact_freshness");
-  assert.equal(followUp.value, 0.8, "the older reading is the one shown");
-  assert.deepEqual(followUp.valueAt, new Date("2026-05-01T00:00:00.000Z"));
-  assert.equal(followUp.valueIsStale, true);
+  assert.equal(
+    followUp.value,
+    null,
+    "the current empty denominator stays Unknown"
+  );
+  assert.equal(followUp.valueAt, null);
+  assert.equal(followUp.valueIsStale, false);
   assert.deepEqual(trends.asOf, new Date("2026-06-01T00:00:00.000Z"));
   // The newest snapshot answered nothing here, so there is no sentence about it.
   assert.equal(followUp.reading, null);

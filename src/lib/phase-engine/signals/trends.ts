@@ -360,7 +360,7 @@ const TREND_METRIC_DEFINITIONS: readonly TrendMetricDefinition[] = [
     reading: (row) => {
       const total = row.taskMeasurableCount;
       const completed = row.taskCompletedWithin48HoursCount;
-      return total != null && total > 0 && completed != null
+      return total != null && completed != null
         ? `${completed} of ${total} matured tasks completed within 48 hours of the meeting; ${row.taskWaivedCount ?? 0} no longer needed; ${row.taskUnmeasuredCount ?? 0} without meeting evidence`
         : null;
     },
@@ -532,10 +532,19 @@ export function buildPlantTrends(
       }
     }
 
-    const last = points[points.length - 1] ?? null;
+    const historicalLast = points[points.length - 1] ?? null;
+    // Follow-up denominators describe the current cohort. A prior percentage
+    // must not fill a current Unknown, even if dated as an older reading.
+    const needsCurrentEvidence =
+      definition.key === "follow_up_completion" ||
+      definition.key === "contact_freshness";
+    const last =
+      needsCurrentEvidence && definition.read(newest) === null
+        ? null
+        : historicalLast;
     // Two readings are the minimum a change can be claimed from. One reading is
     // a value; zero is silence. Neither gets a delta, a direction or a line.
-    const comparable = points.length >= 2;
+    const comparable = last !== null && points.length >= 2;
     const delta = comparable ? last!.value - points[0].value : null;
 
     return {
