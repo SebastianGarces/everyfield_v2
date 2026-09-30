@@ -8,7 +8,7 @@ import {
   trainingPrograms,
   trainingCompletions,
 } from "@/db/schema";
-import { and, desc, eq, inArray, sql, asc } from "drizzle-orm";
+import { and, desc, eq, inArray, sql, asc, isNull, ne } from "drizzle-orm";
 import { getTeamStaffingCounts } from "./shared";
 import { staffingPercent } from "./team-display";
 
@@ -203,6 +203,7 @@ export async function getTeamHealth(
       .where(
         and(
           eq(trainingCompletions.churchId, churchId),
+          isNull(trainingCompletions.revokedAt),
           inArray(
             trainingCompletions.personId,
             members.map((m) => m.personId)
@@ -268,7 +269,12 @@ export async function getAllTeamsHealth(
   const teams = await db
     .select({ id: ministryTeams.id, name: ministryTeams.name })
     .from(ministryTeams)
-    .where(eq(ministryTeams.churchId, churchId))
+    .where(
+      and(
+        eq(ministryTeams.churchId, churchId),
+        ne(ministryTeams.status, "archived")
+      )
+    )
     .orderBy(asc(ministryTeams.sortOrder));
 
   if (teams.length === 0) return [];
@@ -350,6 +356,7 @@ export async function getAllTeamsHealth(
           .where(
             and(
               eq(trainingCompletions.churchId, churchId),
+              isNull(trainingCompletions.revokedAt),
               inArray(
                 trainingCompletions.trainingProgramId,
                 requiredPrograms.map((p) => p.id)
@@ -444,7 +451,12 @@ export async function getStaffingSummary(
   const [teamCountResult] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(ministryTeams)
-    .where(eq(ministryTeams.churchId, churchId));
+    .where(
+      and(
+        eq(ministryTeams.churchId, churchId),
+        ne(ministryTeams.status, "archived")
+      )
+    );
 
   const [roleStats] = await db
     .select({
@@ -452,7 +464,14 @@ export async function getStaffingSummary(
       filled: sql<number>`count(*) filter (where ${teamRoles.status} = 'filled')::int`,
     })
     .from(teamRoles)
-    .where(eq(teamRoles.churchId, churchId));
+    .innerJoin(ministryTeams, eq(teamRoles.teamId, ministryTeams.id))
+    .where(
+      and(
+        eq(teamRoles.churchId, churchId),
+        eq(ministryTeams.churchId, churchId),
+        ne(ministryTeams.status, "archived")
+      )
+    );
 
   const totalTeams = teamCountResult?.count ?? 0;
   const totalRoles = roleStats?.total ?? 0;
