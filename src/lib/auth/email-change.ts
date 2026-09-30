@@ -73,7 +73,7 @@
 // never be holding two live links whose order nobody can reconstruct.
 // ============================================================================
 
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, gt, isNull, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { isUniqueViolation } from "@/db/errors";
@@ -358,6 +358,8 @@ export async function requestEmailChange({
  * separate round trip. A row that expires between the two would otherwise be
  * redeemed on the strength of a stale snapshot.
  */
+// Column-aware predicates use the same UTC encoder as INSERT/UPDATE. Raw Date
+// interpolation uses the host timezone for this timestamp-without-zone column.
 export function consumeRequestStatement(requestId: string, now: Date) {
   return db
     .update(emailChangeRequests)
@@ -366,7 +368,7 @@ export function consumeRequestStatement(requestId: string, now: Date) {
       and(
         eq(emailChangeRequests.id, requestId),
         isNull(emailChangeRequests.consumedAt),
-        sql`${emailChangeRequests.expiresAt} > ${now}`
+        gt(emailChangeRequests.expiresAt, now)
       )
     )
     .returning({ id: emailChangeRequests.id });
@@ -421,7 +423,7 @@ export function swapLoginIdentifierStatement(
         sql`exists (
               select 1 from ${emailChangeRequests}
               where ${emailChangeRequests.id} = ${requestId}
-                and ${emailChangeRequests.consumedAt} = ${now}
+                and ${eq(emailChangeRequests.consumedAt, now)}
             )`
       )
     )
@@ -468,7 +470,7 @@ export async function liveEmailChangeRequest(
         // THE WINDOW IS IN THE `WHERE`, like the claim's. Filtering it in
         // JavaScript afterwards would be a second reading of the same rule, one
         // round trip later — and the two can only ever drift apart.
-        sql`${emailChangeRequests.expiresAt} > ${now}`
+        gt(emailChangeRequests.expiresAt, now)
       )
     )
     .limit(1);

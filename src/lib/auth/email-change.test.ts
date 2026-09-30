@@ -639,3 +639,24 @@ test("a nameless account still gets readable copy", async () => {
   );
   assert.ok(message.text.includes(NEW_EMAIL));
 });
+
+test("claim and swap encode every timestamp identically to the column write", () => {
+  const claim = consumeRequestStatement("request", NOW).toSQL();
+  const swap = swapLoginIdentifierStatement(
+    USER_ID,
+    "request",
+    CURRENT_EMAIL,
+    NEW_EMAIL,
+    NOW
+  ).toSQL();
+  for (const statement of [claim, swap]) {
+    assert.equal(
+      statement.params.filter((param) => param === NOW.toISOString()).length,
+      2
+    );
+    assert.ok(
+      !statement.params.some((param) => param instanceof Date),
+      "raw Dates bypass the column encoder"
+    );
+  }
+});
