@@ -101,17 +101,15 @@ async function main() {
         deletedAt: "deleted" in row ? now : null,
       });
       if (row.name === "multiple")
-        await db
-          .insert(tasks)
-          .values({
-            churchId: f.primaryChurchId,
-            title: "Regression additional overdue",
-            createdById: actor,
-            category: "follow_up",
-            relatedType: "person",
-            relatedId: p.id,
-            dueDate: "2026-09-28",
-          });
+        await db.insert(tasks).values({
+          churchId: f.primaryChurchId,
+          title: "Regression additional overdue",
+          createdById: actor,
+          category: "follow_up",
+          relatedType: "person",
+          relatedId: p.id,
+          dueDate: "2026-09-28",
+        });
     }
   }
   const pipeline = await getPipelineData(f.primaryChurchId);
