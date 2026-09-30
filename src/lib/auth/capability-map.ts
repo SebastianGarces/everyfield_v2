@@ -66,6 +66,20 @@ export const CAPABILITY_BY_EXPORT: Readonly<Record<string, string>> = {
     "meetings.attendance",
   "src/app/(dashboard)/meetings/actions.ts → clearResponseCardAction":
     "meetings.write",
+  "src/app/(dashboard)/people/correction-actions.ts → correctPersonRecordAction":
+    "people.write",
+  "src/app/(dashboard)/teams/actions.ts → undoTrainingCompleteAction":
+    "teams.own",
+  "src/app/(dashboard)/teams/actions.ts → updateTrainingProgramAction":
+    "teams.write",
+  "src/app/(dashboard)/meetings/actions.ts → saveLocationFormAction":
+    "meetings.write",
+  "src/app/(dashboard)/meetings/actions.ts → archiveLocationFormAction":
+    "meetings.write",
+  "src/app/(dashboard)/meetings/actions.ts → archiveLocationAction":
+    "meetings.write",
+  "src/app/(dashboard)/meetings/actions.ts → updateEvaluationAction":
+    "meetings.write",
   "src/app/(dashboard)/meetings/actions.ts → createEvaluationAction":
     "meetings.write",
   "src/app/(dashboard)/meetings/actions.ts → createLocationAction":

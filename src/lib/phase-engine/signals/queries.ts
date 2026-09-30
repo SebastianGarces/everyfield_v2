@@ -338,7 +338,12 @@ export async function getMinistryTeams(
       leaderId: ministryTeams.leaderId,
     })
     .from(ministryTeams)
-    .where(eq(ministryTeams.churchId, churchId))
+    .where(
+      and(
+        eq(ministryTeams.churchId, churchId),
+        sql`${ministryTeams.status} <> 'archived'`
+      )
+    )
     .orderBy(ministryTeams.name, ministryTeams.id);
 }
 
@@ -584,6 +589,7 @@ export async function getTeamLeaderPersonIds(
     .where(
       and(
         eq(ministryTeams.churchId, churchId),
+        sql`${ministryTeams.status} <> 'archived'`,
         isNotNull(ministryTeams.leaderId)
       )
     );
@@ -629,7 +635,12 @@ export async function getTrainingCompletions(
       trainingProgramId: trainingCompletions.trainingProgramId,
     })
     .from(trainingCompletions)
-    .where(eq(trainingCompletions.churchId, churchId))
+    .where(
+      and(
+        eq(trainingCompletions.churchId, churchId),
+        isNull(trainingCompletions.revokedAt)
+      )
+    )
     .orderBy(trainingCompletions.id);
 }
 

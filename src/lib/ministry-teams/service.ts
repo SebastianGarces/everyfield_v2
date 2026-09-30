@@ -78,6 +78,8 @@ export {
   listTrainingPrograms,
   createTrainingProgram,
   markTrainingComplete,
+  undoTrainingComplete,
+  updateTrainingProgram,
   getPersonTraining,
   getTrainingMatrix,
 } from "./training";

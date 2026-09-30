@@ -56,7 +56,12 @@ export type PredefinedTeamKey = (typeof PREDEFINED_TEAM_KEYS)[number];
 export const teamLeaderSources = ["explicit", "role", "legacy"] as const;
 export type TeamLeaderSource = (typeof teamLeaderSources)[number];
 
-export const teamStatuses = ["forming", "active", "paused"] as const;
+export const teamStatuses = [
+  "forming",
+  "active",
+  "paused",
+  "archived",
+] as const;
 export type TeamStatus = (typeof teamStatuses)[number];
 
 export const roleStatuses = ["open", "filled"] as const;
@@ -465,6 +470,7 @@ export const trainingCompletions = pgTable(
       .references(() => trainingPrograms.id, { onDelete: "cascade" })
       .notNull(),
     completedAt: timestamp("completed_at").notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
     verifiedBy: uuid("verified_by").references(() => users.id),
     notes: text("notes"),
     createdBy: uuid("created_by")

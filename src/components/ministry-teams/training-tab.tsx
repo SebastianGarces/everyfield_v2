@@ -1,7 +1,7 @@
 "use client";
 
 import { toast } from "sonner";
-import { GraduationCap, Plus } from "lucide-react";
+import { Check, GraduationCap, Plus } from "lucide-react";
 
 import { useCan } from "@/components/shared/viewer-capabilities";
 import { useCanManageTeam } from "./team-write-context";
@@ -28,6 +28,8 @@ import {
 import {
   createTrainingProgramAction,
   markTrainingCompleteAction,
+  undoTrainingCompleteAction,
+  updateTrainingProgramAction,
 } from "@/app/(dashboard)/teams/actions";
 import type { TrainingProgram } from "@/db/schema";
 import type { TrainingMatrixRow } from "@/lib/ministry-teams/service";
@@ -117,6 +119,39 @@ export function TrainingTab({ teamId, programs, matrix }: TrainingTabProps) {
       <TrainingMatrix
         programs={programs}
         matrix={matrix}
+        completeCell={
+          canWrite
+            ? ({ personId, personName, programId, programName }) =>
+                canWriteAllTeams ||
+                programs.some(
+                  (p) => p.id === programId && p.teamId === teamId
+                ) ? (
+                  <button
+                    type="button"
+                    className="hover:bg-muted inline-flex cursor-pointer rounded p-1"
+                    aria-label={`Undo completion for ${personName}: ${programName}`}
+                    title="Undo completion (history retained)"
+                    onClick={async () => {
+                      const result = await undoTrainingCompleteAction({
+                        personId,
+                        programId,
+                      });
+                      if (!result.success) toast.error(result.error);
+                    }}
+                  >
+                    <Check
+                      className="h-5 w-5 text-green-500"
+                      aria-hidden="true"
+                    />
+                  </button>
+                ) : (
+                  <Check
+                    className="h-5 w-5 text-green-500"
+                    aria-label="Complete"
+                  />
+                )
+            : undefined
+        }
         incompleteCell={
           canWrite
             ? ({ personId, personName, programId, programName }) =>
@@ -141,6 +176,59 @@ export function TrainingTab({ teamId, programs, matrix }: TrainingTabProps) {
         }
       />
 
+      {canWriteAllTeams && (
+        <div className="space-y-2">
+          {programs.map((program) => (
+            <details key={program.id} className="rounded border p-3">
+              <summary className="cursor-pointer text-sm">
+                Edit {program.name}
+              </summary>
+              <form
+                className="mt-3 grid gap-2"
+                action={async (formData) => {
+                  const result = await updateTrainingProgramAction(
+                    program.id,
+                    formData
+                  );
+                  if (!result.success) toast.error(result.error);
+                  else toast.success("Training program corrected");
+                }}
+              >
+                <input
+                  type="hidden"
+                  name="expectedUpdatedAt"
+                  value={new Date(program.updatedAt).toISOString()}
+                />
+                <Label htmlFor={`program-name-${program.id}`}>Name</Label>
+                <Input
+                  id={`program-name-${program.id}`}
+                  name="name"
+                  defaultValue={program.name}
+                  required
+                />
+                <Label htmlFor={`program-description-${program.id}`}>
+                  Description
+                </Label>
+                <Textarea
+                  id={`program-description-${program.id}`}
+                  name="description"
+                  defaultValue={program.description ?? ""}
+                />
+                <label className="flex gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    name="isRequired"
+                    value="true"
+                    defaultChecked={program.isRequired}
+                  />
+                  Required
+                </label>
+                <Button type="submit">Save changes</Button>
+              </form>
+            </details>
+          ))}
+        </div>
+      )}
       {/* Training stats */}
       <div className="flex gap-4">
         <Badge variant="secondary" className="text-xs">

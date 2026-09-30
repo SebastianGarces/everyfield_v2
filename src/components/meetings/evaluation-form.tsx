@@ -7,7 +7,10 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { createEvaluationAction } from "@/app/(dashboard)/meetings/actions";
+import {
+  createEvaluationAction,
+  updateEvaluationAction,
+} from "@/app/(dashboard)/meetings/actions";
 import { useCan } from "@/components/shared/viewer-capabilities";
 // The factors and the rating scale come from the one list the zod schema is
 // built from, so a factor added there is asked for here, listed on the summary
@@ -34,6 +37,8 @@ interface EvaluationFormProps {
    * name once and this component only prints it.
    */
   title: string;
+  evaluation?: MeetingEvaluation;
+  onCancel?: () => void;
 }
 
 /**
@@ -47,7 +52,12 @@ interface EvaluationFormProps {
  */
 const FACTOR_COUNT = EVALUATION_QUALITY_FACTORS.length;
 
-export function EvaluationForm({ meetingId, title }: EvaluationFormProps) {
+export function EvaluationForm({
+  meetingId,
+  title,
+  evaluation,
+  onCancel,
+}: EvaluationFormProps) {
   // AS-020. The page renders this form ONLY when no evaluation exists yet, so
   // for a Member it is an empty state and not a form: there is nothing to read
   // here, and every mark on it is `createEvaluationAction` — `meetings.write`.
@@ -55,13 +65,25 @@ export function EvaluationForm({ meetingId, title }: EvaluationFormProps) {
   const canWrite = useCan("meetings.write");
   const [scores, setScores] = useState<
     Partial<Record<EvaluationScoreKey, number>>
-  >({});
+  >(
+    evaluation
+      ? Object.fromEntries(
+          EVALUATION_QUALITY_FACTORS.map((f) => [f.key, evaluation[f.key]])
+        )
+      : {}
+  );
 
   const action = async (
     _prevState: ActionResult<MeetingEvaluation> | null,
     formData: FormData
   ) => {
-    return createEvaluationAction(meetingId, formData);
+    return evaluation
+      ? updateEvaluationAction(
+          meetingId,
+          evaluation.updatedAt.toISOString(),
+          formData
+        )
+      : createEvaluationAction(meetingId, formData);
   };
 
   const [state, formAction, isPending] = useActionState(action, null);
@@ -173,18 +195,24 @@ export function EvaluationForm({ meetingId, title }: EvaluationFormProps) {
           id="notes"
           name="notes"
           placeholder="What can be improved for the next meeting?"
+          defaultValue={evaluation?.notes ?? ""}
           rows={3}
         />
       </div>
 
-      <div className="flex justify-end">
+      <div className="flex justify-end gap-2">
+        {onCancel && (
+          <Button type="button" variant="outline" onClick={onCancel}>
+            Cancel
+          </Button>
+        )}
         <Button
           type="submit"
           disabled={isPending || !isComplete}
           className="cursor-pointer"
         >
           {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-          Save Evaluation
+          {evaluation ? "Save Correction" : "Save Evaluation"}
         </Button>
       </div>
     </form>

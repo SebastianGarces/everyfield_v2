@@ -98,6 +98,8 @@ const serviceNames = [
   "deleteResponsibility",
   "createTrainingProgram",
   "markTrainingComplete",
+  "undoTrainingComplete",
+  "updateTrainingProgram",
 ];
 mock.module("@/lib/ministry-teams/service", {
   namedExports: {
@@ -218,6 +220,20 @@ async function main() {
       "createTrainingProgramAction",
       true,
       () => a.createTrainingProgramAction(form({ name: "Test", teamId: X })),
+    ],
+    [
+      "undoTrainingCompleteAction",
+      true,
+      () => a.undoTrainingCompleteAction({ personId: PERSON, programId: ROW }),
+    ],
+    [
+      "updateTrainingProgramAction",
+      false,
+      () =>
+        a.updateTrainingProgramAction(
+          ROW,
+          form({ name: "Test", expectedUpdatedAt: "2026-10-01T12:00:00.000Z" })
+        ),
     ],
     [
       "markTrainingCompleteAction",
@@ -375,6 +391,7 @@ async function main() {
           "deleteResponsibilityAction",
           "setResponsibilityCompleteAction",
           "markTrainingCompleteAction",
+          "undoTrainingCompleteAction",
         ].includes(name)
       )
         continue;

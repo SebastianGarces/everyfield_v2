@@ -44,6 +44,7 @@ const SPECIALIZED_ROUTE_FAMILIES: readonly SpecializedRouteFamily[] = [
       "/people/[id]/assessments/new",
       "/people/[id]/assessments/interview",
       "/people/[id]/assessments/commitment",
+      "/people/[id]/assessments/correct/[kind]/[recordId]",
     ],
     owner: "src/components/people/assessment-entry-shell.tsx",
     composition: "attached-workspace",
@@ -176,6 +177,7 @@ const STAGE_3_PRIMARY_ROUTES = [
   "/launch",
   "/meetings",
   "/meetings/new",
+  "/meetings/locations",
   "/notifications",
   "/oversight",
   "/oversight/health",
@@ -243,10 +245,10 @@ function collectPageRoutes(
   return routes.sort();
 }
 
-test("all 37 specialized surfaces declare their ruled composition and owner", () => {
+test("all 38 specialized surfaces declare their ruled composition and owner", () => {
   const routes = SPECIALIZED_ROUTE_FAMILIES.flatMap((family) => family.routes);
 
-  assert.equal(routes.length, 37);
+  assert.equal(routes.length, 38);
   assert.equal(
     new Set(routes).size,
     routes.length,

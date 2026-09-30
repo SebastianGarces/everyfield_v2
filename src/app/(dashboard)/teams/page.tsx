@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { HeaderBreadcrumbs } from "@/components/header";
@@ -10,7 +11,12 @@ import { getStaffingSummary, listTeams } from "@/lib/ministry-teams/service";
 
 export const dynamic = "force-dynamic";
 
-export default async function TeamsPage() {
+export default async function TeamsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ archived?: string }>;
+}) {
+  const includeArchived = (await searchParams).archived === "1";
   const { user } = await verifySession();
 
   if (!user.churchId) {
@@ -23,7 +29,7 @@ export default async function TeamsPage() {
   const canWrite = holdsSeatFor(user, "teams.write");
 
   const [teams, staffingSummary] = await Promise.all([
-    listTeams(user.churchId),
+    listTeams(user.churchId, includeArchived),
     getStaffingSummary(user.churchId),
   ]);
 
@@ -51,6 +57,14 @@ export default async function TeamsPage() {
           </div>
 
           <div className="min-h-0 flex-1 overflow-auto p-4 sm:p-6">
+            <Link
+              className="mb-4 inline-block cursor-pointer text-sm underline"
+              href={includeArchived ? "/teams" : "/teams?archived=1"}
+            >
+              {includeArchived
+                ? "Hide archived teams"
+                : "Include archived teams"}
+            </Link>
             <TeamsDashboard teams={teams} staffingSummary={staffingSummary} />
           </div>
         </WorkspacePanel>

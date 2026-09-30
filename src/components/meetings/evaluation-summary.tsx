@@ -1,3 +1,9 @@
+"use client";
+
+import { useState } from "react";
+import { Button } from "@/components/ui/button";
+import { EvaluationForm } from "./evaluation-form";
+import { useCan } from "@/components/shared/viewer-capabilities";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Star } from "lucide-react";
 // The same list the form asks from and the same scale it offers — this file
@@ -23,6 +29,7 @@ interface EvaluationSummaryProps {
    * the name once and this component only prints it.
    */
   title: string;
+  meetingId?: string;
 }
 
 function ScoreStars({ score }: { score: number }) {
@@ -43,9 +50,27 @@ function ScoreStars({ score }: { score: number }) {
 export function EvaluationSummary({
   evaluation,
   title,
+  meetingId,
 }: EvaluationSummaryProps) {
+  const [editing, setEditing] = useState(false);
+  const canWrite = useCan("meetings.write");
+  if (editing && meetingId)
+    return (
+      <EvaluationForm
+        key={evaluation.updatedAt.toISOString()}
+        meetingId={meetingId}
+        title={title}
+        evaluation={evaluation}
+        onCancel={() => setEditing(false)}
+      />
+    );
   return (
     <div className="space-y-6">
+      {canWrite && meetingId && (
+        <Button variant="outline" onClick={() => setEditing(true)}>
+          Correct Evaluation
+        </Button>
+      )}
       <div className="text-center">
         <h2 className="text-xl font-bold">{title} Evaluation</h2>
         <div className="mt-2">
