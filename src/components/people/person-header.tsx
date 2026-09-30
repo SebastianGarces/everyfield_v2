@@ -181,9 +181,10 @@ export function PersonHeader({
                         Are you absolutely sure?
                       </AlertDialogTitle>
                       <AlertDialogDescription>
-                        This action cannot be undone. This will permanently
-                        delete <span className="font-semibold">{fullName}</span>{" "}
-                        and remove their data from our servers.
+                        This removes{" "}
+                        <span className="font-semibold">{fullName}</span> from
+                        the people directory. Their record and history are
+                        retained.
                       </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
