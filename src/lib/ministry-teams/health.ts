@@ -20,17 +20,17 @@ export interface StaffingSummary {
   totalTeams: number;
   totalRoles: number;
   filledRoles: number;
-  staffingPercentage: number;
+  staffingPercentage: number | null;
 }
 
 export interface TeamHealthMetrics {
   teamId: string;
   teamName: string;
-  staffingPercent: number;
-  trainingPercent: number;
-  meetingAttendancePercent: number;
-  engagementScore: number;
-  alertLevel: "green" | "yellow" | "red";
+  staffingPercent: number | null;
+  trainingPercent: number | null;
+  meetingAttendancePercent: number | null;
+  engagementScore: number | null;
+  alertLevel: "green" | "yellow" | "red" | "unknown";
 }
 
 // ============================================================================
@@ -86,38 +86,44 @@ export function countAttendedByMembers(
 /**
  * The one place the health figures are derived. Both `getTeamHealth` and
  * `getAllTeamsHealth` feed this, so the single-team page and the dashboard
- * cannot drift apart. An empty denominator reads 100 throughout: nothing was
- * required, so nothing is missing. Exported for the unit tests only — the app
+ * cannot drift apart. An empty denominator is Unknown: missing evidence must
+ * never produce a positive assessment. Exported for the unit tests only — the app
  * reaches it through the two reads below.
  */
 export function computeTeamHealth(inputs: TeamHealthInputs): TeamHealthMetrics {
-  const staffing = staffingPercent(
-    inputs.staffing.filled,
-    inputs.staffing.total,
-    100
-  );
-
+  const staffing =
+    inputs.staffing.total > 0
+      ? staffingPercent(inputs.staffing.filled, inputs.staffing.total, 0)
+      : null;
   const totalRequired = inputs.requiredProgramCount * inputs.memberCount;
   const trainingPercent =
     totalRequired > 0
       ? Math.round((inputs.completedCount / totalRequired) * 100)
-      : 100;
-
+      : null;
   const totalExpected = inputs.memberCount * inputs.recentMeetingCount;
   const meetingAttendancePercent =
     totalExpected > 0
       ? Math.round((inputs.attendedCount / totalExpected) * 100)
-      : 100;
+      : null;
 
-  // Engagement score (weighted average)
-  const engagementScore = Math.round(
-    staffing * 0.4 + trainingPercent * 0.35 + meetingAttendancePercent * 0.25
-  );
-
-  // Alert level
-  let alertLevel: "green" | "yellow" | "red" = "green";
-  if (staffing < 40) alertLevel = "red";
-  else if (staffing < 60 || meetingAttendancePercent < 50)
+  // Do not fill missing evidence with a perfect score or renormalize weights.
+  const engagementScore =
+    staffing !== null &&
+    trainingPercent !== null &&
+    meetingAttendancePercent !== null
+      ? Math.round(
+          staffing * 0.4 +
+            trainingPercent * 0.35 +
+            meetingAttendancePercent * 0.25
+        )
+      : null;
+  let alertLevel: TeamHealthMetrics["alertLevel"] =
+    engagementScore === null ? "unknown" : "green";
+  if (staffing !== null && staffing < 40) alertLevel = "red";
+  else if (
+    (staffing !== null && staffing < 60) ||
+    (meetingAttendancePercent !== null && meetingAttendancePercent < 50)
+  )
     alertLevel = "yellow";
 
   return {
@@ -457,6 +463,6 @@ export async function getStaffingSummary(
     totalRoles,
     filledRoles,
     staffingPercentage:
-      totalRoles > 0 ? Math.round((filledRoles / totalRoles) * 100) : 0,
+      totalRoles > 0 ? Math.round((filledRoles / totalRoles) * 100) : null,
   };
 }

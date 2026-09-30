@@ -828,3 +828,7 @@ The platform extends this to 10 teams to provide more granular organization and 
 - Training completion required before Phase 4 (Pre-Launch)
 - All teams have clear responsibilities and checklists for Launch Sunday
 - Ongoing team health monitoring supports the 8 Critical Success Factors
+
+### Alpha evidence semantics (2026-09-30, #867)
+
+An absent denominator for staffing, required training or recent meeting attendance is **Unknown**, never100%. No explicit applicability override exists yet, so absence alone cannot mean N/A. Engagement remains Unknown until all three components are measured; do not renormalize the weights around missing evidence. A measured staffing or attendance gap can still produce an alert while other components are Unknown. Summary engagement averages only fully measured teams and labels the measured-team count. Comparisons omit unmeasured teams rather than drawing missing values as zero.

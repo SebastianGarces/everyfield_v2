@@ -108,7 +108,7 @@ test("the true (lower) rate is reported once guests are excluded", () => {
   assert.equal(health.meetingAttendancePercent, 25);
 });
 
-test("no meetings in the window still reads 100 — nothing was expected", () => {
+test("no meetings in the window reads Unknown", () => {
   const health = computeTeamHealth({
     ...baseInputs,
     memberCount: 3,
@@ -116,5 +116,31 @@ test("no meetings in the window still reads 100 — nothing was expected", () =>
     attendedCount: 0,
   });
 
-  assert.equal(health.meetingAttendancePercent, 100);
+  assert.equal(health.meetingAttendancePercent, null);
+});
+
+test("empty evidence never produces healthy percentages or green status", () => {
+  const health = computeTeamHealth({
+    ...baseInputs,
+    staffing: { filled: 0, total: 0 },
+    memberCount: 0,
+    recentMeetingCount: 0,
+    attendedCount: 0,
+  });
+  assert.equal(health.staffingPercent, null);
+  assert.equal(health.trainingPercent, null);
+  assert.equal(health.engagementScore, null);
+  assert.equal(health.alertLevel, "unknown");
+});
+test("measured gaps still warn while other evidence is missing", () => {
+  const health = computeTeamHealth({
+    ...baseInputs,
+    staffing: { filled: 0, total: 2 },
+    memberCount: 0,
+    recentMeetingCount: 0,
+    attendedCount: 0,
+  });
+  assert.equal(health.staffingPercent, 0);
+  assert.equal(health.engagementScore, null);
+  assert.equal(health.alertLevel, "red");
 });

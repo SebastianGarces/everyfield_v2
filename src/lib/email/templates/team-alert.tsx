@@ -64,10 +64,20 @@ function TeamAlertEmail({
                 <strong>{alert.teamName}</strong>
                 <span style={{ ...alertLabel, color }}> {label}</span>
               </Column>
-              <Column style={cellCenter}>{alert.staffingPercent}%</Column>
-              <Column style={cellCenter}>{alert.trainingPercent}%</Column>
               <Column style={cellCenter}>
-                {alert.meetingAttendancePercent}%
+                {alert.staffingPercent === null
+                  ? "Unknown"
+                  : `${alert.staffingPercent}%`}
+              </Column>
+              <Column style={cellCenter}>
+                {alert.trainingPercent === null
+                  ? "Unknown"
+                  : `${alert.trainingPercent}%`}
+              </Column>
+              <Column style={cellCenter}>
+                {alert.meetingAttendancePercent === null
+                  ? "Unknown"
+                  : `${alert.meetingAttendancePercent}%`}
               </Column>
             </Row>
           );
