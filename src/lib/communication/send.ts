@@ -251,7 +251,8 @@ export async function sendCommunication(
   }
 
   // 7. Send via Resend (batch if > 1, single otherwise), then mark the
-  // message sent — one terminal update, whichever path dispatched it.
+  // sent only when at least one dispatch was accepted by the provider.
+  let acceptedCount = 0;
   try {
     if (emails.length === 1) {
       // Single send
@@ -271,6 +272,7 @@ export async function sendCommunication(
           error.message
         );
       } else if (data?.id) {
+        acceptedCount++;
         await db
           .update(communicationRecipients)
           .set({ externalId: data.id, status: "sent" })
@@ -305,6 +307,7 @@ export async function sendCommunication(
             const resendItem = ids[i];
             const recipient = chunk[i];
             if (recipient && resendItem?.id) {
+              acceptedCount++;
               await db
                 .update(communicationRecipients)
                 .set({ externalId: resendItem.id, status: "sent" })
@@ -315,12 +318,46 @@ export async function sendCommunication(
       }
     }
 
+    if (acceptedCount === 0) {
+      await db
+        .update(communicationRecipients)
+        .set({
+          status: "failed",
+          errorMessage: "Email provider did not accept the message",
+        })
+        .where(
+          and(
+            eq(communicationRecipients.communicationId, comm.id),
+            eq(communicationRecipients.churchId, churchId),
+            eq(communicationRecipients.status, "pending")
+          )
+        );
+    }
+
     await db
       .update(communications)
-      .set({ status: "sent", sentAt: new Date(), updatedAt: new Date() })
+      .set({
+        status: acceptedCount > 0 ? "sent" : "failed",
+        sentAt: acceptedCount > 0 ? new Date() : null,
+        updatedAt: new Date(),
+      })
       .where(eq(communications.id, comm.id));
   } catch (err) {
     console.error("[COMM] Send exception:", err);
+    await db
+      .update(communicationRecipients)
+      .set({
+        status: "failed",
+        errorMessage:
+          err instanceof Error ? err.message : "Email provider failed",
+      })
+      .where(
+        and(
+          eq(communicationRecipients.communicationId, comm.id),
+          eq(communicationRecipients.churchId, churchId),
+          eq(communicationRecipients.status, "pending")
+        )
+      );
     await db
       .update(communications)
       .set({ status: "failed", updatedAt: new Date() })
