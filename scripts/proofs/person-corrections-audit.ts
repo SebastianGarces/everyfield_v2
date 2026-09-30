@@ -83,6 +83,7 @@ async function main() {
         signedDate: "2026-09-01",
         notes: "Original",
         documentUrl: "proof/retained.pdf",
+        witnessedBy: user.id,
       })
       .returning();
     for (const [kind, id, input] of [
@@ -113,7 +114,11 @@ async function main() {
       [
         "commitment",
         commitment.id,
-        { commitmentType: "launch_team", signedDate: "2026-09-02" },
+        {
+          commitmentType: "launch_team",
+          signedDate: "2026-09-02",
+          witnessedBy: crypto.randomUUID(),
+        },
       ],
     ] as [PersonRecordKind, string, Record<string, unknown>][]) {
       const original = await getPersonRecordCorrection(
@@ -183,8 +188,10 @@ async function main() {
         assert.equal(revised.record.committed_notes, null);
       }
       if (kind === "interview") assert.equal(revised.record.next_steps, null);
-      if (kind === "commitment")
+      if (kind === "commitment") {
         assert.equal(revised.record.document_url, "proof/retained.pdf");
+        assert.equal(revised.record.witnessed_by, user.id);
+      }
       const history = await db
         .select()
         .from(recordCorrections)

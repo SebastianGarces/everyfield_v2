@@ -27,6 +27,7 @@ const excluded = new Set([
   "interviewed_by",
   "total_score",
   "document_url",
+  "witnessed_by",
 ]);
 export function RecordCorrectionForm({
   personId,

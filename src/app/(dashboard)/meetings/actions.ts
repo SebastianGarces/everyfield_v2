@@ -51,6 +51,7 @@ import {
   createLocation,
   updateLocation,
   deactivateLocation,
+  restoreLocation,
 } from "@/lib/meetings/locations";
 import {
   addAttendee,
@@ -764,7 +765,7 @@ export async function archiveLocationAction(
   const { user } = await requireSeat("meetings.write");
   try {
     if (!user.churchId) return { success: false, error: "Unauthorized" };
-    await deactivateLocation(user.churchId, locationId);
+    await deactivateLocation(user.churchId, locationId, user.id);
     revalidatePath("/meetings");
     return { success: true, data: null };
   } catch (error) {
@@ -1297,4 +1298,14 @@ export async function archiveLocationFormAction(
       ? "/meetings/locations"
       : `/meetings/locations?error=${encodeURIComponent(result.error)}`
   );
+}
+
+export async function restoreLocationFormAction(
+  locationId: string
+): Promise<void> {
+  const { user } = await requireSeat("meetings.write");
+  if (!user.churchId) redirect("/meetings");
+  await restoreLocation(user.churchId, locationId, user.id);
+  revalidatePath("/meetings");
+  redirect("/meetings/locations?archived=1");
 }

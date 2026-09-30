@@ -50,7 +50,7 @@ const columns = {
     "overall_result",
     "next_steps",
   ],
-  commitment: ["commitment_type", "signed_date", "notes", "witnessed_by"],
+  commitment: ["commitment_type", "signed_date", "notes"],
 };
 
 export async function getPersonRecordCorrection(

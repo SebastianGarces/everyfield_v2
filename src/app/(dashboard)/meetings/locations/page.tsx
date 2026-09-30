@@ -5,7 +5,11 @@ import { listLocations } from "@/lib/meetings/locations";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { saveLocationFormAction, archiveLocationFormAction } from "../actions";
+import {
+  saveLocationFormAction,
+  archiveLocationFormAction,
+  restoreLocationFormAction,
+} from "../actions";
 import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
@@ -13,11 +17,12 @@ export const dynamic = "force-dynamic";
 export default async function LocationsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; archived?: string }>;
 }) {
   const { user } = await requireSeat("meetings.write");
   if (!user.churchId) redirect("/meetings");
-  const locations = await listLocations(user.churchId);
+  const { error, archived } = await searchParams;
+  const locations = await listLocations(user.churchId, archived === "1");
   const histories = new Map(
     await Promise.all(
       locations.map(
@@ -33,7 +38,7 @@ export default async function LocationsPage({
       )
     )
   );
-  const { error } = await searchParams;
+
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <Link href="/meetings">Back to meetings</Link>
@@ -47,9 +52,24 @@ export default async function LocationsPage({
           {error}
         </p>
       )}
+      <Link
+        className="inline-block cursor-pointer underline"
+        href={
+          archived === "1"
+            ? "/meetings/locations"
+            : "/meetings/locations?archived=1"
+        }
+      >
+        {archived === "1"
+          ? "Hide archived locations"
+          : "Include archived locations"}
+      </Link>
       {!locations.length && <p>No active saved locations.</p>}
       {locations.map((location) => (
         <section key={location.id} className="space-y-4 rounded-lg border p-4">
+          {!location.isActive && (
+            <p className="text-muted-foreground">Archived location</p>
+          )}
           <form
             action={saveLocationFormAction.bind(null, location.id)}
             className="space-y-3"
@@ -91,9 +111,14 @@ export default async function LocationsPage({
               </ul>
             </details>
           )}
-          <form action={archiveLocationFormAction.bind(null, location.id)}>
+          <form
+            action={(location.isActive
+              ? archiveLocationFormAction
+              : restoreLocationFormAction
+            ).bind(null, location.id)}
+          >
             <Button type="submit" variant="outline">
-              Archive Location
+              {location.isActive ? "Archive Location" : "Restore Location"}
             </Button>
           </form>
         </section>

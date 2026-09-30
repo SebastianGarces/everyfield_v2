@@ -11,6 +11,7 @@ import {
   createLocation,
   updateLocation,
   deactivateLocation,
+  restoreLocation,
   listLocations,
   getLocation,
 } from "@/lib/meetings/locations";
@@ -80,7 +81,7 @@ async function main() {
       locationAddress: location.address,
     })
     .returning();
-  await deactivateLocation(plant.id, location.id);
+  await deactivateLocation(plant.id, location.id, actor.id);
   assert.equal((await listLocations(plant.id)).length, 0);
   assert.equal((await getLocation(plant.id, location.id))?.isActive, false);
   await assert.rejects(
@@ -90,6 +91,11 @@ async function main() {
       locationId: location.id,
     })
   );
+  assert.equal((await listLocations(plant.id, true)).length, 1);
+  await assert.rejects(restoreLocation(foreign.id, location.id, actor.id));
+  await restoreLocation(plant.id, location.id, actor.id);
+  await restoreLocation(plant.id, location.id, actor.id);
+  assert.equal((await listLocations(plant.id)).length, 1);
   const data = {
     attendanceScore: 3,
     locationScore: 3,
@@ -140,14 +146,14 @@ async function main() {
     .select()
     .from(recordCorrections)
     .where(eq(recordCorrections.churchId, plant.id));
-  assert.equal(histories.length, 2);
+  assert.equal(histories.length, 4);
   const history = histories.find((r) => r.entityType === "meeting_evaluation")!;
   assert.equal((history.before as any).attendance_score, 3);
   assert.equal((history.after as any).attendance_score, 5);
   assert.equal((history.after as any).notes, "");
   assert.equal((await getEvaluation(plant.id, meeting.id))?.notes, "");
   console.log(
-    "PASS location edit/archive, historical reference, archived selection refusal, stale/foreign refusals; evaluation correction/recalculation/empty notes, stale/foreign refusals, exact 2 history entries"
+    "PASS location edit/archive, historical reference, archived selection refusal, stale/foreign refusals; evaluation correction/recalculation/empty notes, stale/foreign refusals, archive/restore idempotence, exact 4 history entries"
   );
 }
 main().catch((error) => {

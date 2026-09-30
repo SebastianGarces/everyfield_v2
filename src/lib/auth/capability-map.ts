@@ -72,6 +72,8 @@ export const CAPABILITY_BY_EXPORT: Readonly<Record<string, string>> = {
     "teams.own",
   "src/app/(dashboard)/teams/actions.ts → updateTrainingProgramAction":
     "teams.write",
+  "src/app/(dashboard)/meetings/actions.ts → restoreLocationFormAction":
+    "meetings.write",
   "src/app/(dashboard)/meetings/actions.ts → saveLocationFormAction":
     "meetings.write",
   "src/app/(dashboard)/meetings/actions.ts → archiveLocationFormAction":

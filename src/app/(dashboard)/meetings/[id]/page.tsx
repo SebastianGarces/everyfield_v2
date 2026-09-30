@@ -62,6 +62,12 @@ export default async function MeetingPage({ params }: MeetingPageProps) {
     notFound();
   }
 
+  if (
+    meeting.location &&
+    !locations.some((location) => location.id === meeting.location!.id)
+  )
+    locations.push(meeting.location);
+
   const church = churchRows[0];
 
   // DOC-014: the documents this meeting type calls for, linked straight to the

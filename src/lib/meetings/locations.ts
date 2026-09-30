@@ -13,11 +13,19 @@ import { and, asc, eq, sql } from "drizzle-orm";
 /**
  * List all active locations for a church, ordered by name.
  */
-export async function listLocations(churchId: string): Promise<Location[]> {
+export async function listLocations(
+  churchId: string,
+  includeArchived = false
+): Promise<Location[]> {
   return db
     .select()
     .from(locations)
-    .where(and(eq(locations.churchId, churchId), eq(locations.isActive, true)))
+    .where(
+      and(
+        eq(locations.churchId, churchId),
+        includeArchived ? undefined : eq(locations.isActive, true)
+      )
+    )
     .orderBy(asc(locations.name));
 }
 
@@ -135,15 +143,42 @@ export async function updateLocation(
  */
 export async function deactivateLocation(
   churchId: string,
-  locationId: string
+  locationId: string,
+  userId: string
 ): Promise<void> {
+  await setLocationActive(churchId, locationId, userId, false);
+}
+export async function restoreLocation(
+  churchId: string,
+  locationId: string,
+  userId: string
+): Promise<void> {
+  await setLocationActive(churchId, locationId, userId, true);
+}
+async function setLocationActive(
+  churchId: string,
+  locationId: string,
+  userId: string,
+  active: boolean
+) {
   const existing = await getLocation(churchId, locationId);
-  if (!existing) {
-    throw new Error("Location not found");
-  }
-
-  await db
-    .update(locations)
-    .set({ isActive: false, updatedAt: new Date() })
-    .where(and(eq(locations.churchId, churchId), eq(locations.id, locationId)));
+  if (!existing) throw new Error("Location not found");
+  const stamp = new Date();
+  const guard = and(
+    eq(locations.churchId, churchId),
+    eq(locations.id, locationId),
+    eq(locations.isActive, !active)
+  );
+  await db.batch([
+    db.execute(
+      sql`SELECT id FROM locations WHERE church_id=${churchId} AND id=${locationId} FOR UPDATE`
+    ),
+    db.execute(
+      sql`INSERT INTO record_corrections(church_id,entity_type,entity_id,before,after,corrected_by) SELECT ${churchId},'location',id,to_jsonb(locations),to_jsonb(locations)||jsonb_build_object('is_active',${active}::boolean,'updated_at',${stamp.toISOString()}::text),${userId} FROM locations WHERE ${guard}`
+    ),
+    db
+      .update(locations)
+      .set({ isActive: active, updatedAt: stamp })
+      .where(guard),
+  ]);
 }
