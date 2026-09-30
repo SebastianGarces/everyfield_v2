@@ -1,5 +1,6 @@
 "use client";
 
+import { isTaskSettled } from "@/lib/tasks/lifecycle";
 import { loadMoreTasksAction } from "@/app/(dashboard)/tasks/actions";
 import { useCan } from "@/components/shared/viewer-capabilities";
 import { Button } from "@/components/ui/button";
@@ -27,7 +28,14 @@ import { TaskCard } from "./task-card";
 interface TaskGroup {
   label: string;
   tasks: TaskListRow[];
-  variant: "overdue" | "today" | "upcoming" | "later" | "no_date" | "completed";
+  variant:
+    | "overdue"
+    | "today"
+    | "upcoming"
+    | "later"
+    | "no_date"
+    | "completed"
+    | "waived";
 }
 
 /**
@@ -64,8 +72,13 @@ function groupTasksByDueDate(tasks: TaskListRow[], now: Date): TaskGroup[] {
   const later: TaskListRow[] = []; // beyond 7 days
   const noDate: TaskListRow[] = [];
   const completed: TaskListRow[] = [];
+  const waived: TaskListRow[] = [];
 
   for (const task of tasks) {
+    if (task.status === "no_longer_needed") {
+      waived.push(task);
+      continue;
+    }
     if (task.status === "complete") {
       completed.push(task);
       continue;
@@ -132,6 +145,12 @@ function groupTasksByDueDate(tasks: TaskListRow[], now: Date): TaskGroup[] {
     });
   }
 
+  if (waived.length > 0)
+    groups.push({
+      label: `No longer needed (${waived.length})`,
+      tasks: waived,
+      variant: "waived",
+    });
   return groups;
 }
 
@@ -142,6 +161,7 @@ const GROUP_STYLES: Record<string, string> = {
   later: "text-muted-foreground",
   no_date: "text-muted-foreground",
   completed: "text-green-600",
+  waived: "text-muted-foreground",
 };
 
 // ============================================================================
@@ -250,7 +270,7 @@ export function TaskList({
   const groups: TaskGroup[] =
     sortBy === "due_date" &&
     sortDir === "asc" &&
-    !tasks.some((task) => task.status === "complete")
+    !tasks.some((task) => isTaskSettled(task.status))
       ? groupTasksByDueDate(tasks, now)
       : [{ label: `Tasks (${tasks.length})`, tasks, variant: "later" }];
 
@@ -265,7 +285,9 @@ export function TaskList({
               <TaskGroupSelectAll
                 taskIds={group.tasks.map((task) => task.id)}
                 label={group.label}
-                disabled={group.variant === "completed"}
+                disabled={
+                  group.variant === "completed" || group.variant === "waived"
+                }
               />
               <h2
                 className={`text-sm font-semibold ${GROUP_STYLES[group.variant] ?? ""}`}

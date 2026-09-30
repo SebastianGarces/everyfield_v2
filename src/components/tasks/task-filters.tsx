@@ -42,6 +42,7 @@ const STATUS_LABELS: Record<TaskStatus, string> = {
   in_progress: "In Progress",
   blocked: "Blocked",
   complete: "Complete",
+  no_longer_needed: "No longer needed",
 };
 
 const PRIORITY_LABELS: Record<TaskPriority, string> = {
@@ -147,7 +148,7 @@ export function TaskFilters({
             updateParam("completed", selected.showCompleted ? null : "true")
           }
         >
-          Show Completed
+          Show closed tasks
         </button>
       )}
 

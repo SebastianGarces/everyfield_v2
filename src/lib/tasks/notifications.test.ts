@@ -491,3 +491,15 @@ test("no module inserts into tasks without asking for notifications", () => {
     "a module writes tasks and never asks for their due/overdue notifications — those rows are silent for ever"
   );
 });
+
+test("no longer needed cancels pending reminders and cannot be announced", async () => {
+  const h = harness();
+  const task = facts();
+  await h.write(task);
+  assert.ok(h.queue.pending(TASK_DUE_TYPE).length > 0);
+  const waived = { ...task, status: "no_longer_needed" as const };
+  await h.write(waived, { previous: task });
+  assert.equal(h.queue.pending(TASK_DUE_TYPE).length, 0);
+  assert.equal(h.queue.pending(TASK_OVERDUE_TYPE).length, 0);
+  assert.equal(planTaskNotifications(waived, NOW).skipped, "no_longer_needed");
+});

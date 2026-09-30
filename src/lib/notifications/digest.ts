@@ -1,3 +1,4 @@
+import { actionableTaskStatuses } from "@/lib/tasks/lifecycle";
 import {
   and,
   count,
@@ -338,7 +339,7 @@ function openTaskCondition(churchId: ChurchIdRef, assigneeId: UserIdRef) {
     eq(tasks.churchId, churchId),
     eq(tasks.assignedToId, assigneeId),
     isNull(tasks.deletedAt),
-    ne(tasks.status, "complete"),
+    inArray(tasks.status, actionableTaskStatuses),
     topLevelTasksOnly()
   );
 }

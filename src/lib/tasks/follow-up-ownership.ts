@@ -1,3 +1,4 @@
+import { actionableTaskStatuses } from "@/lib/tasks/lifecycle";
 // ============================================================================
 // WHO OWNS THIS FOLLOW-UP — the reads (#470, C01/C13).
 //
@@ -22,7 +23,7 @@
 // demoted or removed surfaces as unowned instead of hiding behind a name.
 // ============================================================================
 
-import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { isOwnerSeat } from "@/lib/auth/seat-rules";
@@ -47,7 +48,7 @@ function openTaskConditions(churchId: string) {
   return [
     eq(tasks.churchId, churchId),
     isNull(tasks.deletedAt),
-    ne(tasks.status, "complete"),
+    inArray(tasks.status, actionableTaskStatuses),
     eq(tasks.category, OWNED_TASK_CATEGORY),
   ];
 }

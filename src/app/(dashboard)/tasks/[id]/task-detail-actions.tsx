@@ -1,5 +1,6 @@
 "use client";
 
+import { isTaskSettled } from "@/lib/tasks/lifecycle";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -21,6 +22,7 @@ import {
   completeTaskAction,
   deleteTaskAction,
   reopenTaskAction,
+  updateTaskStatusAction,
 } from "@/app/(dashboard)/tasks/actions";
 import { toast } from "sonner";
 
@@ -48,7 +50,7 @@ export function TaskDetailActions({
   const canWrite = useCan("tasks.write");
   const canComplete = canWrite || task.assignedToId === currentUserId;
 
-  const isComplete = task.status === "complete";
+  const isComplete = isTaskSettled(task.status);
 
   function handleComplete() {
     startTransition(async () => {
@@ -110,6 +112,27 @@ export function TaskDetailActions({
             Complete
           </Button>
         ))}
+
+      {canComplete && !isComplete && (
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={isPending}
+          className="cursor-pointer"
+          onClick={() =>
+            startTransition(async () => {
+              const result = await updateTaskStatusAction(
+                task.id,
+                "no_longer_needed"
+              );
+              if (result.success) toast.success("Task no longer needed");
+              else toast.error(result.error);
+            })
+          }
+        >
+          No longer needed
+        </Button>
+      )}
 
       {canWrite && (
         <AlertDialog>

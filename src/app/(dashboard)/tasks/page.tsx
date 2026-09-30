@@ -109,6 +109,7 @@ export default async function TasksPage({ searchParams }: TasksPageProps) {
             (task) => task.dueDate && task.dueDate < today
           ).length,
           complete: 0,
+          noLongerNeeded: 0,
           checklistTotal: 0,
           checklistComplete: 0,
         }
@@ -222,6 +223,11 @@ export default async function TasksPage({ searchParams }: TasksPageProps) {
                 {view !== "assignments" && (
                   <Badge variant="outline" className="text-xs tabular-nums">
                     {displayedCounts.complete} completed
+                  </Badge>
+                )}
+                {displayedCounts.noLongerNeeded > 0 && (
+                  <Badge variant="outline" className="text-xs tabular-nums">
+                    {displayedCounts.noLongerNeeded} no longer needed
                   </Badge>
                 )}
               </div>

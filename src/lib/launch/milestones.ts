@@ -769,7 +769,7 @@ export function completeLaunchMilestoneStatement(input: {
         join tasks t on t.id = lmt.task_id
         where lmt.milestone_id = m.id
           and t.deleted_at is null
-          and t.status <> 'complete'
+          and t.status in ('not_started', 'in_progress', 'blocked')
       )
     returning m.id
   `;

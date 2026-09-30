@@ -104,7 +104,9 @@ export function taskListParamsWith(
   if (key === "completed" && value !== "true") {
     const statuses = params
       .getAll("status")
-      .filter((status) => status !== "complete");
+      .filter(
+        (status) => status !== "complete" && status !== "no_longer_needed"
+      );
     params.delete("status");
     for (const status of statuses) params.append("status", status);
   }
@@ -259,7 +261,10 @@ export function parseTaskListSearchParams(params: {
     // and unreadable — which is exactly what `all` was (#660).
     view: isTaskListView(params.view) ? params.view : "my_tasks",
     showCompleted:
-      params.completed === "true" || !!status?.includes("complete"),
+      params.completed === "true" ||
+      !!status?.some(
+        (value) => value === "complete" || value === "no_longer_needed"
+      ),
     status,
     priority: parseEnumParam(params.priority, taskPrioritySchema),
     category: parseEnumParam(params.category, taskCategorySchema),

@@ -1,3 +1,4 @@
+import { actionableTaskStatuses } from "@/lib/tasks/lifecycle";
 import { db } from "@/db";
 import { taskDependencies, tasks, type TaskStatus } from "@/db/schema";
 import { and, eq, inArray, isNull, ne, notInArray, sql } from "drizzle-orm";
@@ -406,7 +407,7 @@ export function blockedTaskIdsQuery(
         eq(taskDependencies.churchId, churchId),
         inArray(taskDependencies.taskId, [...taskIds]),
         isNull(tasks.deletedAt),
-        ne(tasks.status, "complete")
+        inArray(tasks.status, actionableTaskStatuses)
       )
     );
 }

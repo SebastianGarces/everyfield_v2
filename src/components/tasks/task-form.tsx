@@ -60,6 +60,7 @@ const STATUS_LABELS: Record<string, string> = {
   in_progress: "In Progress",
   blocked: "Blocked",
   complete: "Complete",
+  no_longer_needed: "No longer needed",
 };
 
 const PRIORITY_LABELS: Record<string, string> = {
@@ -244,7 +245,8 @@ export function TaskPrerequisitesField({
         id={PREREQUISITES_DESCRIPTION_ID}
         className="text-muted-foreground text-sm"
       >
-        This task stays blocked until every prerequisite is complete.
+        This task stays blocked until every prerequisite is completed or no
+        longer needed.
       </p>
     </div>
   );
