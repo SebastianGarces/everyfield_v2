@@ -58,6 +58,7 @@ export function computeFollowUpTaskMetrics(
       row.completedAt !== null &&
       row.completedAt <= asOf &&
       row.completedAt.getTime() >= row.followUpStartedAt.getTime() &&
+      row.completedAt.getTime() >= row.createdAt.getTime() &&
       row.completedAt.getTime() <= deadline
     )
       taskCompletedWithin48HoursCount++;
