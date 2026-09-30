@@ -10,7 +10,10 @@ import {
 } from "react";
 import { toast } from "sonner";
 
-import { saveCheckinAction } from "@/app/(dashboard)/phase/checkin-actions";
+import {
+  correctCheckinAction,
+  saveCheckinAction,
+} from "@/app/(dashboard)/phase/checkin-actions";
 import {
   Card,
   CardContent,
@@ -89,6 +92,8 @@ export interface CheckinWeek {
 interface PlanterCheckinCardProps {
   /** This week's answer, or `null` when the week is unanswered — the card asks. */
   thisWeek: CheckinAnswer | null;
+  historyId?: string;
+  weekLabel?: string;
   /** Oldest first. Weeks with no answer carry `levels: null`. */
   weeks: CheckinWeek[];
   /** Deterministic runs of three or more strained weeks. */
@@ -97,6 +102,8 @@ interface PlanterCheckinCardProps {
 
 export function PlanterCheckinCard({
   thisWeek,
+  historyId,
+  weekLabel,
   weeks,
   nudges,
 }: PlanterCheckinCardProps) {
@@ -149,7 +156,9 @@ export function PlanterCheckinCard({
       setAnsweredWeek(complete);
       setEditing(null);
 
-      const result = await saveCheckinAction(complete);
+      const result = historyId
+        ? await correctCheckinAction(historyId, complete)
+        : await saveCheckinAction(complete);
 
       if (!result.success) {
         toast.error(result.error);
@@ -170,7 +179,9 @@ export function PlanterCheckinCard({
   return (
     <Card data-testid="planter-checkin">
       <CardHeader>
-        <CardTitle>How are you doing?</CardTitle>
+        <CardTitle>
+          {weekLabel ? `Week of ${weekLabel}` : "How are you doing?"}
+        </CardTitle>
         <CardDescription className="max-w-[60ch] text-pretty">
           A plant can hit every number while the planter is running on empty.
           This is a weekly note to yourself.{" "}
@@ -185,8 +196,9 @@ export function PlanterCheckinCard({
         {draft === null ? (
           <div className="space-y-3">
             <p className="text-muted-foreground text-sm">
-              You have answered this week. Come back next week — or change your
-              answer any time before then.
+              {historyId
+                ? "Your saved answer. Corrections preserve the previous answer in your private edit history."
+                : "You have answered this week. Come back next week — or change your answer any time before then."}
             </p>
             <Button
               ref={changeButton}
@@ -314,7 +326,7 @@ export function PlanterCheckinCard({
           </div>
         )}
 
-        <CheckinStrip weeks={weeks} nudges={nudges} />
+        {!historyId && <CheckinStrip weeks={weeks} nudges={nudges} />}
       </CardContent>
     </Card>
   );

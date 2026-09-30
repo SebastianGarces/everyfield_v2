@@ -568,6 +568,13 @@
       "when": 1790805775615,
       "tag": "0081_thin_ultragirl",
       "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1790805775616,
+      "tag": "0082_checkin_history",
+      "breakpoints": true
     }
   ]
 }

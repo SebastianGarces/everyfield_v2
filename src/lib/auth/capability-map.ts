@@ -190,7 +190,9 @@ export const CAPABILITY_BY_EXPORT: Readonly<Record<string, string>> = {
   "src/app/(dashboard)/people/tag-actions.ts → removeTagAction": "people.write",
   "src/app/(dashboard)/people/tag-actions.ts → updateTagAction": "people.write",
   "src/app/(dashboard)/phase/checkin-actions.ts → saveCheckinAction":
-    "phase.signal",
+    "phase.declare",
+  "src/app/(dashboard)/phase/checkin-actions.ts → correctCheckinAction":
+    "phase.declare",
   "src/app/(dashboard)/phase/actions.ts → transitionPhaseAction":
     "phase.declare",
   "src/app/(dashboard)/phase/feedback-actions.ts → submitInsightFeedbackAction":

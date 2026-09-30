@@ -79,6 +79,7 @@ export interface ListTasksOptions {
   status?: TaskStatus[];
   priority?: TaskPriority[];
   category?: TaskCategory[];
+  teamId?: string; // explicitly team-related tasks
   assignedToId?: string; // filter to specific user's tasks
   dueDateFrom?: string; // ISO date
   dueDateTo?: string; // ISO date
@@ -330,6 +331,7 @@ export function taskListConditions(
     priority,
     category,
     assignedToId,
+    teamId,
     dueDateFrom,
     dueDateTo,
     search,
@@ -366,6 +368,13 @@ export function taskListConditions(
   // Filter by category
   if (category && category.length > 0) {
     baseConditions.push(inArray(table.category, category));
+  }
+
+  if (teamId) {
+    baseConditions.push(
+      eq(table.relatedType, "team"),
+      eq(table.relatedId, teamId)
+    );
   }
 
   // Filter by assignee

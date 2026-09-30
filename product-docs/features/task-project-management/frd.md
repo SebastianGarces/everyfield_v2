@@ -664,3 +664,7 @@ Network admins can see aggregate task metrics across all plants in their network
 4. **Time tracking:** Should tasks support time tracking for effort estimation?
 
 5. **Comments:** Should tasks support threaded comments for collaboration?
+
+### Alpha team filter (#878, ruling 2026-09-30)
+
+My Tasks and All Tasks support a team filter for tasks explicitly related to that plant's team. The same filter applies to counts and pagination, survives other filter edits, and clears with Clear filters. Invalid team IDs are ignored; well-formed unavailable IDs match no rows and reveal no foreign team names. Assignments remains person-linked follow-ups and does not apply a team filter. Manual task reordering is deferred; existing sorting remains.

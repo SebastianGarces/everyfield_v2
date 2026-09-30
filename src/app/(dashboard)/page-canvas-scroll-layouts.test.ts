@@ -229,6 +229,12 @@ const AUTHENTICATED_PAGE_CANVAS_OWNERS = [
     compositions: ["view-dependent-workspace"],
   },
   {
+    owner: "src/app/(dashboard)/phase/checkins/page.tsx",
+    routes: ["/phase/checkins"],
+    scrollLayout: "flow",
+    compositions: ["lone-workspace"],
+  },
+  {
     owner: "src/app/(dashboard)/phase/page.tsx",
     routes: ["/phase"],
     scrollLayout: "flow",

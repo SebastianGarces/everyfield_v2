@@ -415,6 +415,16 @@ export const planterCheckinLevels = [
 ] as const;
 export type PlanterCheckinLevel = (typeof planterCheckinLevels)[number];
 
+export interface PlanterCheckinRevision {
+  spiritually: PlanterCheckinLevel;
+  marriageFamily: PlanterCheckinLevel;
+  financially: PlanterCheckinLevel;
+  pace: PlanterCheckinLevel;
+  note: string | null;
+  answeredById: string;
+  recordedAt: string;
+}
+
 export const planterCheckins = pgTable(
   "planter_checkins",
   {
@@ -436,6 +446,10 @@ export const planterCheckins = pgTable(
       .notNull(),
     pace: varchar("pace", { length: 20 })
       .$type<PlanterCheckinLevel>()
+      .notNull(),
+    editHistory: jsonb("edit_history")
+      .$type<PlanterCheckinRevision[]>()
+      .default([])
       .notNull(),
     /** The planter's own words, for the planter's own eyes. */
     note: text("note"),

@@ -187,6 +187,7 @@ const STAGE_3_PRIMARY_ROUTES = [
   "/people/duplicates",
   "/people/duplicates/[leftId]/[rightId]",
   "/phase",
+  "/phase/checkins",
   "/tasks",
   "/tasks/new",
   "/tasks/templates",
