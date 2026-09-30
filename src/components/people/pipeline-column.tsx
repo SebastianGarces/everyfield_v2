@@ -93,9 +93,9 @@ export function PipelineColumn({
     >
       {/* Sticky column header */}
       <div className="sticky top-0 z-10 flex items-center justify-between rounded-t-lg bg-inherit px-4 pt-3 pb-2">
-        <h3 className="text-foreground/70 text-xs font-semibold tracking-wide uppercase">
+        <h2 className="text-foreground/70 text-xs font-semibold tracking-wide uppercase">
           {column.title}
-        </h3>
+        </h2>
         <Badge
           variant="secondary"
           className="bg-background text-foreground h-5 min-w-5 border px-1.5 text-[11px] font-medium"
@@ -112,7 +112,7 @@ export function PipelineColumn({
               "flex min-h-[60px] items-center justify-center rounded-md border border-dashed text-xs transition-colors",
               isDraggedOver
                 ? "border-primary/40 text-primary/60"
-                : "border-muted-foreground/30 text-muted-foreground/70"
+                : "border-muted-foreground/30 text-muted-foreground"
             )}
           >
             {isDraggedOver ? "Drop here" : "No people"}
