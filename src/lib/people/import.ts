@@ -85,96 +85,74 @@ export function generateCsvTemplate(): string {
 /**
  * Parse a CSV string into rows of key-value pairs
  */
-function parseCsvString(csvContent: string): Record<string, string>[] {
-  const lines = csvContent
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
-
-  if (lines.length < 2) {
-    return [];
+export function parseCsvString(csvContent: string): Record<string, string>[] {
+  const records: string[][] = [];
+  let record: string[] = [];
+  let field = "";
+  let quoted = false;
+  let closedQuote = false;
+  const content = csvContent.replace(/^\uFEFF/, "");
+  const finishField = () => {
+    record.push(field);
+    field = "";
+    closedQuote = false;
+  };
+  const finishRecord = () => {
+    finishField();
+    if (record.some((value) => value.trim().length > 0)) records.push(record);
+    record = [];
+  };
+  for (let i = 0; i < content.length; i++) {
+    const character = content[i];
+    if (quoted) {
+      if (character === '"') {
+        if (content[i + 1] === '"') {
+          field += '"';
+          i++;
+        } else {
+          quoted = false;
+          closedQuote = true;
+        }
+      } else {
+        field += character;
+      }
+      continue;
+    }
+    if (character === ",") {
+      finishField();
+    } else if (character === "\r" || character === "\n") {
+      finishRecord();
+      if (character === "\r" && content[i + 1] === "\n") i++;
+    } else if (character === '"') {
+      if (field.length > 0 || closedQuote)
+        throw new Error("Invalid CSV: quote must begin a field");
+      quoted = true;
+    } else {
+      if (closedQuote)
+        throw new Error("Invalid CSV: unexpected text after a closing quote");
+      field += character;
+    }
   }
+  if (quoted) throw new Error("Invalid CSV: unterminated quoted field");
+  if (field.length > 0 || record.length > 0 || closedQuote) finishRecord();
+  if (records.length < 2) return [];
 
-  // Parse header row - map from display labels back to field names
-  const headerLine = lines[0];
-  const rawHeaders = parseCsvLine(headerLine);
-
-  // Create a reverse lookup from label to field name
   const labelToField: Record<string, string> = {};
-  for (const [field, label] of Object.entries(CSV_HEADER_LABELS)) {
-    labelToField[label.toLowerCase()] = field;
-  }
-
-  // Also support direct field names (camelCase)
-  for (const field of CSV_HEADERS) {
-    labelToField[field.toLowerCase()] = field;
-  }
-
-  const fieldNames = rawHeaders.map((header) => {
+  for (const [name, label] of Object.entries(CSV_HEADER_LABELS))
+    labelToField[label.toLowerCase()] = name;
+  for (const name of CSV_HEADERS) labelToField[name.toLowerCase()] = name;
+  const fieldNames = records[0].map((header) => {
     const normalized = header.trim().toLowerCase();
     return labelToField[normalized] ?? header.trim();
   });
-
-  // Parse data rows
-  const rows: Record<string, string>[] = [];
-  for (let i = 1; i < lines.length; i++) {
-    const values = parseCsvLine(lines[i]);
+  return records.slice(1).map((values) => {
     const row: Record<string, string> = {};
-
-    for (let j = 0; j < fieldNames.length; j++) {
-      const value = values[j]?.trim() ?? "";
-      if (value) {
-        row[fieldNames[j]] = value;
-      }
+    for (let i = 0; i < fieldNames.length; i++) {
+      const value = values[i]?.trim() ?? "";
+      if (value) row[fieldNames[i]] = value;
     }
-
-    // Skip completely empty rows
-    if (Object.keys(row).length > 0) {
-      rows.push(row);
-    }
-  }
-
-  return rows;
-}
-
-/**
- * Parse a single CSV line, handling quoted fields
- */
-function parseCsvLine(line: string): string[] {
-  const result: string[] = [];
-  let current = "";
-  let inQuotes = false;
-
-  for (let i = 0; i < line.length; i++) {
-    const char = line[i];
-
-    if (inQuotes) {
-      if (char === '"') {
-        if (i + 1 < line.length && line[i + 1] === '"') {
-          // Escaped quote
-          current += '"';
-          i++;
-        } else {
-          // End of quoted field
-          inQuotes = false;
-        }
-      } else {
-        current += char;
-      }
-    } else {
-      if (char === '"') {
-        inQuotes = true;
-      } else if (char === ",") {
-        result.push(current);
-        current = "";
-      } else {
-        current += char;
-      }
-    }
-  }
-
-  result.push(current);
-  return result;
+    return row;
+  });
 }
 
 // ============================================================================
