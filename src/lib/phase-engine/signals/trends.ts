@@ -35,8 +35,8 @@ import { and, desc, eq, sql } from "drizzle-orm";
 // ============================================================================
 // PE-026 — trends and velocity, read out of the PERSISTED fact snapshots.
 //
-// Four trends a planter asks for by name: core-group growth, vision-meeting
-// attendance, follow-up completion, ministry-team readiness (D-010…D-013).
+// Independent trends: core-group growth, vision-meeting attendance,
+// meeting follow-up task completion, contact freshness and ministry-team readiness (D-010…D-013).
 //
 // WHERE THE HISTORY COMES FROM, AND WHY IT IS NOT RE-DERIVED FROM FEATURE DATA.
 // Every assessment persists the exact `PlantFactSnapshot` the judge reasoned
@@ -89,6 +89,16 @@ import { and, desc, eq, sql } from "drizzle-orm";
 const TREND_SNAPSHOT_PATHS = {
   coreGroupCommittedCount: ["coreGroup", "committedCount"],
   visionMeetingLatestAttendance: ["visionMeetings", "latestAttendance"],
+  taskMeasurableCount: ["followUp", "taskMeasurableCount"],
+  taskCompletedWithin48HoursCount: [
+    "followUp",
+    "taskCompletedWithin48HoursCount",
+  ],
+  taskUnmeasuredCount: ["followUp", "taskUnmeasuredCount"],
+  taskWaivedCount: ["followUp", "taskWaivedCount"],
+  contactMeasuredCount: ["followUp", "contactMeasuredCount"],
+  contactRecentCount: ["followUp", "contactRecentCount"],
+  contactUnknownCount: ["followUp", "contactUnknownCount"],
   followUpOpenCount: ["followUp", "openCount"],
   followUpStaleCount: ["followUp", "staleCount"],
   followUpStaleThresholdDays: ["followUp", "staleThresholdDays"],
@@ -120,12 +130,19 @@ function snapshotInteger(field: TrendSnapshotField) {
   >`(${plantAssessments.factSnapshot} #>> ${jsonPath})::int`;
 }
 
-/** One persisted snapshot, reduced to the fields the four trends read. */
+/** One persisted snapshot, reduced to the fields the trend readings read. */
 export interface SnapshotHistoryRow {
   assessmentId: string;
   generatedAt: Date;
   coreGroupCommittedCount: number | null;
   visionMeetingLatestAttendance: number | null;
+  taskMeasurableCount?: number | null;
+  taskCompletedWithin48HoursCount?: number | null;
+  taskWaivedCount?: number | null;
+  taskUnmeasuredCount?: number | null;
+  contactMeasuredCount?: number | null;
+  contactRecentCount?: number | null;
+  contactUnknownCount?: number | null;
   followUpOpenCount: number | null;
   followUpStaleCount: number | null;
   followUpStaleThresholdDays: number | null;
@@ -160,6 +177,15 @@ export async function getSnapshotTrendHistory(
       visionMeetingLatestAttendance: snapshotInteger(
         "visionMeetingLatestAttendance"
       ),
+      taskMeasurableCount: snapshotInteger("taskMeasurableCount"),
+      taskCompletedWithin48HoursCount: snapshotInteger(
+        "taskCompletedWithin48HoursCount"
+      ),
+      taskUnmeasuredCount: snapshotInteger("taskUnmeasuredCount"),
+      taskWaivedCount: snapshotInteger("taskWaivedCount"),
+      contactMeasuredCount: snapshotInteger("contactMeasuredCount"),
+      contactRecentCount: snapshotInteger("contactRecentCount"),
+      contactUnknownCount: snapshotInteger("contactUnknownCount"),
       followUpOpenCount: snapshotInteger("followUpOpenCount"),
       followUpStaleCount: snapshotInteger("followUpStaleCount"),
       followUpStaleThresholdDays: snapshotInteger("followUpStaleThresholdDays"),
@@ -247,13 +273,14 @@ export function deriveEngineAlert(
 }
 
 // ----------------------------------------------------------------------------
-// The four trends.
+// The trend readings.
 // ----------------------------------------------------------------------------
 
 export const TREND_METRIC_KEYS = [
   "core_group_growth",
   "meeting_attendance",
   "follow_up_completion",
+  "contact_freshness",
   "team_readiness",
 ] as const;
 
@@ -310,43 +337,61 @@ const TREND_METRIC_DEFINITIONS: readonly TrendMetricDefinition[] = [
     reading: () => null,
   },
   {
-    // THE DENOMINATOR IS FIRST-TIMERS, AND THE LABEL SAYS SO (#323 WS2).
-    // `followUpOpenCount` counts people in the three open follow-up statuses
-    // (attendee / following_up / interviewed), and the only way into that
-    // cohort is `prospect -> attendee` on a vision meeting — which by
-    // derivation is a person's FIRST one (`meetings/attendance-type.ts`). So
-    // the cohort was always the first-timers; what changed is that VM-007 now
-    // generates a follow-up task for exactly that cohort and nobody else, so
-    // the rate and the work it measures finally name the same people. A label
-    // reading plain "Follow-up completion" invited the planter to read it as
-    // "of everyone I mean to follow up", which is a wider set than anything
-    // here counts.
     key: "follow_up_completion",
-    label: "First-time follow-up completion",
-    description: "First-time attendees still open, reached inside the window.",
+    label: "Follow-up task completion (48 hours)",
+    description:
+      "Matured follow-up tasks completed within 48 hours of the originating meeting; no longer needed is excluded.",
     unit: "rate",
     higherIsBetter: true,
     fields: [
-      "followUpOpenCount",
-      "followUpStaleCount",
-      "followUpStaleThresholdDays",
+      "taskMeasurableCount",
+      "taskCompletedWithin48HoursCount",
+      "taskWaivedCount",
+      "taskUnmeasuredCount",
     ],
     categories: ["follow_up", "shared_ownership"],
     read: (row) => {
-      const { followUpOpenCount: open, followUpStaleCount: stale } = row;
-      if (open === null || stale === null) return null;
-      // A rate with a zero denominator is UNKNOWN, never 100% — the same rule
-      // the communication figures are held to (invariants.md → Communication).
-      // "No open follow-ups" is not "every follow-up completed".
-      if (open <= 0) return null;
-      return (open - stale) / open;
+      const total = row.taskMeasurableCount;
+      const completed = row.taskCompletedWithin48HoursCount;
+      return total != null && total > 0 && completed != null
+        ? completed / total
+        : null;
     },
     reading: (row) => {
-      const { followUpOpenCount: open, followUpStaleCount: stale } = row;
-      if (open === null || stale === null || open <= 0) return null;
-      const days = row.followUpStaleThresholdDays;
-      const window = days === null ? "the follow-up window" : `${days} days`;
-      return `${open - stale} of ${open} open contacts touched within ${window}`;
+      const total = row.taskMeasurableCount;
+      const completed = row.taskCompletedWithin48HoursCount;
+      return total != null && total > 0 && completed != null
+        ? `${completed} of ${total} matured tasks completed within 48 hours of the meeting; ${row.taskWaivedCount ?? 0} no longer needed; ${row.taskUnmeasuredCount ?? 0} without meeting evidence`
+        : null;
+    },
+  },
+  {
+    key: "contact_freshness",
+    label: "Contact freshness (14 days)",
+    description:
+      "Successful sends or logged contacts; profile edits do not establish contact.",
+    unit: "rate",
+    higherIsBetter: true,
+    fields: [
+      "contactMeasuredCount",
+      "contactRecentCount",
+      "contactUnknownCount",
+      "followUpOpenCount",
+    ],
+    categories: ["follow_up", "shared_ownership"],
+    read: (row) => {
+      const known = row.contactMeasuredCount;
+      const recent = row.contactRecentCount;
+      return known != null && known > 0 && recent != null
+        ? recent / known
+        : null;
+    },
+    reading: (row) => {
+      const known = row.contactMeasuredCount;
+      const recent = row.contactRecentCount;
+      return known != null && recent != null && (row.followUpOpenCount ?? 0) > 0
+        ? `${recent} of ${known} measured contacts within 14 days; ${row.contactUnknownCount ?? 0} Unknown of ${row.followUpOpenCount ?? 0} open contacts`
+        : null;
     },
   },
   {
@@ -424,7 +469,7 @@ export interface TrendMetric {
   alert: EngineAlert;
 }
 
-/** The four trends plus the identity of the window they were read over. */
+/** The trend readings plus the identity of the window they were read over. */
 export interface PlantTrends {
   metrics: TrendMetric[];
   /** Complete assessments in the window. */
@@ -451,7 +496,7 @@ function directionOf(delta: number): "up" | "down" | "flat" {
 }
 
 /**
- * Project persisted snapshots + persisted insights onto the four trends (PE-026).
+ * Project persisted snapshots + persisted insights onto the trend readings (PE-026).
  *
  * Pure — no DB, no LLM, no recomputation from feature tables. Returns null when
  * the plant has no complete assessment at all: four empty tiles would claim the

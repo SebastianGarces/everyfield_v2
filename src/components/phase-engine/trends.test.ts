@@ -258,7 +258,7 @@ test("an unanswered metric reads as no reading, never as zero", () => {
   });
   const rendered = tiles(render(plantTrends([missing])));
 
-  assert.match(text(rendered[0]), /—/);
+  assert.match(text(rendered[0]), /Unknown/);
   assert.equal(text(rendered[0]).includes(" 0 "), false);
   assert.ok(rendered[0].includes('data-testid="trend-no-reading"'));
   assert.equal(rendered[0].includes('data-testid="trend-sparkline"'), false);

@@ -63,6 +63,9 @@ function historyRow(
     generatedAt: new Date(generatedAt),
     coreGroupCommittedCount: 10,
     visionMeetingLatestAttendance: 20,
+    contactMeasuredCount: 10,
+    contactRecentCount: 8,
+    contactUnknownCount: 0,
     followUpOpenCount: 10,
     followUpStaleCount: 2,
     followUpStaleThresholdDays: 14,
@@ -137,6 +140,7 @@ test("produces all four trends, in a fixed order", () => {
       "core_group_growth",
       "meeting_attendance",
       "follow_up_completion",
+      "contact_freshness",
       "team_readiness",
     ]
   );
@@ -278,7 +282,7 @@ test("a falling series reads as down, an unchanged one as flat", () => {
 // Ratios: two counts out of the snapshot, and an honest unknown.
 // ----------------------------------------------------------------------------
 
-test("follow-up completion is the share of open contacts inside the window", () => {
+test("contact freshness counts evidenced contacts inside 14 days", () => {
   const trends = buildPlantTrends(
     [
       historyRow("2026-06-01T00:00:00.000Z", {
@@ -290,12 +294,12 @@ test("follow-up completion is the share of open contacts inside the window", () 
   );
   assert.ok(trends);
 
-  const followUp = metric(trends.metrics, "follow_up_completion");
+  const followUp = metric(trends.metrics, "contact_freshness");
   assert.equal(followUp.value, 0.8);
   assert.equal(followUp.unit, "rate");
   assert.equal(
     followUp.reading,
-    "8 of 10 open contacts touched within 14 days"
+    "8 of 10 measured contacts within 14 days; 0 Unknown of 10 open contacts"
   );
 });
 
@@ -305,6 +309,9 @@ test("no open follow-ups is unknown, never 100%", () => {
   const trends = buildPlantTrends(
     [
       historyRow("2026-06-01T00:00:00.000Z", {
+        contactMeasuredCount: 0,
+        contactRecentCount: 0,
+        contactUnknownCount: 0,
         followUpOpenCount: 0,
         followUpStaleCount: 0,
       }),
@@ -313,7 +320,7 @@ test("no open follow-ups is unknown, never 100%", () => {
   );
   assert.ok(trends);
 
-  const followUp = metric(trends.metrics, "follow_up_completion");
+  const followUp = metric(trends.metrics, "contact_freshness");
   assert.equal(followUp.value, null);
   assert.equal(followUp.reading, null);
   assert.deepEqual(followUp.points, []);
@@ -333,6 +340,9 @@ test("a reading the newest snapshot could not answer is dated as older", () => {
         followUpStaleCount: 2,
       }),
       historyRow("2026-06-01T00:00:00.000Z", {
+        contactMeasuredCount: 0,
+        contactRecentCount: 0,
+        contactUnknownCount: 0,
         followUpOpenCount: 0,
         followUpStaleCount: 0,
       }),
@@ -341,7 +351,7 @@ test("a reading the newest snapshot could not answer is dated as older", () => {
   );
   assert.ok(trends);
 
-  const followUp = metric(trends.metrics, "follow_up_completion");
+  const followUp = metric(trends.metrics, "contact_freshness");
   assert.equal(followUp.value, 0.8, "the older reading is the one shown");
   assert.deepEqual(followUp.valueAt, new Date("2026-05-01T00:00:00.000Z"));
   assert.equal(followUp.valueIsStale, true);

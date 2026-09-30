@@ -242,10 +242,10 @@ function Sparkline({ points }: { points: TrendPoint[] }) {
 
 /**
  * A rate is 0..1 and reads as a whole percent; a count reads as itself. An
- * absent reading is an em dash — never a zero (constraint 3).
+ * absent reading is Unknown — never a zero (constraint 3).
  */
 function formatValue(metric: TrendMetric): string {
-  if (metric.value === null) return "—";
+  if (metric.value === null) return "Unknown";
   if (metric.unit === "rate") return `${Math.round(metric.value * 100)}%`;
   return String(metric.value);
 }
@@ -360,7 +360,7 @@ export function TrendTile({ metric }: { metric: TrendMetric }) {
           data-testid="trend-no-reading"
           className="text-muted-foreground mt-2 max-w-[42ch] text-xs text-pretty"
         >
-          No assessment in this window recorded this one yet.
+          No measurable evidence in the assessments in this window.
         </p>
       ) : hasTrend ? (
         <>
@@ -403,7 +403,7 @@ interface TrendsProps {
 }
 
 export function Trends({ trends }: TrendsProps) {
-  // Cold start. Four tiles reading "—" would say the engine measured four things
+  // Cold start. Tiles reading "Unknown" would say the engine measured four things
   // and found nothing; it has measured nothing at all. A materially different
   // claim, so no tiles render.
   if (!trends) {
