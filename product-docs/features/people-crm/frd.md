@@ -978,3 +978,7 @@ None.
 |-------|--------|-------|
 | External ChMS integration | Deferred to user feedback | Planning Center Online (PCO) likely first target. Scope TBD - likely auto-migration of People to PCO, etc. |
 | P-020: Conversion metrics | Deferred - needs redesign | All-time conversion rates mislead as the pipeline grows: the denominator inflates while current counts stay small. This is why P-020 sits below Must. The right metric is undecided — time-windowed rates (last 30/60/90 days), cohort-based tracking (people who entered a stage in a period), or a different approach entirely. |
+
+### Alpha pipeline follow-up warning (2026-09-30 ruling)
+
+Pipeline urgency comes from an actionable top-level person-linked task in the same plant with category `follow_up`, never from age of the person's last activity or their stage. Completed, No longer needed and deleted tasks do not create urgency. With multiple open tasks, any overdue obligation produces a warning and count; future or undated tasks display neutral context. A date-only deadline is overdue after the end of its church-local calendar day, including DST boundaries. Other legacy task list/date counters still use the application UTC day; align their semantics separately before claiming every task surface agrees.

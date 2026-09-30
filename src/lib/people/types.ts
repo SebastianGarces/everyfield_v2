@@ -134,6 +134,8 @@ export function toPersonForClient<T extends Person>(
 export type PersonWithTags = PersonForClient & {
   tags: Tag[];
   lastActivityAt?: Date | null;
+  /** Open person-linked follow-up obligations only; no task content crosses this boundary. */
+  followUpTasks?: { id: string; dueDate: string | null }[];
 };
 
 /**
