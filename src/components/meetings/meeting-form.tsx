@@ -40,6 +40,7 @@ interface MeetingFormProps {
   defaultType?: MeetingType;
   defaultTeamId?: string;
   onSuccess?: () => void;
+  onCancel?: () => void;
 }
 
 const subtypeOptions: { value: MeetingSubtype; label: string }[] = [
@@ -58,6 +59,7 @@ export function MeetingForm({
   defaultType,
   defaultTeamId,
   onSuccess,
+  onCancel,
 }: MeetingFormProps) {
   const router = useRouter();
   const isEdit = mode === "edit";
@@ -263,7 +265,10 @@ export function MeetingForm({
         <Button
           type="button"
           variant="outline"
-          onClick={() => router.back()}
+          onClick={() => {
+            if (onCancel) onCancel();
+            else router.back();
+          }}
           className="cursor-pointer"
         >
           Cancel
