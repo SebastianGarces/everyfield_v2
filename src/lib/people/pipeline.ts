@@ -4,6 +4,7 @@ import {
   persons,
   personTags,
   tags,
+  tasks,
   type PersonStatus,
   type Tag,
 } from "@/db/schema";
@@ -147,6 +148,37 @@ export async function getPipelineData(churchId: string): Promise<PipelineData> {
     }
   }
 
+  const followUpTasksMap = new Map<
+    string,
+    { id: string; dueDate: string | null }[]
+  >();
+  if (personIds.length > 0) {
+    const followUps = await db
+      .select({
+        id: tasks.id,
+        personId: tasks.relatedId,
+        dueDate: tasks.dueDate,
+      })
+      .from(tasks)
+      .where(
+        and(
+          eq(tasks.churchId, churchId),
+          eq(tasks.category, "follow_up"),
+          eq(tasks.relatedType, "person"),
+          inArray(tasks.relatedId, personIds),
+          inArray(tasks.status, ["not_started", "in_progress", "blocked"]),
+          isNull(tasks.parentTaskId),
+          isNull(tasks.deletedAt)
+        )
+      );
+    for (const task of followUps) {
+      if (!task.personId) continue;
+      const existing = followUpTasksMap.get(task.personId) ?? [];
+      existing.push({ id: task.id, dueDate: task.dueDate });
+      followUpTasksMap.set(task.personId, existing);
+    }
+  }
+
   // Build PersonWithTags array. `PipelineView` is a client component, so this
   // map IS the boundary: the strip drops the account link (#378) and trades the
   // photo key for its route (#654) in one pass, decorations and all.
@@ -154,6 +186,7 @@ export async function getPipelineData(churchId: string): Promise<PipelineData> {
     toPersonForClient({
       ...person,
       tags: personTagsMap.get(person.id) ?? [],
+      followUpTasks: followUpTasksMap.get(person.id) ?? [],
     })
   );
 

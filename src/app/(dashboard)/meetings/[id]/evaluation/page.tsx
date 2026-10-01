@@ -1,3 +1,5 @@
+import { EVALUATION_QUALITY_FACTORS } from "@/lib/meetings/evaluation-factors";
+import { listRecordCorrections } from "@/lib/corrections/history";
 import { hasVisionFeature } from "@/lib/meetings/vision-features";
 import { notFound, redirect } from "next/navigation";
 
@@ -67,15 +69,78 @@ export default async function EvaluationPage({ params }: EvaluationPageProps) {
       })
     : null;
 
+  const corrections = evaluation
+    ? await listRecordCorrections(
+        user.churchId,
+        "meeting_evaluation",
+        evaluation.id
+      )
+    : [];
+
   return (
     <div className="mx-auto max-w-3xl space-y-8">
       {evaluation ? (
         <>
           <EvaluationSummary
+            key={evaluation.updatedAt.toISOString()}
             evaluation={evaluation}
+            meetingId={meeting.id}
             title={meetingDisplayTitle(meeting)}
           />
           <EvaluationComparisonCard comparison={comparison} />
+          {corrections.length > 0 && (
+            <details className="rounded-lg border p-4">
+              <summary className="cursor-pointer">
+                Correction history ({corrections.length})
+              </summary>
+              <ul className="mt-3 space-y-2">
+                {corrections.map((entry) => (
+                  <li key={entry.id}>
+                    <span>
+                      Corrected {entry.correctedAt.toISOString().slice(0, 10)}
+                    </span>
+                    <ul className="text-sm">
+                      {EVALUATION_QUALITY_FACTORS.map((factor) => (
+                        <li key={factor.key}>
+                          {factor.label}:{" "}
+                          {String(
+                            (entry.before as Record<string, unknown>)[
+                              factor.key.replace(
+                                /[A-Z]/g,
+                                (c) => `_${c.toLowerCase()}`
+                              )
+                            ] ?? "—"
+                          )}{" "}
+                          →{" "}
+                          {String(
+                            (entry.after as Record<string, unknown>)[
+                              factor.key.replace(
+                                /[A-Z]/g,
+                                (c) => `_${c.toLowerCase()}`
+                              )
+                            ] ?? "—"
+                          )}
+                        </li>
+                      ))}
+                      <li>
+                        Notes:{" "}
+                        {String(
+                          (entry.before as Record<string, unknown>).notes ??
+                            "None"
+                        )}{" "}
+                        →{" "}
+                        {String(
+                          (entry.after as Record<string, unknown>).notes ??
+                            "None"
+                        )}
+                      </li>
+                    </ul>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+
           {/* Show attendee notes after evaluation is saved */}
           <AttendeeNotes
             meetingId={meeting.id}

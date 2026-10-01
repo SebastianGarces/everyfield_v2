@@ -1,6 +1,7 @@
 "use client";
 
 import { useCan } from "@/components/shared/viewer-capabilities";
+import { CreateTeamDialog } from "./create-team-dialog";
 import { LeaderAssignDialog } from "./leader-assign-dialog";
 
 import { Users } from "lucide-react";
@@ -81,6 +82,7 @@ export function TeamDetailHeader({ team }: TeamDetailHeaderProps) {
                 </span>
               )}
             </div>
+            {canAppoint && <CreateTeamDialog team={team} />}
             {canAppoint && (
               <LeaderAssignDialog
                 teamId={team.id}

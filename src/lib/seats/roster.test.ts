@@ -228,7 +228,7 @@ test("only open tasks move, and they move to the actor", () => {
 
   assert.match(
     taskWrite,
-    /ne\(tasks\.status, "complete"\)/,
+    /inArray\(tasks\.status, actionableTaskStatuses\)/,
     "AS-016: a completed task keeps its assignee — it is a record of who did the work"
   );
   assert.match(

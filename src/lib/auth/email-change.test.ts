@@ -369,7 +369,7 @@ test("the confirm's order is claim first, then the dependent swap", () => {
     "email-change.ts",
     [
       "hashEmailChangeToken(token)",
-      "consumeRequestStatement(request.id, now)",
+      "consumeRequestStatement(request.id, now, actor)",
       "swapLoginIdentifierStatement(",
     ],
     "memory/invariants.md → Transactions: in a batch the compare-and-set goes FIRST and the dependent write re-asserts what the claim set"
@@ -400,7 +400,7 @@ test("the request supersedes BEFORE it inserts — the partial index refuses the
       "limiter.count",
       "isMailableAddress(newEmail)",
       "verifyPassword(actor.passwordHash, currentPassword)",
-      "openRequest(actor.id, newEmail, token, now, expiresAt)",
+      "openRequest(actor.id, newEmail, token, now, expiresAt, actor)",
       "sendEmailChangeVerification(",
     ],
     "email_change_requests_live_user_unique_idx is partial on consumed_at IS NULL, so a second live row cannot commit; and the mail must follow the durable row"
@@ -411,7 +411,7 @@ test("the request supersedes BEFORE it inserts — the partial index refuses the
     READER.after("const token = newEmailChangeToken()"),
     "email-change.ts",
     [
-      "openRequest(actor.id, newEmail, token, now, expiresAt)",
+      "openRequest(actor.id, newEmail, token, now, expiresAt, actor)",
       "sendEmailChangeVerification(",
       'limiter.record(identifier, ip, "email_change", false)',
     ],
@@ -638,4 +638,25 @@ test("a nameless account still gets readable copy", async () => {
     "`users.name` is nullable — a blank one must not print as a word"
   );
   assert.ok(message.text.includes(NEW_EMAIL));
+});
+
+test("claim and swap encode every timestamp identically to the column write", () => {
+  const claim = consumeRequestStatement("request", NOW).toSQL();
+  const swap = swapLoginIdentifierStatement(
+    USER_ID,
+    "request",
+    CURRENT_EMAIL,
+    NEW_EMAIL,
+    NOW
+  ).toSQL();
+  for (const statement of [claim, swap]) {
+    assert.equal(
+      statement.params.filter((param) => param === NOW.toISOString()).length,
+      2
+    );
+    assert.ok(
+      !statement.params.some((param) => param instanceof Date),
+      "raw Dates bypass the column encoder"
+    );
+  }
 });

@@ -58,6 +58,7 @@ export function taskListScope(
   parsed: TaskListSearchParams
 ): TaskCountScope {
   return {
+    teamId: parsed.teamId,
     status: parsed.status,
     priority: parsed.priority,
     category: parsed.category,

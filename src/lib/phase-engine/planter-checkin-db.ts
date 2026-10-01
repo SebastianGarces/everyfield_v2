@@ -11,7 +11,7 @@
 // `planter-checkin` prefix.
 // ============================================================================
 
-import { and, desc, eq, gte } from "drizzle-orm";
+import { and, desc, eq, gte, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { planterCheckins, type PlanterCheckin } from "@/db/schema";
@@ -53,6 +53,15 @@ export async function saveCheckin(
     .onConflictDoUpdate({
       target: [planterCheckins.churchId, planterCheckins.weekStart],
       set: {
+        editHistory: sql`${planterCheckins.editHistory} || jsonb_build_array(jsonb_build_object(
+          'spiritually', ${planterCheckins.spiritually},
+          'marriageFamily', ${planterCheckins.marriageFamily},
+          'financially', ${planterCheckins.financially},
+          'pace', ${planterCheckins.pace},
+          'note', ${planterCheckins.note},
+          'answeredById', ${planterCheckins.answeredById},
+          'recordedAt', ${planterCheckins.updatedAt}
+        ))`,
         spiritually: answer.spiritually,
         marriageFamily: answer.marriageFamily,
         financially: answer.financially,
@@ -93,4 +102,34 @@ export async function listRecentCheckins(
     .orderBy(desc(planterCheckins.weekStart));
 
   return rows.reverse();
+}
+
+/** Private owner surface only; callers establish authority before reading. */
+export async function listCheckinHistory(
+  churchId: string
+): Promise<PlanterCheckin[]> {
+  return db
+    .select()
+    .from(planterCheckins)
+    .where(eq(planterCheckins.churchId, churchId))
+    .orderBy(desc(planterCheckins.weekStart));
+}
+
+/** Correct an existing week only. Church scope prevents foreign-row writes. */
+export async function correctCheckin(
+  churchId: string,
+  answeredById: string,
+  id: string,
+  answer: CheckinAnswer
+): Promise<boolean> {
+  const [row] = await db
+    .select({ weekStart: planterCheckins.weekStart })
+    .from(planterCheckins)
+    .where(
+      and(eq(planterCheckins.churchId, churchId), eq(planterCheckins.id, id))
+    )
+    .limit(1);
+  if (!row) return false;
+  await saveCheckin(churchId, answeredById, row.weekStart, answer);
+  return true;
 }

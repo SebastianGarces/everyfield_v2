@@ -14,7 +14,15 @@ import {
   type TeamStatus,
   type TeamType,
 } from "@/db/schema";
-import { and, eq, inArray, sql, asc, isNull } from "drizzle-orm";
+import {
+  and,
+  eq,
+  inArray,
+  sql,
+  asc,
+  isNull,
+  getTableColumns,
+} from "drizzle-orm";
 import { emitTeamLeaderAssigned } from "./events";
 import { ExpectedError } from "./expected-error";
 import { TEAM_TEMPLATES, type PredefinedTeamKey } from "./role-templates";
@@ -59,11 +67,19 @@ export interface TeamDetail extends MinistryTeam {
  * List all teams for a church with staffing stats.
  * Uses batch queries instead of N+1 loops.
  */
-export async function listTeams(churchId: string): Promise<TeamWithStats[]> {
+export async function listTeams(
+  churchId: string,
+  includeArchived = false
+): Promise<TeamWithStats[]> {
   const teams = await db
     .select()
     .from(ministryTeams)
-    .where(eq(ministryTeams.churchId, churchId))
+    .where(
+      and(
+        eq(ministryTeams.churchId, churchId),
+        includeArchived ? undefined : sql`${ministryTeams.status} <> 'archived'`
+      )
+    )
     .orderBy(asc(ministryTeams.sortOrder), asc(ministryTeams.name));
 
   if (teams.length === 0) return [];
@@ -269,7 +285,9 @@ export async function updateTeam(
     description?: string;
     icon?: string;
     status?: TeamStatus;
-  }
+  },
+  userId: string,
+  expectedUpdatedAt?: string
 ): Promise<MinistryTeam> {
   const updateData: Partial<NewMinistryTeam> = { updatedAt: new Date() };
 
@@ -278,15 +296,42 @@ export async function updateTeam(
   if (data.icon !== undefined) updateData.icon = data.icon;
   if (data.status !== undefined) updateData.status = data.status;
 
-  const [updated] = await db
-    .update(ministryTeams)
-    .set(updateData)
+  const [before] = await db
+    .select({
+      ...getTableColumns(ministryTeams),
+      version: sql<string>`md5(to_jsonb(ministry_teams)::text)`,
+    })
+    .from(ministryTeams)
     .where(
       and(eq(ministryTeams.churchId, churchId), eq(ministryTeams.id, teamId))
     )
-    .returning();
-
-  if (!updated) throw new Error("Team not found");
+    .limit(1);
+  if (!before) throw new ExpectedError("Team not found");
+  if (expectedUpdatedAt && before.updatedAt.toISOString() !== expectedUpdatedAt)
+    throw new ExpectedError("This team changed. Reload before correcting it.");
+  const unchanged = sql`md5(to_jsonb(ministry_teams)::text) = ${before.version}`;
+  const [, , result] = await db.batch([
+    db.execute(
+      sql`SELECT id FROM ministry_teams WHERE church_id = ${churchId} AND id = ${teamId} FOR UPDATE`
+    ),
+    db.execute(
+      sql`INSERT INTO record_corrections (church_id,entity_type,entity_id,before,after,corrected_by) SELECT ${churchId}, 'team', ${teamId}, to_jsonb(ministry_teams), to_jsonb(ministry_teams) || ${JSON.stringify({ ...updateData, updatedAt: undefined, updated_at: updateData.updatedAt?.toISOString() })}::jsonb, ${userId} FROM ministry_teams WHERE church_id = ${churchId} AND id = ${teamId} AND ${unchanged}`
+    ),
+    db
+      .update(ministryTeams)
+      .set(updateData)
+      .where(
+        and(
+          eq(ministryTeams.churchId, churchId),
+          eq(ministryTeams.id, teamId),
+          unchanged
+        )
+      )
+      .returning(),
+  ]);
+  const updated = result[0];
+  if (!updated)
+    throw new ExpectedError("This team changed. Reload before correcting it.");
   return updated;
 }
 

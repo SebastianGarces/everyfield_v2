@@ -34,21 +34,29 @@ export function TeamHealthDashboard({
   const yellowAlerts = healthMetrics.filter((m) => m.alertLevel === "yellow");
 
   // Prepare radar chart data
-  const radarData = healthMetrics.map((m) => ({
-    team: m.teamName.length > 12 ? m.teamName.slice(0, 12) + "..." : m.teamName,
-    staffing: m.staffingPercent,
-    training: m.trainingPercent,
-    attendance: m.meetingAttendancePercent,
-    fullName: m.teamName,
-  }));
+  const radarData = healthMetrics
+    .filter((m) => m.engagementScore !== null)
+    .map((m) => ({
+      team:
+        m.teamName.length > 12 ? m.teamName.slice(0, 12) + "..." : m.teamName,
+      staffing: m.staffingPercent,
+      training: m.trainingPercent,
+      attendance: m.meetingAttendancePercent,
+      fullName: m.teamName,
+    }));
 
+  const measuredEngagement = healthMetrics.filter(
+    (m) => m.engagementScore !== null
+  );
   const averageEngagement =
-    healthMetrics.length > 0
+    measuredEngagement.length > 0
       ? Math.round(
-          healthMetrics.reduce((sum, m) => sum + m.engagementScore, 0) /
-            healthMetrics.length
+          measuredEngagement.reduce(
+            (sum, m) => sum + (m.engagementScore ?? 0),
+            0
+          ) / measuredEngagement.length
         )
-      : 0;
+      : null;
 
   return (
     <div className="space-y-6">
@@ -62,14 +70,14 @@ export function TeamHealthDashboard({
         />
         <SummaryCard
           title="Staffing"
-          value={`${staffingSummary.staffingPercentage}%`}
+          value={formatHealthPercent(staffingSummary.staffingPercentage)}
           description={`${staffingSummary.filledRoles}/${staffingSummary.totalRoles} roles`}
           icon={<TrendingUp className="h-4 w-4" />}
         />
         <SummaryCard
           title="Engagement"
-          value={`${averageEngagement}%`}
-          description="Avg. engagement score"
+          value={formatHealthPercent(averageEngagement)}
+          description={`${measuredEngagement.length}/${healthMetrics.length} teams with complete evidence`}
           icon={<TrendingUp className="h-4 w-4" />}
         />
         <SummaryCard
@@ -105,7 +113,7 @@ export function TeamHealthDashboard({
 
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Radar Chart */}
-        {healthMetrics.length > 0 && (
+        {radarData.length > 0 && (
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base">
@@ -113,6 +121,9 @@ export function TeamHealthDashboard({
               </CardTitle>
             </CardHeader>
             <CardContent>
+              <p className="text-muted-foreground mb-3 text-xs">
+                Only teams with complete evidence appear in this comparison.
+              </p>
               <div className="h-80">
                 <ResponsiveContainer width="100%" height="100%">
                   <RadarChart data={radarData}>
@@ -184,20 +195,28 @@ export function TeamHealthDashboard({
                       "h-2.5 w-2.5 shrink-0 rounded-full",
                       m.alertLevel === "red" && "bg-red-500",
                       m.alertLevel === "yellow" && "bg-yellow-500",
-                      m.alertLevel === "green" && "bg-green-500"
+                      m.alertLevel === "green" && "bg-green-500",
+                      m.alertLevel === "unknown" && "bg-muted-foreground"
                     )}
                   />
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium">{m.teamName}</p>
                     <div className="text-muted-foreground mt-1 flex items-center gap-3 text-xs">
-                      <span>Staffing: {m.staffingPercent}%</span>
-                      <span>Training: {m.trainingPercent}%</span>
-                      <span>Attendance: {m.meetingAttendancePercent}%</span>
+                      <span>
+                        Staffing: {formatHealthPercent(m.staffingPercent)}
+                      </span>
+                      <span>
+                        Training: {formatHealthPercent(m.trainingPercent)}
+                      </span>
+                      <span>
+                        Attendance:{" "}
+                        {formatHealthPercent(m.meetingAttendancePercent)}
+                      </span>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
                     <Badge variant="secondary" className="text-xs">
-                      {m.engagementScore}%
+                      {formatHealthPercent(m.engagementScore)}
                     </Badge>
                     <ArrowRight className="text-muted-foreground h-4 w-4" />
                   </div>
@@ -248,10 +267,14 @@ function SummaryCard({
 
 function AlertRow({ metrics }: { metrics: TeamHealthMetrics }) {
   const issues: string[] = [];
-  if (metrics.staffingPercent < 40) issues.push("Critical: Staffing below 40%");
-  else if (metrics.staffingPercent < 60)
+  if (metrics.staffingPercent !== null && metrics.staffingPercent < 40)
+    issues.push("Critical: Staffing below 40%");
+  else if (metrics.staffingPercent !== null && metrics.staffingPercent < 60)
     issues.push("Warning: Staffing below 60%");
-  if (metrics.meetingAttendancePercent < 50)
+  if (
+    metrics.meetingAttendancePercent !== null &&
+    metrics.meetingAttendancePercent < 50
+  )
     issues.push("Warning: Attendance below 50%");
 
   return (
@@ -275,11 +298,18 @@ function AlertRow({ metrics }: { metrics: TeamHealthMetrics }) {
         </div>
       </div>
       <div className="flex items-center gap-2">
-        <Progress value={metrics.staffingPercent} className="h-2 w-16" />
+        <Progress
+          value={metrics.staffingPercent ?? undefined}
+          className="h-2 w-16"
+        />
         <span className="text-muted-foreground text-xs">
-          {metrics.staffingPercent}%
+          {formatHealthPercent(metrics.staffingPercent)}
         </span>
       </div>
     </Link>
   );
+}
+
+function formatHealthPercent(value: number | null): string {
+  return value === null ? "Unknown" : `${value}%`;
 }

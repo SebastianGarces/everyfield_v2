@@ -379,6 +379,16 @@ export const UNSEATED_EXPORTS: Readonly<
     reason:
       "authenticated own discovery profile; scoped association and confirmation checked in core",
   },
+  "src/app/(auth)/forgot-password/actions.ts → forgotPassword": {
+    kind: "sessionless",
+    reason:
+      "authorized public recovery request; generic response, account/IP throttling, no credential change",
+  },
+  "src/app/(auth)/reset-password/actions.ts → finishPasswordReset": {
+    kind: "sessionless",
+    reason:
+      "mailbox recovery capability; expiring single-use token and current credential snapshots authorize atomic reset/session revocation",
+  },
   "src/app/(auth)/login/actions.ts → login": {
     kind: "sessionless",
     reason: "signing in — there is no session to check yet",

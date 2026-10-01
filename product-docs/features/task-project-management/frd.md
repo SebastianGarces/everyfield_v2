@@ -31,7 +31,7 @@ Task & Project Management tracks all tasks required for successful launch with t
 |----|-------------|-------------|
 | T-001 | Task creation | Create tasks with title, due date, and priority |
 | T-002 | Task list view | Display tasks in a filterable, sortable list |
-| T-003 | Task status tracking | Track status: Not Started, In Progress, Blocked, Complete |
+| T-003 | Task status tracking | Track status: Not Started, In Progress, Blocked, Complete, No longer needed |
 | T-004 | Task assignment | Assign tasks to users |
 | T-005 | Due date management | Set and track due dates with overdue indicators |
 | T-006 | Priority levels | Assign priority: Low, Medium, High, Urgent |
@@ -142,7 +142,7 @@ Full task view with all fields.
 |-------|------|----------|-------------|
 | Title | Text | Yes | Task description |
 | Description | Rich text | No | Detailed notes |
-| Status | Dropdown | Yes | Not Started / In Progress / Blocked / Complete |
+| Status | Dropdown | Yes | Not Started / In Progress / Blocked / Complete / No longer needed |
 | Priority | Dropdown | Yes | Low / Medium / High / Urgent |
 | Due Date | Date | No | When task is due |
 | Assigned To | Person selector | No | Who owns this task |
@@ -664,3 +664,15 @@ Network admins can see aggregate task metrics across all plants in their network
 4. **Time tracking:** Should tasks support time tracking for effort estimation?
 
 5. **Comments:** Should tasks support threaded comments for collaboration?
+
+### Alpha team filter (#878, ruling 2026-09-30)
+
+My Tasks and All Tasks support a team filter for tasks explicitly related to that plant's team. The same filter applies to counts and pagination, survives other filter edits, and clears with Clear filters. Invalid team IDs are ignored; well-formed unavailable IDs match no rows and reveal no foreign team names. Assignments remains person-linked follow-ups and does not apply a team filter. Manual task reordering is deferred; existing sorting remains.
+
+### Alpha task outcomes (2026-09-30)
+
+- **No longer needed** settles an obligation without claiming it was completed. It clears overdue work and pending reminders, remains separately labelled in closed-task lists, and earns no completion credit.
+- Owners/admins and members acting on their own assigned tasks may set the outcome and reopen it. Reopening is explicit; completed and waived recurring instances respect the one-open-occurrence guard. Waiving does not generate a recurrence successor; completing does.
+- Preserve task status transitions and their timestamps. Completion timestamps and completed-by attribution belong only to completion, never to a waiver. Display transition history on the task detail.
+- Automatic vision-meeting follow-ups retain an immutable meeting/person obligation identity, source meeting and resolved meeting start. Re-finalizing the same obligation does not regenerate a waived task after editing or soft deletion. A different meeting remains a distinct obligation. For older untraceable tasks, retain the known person/due-day identity when waived without inventing meeting provenance.
+- A meeting datetime is a church wall clock. Freeze its uniquely resolved real instant in the church timezone for the separate48h completion measure. An ambiguous or nonexistent DST wall time leaves the metric start Unknown. Keep existing calendar due-day semantics separately from that exact elapsed-time measure.

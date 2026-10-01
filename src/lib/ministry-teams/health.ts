@@ -8,7 +8,7 @@ import {
   trainingPrograms,
   trainingCompletions,
 } from "@/db/schema";
-import { and, desc, eq, inArray, sql, asc } from "drizzle-orm";
+import { and, desc, eq, inArray, sql, asc, isNull, ne } from "drizzle-orm";
 import { getTeamStaffingCounts } from "./shared";
 import { staffingPercent } from "./team-display";
 
@@ -20,17 +20,17 @@ export interface StaffingSummary {
   totalTeams: number;
   totalRoles: number;
   filledRoles: number;
-  staffingPercentage: number;
+  staffingPercentage: number | null;
 }
 
 export interface TeamHealthMetrics {
   teamId: string;
   teamName: string;
-  staffingPercent: number;
-  trainingPercent: number;
-  meetingAttendancePercent: number;
-  engagementScore: number;
-  alertLevel: "green" | "yellow" | "red";
+  staffingPercent: number | null;
+  trainingPercent: number | null;
+  meetingAttendancePercent: number | null;
+  engagementScore: number | null;
+  alertLevel: "green" | "yellow" | "red" | "unknown";
 }
 
 // ============================================================================
@@ -86,38 +86,44 @@ export function countAttendedByMembers(
 /**
  * The one place the health figures are derived. Both `getTeamHealth` and
  * `getAllTeamsHealth` feed this, so the single-team page and the dashboard
- * cannot drift apart. An empty denominator reads 100 throughout: nothing was
- * required, so nothing is missing. Exported for the unit tests only — the app
+ * cannot drift apart. An empty denominator is Unknown: missing evidence must
+ * never produce a positive assessment. Exported for the unit tests only — the app
  * reaches it through the two reads below.
  */
 export function computeTeamHealth(inputs: TeamHealthInputs): TeamHealthMetrics {
-  const staffing = staffingPercent(
-    inputs.staffing.filled,
-    inputs.staffing.total,
-    100
-  );
-
+  const staffing =
+    inputs.staffing.total > 0
+      ? staffingPercent(inputs.staffing.filled, inputs.staffing.total, 0)
+      : null;
   const totalRequired = inputs.requiredProgramCount * inputs.memberCount;
   const trainingPercent =
     totalRequired > 0
       ? Math.round((inputs.completedCount / totalRequired) * 100)
-      : 100;
-
+      : null;
   const totalExpected = inputs.memberCount * inputs.recentMeetingCount;
   const meetingAttendancePercent =
     totalExpected > 0
       ? Math.round((inputs.attendedCount / totalExpected) * 100)
-      : 100;
+      : null;
 
-  // Engagement score (weighted average)
-  const engagementScore = Math.round(
-    staffing * 0.4 + trainingPercent * 0.35 + meetingAttendancePercent * 0.25
-  );
-
-  // Alert level
-  let alertLevel: "green" | "yellow" | "red" = "green";
-  if (staffing < 40) alertLevel = "red";
-  else if (staffing < 60 || meetingAttendancePercent < 50)
+  // Do not fill missing evidence with a perfect score or renormalize weights.
+  const engagementScore =
+    staffing !== null &&
+    trainingPercent !== null &&
+    meetingAttendancePercent !== null
+      ? Math.round(
+          staffing * 0.4 +
+            trainingPercent * 0.35 +
+            meetingAttendancePercent * 0.25
+        )
+      : null;
+  let alertLevel: TeamHealthMetrics["alertLevel"] =
+    engagementScore === null ? "unknown" : "green";
+  if (staffing !== null && staffing < 40) alertLevel = "red";
+  else if (
+    (staffing !== null && staffing < 60) ||
+    (meetingAttendancePercent !== null && meetingAttendancePercent < 50)
+  )
     alertLevel = "yellow";
 
   return {
@@ -197,6 +203,7 @@ export async function getTeamHealth(
       .where(
         and(
           eq(trainingCompletions.churchId, churchId),
+          isNull(trainingCompletions.revokedAt),
           inArray(
             trainingCompletions.personId,
             members.map((m) => m.personId)
@@ -262,7 +269,12 @@ export async function getAllTeamsHealth(
   const teams = await db
     .select({ id: ministryTeams.id, name: ministryTeams.name })
     .from(ministryTeams)
-    .where(eq(ministryTeams.churchId, churchId))
+    .where(
+      and(
+        eq(ministryTeams.churchId, churchId),
+        ne(ministryTeams.status, "archived")
+      )
+    )
     .orderBy(asc(ministryTeams.sortOrder));
 
   if (teams.length === 0) return [];
@@ -344,6 +356,7 @@ export async function getAllTeamsHealth(
           .where(
             and(
               eq(trainingCompletions.churchId, churchId),
+              isNull(trainingCompletions.revokedAt),
               inArray(
                 trainingCompletions.trainingProgramId,
                 requiredPrograms.map((p) => p.id)
@@ -438,7 +451,12 @@ export async function getStaffingSummary(
   const [teamCountResult] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(ministryTeams)
-    .where(eq(ministryTeams.churchId, churchId));
+    .where(
+      and(
+        eq(ministryTeams.churchId, churchId),
+        ne(ministryTeams.status, "archived")
+      )
+    );
 
   const [roleStats] = await db
     .select({
@@ -446,7 +464,14 @@ export async function getStaffingSummary(
       filled: sql<number>`count(*) filter (where ${teamRoles.status} = 'filled')::int`,
     })
     .from(teamRoles)
-    .where(eq(teamRoles.churchId, churchId));
+    .innerJoin(ministryTeams, eq(teamRoles.teamId, ministryTeams.id))
+    .where(
+      and(
+        eq(teamRoles.churchId, churchId),
+        eq(ministryTeams.churchId, churchId),
+        ne(ministryTeams.status, "archived")
+      )
+    );
 
   const totalTeams = teamCountResult?.count ?? 0;
   const totalRoles = roleStats?.total ?? 0;
@@ -457,6 +482,6 @@ export async function getStaffingSummary(
     totalRoles,
     filledRoles,
     staffingPercentage:
-      totalRoles > 0 ? Math.round((filledRoles / totalRoles) * 100) : 0,
+      totalRoles > 0 ? Math.round((filledRoles / totalRoles) * 100) : null,
   };
 }

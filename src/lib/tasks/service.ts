@@ -1,3 +1,4 @@
+import { actionableTaskStatuses, isTaskSettled } from "@/lib/tasks/lifecycle";
 import {
   assertTaskRelation,
   MANAGED_TASK_RELATION_ERROR,
@@ -7,6 +8,7 @@ import { taskStructureLockStatement } from "./structure-lock";
 import { db } from "@/db";
 import {
   tasks,
+  taskStatusHistory,
   users,
   type NewTask,
   type Task,
@@ -79,6 +81,7 @@ export interface ListTasksOptions {
   status?: TaskStatus[];
   priority?: TaskPriority[];
   category?: TaskCategory[];
+  teamId?: string; // explicitly team-related tasks
   assignedToId?: string; // filter to specific user's tasks
   dueDateFrom?: string; // ISO date
   dueDateTo?: string; // ISO date
@@ -215,6 +218,9 @@ const taskWithAssigneeColumns = {
   parentTaskId: tasks.parentTaskId,
   isRecurring: tasks.isRecurring,
   recurrenceRule: tasks.recurrenceRule,
+  followUpMeetingId: tasks.followUpMeetingId,
+  followUpStartedAt: tasks.followUpStartedAt,
+  followUpObligationKey: tasks.followUpObligationKey,
   completionEvent: tasks.completionEvent,
   completedAt: tasks.completedAt,
   completedById: tasks.completedById,
@@ -330,6 +336,7 @@ export function taskListConditions(
     priority,
     category,
     assignedToId,
+    teamId,
     dueDateFrom,
     dueDateTo,
     search,
@@ -344,7 +351,7 @@ export function taskListConditions(
 
   // Exclude completed unless requested
   if (!includeCompleted) {
-    baseConditions.push(ne(table.status, "complete"));
+    baseConditions.push(inArray(table.status, actionableTaskStatuses));
   }
 
   // Top-level rows only unless requested (T-016). Applied to the count query
@@ -366,6 +373,13 @@ export function taskListConditions(
   // Filter by category
   if (category && category.length > 0) {
     baseConditions.push(inArray(table.category, category));
+  }
+
+  if (teamId) {
+    baseConditions.push(
+      eq(table.relatedType, "team"),
+      eq(table.relatedId, teamId)
+    );
   }
 
   // Filter by assignee
@@ -563,7 +577,8 @@ export async function getTaskCounts(
         inProgress: sql<number>`count(*) filter (where ${tasks.status} = 'in_progress')::int`,
         blocked: sql<number>`count(*) filter (where ${tasks.status} = 'blocked')::int`,
         complete: sql<number>`count(*) filter (where ${tasks.status} = 'complete')::int`,
-        overdue: sql<number>`count(*) filter (where ${tasks.status} != 'complete' and ${tasks.dueDate} < ${today})::int`,
+        noLongerNeeded: sql<number>`count(*) filter (where ${tasks.status} = 'no_longer_needed')::int`,
+        overdue: sql<number>`count(*) filter (where ${tasks.status} in ('not_started', 'in_progress', 'blocked') and ${tasks.dueDate} < ${today})::int`,
         total: sql<number>`count(*)::int`,
       })
       .from(tasks)
@@ -578,6 +593,7 @@ export async function getTaskCounts(
       inProgress: 0,
       blocked: 0,
       complete: 0,
+      noLongerNeeded: 0,
       overdue: 0,
       total: 0,
     }),
@@ -923,7 +939,25 @@ export async function updateTask(
   // with no session and no UI just like the first (T-021).
   if (data.description !== undefined)
     updateData.description = normalizeTaskDescription(data.description);
-  if (data.status !== undefined) updateData.status = data.status;
+  if (data.status !== undefined) {
+    updateData.status = data.status;
+    // Legacy generated tasks have no meeting provenance. Preserve their existing
+    // person/day obligation when waived, without inventing a meeting timestamp.
+    if (
+      data.status === "no_longer_needed" &&
+      !existing.followUpObligationKey &&
+      existing.category === "follow_up" &&
+      existing.relatedType === "person" &&
+      existing.relatedId &&
+      existing.dueDate
+    ) {
+      updateData.followUpObligationKey = `legacy:${existing.dueDate}:${existing.relatedId}`;
+    }
+    if (data.status !== "complete") {
+      updateData.completedAt = null;
+      updateData.completedById = null;
+    }
+  }
   if (data.priority !== undefined) updateData.priority = data.priority;
   if (data.dueDate !== undefined) updateData.dueDate = data.dueDate ?? null;
   if (data.dueTime !== undefined) updateData.dueTime = data.dueTime ?? null;
@@ -946,7 +980,10 @@ export async function updateTask(
         and(
           eq(tasks.churchId, churchId),
           eq(tasks.id, taskId),
-          isNull(tasks.deletedAt)
+          isNull(tasks.deletedAt),
+          ...(data.status !== undefined
+            ? [eq(tasks.status, existing.status)]
+            : [])
         )
       )
       .returning(),
@@ -1062,7 +1099,7 @@ export const defaultRecurrenceDeps: RecurrenceDeps = {
       .where(
         and(
           eq(tasks.churchId, churchId),
-          ne(tasks.status, "complete"),
+          inArray(tasks.status, actionableTaskStatuses),
           isNull(tasks.deletedAt),
           eq(tasks.isRecurring, true),
           sql`${tasks.recurrenceRule} ->> 'seriesId' = ${seriesId}`
@@ -1290,8 +1327,12 @@ export async function completeTask(
 
   assertMayActOnTask(actor, existing);
 
-  if (existing.status === "complete") {
-    throw new Error("Task is already complete");
+  if (isTaskSettled(existing.status)) {
+    throw new Error(
+      existing.status === "no_longer_needed"
+        ? "Task is no longer needed — reopen it before completing"
+        : "Task is already complete"
+    );
   }
 
   const completedAt = new Date();
@@ -1316,7 +1357,7 @@ export async function completeTask(
           eq(tasks.churchId, churchId),
           eq(tasks.id, taskId),
           isNull(tasks.deletedAt),
-          ne(tasks.status, "complete")
+          inArray(tasks.status, actionableTaskStatuses)
         )
       )
       .returning(),
@@ -1386,7 +1427,7 @@ export async function reopenTask(
 
   assertMayActOnTask(actor, existing);
 
-  if (existing.status !== "complete") {
+  if (!isTaskSettled(existing.status)) {
     throw new Error("Task is not complete");
   }
 
@@ -1402,7 +1443,7 @@ export async function reopenTask(
         eq(active.churchId, tasks.churchId),
         ne(active.id, tasks.id),
         eq(active.isRecurring, true),
-        ne(active.status, "complete"),
+        inArray(active.status, actionableTaskStatuses),
         isNull(active.deletedAt),
         sql`coalesce(${active.recurrenceRule}->>'seriesId', ${active.id}::text) = coalesce(${tasks.recurrenceRule}->>'seriesId', ${tasks.id}::text)`
       )
@@ -1432,7 +1473,7 @@ export async function reopenTask(
           eq(tasks.churchId, churchId),
           eq(tasks.id, taskId),
           isNull(tasks.deletedAt),
-          eq(tasks.status, "complete"),
+          inArray(tasks.status, ["complete", "no_longer_needed"]),
           notExists(activeOccurrence)
         )
       )
@@ -1624,11 +1665,14 @@ export function planBulkTaskOperation(
       continue;
     }
 
-    if (options.rejectCompleted && row.status === "complete") {
+    if (options.rejectCompleted && isTaskSettled(row.status)) {
       failures.push({
         taskId: id,
         title: row.title,
-        reason: options.completedReason ?? "Task is already complete",
+        reason:
+          row.status === "no_longer_needed"
+            ? "Task is no longer needed — reopen it before changing its outcome"
+            : (options.completedReason ?? "Task is already complete"),
       });
       continue;
     }
@@ -1757,7 +1801,7 @@ export const defaultBulkTaskDeps: BulkTaskDeps = {
             eq(tasks.churchId, churchId),
             inArray(tasks.id, taskIds),
             isNull(tasks.deletedAt),
-            ne(tasks.status, "complete")
+            inArray(tasks.status, actionableTaskStatuses)
           )
         )
         .returning({ id: tasks.id }),
@@ -1780,7 +1824,7 @@ export const defaultBulkTaskDeps: BulkTaskDeps = {
             // Mirrors the planner's rejectCompleted guard. Belt and braces: if a
             // task is completed between the load and this write, it is reported
             // as a failure rather than quietly given a new due date.
-            ne(tasks.status, "complete")
+            inArray(tasks.status, actionableTaskStatuses)
           )
         )
         .returning({ id: tasks.id }),
@@ -1980,4 +2024,19 @@ export async function bulkRescheduleTasks(
   }
 
   return reconcileBulkTaskOperation(plan, writtenIds, missedReason).result;
+}
+
+/** History is scoped by plant and live parent, just like the task detail. */
+export async function listTaskStatusHistory(churchId: string, taskId: string) {
+  if (!(await getTask(churchId, taskId))) return [];
+  return db
+    .select()
+    .from(taskStatusHistory)
+    .where(
+      and(
+        eq(taskStatusHistory.churchId, churchId),
+        eq(taskStatusHistory.taskId, taskId)
+      )
+    )
+    .orderBy(desc(taskStatusHistory.changedAt));
 }

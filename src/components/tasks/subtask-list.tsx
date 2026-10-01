@@ -24,6 +24,7 @@ interface SubtaskRow {
   id: string;
   title: string;
   complete: boolean;
+  waived: boolean;
   assigneeName: string | null;
   /** WHOSE ROW THIS IS — the subject half of `tasks.own` for the tick.
    *  `setSubtaskCompletionAction` is asked about the SUBTASK, not its parent,
@@ -38,6 +39,7 @@ function toRows(subtasks: TaskWithAssignee[]): SubtaskRow[] {
     id: subtask.id,
     title: subtask.title,
     complete: subtask.status === "complete",
+    waived: subtask.status === "no_longer_needed",
     assigneeName: subtask.assigneeName,
     assignedToId: subtask.assignedToId,
     pending: false,
@@ -55,7 +57,9 @@ function applyOptimisticAction(
   switch (action.type) {
     case "toggle":
       return rows.map((row) =>
-        row.id === action.id ? { ...row, complete: action.complete } : row
+        row.id === action.id
+          ? { ...row, complete: action.complete, waived: false }
+          : row
       );
     case "add":
       return [
@@ -64,6 +68,7 @@ function applyOptimisticAction(
           id: action.tempId,
           title: action.title,
           complete: false,
+          waived: false,
           assigneeName: null,
           // Unassigned, which is what `createTask` stores for a subtask added
           // from this form — so the optimistic row offers the same tick the
@@ -212,7 +217,7 @@ export function SubtaskList({
                 {canTick ? (
                   <Checkbox
                     id={`subtask-${row.id}`}
-                    checked={row.complete}
+                    checked={row.complete || row.waived}
                     disabled={row.pending}
                     onCheckedChange={(checked) =>
                       handleToggle(row.id, checked === true)
@@ -248,6 +253,12 @@ export function SubtaskList({
                     )}
                   >
                     {row.title}
+                    {row.waived && (
+                      <span className="text-muted-foreground">
+                        {" "}
+                        · No longer needed
+                      </span>
+                    )}
                   </label>
                 ) : (
                   <span
@@ -257,6 +268,12 @@ export function SubtaskList({
                     )}
                   >
                     {row.title}
+                    {row.waived && (
+                      <span className="text-muted-foreground">
+                        {" "}
+                        · No longer needed
+                      </span>
+                    )}
                   </span>
                 )}
                 {row.assigneeName && (

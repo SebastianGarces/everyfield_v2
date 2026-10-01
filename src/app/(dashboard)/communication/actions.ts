@@ -55,6 +55,13 @@ export async function sendMessageAction(formData: FormData) {
   try {
     const comm = await sendCommunication(user.churchId, user.id, parsed.data);
     revalidatePath("/communication");
+    if (comm.status === "failed") {
+      return {
+        error:
+          "The message could not be sent. Review the communication history for details.",
+        communicationId: comm.id,
+      };
+    }
     return { success: true, communicationId: comm.id };
   } catch (err) {
     console.error("[ACTION] sendMessage failed:", err);

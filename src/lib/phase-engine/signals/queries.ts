@@ -272,6 +272,7 @@ export async function getCompletedVisionMeetings(
 // ----------------------------------------------------------------------------
 
 export interface FollowUpRow {
+  lastContactAt?: Date | null;
   id: string;
   status: string;
   updatedAt: Date;
@@ -279,13 +280,31 @@ export interface FollowUpRow {
 
 /** Non-deleted persons in an open follow-up status, church-scoped. */
 export async function getOpenFollowUpContacts(
-  churchId: string
+  churchId: string,
+  asOf: Date = new Date()
 ): Promise<FollowUpRow[]> {
+  return openFollowUpContactsQuery(churchId, asOf);
+}
+
+export function openFollowUpContactsQuery(churchId: string, asOf: Date) {
   return db
     .select({
       id: persons.id,
       status: persons.status,
       updatedAt: persons.updatedAt,
+      // Raw qualified identifiers prevent Drizzle's select projection from
+      // stripping column qualification inside this correlated subquery.
+      lastContactAt: sql<
+        string | null
+      >`(select max(c.sent_at at time zone 'UTC') from communications c
+        inner join communication_recipients r on r.communication_id = c.id
+        where c.church_id = ${churchId} and r.church_id = ${churchId}
+          and r.person_id = persons.id
+          and c.status in ('sent', 'logged')
+          and r.status in ('sent', 'delivered', 'opened', 'clicked')
+          and c.sent_at <= (${asOf.toISOString()}::timestamptz at time zone 'UTC'))`.mapWith(
+        (value) => (value === null ? null : new Date(value))
+      ),
     })
     .from(persons)
     .where(
@@ -319,7 +338,12 @@ export async function getMinistryTeams(
       leaderId: ministryTeams.leaderId,
     })
     .from(ministryTeams)
-    .where(eq(ministryTeams.churchId, churchId))
+    .where(
+      and(
+        eq(ministryTeams.churchId, churchId),
+        sql`${ministryTeams.status} <> 'archived'`
+      )
+    )
     .orderBy(ministryTeams.name, ministryTeams.id);
 }
 
@@ -565,6 +589,7 @@ export async function getTeamLeaderPersonIds(
     .where(
       and(
         eq(ministryTeams.churchId, churchId),
+        sql`${ministryTeams.status} <> 'archived'`,
         isNotNull(ministryTeams.leaderId)
       )
     );
@@ -610,7 +635,12 @@ export async function getTrainingCompletions(
       trainingProgramId: trainingCompletions.trainingProgramId,
     })
     .from(trainingCompletions)
-    .where(eq(trainingCompletions.churchId, churchId))
+    .where(
+      and(
+        eq(trainingCompletions.churchId, churchId),
+        isNull(trainingCompletions.revokedAt)
+      )
+    )
     .orderBy(trainingCompletions.id);
 }
 

@@ -16,7 +16,11 @@ import {
   formatDateTime,
   formatDateWithoutWeekday,
 } from "@/lib/datetime";
-import { getTask, listSubtasks } from "@/lib/tasks/service";
+import {
+  getTask,
+  listSubtasks,
+  listTaskStatusHistory,
+} from "@/lib/tasks/service";
 import { listFollowUpAssignees } from "@/lib/tasks/follow-up-ownership";
 import {
   listPrerequisiteCandidates,
@@ -48,6 +52,10 @@ const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   in_progress: { label: "In Progress", color: "bg-blue-100 text-blue-700" },
   blocked: { label: "Blocked", color: "bg-red-100 text-red-700" },
   complete: { label: "Complete", color: "bg-green-100 text-green-700" },
+  no_longer_needed: {
+    label: "No longer needed",
+    color: "text-muted-foreground",
+  },
 };
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -151,6 +159,7 @@ export default async function TaskDetailPage({ params }: TaskDetailPageProps) {
   // a Member — the page itself stays readable, which is what they came for. The
   // controls that are `tasks.own` (complete, reopen, the checklist) ask their
   // own question further down, against the row's assignee.
+  const statusHistory = await listTaskStatusHistory(user.churchId, id);
   const canWrite = holdsSeatFor(user, "tasks.write");
 
   const statusConfig = STATUS_CONFIG[task.status] ?? STATUS_CONFIG.not_started;
@@ -158,7 +167,9 @@ export default async function TaskDetailPage({ params }: TaskDetailPageProps) {
     PRIORITY_CONFIG[task.priority] ?? PRIORITY_CONFIG.medium;
   const relatedUrl = getRelatedUrl(task.relatedType, task.relatedId);
   const isBlocked = prerequisites.some(
-    (prerequisite) => prerequisite.status !== "complete"
+    (prerequisite) =>
+      prerequisite.status !== "complete" &&
+      prerequisite.status !== "no_longer_needed"
   );
   const candidateById = new Map(
     prerequisiteCandidates.map((candidate) => [candidate.id, candidate])
@@ -357,6 +368,29 @@ export default async function TaskDetailPage({ params }: TaskDetailPageProps) {
               </CardContent>
             </Card>
 
+            {statusHistory.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-sm font-medium">
+                    Task history
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <ul className="space-y-2 text-sm">
+                    {statusHistory.map((entry) => (
+                      <li key={entry.id}>
+                        {STATUS_CONFIG[entry.previousStatus]?.label} →{" "}
+                        {STATUS_CONFIG[entry.status]?.label}
+                        <span className="text-muted-foreground">
+                          {" "}
+                          · {formatDateTime(entry.changedAt, "short")}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </CardContent>
+              </Card>
+            )}
             {/* Edit form */}
             {canWrite && (
               <Card>

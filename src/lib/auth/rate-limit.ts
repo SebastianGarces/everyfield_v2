@@ -76,6 +76,11 @@ const RATE_LIMITS: Record<
     perIdentifier: EMAIL_CHANGE_MAX_PER_IDENTIFIER,
     perIp: EMAIL_CHANGE_MAX_PER_IP,
   },
+  password_reset: {
+    windowMs: HOUR_MS,
+    perIdentifier: 3,
+    perIp: 10,
+  },
   password_change: {
     windowMs: LOGIN_WINDOW_MS,
     perIdentifier: LOGIN_MAX_PER_IDENTIFIER,

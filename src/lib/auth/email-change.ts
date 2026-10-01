@@ -73,11 +73,16 @@
 // never be holding two live links whose order nobody can reconstruct.
 // ============================================================================
 
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, gt, isNull, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { isUniqueViolation } from "@/db/errors";
-import { emailChangeRequests, users, type User } from "@/db/schema";
+import {
+  emailChangeRequests,
+  passwordResetRequests,
+  users,
+  type User,
+} from "@/db/schema";
 
 import {
   EMAIL_CHANGE_EXPIRY_HOURS,
@@ -173,14 +178,21 @@ export type EmailChangeRequestOutcome =
  * "asking again supersedes the last ask" is enforced by the index rather than by
  * a sequence somebody has to remember.
  */
-export function supersedeLiveRequestsStatement(userId: string, at: Date) {
+export function supersedeLiveRequestsStatement(
+  userId: string,
+  at: Date,
+  actor?: EmailChangeActor
+) {
   return db
     .update(emailChangeRequests)
     .set({ consumedAt: at })
     .where(
       and(
         eq(emailChangeRequests.userId, userId),
-        isNull(emailChangeRequests.consumedAt)
+        isNull(emailChangeRequests.consumedAt),
+        actor
+          ? sql`exists (select 1 from ${users} where ${users.id} = ${actor.id} and ${users.email} = ${actor.email} and ${users.passwordHash} = ${actor.passwordHash})`
+          : undefined
       )
     );
 }
@@ -211,29 +223,29 @@ async function openRequest(
   newEmail: string,
   token: string,
   now: Date,
-  expiresAt: Date
-): Promise<void> {
+  expiresAt: Date,
+  actor: EmailChangeActor
+): Promise<boolean> {
   const write = () =>
     db.batch([
-      supersedeLiveRequestsStatement(userId, now),
-      db.insert(emailChangeRequests).values({
-        userId,
-        newEmail,
-        tokenHash: hashEmailChangeToken(token),
-        createdAt: now,
-        expiresAt,
-      }),
+      db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.id, userId))
+        .for("update"),
+      supersedeLiveRequestsStatement(userId, now, actor),
+      db.execute(sql`insert into email_change_requests (user_id,new_email,token_hash,created_at,expires_at)
+      select id,${newEmail},${hashEmailChangeToken(token)},${now.toISOString()}::timestamptz AT TIME ZONE 'UTC',${expiresAt.toISOString()}::timestamptz AT TIME ZONE 'UTC'
+      from users where id=${userId} and email=${actor.email} and password_hash=${actor.passwordHash} returning id`),
     ]);
-
   try {
-    await write();
+    const result = await write();
+    return result[2].rows.length > 0;
   } catch (error) {
-    if (
-      !isUniqueViolation(error, "email_change_requests_live_user_unique_idx")
-    ) {
+    if (!isUniqueViolation(error, "email_change_requests_live_user_unique_idx"))
       throw error;
-    }
-    await write();
+    const result = await write();
+    return result[2].rows.length > 0;
   }
 }
 
@@ -324,7 +336,13 @@ export async function requestEmailChange({
     now.getTime() + EMAIL_CHANGE_EXPIRY_HOURS * HOUR_MS
   );
 
-  await openRequest(actor.id, newEmail, token, now, expiresAt);
+  if (!(await openRequest(actor.id, newEmail, token, now, expiresAt, actor))) {
+    return {
+      ok: false,
+      field: "currentPassword",
+      message: CURRENT_PASSWORD_WRONG_MESSAGE,
+    };
+  }
 
   const sent = await sendEmailChangeVerification(
     {
@@ -358,7 +376,13 @@ export async function requestEmailChange({
  * separate round trip. A row that expires between the two would otherwise be
  * redeemed on the strength of a stale snapshot.
  */
-export function consumeRequestStatement(requestId: string, now: Date) {
+// Column-aware predicates use the same UTC encoder as INSERT/UPDATE. Raw Date
+// interpolation uses the host timezone for this timestamp-without-zone column.
+export function consumeRequestStatement(
+  requestId: string,
+  now: Date,
+  actor?: EmailChangeActor
+) {
   return db
     .update(emailChangeRequests)
     .set({ consumedAt: now })
@@ -366,7 +390,10 @@ export function consumeRequestStatement(requestId: string, now: Date) {
       and(
         eq(emailChangeRequests.id, requestId),
         isNull(emailChangeRequests.consumedAt),
-        sql`${emailChangeRequests.expiresAt} > ${now}`
+        gt(emailChangeRequests.expiresAt, now),
+        actor
+          ? sql`exists (select 1 from ${users} where ${users.id} = ${actor.id} and ${users.email} = ${actor.email} and ${users.passwordHash} = ${actor.passwordHash})`
+          : undefined
       )
     )
     .returning({ id: emailChangeRequests.id });
@@ -421,7 +448,7 @@ export function swapLoginIdentifierStatement(
         sql`exists (
               select 1 from ${emailChangeRequests}
               where ${emailChangeRequests.id} = ${requestId}
-                and ${emailChangeRequests.consumedAt} = ${now}
+                and ${eq(emailChangeRequests.consumedAt, now)}
             )`
       )
     )
@@ -468,7 +495,7 @@ export async function liveEmailChangeRequest(
         // THE WINDOW IS IN THE `WHERE`, like the claim's. Filtering it in
         // JavaScript afterwards would be a second reading of the same rule, one
         // round trip later — and the two can only ever drift apart.
-        sql`${emailChangeRequests.expiresAt} > ${now}`
+        gt(emailChangeRequests.expiresAt, now)
       )
     )
     .limit(1);
@@ -550,8 +577,13 @@ export async function confirmEmailChange({
   let claimed;
   let swapped;
   try {
-    [claimed, swapped] = await db.batch([
-      consumeRequestStatement(request.id, now),
+    [, claimed, swapped] = await db.batch([
+      db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.id, actor.id))
+        .for("update"),
+      consumeRequestStatement(request.id, now, actor),
       swapLoginIdentifierStatement(
         actor.id,
         request.id,
@@ -559,6 +591,16 @@ export async function confirmEmailChange({
         newEmail,
         now
       ),
+      db
+        .update(passwordResetRequests)
+        .set({ consumedAt: now })
+        .where(
+          and(
+            eq(passwordResetRequests.userId, actor.id),
+            isNull(passwordResetRequests.consumedAt),
+            sql`exists (select 1 from ${users} where ${users.id} = ${actor.id} and ${users.email} = ${newEmail} and ${users.passwordHash} = ${actor.passwordHash})`
+          )
+        ),
     ]);
   } catch (error) {
     if (isUniqueViolation(error, "users_email_unique")) {

@@ -75,14 +75,28 @@ export function LocationPicker({
               <SelectValue placeholder="Select a saved location" />
             </SelectTrigger>
             <SelectContent>
+              {defaultLocationId &&
+                !locations.some(
+                  (location) => location.id === defaultLocationId
+                ) && (
+                  <SelectItem value={defaultLocationId} disabled>
+                    {defaultLocationName ?? "Recorded location"} (archived)
+                    {defaultLocationAddress
+                      ? ` — ${defaultLocationAddress}`
+                      : ""}
+                  </SelectItem>
+                )}
+
               {locations.map((loc) => (
                 <SelectItem
                   key={loc.id}
                   value={loc.id}
+                  disabled={!loc.isActive}
                   className="cursor-pointer"
                 >
                   <span className="truncate">
-                    {loc.name} — {loc.address}
+                    {loc.name}
+                    {!loc.isActive ? " (archived)" : ""} — {loc.address}
                   </span>
                 </SelectItem>
               ))}

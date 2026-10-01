@@ -468,7 +468,14 @@ test("the responsibilities empty state EXPLAINS instead of inviting", () => {
 // Training — the program dialog, and the mark-complete cell
 // ----------------------------------------------------------------------------
 
-const PROGRAMS = [{ id: "program-1", name: "Child Safety", isRequired: true }];
+const PROGRAMS = [
+  {
+    id: "program-1",
+    name: "Child Safety",
+    isRequired: true,
+    updatedAt: new Date("2026-09-30T12:00:00Z"),
+  },
+];
 const MATRIX = [
   {
     personId: "person-1",
@@ -552,6 +559,27 @@ test("the training matrix names its headers, completion states, and write contro
       "Mark Ada Lovelace as complete for Child Safety"
     ),
     "the mark-complete control names the exact member and training program"
+  );
+});
+
+test("only an authorized training manager can undo completion", () => {
+  const { member, admin } = bothWays(() =>
+    training(PROGRAMS, [
+      {
+        personId: "person-1",
+        personName: "Ada Lovelace",
+        completions: { "program-1": true },
+      },
+    ])
+  );
+  assert.equal(
+    controlLabels(member).some((label) => label.startsWith("Undo ")),
+    false
+  );
+  assert.ok(
+    controlLabels(admin).includes(
+      "Undo completion for Ada Lovelace: Child Safety"
+    )
   );
 });
 
@@ -679,14 +707,29 @@ test("a leader's training controls exclude church-wide and foreign-team programs
     ["teams.own"],
     createElement(TeamWriteProvider, {
       writableTeamId: "team-1",
-      children: training(programs, rows),
+      children: training(
+        programs.map((program) => ({
+          ...program,
+          updatedAt: new Date("2026-09-30T12:00:00Z"),
+        })),
+        rows
+      ),
     })
   );
   const buttons = controlLabels(html).filter((label) =>
     label.startsWith("Mark Ada")
   );
   assert.deepEqual(buttons, ["Mark Ada as complete for Team induction"]);
-  const admin = render(ADMIN, training(programs, rows));
+  const admin = render(
+    ADMIN,
+    training(
+      programs.map((program) => ({
+        ...program,
+        updatedAt: new Date("2026-09-30T12:00:00Z"),
+      })),
+      rows
+    )
+  );
   assert.equal(
     controlLabels(admin).filter((label) => label.startsWith("Mark Ada")).length,
     3

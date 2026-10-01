@@ -42,6 +42,7 @@ const STATUS_LABELS: Record<TaskStatus, string> = {
   in_progress: "In Progress",
   blocked: "Blocked",
   complete: "Complete",
+  no_longer_needed: "No longer needed",
 };
 
 const PRIORITY_LABELS: Record<TaskPriority, string> = {
@@ -83,7 +84,11 @@ const CATEGORY_LABELS: Record<TaskCategory, string> = {
 // Component
 // ============================================================================
 
-export function TaskFilters() {
+export function TaskFilters({
+  teams = [],
+}: {
+  teams?: { id: string; label: string }[];
+}) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -143,12 +148,45 @@ export function TaskFilters() {
             updateParam("completed", selected.showCompleted ? null : "true")
           }
         >
-          Show Completed
+          Show closed tasks
         </button>
       )}
 
       <div className="text-border mx-1">|</div>
 
+      {selected.view !== "assignments" && (
+        <Select
+          value={selected.teamId ?? "all"}
+          onValueChange={(v) => updateParam("teamId", v === "all" ? null : v)}
+        >
+          <SelectTrigger
+            aria-label="Filter by team"
+            className="h-8 w-[160px] cursor-pointer text-xs"
+          >
+            <SelectValue placeholder="Team" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all" className="cursor-pointer">
+              All Teams
+            </SelectItem>
+            {selected.teamId &&
+              !teams.some((team) => team.id === selected.teamId) && (
+                <SelectItem value={selected.teamId} disabled>
+                  Unavailable team
+                </SelectItem>
+              )}
+            {teams.map((team) => (
+              <SelectItem
+                key={team.id}
+                value={team.id}
+                className="cursor-pointer"
+              >
+                {team.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
       {/* Status filter */}
       <Select
         value={

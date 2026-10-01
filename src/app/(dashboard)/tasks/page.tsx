@@ -1,3 +1,4 @@
+import { taskRelationQuery } from "@/lib/tasks/relations";
 import { AlertCircle, ListChecks, Plus } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -76,7 +77,7 @@ export default async function TasksPage({ searchParams }: TasksPageProps) {
   // banner is the thing that makes an unowned follow-up findable, and a banner
   // that appears only where the planter already went is not a banner (#470
   // AC-4). Three church-scoped indexed reads.
-  const [result, counts, openFollowUps, followUpContacts, assignees] =
+  const [result, counts, openFollowUps, followUpContacts, assignees, teams] =
     await Promise.all([
       readTaskListPage(user.churchId, user.id, params),
       // THE SAME READING OF THE URL THE LIST GETS (#613). The badges describe
@@ -87,6 +88,7 @@ export default async function TasksPage({ searchParams }: TasksPageProps) {
       listOpenFollowUpTasks(user.churchId),
       listFollowUpContacts(user.churchId),
       listFollowUpAssignees(user.churchId),
+      taskRelationQuery(user.churchId, "team"),
     ]);
 
   const assignmentTasks = filterFollowUpTasks(openFollowUps, parsed);
@@ -107,6 +109,7 @@ export default async function TasksPage({ searchParams }: TasksPageProps) {
             (task) => task.dueDate && task.dueDate < today
           ).length,
           complete: 0,
+          noLongerNeeded: 0,
           checklistTotal: 0,
           checklistComplete: 0,
         }
@@ -222,6 +225,11 @@ export default async function TasksPage({ searchParams }: TasksPageProps) {
                     {displayedCounts.complete} completed
                   </Badge>
                 )}
+                {displayedCounts.noLongerNeeded > 0 && (
+                  <Badge variant="outline" className="text-xs tabular-nums">
+                    {displayedCounts.noLongerNeeded} no longer needed
+                  </Badge>
+                )}
               </div>
 
               {displayedCounts.checklistTotal > 0 && (
@@ -260,7 +268,7 @@ export default async function TasksPage({ searchParams }: TasksPageProps) {
             )}
 
             {/* Filters */}
-            <TaskFilters />
+            <TaskFilters teams={teams} />
           </div>
 
           {/* Task list */}

@@ -104,6 +104,13 @@ export default async function MeetingsPage({
               )}
             </div>
           </div>
+          {canWrite && (
+            <div className="px-4 py-2 sm:px-6">
+              <Link href="/meetings/locations" className="text-sm underline">
+                Manage saved locations
+              </Link>
+            </div>
+          )}
           <div className="min-h-0 flex-1 overflow-auto p-4 sm:p-6">
             <MeetingList
               upcomingMeetings={upcomingResult.meetings}

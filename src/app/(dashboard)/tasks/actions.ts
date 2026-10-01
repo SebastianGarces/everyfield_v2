@@ -222,6 +222,7 @@ export async function createTaskAction(
     // memory/invariants.md forbids. `revalidatePath` is the right half: it
     // freshens the list the planter lands on.
     revalidatePath("/tasks");
+    revalidatePath("/people");
 
     return { success: true, data: task };
   } catch (error) {
@@ -275,6 +276,7 @@ export async function quickAddTaskAction(
     });
 
     revalidatePath("/tasks");
+    revalidatePath("/people");
 
     return { success: true, data: task };
   } catch (error) {
@@ -332,13 +334,29 @@ export async function updateTaskAction(
       };
     }
 
-    const task = await updateTask(
+    const existing = await getTask(user.churchId, taskId);
+    if (!existing) return { success: false, error: "Task not found" };
+    if (
+      parsed.data.status &&
+      parsed.data.status !== existing.status &&
+      (existing.status === "complete" || existing.status === "no_longer_needed")
+    ) {
+      await reopenTask(user.churchId, taskId, user);
+    }
+    let task = await updateTask(
       user.churchId,
       taskId,
-      parsed.data,
+      {
+        ...parsed.data,
+        status:
+          parsed.data.status === "complete" ? undefined : parsed.data.status,
+      },
       parseRecurrenceForm(rawData) ?? undefined
     );
 
+    if (parsed.data.status === "complete" && task.status !== "complete") {
+      task = (await completeTask(user.churchId, taskId, user)).task;
+    }
     if (prerequisites?.ok) {
       await setTaskPrerequisites(user.churchId, taskId, prerequisites.ids);
     }
@@ -347,6 +365,7 @@ export async function updateTaskAction(
     // is `TaskForm`, which pushes to /tasks, and a refresh would re-render
     // /tasks/<id>/edit while that push is in flight.
     revalidatePath("/tasks");
+    revalidatePath("/people");
     revalidatePath(`/tasks/${taskId}`);
 
     return { success: true, data: task };
@@ -387,6 +406,7 @@ export async function completeTaskAction(
     // a full navigation. `revalidatePath` covers the other task surfaces.
     refresh();
     revalidatePath("/tasks");
+    revalidatePath("/people");
     revalidatePath(`/tasks/${taskId}`);
 
     return { success: true, data: task };
@@ -432,6 +452,7 @@ export async function reopenTaskAction(
 
     refresh();
     revalidatePath("/tasks");
+    revalidatePath("/people");
     revalidatePath(`/tasks/${taskId}`);
 
     return { success: true, data: task };
@@ -472,6 +493,7 @@ export async function deleteTaskAction(
     await deleteTask(user.churchId, taskId);
 
     revalidatePath("/tasks");
+    revalidatePath("/people");
 
     return { success: true, data: undefined };
   } catch (error) {
@@ -520,6 +542,7 @@ export async function updateTaskStatusAction(
     if (parsed.data === "complete") {
       const { task } = await completeTask(user.churchId, taskId, user);
       revalidatePath("/tasks");
+      revalidatePath("/people");
       return { success: true, data: task };
     }
 
@@ -531,12 +554,21 @@ export async function updateTaskStatusAction(
       return { success: false, error: "Task not found" };
     }
     assertMayActOnTask(user, existing);
+    if (existing.status === parsed.data)
+      return { success: true, data: existing };
 
+    if (
+      existing.status === "complete" ||
+      existing.status === "no_longer_needed"
+    ) {
+      await reopenTask(user.churchId, taskId, user);
+    }
     const task = await updateTask(user.churchId, taskId, {
       status: parsed.data,
     });
 
     revalidatePath("/tasks");
+    revalidatePath("/people");
     revalidatePath(`/tasks/${taskId}`);
 
     return { success: true, data: task };
@@ -621,6 +653,7 @@ export async function addSubtaskAction(
 
     refresh();
     revalidatePath("/tasks");
+    revalidatePath("/people");
 
     return { success: true, data: subtask };
   } catch (error) {
@@ -670,6 +703,7 @@ export async function setSubtaskCompletionAction(
 
     refresh();
     revalidatePath("/tasks");
+    revalidatePath("/people");
     revalidatePath(`/tasks/${subtask.parentTaskId}`);
 
     return { success: true, data: task };
@@ -731,6 +765,7 @@ export async function bulkCompleteTasksAction(
     const result = await bulkCompleteTasks(user.churchId, parsed.data, user);
 
     revalidatePath("/tasks");
+    revalidatePath("/people");
 
     return { success: true, data: result };
   } catch (error) {
@@ -772,6 +807,7 @@ export async function bulkRescheduleTasksAction(
     );
 
     revalidatePath("/tasks");
+    revalidatePath("/people");
 
     return { success: true, data: result };
   } catch (error) {
@@ -861,6 +897,7 @@ export async function importTaskTemplateAction(
     // reaches the import from elsewhere.
     refresh();
     revalidatePath("/tasks");
+    revalidatePath("/people");
 
     return {
       success: true,

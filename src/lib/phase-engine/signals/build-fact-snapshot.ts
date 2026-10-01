@@ -1,3 +1,9 @@
+import {
+  getFollowUpTaskOutcomes,
+  computeFollowUpTaskMetrics,
+  computeContactFreshness,
+  type FollowUpTaskOutcome,
+} from "./follow-up-task-metrics";
 // ============================================================================
 // Phase Engine — buildFactSnapshot
 //
@@ -445,8 +451,9 @@ function buildCohesionSignals(
 // the measured cohort are the same people. Before, the tasks covered every
 // attendee while this rate covered a narrower set, and "follow-up completion"
 // silently meant two different populations depending on which screen you were
-// on. The trend that renders it is labelled `First-time follow-up completion`
-// (`trends.ts`) for the same reason.
+// on. These legacy rubric fields remain record-update staleness signals.
+// The alpha trend readings use separate actual-contact and task-outcome fields
+// below; never label this legacy proxy as completion or contact evidence.
 //
 // STALENESS IS THE PROXY FOR COMPLETION, and the threshold below is the whole
 // definition of "reached": a contact untouched for longer than
@@ -811,6 +818,7 @@ export interface SnapshotInputs {
    * that cohort is who is waiting, this one is who is on it.
    */
   followUpTasks: OpenFollowUpTask[];
+  followUpTaskOutcomes?: FollowUpTaskOutcome[];
   ministryTeams: MinistryTeamRow[];
   leadershipCandidates: LeadershipPersonRow[];
   meetingsAttendedByPerson: PersonCountRow[];
@@ -859,6 +867,11 @@ export function assembleFactSnapshot(
     inputs.attendance,
     asOf
   );
+  Object.assign(
+    followUp,
+    computeFollowUpTaskMetrics(inputs.followUpTaskOutcomes ?? [], asOf)
+  );
+  Object.assign(followUp, computeContactFreshness(inputs.followUp, asOf));
   const ministryRoles = buildMinistryRoleSignals(inputs.ministryTeams);
   const leadership = buildLeadershipSignals(
     inputs.leadershipCandidates,
@@ -959,6 +972,7 @@ export async function buildFactSnapshot(
     visionMeetings,
     followUp,
     followUpTasks,
+    followUpTaskOutcomes,
     ministryTeams,
     leadershipCandidates,
     meetingsAttendedByPerson,
@@ -976,8 +990,9 @@ export async function buildFactSnapshot(
     getCommitments(churchId),
     getPersonSources(churchId),
     getCompletedVisionMeetings(churchId),
-    getOpenFollowUpContacts(churchId),
+    getOpenFollowUpContacts(churchId, asOf),
     listOpenFollowUpTasks(churchId),
+    getFollowUpTaskOutcomes(churchId),
     getMinistryTeams(churchId),
     getLeadershipCandidates(churchId),
     getMeetingsAttendedByPerson(churchId),
@@ -1005,6 +1020,7 @@ export async function buildFactSnapshot(
       visionMeetings,
       followUp,
       followUpTasks,
+      followUpTaskOutcomes,
       ministryTeams,
       leadershipCandidates,
       meetingsAttendedByPerson,

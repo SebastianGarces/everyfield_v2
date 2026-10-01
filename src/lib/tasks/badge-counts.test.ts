@@ -60,6 +60,7 @@ function renderConditions(conditions: SQL[]): string {
  * them — and the toggle would be back to looking dead.
  */
 const NARROWING_FILTERS: TaskCountScope[] = [
+  { teamId: "11111111-1111-4111-8111-111111111112" },
   { dueDateFrom: "2026-09-01" },
   { dueDateTo: "2026-09-30" },
   { dueDateFrom: "2026-09-01", dueDateTo: "2026-09-30", priority: ["high"] },

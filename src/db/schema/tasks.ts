@@ -33,6 +33,7 @@ export const taskStatuses = [
   "in_progress",
   "blocked",
   "complete",
+  "no_longer_needed",
 ] as const;
 export type TaskStatus = (typeof taskStatuses)[number];
 
@@ -137,6 +138,9 @@ export const tasks = pgTable(
     recurrenceRule: jsonb("recurrence_rule"),
     completionEvent: varchar("completion_event", { length: 100 }),
     completedAt: timestamp("completed_at"),
+    followUpMeetingId: uuid("follow_up_meeting_id"),
+    followUpStartedAt: timestamp("follow_up_started_at"),
+    followUpObligationKey: text("follow_up_obligation_key"),
     completedById: uuid("completed_by_id").references(() => users.id),
     createdById: uuid("created_by_id")
       .references(() => users.id)
@@ -146,6 +150,10 @@ export const tasks = pgTable(
     deletedAt: timestamp("deleted_at"),
   },
   (table) => [
+    uniqueIndex("tasks_follow_up_obligation_unique_idx").on(
+      table.churchId,
+      table.followUpObligationKey
+    ),
     index("tasks_church_id_idx").on(table.churchId),
     index("tasks_assigned_to_id_idx").on(table.assignedToId),
     index("tasks_status_idx").on(table.status),
@@ -223,7 +231,7 @@ export const tasks = pgTable(
         sql`(coalesce(${table.recurrenceRule} ->> 'seriesId', ${table.id}::text))`
       )
       .where(
-        sql`${table.isRecurring} and ${table.status} <> 'complete' and ${table.deletedAt} is null`
+        sql`${table.isRecurring} and ${table.status} not in ('complete', 'no_longer_needed') and ${table.deletedAt} is null`
       ),
     // Composite FKs on task_dependencies reference (id, church_id), so both
     // ends of an edge are the same church as the row that names them. `id` is
@@ -358,3 +366,19 @@ export const taskDependencies = pgTable(
 
 export type TaskDependency = typeof taskDependencies.$inferSelect;
 export type NewTaskDependency = typeof taskDependencies.$inferInsert;
+
+/** Durable transition log; the database trigger records every write path. */
+export const taskStatusHistory = pgTable("task_status_history", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  taskId: uuid("task_id")
+    .references(() => tasks.id, { onDelete: "cascade" })
+    .notNull(),
+  churchId: uuid("church_id")
+    .references(() => churches.id)
+    .notNull(),
+  previousStatus: varchar("previous_status", { length: 20 })
+    .$type<TaskStatus>()
+    .notNull(),
+  status: varchar("status", { length: 20 }).$type<TaskStatus>().notNull(),
+  changedAt: timestamp("changed_at").defaultNow().notNull(),
+});

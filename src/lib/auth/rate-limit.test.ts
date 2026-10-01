@@ -81,10 +81,10 @@ function failures(
 test("the policy table is total over the attempt kinds — a new kind has no default", () => {
   // The compiler holds this (`Record<AuthAttemptKind, …>` in rate-limit.ts), and
   // the assertion is here so the CLOSED union is visible as a fact of the
-  // product: these four and nothing else is what the guard knows how to answer.
+  // product: these credential kinds is what the guard knows how to answer.
   assert.deepEqual(
     [...authAttemptKinds],
-    ["login", "register", "email_change", "password_change"]
+    ["login", "register", "email_change", "password_change", "password_reset"]
   );
 });
 

@@ -199,6 +199,14 @@ export interface CohesionSignals {
  * interpretation note lives above `buildFollowUpSignals`.
  */
 export interface FollowUpSignals {
+  contactMeasuredCount?: number;
+  contactRecentCount?: number;
+  contactUnknownCount?: number;
+  /** Task outcome counts, absent in historical snapshots. */
+  taskMeasurableCount?: number;
+  taskCompletedWithin48HoursCount?: number;
+  taskWaivedCount?: number;
+  taskUnmeasuredCount?: number;
   /** People in active follow-up stages (attendee / following_up / interviewed). */
   openCount: number;
   /**

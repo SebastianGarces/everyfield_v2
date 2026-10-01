@@ -52,6 +52,12 @@ interface TrainingMatrixProps {
    * program. The app passes a button that fires the mark-complete action;
    * omitting it renders an inert marker.
    */
+  completeCell?: (cell: {
+    personId: string;
+    personName: string;
+    programId: string;
+    programName: string;
+  }) => ReactNode;
   incompleteCell?: (cell: {
     personId: string;
     personName: string;
@@ -72,6 +78,7 @@ export function TrainingMatrix({
   programs,
   matrix,
   incompleteCell,
+  completeCell,
 }: TrainingMatrixProps) {
   return (
     <div className="overflow-x-auto rounded-lg border">
@@ -109,7 +116,14 @@ export function TrainingMatrix({
                 const isComplete = row.completions[program.id];
                 return (
                   <td key={program.id} className="px-3 py-3 text-center">
-                    {isComplete ? (
+                    {isComplete && completeCell ? (
+                      completeCell({
+                        personId: row.personId,
+                        personName: row.personName,
+                        programId: program.id,
+                        programName: program.name,
+                      })
+                    ) : isComplete ? (
                       <div className="flex items-center justify-center">
                         <Check
                           aria-hidden="true"

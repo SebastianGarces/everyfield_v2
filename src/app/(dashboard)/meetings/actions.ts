@@ -47,10 +47,16 @@ import {
   meetingUpdateSchema,
   responseCardRecordSchema,
 } from "@/lib/validations/meetings";
-import { createLocation, updateLocation } from "@/lib/meetings/locations";
+import {
+  createLocation,
+  updateLocation,
+  deactivateLocation,
+  restoreLocation,
+} from "@/lib/meetings/locations";
 import {
   addAttendee,
   createEvaluation,
+  updateEvaluation,
   createMeeting,
   deleteMeeting,
   finalizeAttendance,
@@ -367,7 +373,9 @@ export async function updateLocationAction(
     const location = await updateLocation(
       user.churchId,
       locationId,
-      parsed.data
+      parsed.data,
+      user.id,
+      formData.get("expectedUpdatedAt")?.toString()
     );
     revalidatePath("/meetings");
     return { success: true, data: location };
@@ -376,6 +384,8 @@ export async function updateLocationAction(
 
     console.error("updateLocationAction error:", error);
     if (error instanceof Error) {
+      if (error.message.includes("This location changed"))
+        return { success: false, error: error.message };
       if (error.message === "Location not found")
         return {
           success: false,
@@ -715,6 +725,52 @@ export async function createEvaluationAction(
       success: false,
       error: "An unexpected error occurred while saving the evaluation",
     };
+  }
+}
+
+export async function updateEvaluationAction(
+  meetingId: string,
+  expectedUpdatedAt: string,
+  formData: FormData
+): Promise<ActionResult<MeetingEvaluation>> {
+  const { user } = await requireSeat("meetings.write");
+  try {
+    if (!user.churchId) return { success: false, error: "Unauthorized" };
+    const parsed = evaluationCreateSchema.safeParse(formDataToObject(formData));
+    if (!parsed.success)
+      return { success: false, error: "Rate every quality factor from 1 to 5" };
+    const evaluation = await updateEvaluation(
+      user.churchId,
+      meetingId,
+      user.id,
+      parsed.data,
+      expectedUpdatedAt
+    );
+    revalidatePath(`/meetings/${meetingId}/evaluation`);
+    revalidatePath(`/meetings/${meetingId}`);
+    return { success: true, data: evaluation };
+  } catch (error) {
+    rethrowUnauthorized(error);
+    return {
+      success: false,
+      error:
+        error instanceof Error ? error.message : "Unable to correct evaluation",
+    };
+  }
+}
+
+export async function archiveLocationAction(
+  locationId: string
+): Promise<ActionResult<null>> {
+  const { user } = await requireSeat("meetings.write");
+  try {
+    if (!user.churchId) return { success: false, error: "Unauthorized" };
+    await deactivateLocation(user.churchId, locationId, user.id);
+    revalidatePath("/meetings");
+    return { success: true, data: null };
+  } catch (error) {
+    rethrowUnauthorized(error);
+    return { success: false, error: "Unable to archive location" };
   }
 }
 
@@ -1217,4 +1273,39 @@ export async function saveAgendaAction(
 
   refresh();
   return { success: true };
+}
+
+export async function saveLocationFormAction(
+  locationId: string,
+  formData: FormData
+): Promise<void> {
+  await requireSeat("meetings.write");
+  const result = await updateLocationAction(locationId, formData);
+  redirect(
+    result.success
+      ? "/meetings/locations"
+      : `/meetings/locations?error=${encodeURIComponent(result.error)}`
+  );
+}
+
+export async function archiveLocationFormAction(
+  locationId: string
+): Promise<void> {
+  await requireSeat("meetings.write");
+  const result = await archiveLocationAction(locationId);
+  redirect(
+    result.success
+      ? "/meetings/locations"
+      : `/meetings/locations?error=${encodeURIComponent(result.error)}`
+  );
+}
+
+export async function restoreLocationFormAction(
+  locationId: string
+): Promise<void> {
+  const { user } = await requireSeat("meetings.write");
+  if (!user.churchId) redirect("/meetings");
+  await restoreLocation(user.churchId, locationId, user.id);
+  revalidatePath("/meetings");
+  redirect("/meetings/locations?archived=1");
 }

@@ -90,7 +90,19 @@ export function AssessmentsTabs({
         </div>
 
         {interviews.length > 0 ? (
-          <InterviewHistory interviews={interviews} />
+          <div className="space-y-3">
+            <InterviewHistory interviews={interviews} />
+            {canWrite &&
+              interviews.map((record) => (
+                <Button key={record.id} variant="outline" asChild>
+                  <Link
+                    href={`/people/${personId}/assessments/correct/interview/${record.id}`}
+                  >
+                    Correct interview ({record.interviewDate})
+                  </Link>
+                </Button>
+              ))}
+          </div>
         ) : (
           <div className="bg-card flex flex-col items-center justify-center rounded-lg border-2 border-dashed py-12 text-center">
             <UserCheck className="text-muted-foreground/50 h-12 w-12" />
@@ -136,7 +148,19 @@ export function AssessmentsTabs({
         </div>
 
         {commitments.length > 0 ? (
-          <CommitmentHistory commitments={commitments} />
+          <div className="space-y-3">
+            <CommitmentHistory commitments={commitments} />
+            {canWrite &&
+              commitments.map((record) => (
+                <Button key={record.id} variant="outline" asChild>
+                  <Link
+                    href={`/people/${personId}/assessments/correct/commitment/${record.id}`}
+                  >
+                    Correct commitment ({record.signedDate})
+                  </Link>
+                </Button>
+              ))}
+          </div>
         ) : (
           <div className="bg-card flex flex-col items-center justify-center rounded-lg border-2 border-dashed py-12 text-center">
             <FileSignature className="text-muted-foreground/50 h-12 w-12" />
@@ -183,7 +207,19 @@ export function AssessmentsTabs({
         </div>
 
         {assessments.length > 0 ? (
-          <AssessmentHistory assessments={assessments} />
+          <div className="space-y-3">
+            <AssessmentHistory assessments={assessments} />
+            {canWrite &&
+              assessments.map((record) => (
+                <Button key={record.id} variant="outline" asChild>
+                  <Link
+                    href={`/people/${personId}/assessments/correct/assessment/${record.id}`}
+                  >
+                    Correct assessment ({record.assessmentDate})
+                  </Link>
+                </Button>
+              ))}
+          </div>
         ) : (
           <div className="bg-card flex flex-col items-center justify-center rounded-lg border-2 border-dashed py-12 text-center">
             <ClipboardList className="text-muted-foreground/50 h-12 w-12" />

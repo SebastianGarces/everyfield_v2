@@ -387,3 +387,22 @@ test("the two sets are what the ruling says, and neither is empty", () => {
   assert.equal(holdsSeatFor(plantMember, "church.claim"), true);
   assert.equal(holdsSeatFor(orgOwner, "church.claim"), false);
 });
+
+test("personal check-in corrections carry owner-only authority", () => {
+  for (const name of ["saveCheckinAction", "correctCheckinAction"]) {
+    const key = `src/app/(dashboard)/phase/checkin-actions.ts → ${name}`;
+    const capability =
+      CAPABILITY_BY_EXPORT[key as keyof typeof CAPABILITY_BY_EXPORT];
+    assert.equal(capability, "phase.declare");
+    assert.equal(holdsSeatFor(plantOwner, "phase.declare"), true);
+    for (const viewer of [
+      plantAdmin,
+      plantMember,
+      coach,
+      orgOwner,
+      networkOwner,
+    ]) {
+      assert.equal(holdsSeatFor(viewer, "phase.declare"), false);
+    }
+  }
+});

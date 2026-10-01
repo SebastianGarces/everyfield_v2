@@ -1,3 +1,4 @@
+import { actionableTaskStatuses } from "@/lib/tasks/lifecycle";
 // ============================================================================
 // THE SEATS A TENANCY HOLDS, AND THE FOUR ACTS THAT CHANGE THEM — AS-015
 // through AS-018 and AS-023 (#497, widened to the org side by #500).
@@ -77,7 +78,7 @@
 // ============================================================================
 
 import { lockPlantLeadership } from "@/lib/ministry-teams/leadership-lock";
-import { and, eq, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, ne, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import {
@@ -403,7 +404,7 @@ function plantRemovalEffects(
         and(
           eq(tasks.churchId, churchId),
           eq(tasks.assignedToId, targetUserId),
-          ne(tasks.status, "complete")
+          inArray(tasks.status, actionableTaskStatuses)
         )
       ),
 

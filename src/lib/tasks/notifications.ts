@@ -1,6 +1,7 @@
 import { and, eq, inArray, isNull } from "drizzle-orm";
 
 import { db } from "@/db";
+import { isTaskSettled } from "./lifecycle";
 import { tasks, type TaskStatus } from "@/db/schema";
 import { MS_PER_DAY, formatDayLong } from "@/lib/datetime";
 import type { NotificationCategory } from "@/lib/notifications/categories";
@@ -232,6 +233,7 @@ export function composeTaskOverdue(
 export type TaskNotificationSkip =
   | "deleted"
   | "already_complete"
+  | "no_longer_needed"
   | "unassigned"
   | "no_due_date";
 
@@ -269,6 +271,7 @@ export function planTaskNotifications(
   });
 
   if (facts.deletedAt) return none("deleted");
+  if (facts.status === "no_longer_needed") return none("no_longer_needed");
   if (facts.status === "complete") return none("already_complete");
   if (!facts.assignedToId) return none("unassigned");
 
@@ -491,7 +494,7 @@ export function taskStillLivePredicate(
     );
     if (!task) return false;
 
-    return task.deletedAt === null && task.status !== "complete";
+    return task.deletedAt === null && !isTaskSettled(task.status);
   };
 }
 

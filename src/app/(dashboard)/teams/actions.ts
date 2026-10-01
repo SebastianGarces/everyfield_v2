@@ -31,6 +31,8 @@ import {
   deleteResponsibility,
   createTrainingProgram,
   markTrainingComplete,
+  undoTrainingComplete,
+  updateTrainingProgram,
 } from "@/lib/ministry-teams/service";
 import { getTeamCountsForPeople } from "@/lib/ministry-teams/service";
 import type { TeamWithStats } from "@/lib/ministry-teams/service";
@@ -153,13 +155,19 @@ export async function updateTeamAction(
   return withChurch(
     "teams.write",
     "Failed to update team",
-    async ({ churchId }) => {
+    async ({ churchId, userId }) => {
       const parsed = teamUpdateSchema.safeParse(
         Object.fromEntries(formData.entries())
       );
       if (!parsed.success) return fieldErrorResult(parsed.error);
 
-      const team = await updateTeam(churchId, teamId, parsed.data);
+      const team = await updateTeam(
+        churchId,
+        teamId,
+        parsed.data,
+        userId,
+        formData.get("expectedUpdatedAt")?.toString()
+      );
       revalidateTeamSurfaces();
       return { success: true, data: team };
     }
@@ -613,6 +621,63 @@ export async function markTrainingCompleteAction(data: {
       kind: "training-completion",
       programId: data.programId,
       personId: data.personId,
+    }
+  );
+}
+
+export async function undoTrainingCompleteAction(data: {
+  personId: string;
+  programId: string;
+}): Promise<ActionResult> {
+  return withChurch(
+    "teams.own",
+    "Failed to correct completion",
+    async ({ churchId, userId }) => {
+      const parsed = trainingCompleteSchema.safeParse(data);
+      if (!parsed.success) return fieldErrorResult(parsed.error);
+      await undoTrainingComplete(
+        churchId,
+        parsed.data.personId,
+        parsed.data.programId,
+        userId
+      );
+      revalidateTeamSurfaces();
+      return { success: true, data: undefined };
+    },
+    {
+      kind: "training-completion",
+      programId: data.programId,
+      personId: data.personId,
+    }
+  );
+}
+
+export async function updateTrainingProgramAction(
+  programId: string,
+  formData: FormData
+): Promise<ActionResult<TrainingProgram>> {
+  return withChurch(
+    "teams.write",
+    "Failed to correct training program",
+    async ({ churchId, userId }) => {
+      const parsed = trainingProgramCreateSchema.safeParse(
+        Object.fromEntries(formData.entries())
+      );
+      if (!parsed.success) return fieldErrorResult(parsed.error);
+      const version = z
+        .string()
+        .datetime()
+        .safeParse(formData.get("expectedUpdatedAt"));
+      if (!version.success) return fieldErrorResult(version.error);
+      const program = await updateTrainingProgram(
+        churchId,
+        programId,
+        userId,
+        parsed.data,
+        version.data
+      );
+      revalidateTeamSurfaces();
+      return { success: true, data: program };
     }
   );
 }

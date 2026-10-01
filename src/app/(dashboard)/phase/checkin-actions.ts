@@ -11,7 +11,10 @@ import {
   CHECKIN_NOTE_MAX,
   weekStartOf,
 } from "@/lib/phase-engine/planter-checkin";
-import { saveCheckin } from "@/lib/phase-engine/planter-checkin-db";
+import {
+  correctCheckin,
+  saveCheckin,
+} from "@/lib/phase-engine/planter-checkin-db";
 
 // ============================================================================
 // The planter's weekly sustainability check-in (#484, C19).
@@ -44,9 +47,9 @@ type ActionResult = { success: true } | { success: false; error: string };
 export async function saveCheckinAction(
   input: SaveCheckinInput
 ): Promise<ActionResult> {
-  // `phase.signal` — the same capability the attestation toggles carry. This is
+  // Owner-only: personal answers and history are private to the planter. This is
   // the planter answering about their own plant, not an admin action.
-  const { user } = await requireSeat("phase.signal");
+  const { user } = await requireSeat("phase.declare");
 
   try {
     if (!user.churchId) {
@@ -79,6 +82,38 @@ export async function saveCheckinAction(
     return {
       success: false,
       error: "Could not save your check-in. Please try again.",
+    };
+  }
+}
+
+export async function correctCheckinAction(
+  id: string,
+  input: SaveCheckinInput
+): Promise<ActionResult> {
+  const { user } = await requireSeat("phase.declare");
+  try {
+    const parsed = checkinSchema.safeParse(input);
+    if (
+      !user.churchId ||
+      !z.string().uuid().safeParse(id).success ||
+      !parsed.success
+    ) {
+      return {
+        success: false,
+        error: "Choose an existing check-in and valid answers.",
+      };
+    }
+    await requireChurchAccess(user, user.churchId);
+    if (!(await correctCheckin(user.churchId, user.id, id, parsed.data))) {
+      return { success: false, error: "That check-in is unavailable." };
+    }
+    refresh();
+    return { success: true };
+  } catch (error) {
+    rethrowUnauthorized(error);
+    return {
+      success: false,
+      error: "Could not save your correction. Please try again.",
     };
   }
 }

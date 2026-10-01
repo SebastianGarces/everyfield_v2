@@ -154,7 +154,7 @@ test("blocked-ness is a query over incomplete live prerequisites, not a stored s
     "church_id belongs in the JOIN, not only the WHERE"
   );
   assert.match(sql, /"tasks"\."deleted_at" is null/i);
-  assert.match(sql, /"tasks"\."status"\s*<>\s*\$\d+/i);
+  assert.match(sql, /"tasks"\."status"\s*in\s*\(/i);
   assert.doesNotMatch(
     sql,
     /update "tasks"/i,

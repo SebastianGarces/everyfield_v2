@@ -23,6 +23,7 @@ import {
 
 test("the defaults are the ones the page shipped with", () => {
   assert.deepEqual(parseTaskListSearchParams({}), {
+    teamId: undefined,
     view: "my_tasks",
     showCompleted: false,
     status: undefined,
@@ -326,4 +327,25 @@ test("malformed dates/sorts default safely, and inverted ranges remain visibly i
     }).invalidDateRange,
     false
   );
+});
+
+test("team filter validates, round-trips, clears and is inapplicable to assignments", () => {
+  const id = "b9ca8f7a-2f43-4c15-b647-0e91aab019d2";
+  const selected = parseTaskListSearchParams({ teamId: id });
+  assert.equal(selected.teamId, id);
+  assert.equal(
+    parseTaskListSearchParams({ teamId: "bogus" }).teamId,
+    undefined
+  );
+  assert.equal(
+    parseTaskListSearchParams({ view: "assignments", teamId: id }).teamId,
+    undefined
+  );
+  assert.equal(
+    parseTaskListQuery(
+      taskListParamsWith(`teamId=${id}`, "category", "general")
+    ).teamId,
+    id
+  );
+  assert.equal(taskListParamsCleared(`teamId=${id}`).has("teamId"), false);
 });

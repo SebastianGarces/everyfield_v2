@@ -1,3 +1,4 @@
+import { actionableTaskStatuses } from "@/lib/tasks/lifecycle";
 // ============================================================================
 // Oversight plants directory + detail — the read layer (OV-001 / OV-002).
 //
@@ -41,7 +42,6 @@ import {
   inArray,
   isNull,
   lt,
-  ne,
 } from "drizzle-orm";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 
@@ -582,7 +582,7 @@ async function readTasksAggregate(
         and(
           eq(tasks.churchId, churchId),
           isNull(tasks.deletedAt),
-          ne(tasks.status, "complete"),
+          inArray(tasks.status, actionableTaskStatuses),
           lt(tasks.dueDate, today)
         )
       ),
@@ -594,7 +594,11 @@ async function readTasksAggregate(
 
   return {
     total,
-    open: total - completed,
+    open: statusRows
+      .filter((row) =>
+        actionableTaskStatuses.some((status) => status === row.status)
+      )
+      .reduce((sum, row) => sum + row.total, 0),
     completed,
     overdue: overdueRow[0]?.total ?? 0,
   };

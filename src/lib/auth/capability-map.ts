@@ -66,6 +66,22 @@ export const CAPABILITY_BY_EXPORT: Readonly<Record<string, string>> = {
     "meetings.attendance",
   "src/app/(dashboard)/meetings/actions.ts → clearResponseCardAction":
     "meetings.write",
+  "src/app/(dashboard)/people/correction-actions.ts → correctPersonRecordAction":
+    "people.write",
+  "src/app/(dashboard)/teams/actions.ts → undoTrainingCompleteAction":
+    "teams.own",
+  "src/app/(dashboard)/teams/actions.ts → updateTrainingProgramAction":
+    "teams.write",
+  "src/app/(dashboard)/meetings/actions.ts → restoreLocationFormAction":
+    "meetings.write",
+  "src/app/(dashboard)/meetings/actions.ts → saveLocationFormAction":
+    "meetings.write",
+  "src/app/(dashboard)/meetings/actions.ts → archiveLocationFormAction":
+    "meetings.write",
+  "src/app/(dashboard)/meetings/actions.ts → archiveLocationAction":
+    "meetings.write",
+  "src/app/(dashboard)/meetings/actions.ts → updateEvaluationAction":
+    "meetings.write",
   "src/app/(dashboard)/meetings/actions.ts → createEvaluationAction":
     "meetings.write",
   "src/app/(dashboard)/meetings/actions.ts → createLocationAction":
@@ -190,7 +206,9 @@ export const CAPABILITY_BY_EXPORT: Readonly<Record<string, string>> = {
   "src/app/(dashboard)/people/tag-actions.ts → removeTagAction": "people.write",
   "src/app/(dashboard)/people/tag-actions.ts → updateTagAction": "people.write",
   "src/app/(dashboard)/phase/checkin-actions.ts → saveCheckinAction":
-    "phase.signal",
+    "phase.declare",
+  "src/app/(dashboard)/phase/checkin-actions.ts → correctCheckinAction":
+    "phase.declare",
   "src/app/(dashboard)/phase/actions.ts → transitionPhaseAction":
     "phase.declare",
   "src/app/(dashboard)/phase/feedback-actions.ts → submitInsightFeedbackAction":

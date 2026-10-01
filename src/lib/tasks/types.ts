@@ -28,6 +28,7 @@ export interface TaskCounts {
   inProgress: number;
   blocked: number;
   complete: number;
+  noLongerNeeded: number;
   overdue: number;
   total: number;
   /**

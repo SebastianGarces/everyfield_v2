@@ -561,6 +561,41 @@
       "when": 1790484862437,
       "tag": "0080_fine_moondragon",
       "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1790805775615,
+      "tag": "0081_thin_ultragirl",
+      "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1790805775616,
+      "tag": "0082_checkin_history",
+      "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "7",
+      "when": 1790805775617,
+      "tag": "0083_record_correction_history",
+      "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1790805775618,
+      "tag": "0084_training_completion_undo",
+      "breakpoints": true
+    },
+    {
+      "idx": 85,
+      "version": "7",
+      "when": 1790805775619,
+      "tag": "0085_password_recovery",
+      "breakpoints": true
     }
   ]
 }

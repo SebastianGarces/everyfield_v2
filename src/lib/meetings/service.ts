@@ -351,10 +351,15 @@ export async function createMeeting(
       .select({ name: locations.name, address: locations.address })
       .from(locations)
       .where(
-        and(eq(locations.id, locationId), eq(locations.churchId, churchId))
+        and(
+          eq(locations.id, locationId),
+          eq(locations.churchId, churchId),
+          eq(locations.isActive, true)
+        )
       )
       .limit(1);
 
+    if (!loc) throw new Error("Choose an active location in your plant");
     if (loc) {
       locationName = loc.name;
       locationAddress = loc.address;
@@ -516,23 +521,25 @@ export async function updateMeeting(
   if (data.locationId !== undefined) {
     updateData.locationId = data.locationId ?? null;
 
-    if (data.locationId) {
+    if (data.locationId && data.locationId !== existing.locationId) {
       const [loc] = await db
         .select({ name: locations.name, address: locations.address })
         .from(locations)
         .where(
           and(
             eq(locations.id, data.locationId),
-            eq(locations.churchId, churchId)
+            eq(locations.churchId, churchId),
+            eq(locations.isActive, true)
           )
         )
         .limit(1);
 
+      if (!loc) throw new Error("Choose an active location in your plant");
       if (loc) {
         updateData.locationName = loc.name;
         updateData.locationAddress = loc.address;
       }
-    } else {
+    } else if (!data.locationId) {
       // Clearing the location
       updateData.locationName = null;
       updateData.locationAddress = null;
@@ -1264,6 +1271,48 @@ export async function createEvaluation(
   await emitEvaluationCompleted(meetingId, churchId, userId);
 
   return evaluation;
+}
+
+/** Corrections keep the original evidence and do not emit completion again. */
+export async function updateEvaluation(
+  churchId: string,
+  meetingId: string,
+  userId: string,
+  data: EvaluationCreateInput,
+  expectedUpdatedAt: string
+): Promise<MeetingEvaluation> {
+  await requireVisionFeature(churchId, meetingId, "evaluation");
+  const snapshot = await db.execute(
+    sql`SELECT md5(to_jsonb(t)::text) AS fingerprint FROM meeting_evaluations t WHERE meeting_id = ${meetingId}::uuid AND church_id = ${churchId}::uuid`
+  );
+  const fingerprint = snapshot.rows[0]?.fingerprint;
+  const existing = await getEvaluation(churchId, meetingId);
+  if (!existing) throw new Error("Evaluation not found");
+  if (
+    !Number.isFinite(Date.parse(expectedUpdatedAt)) ||
+    existing.updatedAt.toISOString() !== expectedUpdatedAt
+  )
+    throw new Error("This evaluation changed. Reload before correcting it.");
+  const scores = EVALUATION_QUALITY_FACTORS.map((factor) => data[factor.key]);
+  const values = {
+    ...data,
+    notes: data.notes ?? null,
+    totalScore: (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1),
+    updatedAt: new Date(),
+  };
+  const guard = sql`id = ${existing.id}::uuid AND church_id = ${churchId}::uuid AND md5(to_jsonb(meeting_evaluations)::text) = ${fingerprint}`;
+  const [, , updated] = await db.batch([
+    db.execute(
+      sql`SELECT id FROM meeting_evaluations WHERE id = ${existing.id}::uuid AND church_id = ${churchId}::uuid FOR UPDATE`
+    ),
+    db.execute(
+      sql`INSERT INTO record_corrections (church_id, entity_type, entity_id, before, after, corrected_by) SELECT ${churchId}::uuid, 'meeting_evaluation', id, to_jsonb(meeting_evaluations), ${JSON.stringify(Object.fromEntries(Object.entries({ ...existing, ...values }).map(([key, value]) => [key.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`), value])))}::jsonb, ${userId}::uuid FROM meeting_evaluations WHERE ${guard}`
+    ),
+    db.update(meetingEvaluations).set(values).where(guard).returning(),
+  ]);
+  if (!updated[0])
+    throw new Error("This evaluation changed. Reload before correcting it.");
+  return updated[0];
 }
 
 /**

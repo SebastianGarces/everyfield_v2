@@ -1,3 +1,4 @@
+import { actionableTaskStatuses } from "@/lib/tasks/lifecycle";
 import { db } from "@/db";
 import {
   churches,
@@ -7,14 +8,17 @@ import {
   churchMeetings,
   type NewTask,
 } from "@/db/schema";
-import { and, eq, inArray, isNull, ne } from "drizzle-orm";
+import { and, eq, inArray, isNull, or } from "drizzle-orm";
 import { eventBus } from "@/lib/events/event-bus";
 import type { FinalizedAttendee } from "@/lib/meetings/events";
 import { churchHasNoPlanter } from "@/lib/onboarding/leadership";
 
-import { addCalendarDays } from "@/lib/datetime";
+import { addCalendarDays, instantsAtZonedTime } from "@/lib/datetime";
 
-import { syncTaskNotificationsFor } from "./notifications";
+import {
+  cancelTaskNotificationsFor,
+  syncTaskNotificationsFor,
+} from "./notifications";
 
 // ============================================================================
 // Event Types
@@ -101,11 +105,17 @@ export async function autoCompleteTasksByEvent(
           eq(tasks.completionEvent, completionEvent),
           eq(tasks.relatedId, entityId),
           eq(tasks.churchId, churchId),
-          ne(tasks.status, "complete"),
+          inArray(tasks.status, actionableTaskStatuses),
           isNull(tasks.deletedAt)
         )
       )
       .returning({ id: tasks.id });
+
+    if (completed.length > 0)
+      await cancelTaskNotificationsFor(
+        churchId,
+        completed.map((task) => task.id)
+      );
 
     if (completed.length > 0 && process.env.NODE_ENV === "development") {
       console.log(
@@ -160,6 +170,26 @@ export function followUpRecipients(attendees: FinalizedAttendee[]): string[] {
  */
 export function followUpDueDate(meetingDate: Date): string {
   return addCalendarDays(meetingDate, 2);
+}
+
+/** Meetings store a naive church wall clock, not a UTC instant. A DST gap or
+ * fold cannot establish an exact48h start without a human offset choice. */
+export function followUpMeetingInstant(
+  meetingDate: Date,
+  timeZone: string
+): Date | null {
+  const candidates = instantsAtZonedTime(
+    meetingDate.toISOString().slice(0, 10),
+    meetingDate.getUTCHours(),
+    meetingDate.getUTCMinutes(),
+    timeZone
+  );
+  if (candidates.length !== 1) return null;
+  return new Date(
+    candidates[0].getTime() +
+      meetingDate.getUTCSeconds() * 1000 +
+      meetingDate.getUTCMilliseconds()
+  );
 }
 
 /**
@@ -297,7 +327,10 @@ export async function handleMeetingAttendanceFinalized(
   //    answer wins over the inferred one. `null` (never asked, i.e. every church
   //    created before this step) keeps the inference, so nothing is retro-orphaned.
   const [church] = await db
-    .select({ leadershipStatus: churches.leadershipStatus })
+    .select({
+      leadershipStatus: churches.leadershipStatus,
+      timeZone: churches.timeZone,
+    })
     .from(churches)
     .where(eq(churches.id, churchId))
     .limit(1);
@@ -338,21 +371,37 @@ export async function handleMeetingAttendanceFinalized(
     // Which of them already hold this meeting's follow-up. Empty on a first
     // finalize; on a reconcile it is exactly the set to leave alone.
     const existing = await db
-      .select({ relatedId: tasks.relatedId })
+      .select({
+        relatedId: tasks.relatedId,
+        obligationKey: tasks.followUpObligationKey,
+      })
       .from(tasks)
       .where(
         and(
           eq(tasks.churchId, churchId),
-          eq(tasks.category, "follow_up"),
-          eq(tasks.relatedType, "person"),
-          eq(tasks.dueDate, followUpDueDateStr),
-          inArray(tasks.relatedId, firstTimerIds),
-          isNull(tasks.deletedAt)
+          or(
+            and(
+              eq(tasks.category, "follow_up"),
+              eq(tasks.relatedType, "person"),
+              eq(tasks.dueDate, followUpDueDateStr),
+              inArray(tasks.relatedId, firstTimerIds),
+              or(isNull(tasks.deletedAt), eq(tasks.status, "no_longer_needed"))
+            ),
+            inArray(
+              tasks.followUpObligationKey,
+              firstTimerIds.flatMap((id) => [
+                `${meetingId}:${id}`,
+                `legacy:${followUpDueDateStr}:${id}`,
+              ])
+            )
+          )
         )
       );
 
     const alreadyFollowedUp = new Set(
-      existing.map((row) => row.relatedId).filter((id): id is string => !!id)
+      existing
+        .map((row) => row.obligationKey?.split(":").at(-1) ?? row.relatedId)
+        .filter((id): id is string => !!id)
     );
 
     const owed = firstTimerIds.filter((id) => !alreadyFollowedUp.has(id));
@@ -385,6 +434,11 @@ export async function handleMeetingAttendanceFinalized(
           status: "not_started",
           priority: "high",
           category: "follow_up",
+          followUpObligationKey: `${meetingId}:${personId}`,
+          followUpStartedAt: church?.timeZone
+            ? followUpMeetingInstant(meeting.datetime, church.timeZone)
+            : null,
+          followUpMeetingId: meetingId,
           dueDate: followUpDueDateStr,
           assignedToId: planterId,
           relatedType: "person",

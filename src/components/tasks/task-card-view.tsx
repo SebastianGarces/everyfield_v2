@@ -22,6 +22,7 @@
 // landing page's card changes with it, because they are the same card.
 // ============================================================================
 
+import { isTaskSettled } from "@/lib/tasks/lifecycle";
 import type { ReactNode } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -65,6 +66,10 @@ export const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   in_progress: { label: "In Progress", color: "text-blue-600" },
   blocked: { label: "Blocked", color: "text-red-600" },
   complete: { label: "Complete", color: "text-green-600" },
+  no_longer_needed: {
+    label: "No longer needed",
+    color: "text-muted-foreground",
+  },
 };
 
 // ============================================================================
@@ -238,14 +243,14 @@ export function TaskCardView({
   linkStatic,
   now,
 }: TaskCardViewProps) {
-  const isComplete = task.status === "complete";
+  const isComplete = isTaskSettled(task.status);
   const isBlocked = task.isBlocked === true;
   const priority = PRIORITY_CONFIG[task.priority] ?? PRIORITY_CONFIG.medium;
   const categoryInfo = task.category ? CATEGORY_CONFIG[task.category] : null;
   const dueDateInfo = getDueDateInfo(task.dueDate, now);
   const showStoredStatus =
     task.status !== "not_started" &&
-    task.status !== "complete" &&
+    !isTaskSettled(task.status) &&
     !(isBlocked && task.status === "blocked");
   // A span carrying the identical className, not an href-less anchor: a
   // presentational embed should carry no app URL at all, so there is nothing

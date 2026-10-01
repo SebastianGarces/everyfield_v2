@@ -7,7 +7,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { ViewerCapabilitiesProvider } from "@/components/shared/viewer-capabilities";
 import type { PersonWithTags } from "@/lib/people/types";
 
-import { getInactivityInfo, PipelineCard } from "./pipeline-card";
+import { PipelineCard } from "./pipeline-card";
 
 const NOW = new Date("2026-08-27T12:00:00.000Z");
 const THRESHOLDS = { warningDays: 7, alertDays: 14 };
@@ -46,88 +46,37 @@ function person(overrides: Partial<PersonWithTags> = {}): PersonWithTags {
   };
 }
 
-test("inactivity keeps the actual whole-day count and existing threshold branches", () => {
-  assert.deepEqual(
-    getInactivityInfo(
-      person({ lastActivityAt: new Date("2026-08-17T12:00:00.000Z") }),
-      THRESHOLDS,
-      NOW,
-      TIME_ZONE
-    ),
-    { level: "warning", daysSince: 10 }
-  );
-  assert.deepEqual(
-    getInactivityInfo(
-      person({ lastActivityAt: new Date("2026-08-20T12:00:00.000Z") }),
-      THRESHOLDS,
-      NOW,
-      TIME_ZONE
-    ),
-    { level: "warning", daysSince: 7 }
-  );
-  assert.deepEqual(
-    getInactivityInfo(
-      person({ lastActivityAt: new Date("2026-08-13T12:00:00.000Z") }),
-      THRESHOLDS,
-      NOW,
-      TIME_ZONE
-    ),
-    { level: "alert", daysSince: 14 }
-  );
-  assert.equal(
-    getInactivityInfo(
-      person({ lastActivityAt: new Date("2026-08-21T12:00:00.000Z") }),
-      THRESHOLDS,
-      NOW,
-      TIME_ZONE
-    ),
-    null
-  );
-});
-
-test("inactivity compares church calendar days across midnight and DST", () => {
-  const oneDayWarning = { warningDays: 1, alertDays: 2 };
-
-  assert.deepEqual(
-    getInactivityInfo(
-      person({ lastActivityAt: new Date("2026-08-27T04:30:00.000Z") }),
-      oneDayWarning,
-      new Date("2026-08-27T05:30:00.000Z"),
-      TIME_ZONE
-    ),
-    { level: "warning", daysSince: 1 },
-    "one elapsed hour across Chicago midnight is one inactive calendar day"
-  );
-  assert.deepEqual(
-    getInactivityInfo(
-      person({ lastActivityAt: new Date("2026-03-08T06:30:00.000Z") }),
-      oneDayWarning,
-      new Date("2026-03-09T05:30:00.000Z"),
-      TIME_ZONE
-    ),
-    { level: "warning", daysSince: 1 },
-    "the 23-hour spring-forward day is still one inactive calendar day"
-  );
-});
-
-test("an inactive pipeline card renders its day count without a hover", () => {
-  const daysSince = 21;
-  const html = renderToStaticMarkup(
-    createElement(ViewerCapabilitiesProvider, {
-      capabilities: [],
-      children: createElement(PipelineCard, {
-        person: person({
-          lastActivityAt: new Date("2026-08-06T12:00:00.000Z"),
+test("old core-team activity alone never renders follow-up urgency", () => {
+  const render = (followUpTasks: PersonWithTags["followUpTasks"]) =>
+    renderToStaticMarkup(
+      createElement(ViewerCapabilitiesProvider, {
+        capabilities: [],
+        children: createElement(PipelineCard, {
+          person: person({
+            lastActivityAt: new Date("2026-08-06T12:00:00.000Z"),
+            followUpTasks,
+          }),
+          columnId: "core_group",
+          inactivityThresholds: THRESHOLDS,
+          now: NOW,
+          timeZone: TIME_ZONE,
         }),
-        columnId: "core_group",
-        inactivityThresholds: THRESHOLDS,
-        now: NOW,
-        timeZone: TIME_ZONE,
-      }),
-    })
+      })
+    );
+  assert.doesNotMatch(
+    render([]),
+    /lucide-triangle-alert|No activity|Follow-up/
   );
-
-  assert.match(html, new RegExp(`No activity · ${daysSince}d`));
-  assert.match(html, /lucide-triangle-alert/);
-  assert.doesNotMatch(html, /title="No activity in/);
+  assert.match(
+    render([{ id: "due-task", dueDate: "2026-08-26" }]),
+    /Follow-up overdue · 1/
+  );
+  assert.match(
+    render([{ id: "future-task", dueDate: "2026-08-29" }]),
+    /Follow-up due 2026-08-29/
+  );
+  assert.doesNotMatch(
+    render([{ id: "undated", dueDate: null }]),
+    /lucide-triangle-alert/
+  );
 });

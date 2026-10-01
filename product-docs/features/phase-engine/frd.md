@@ -231,3 +231,7 @@ The launch date is owned by the Launch feature's launch entity, not by the Churc
 3. **Insight volume:** how many insights per assessment before "judge fatigue" sets in — and how to rank/cap.
 4. **Network conservatism:** auto-generated network health signals are in for beta (decided); revisit thresholds after first-cohort feedback.
 5. **Prayer/Generosity signals (CSF-5/6):** these are weakly represented in system data; how much to lean on manual attestation vs. building data capture?
+
+### Alpha personal check-in corrections (#897, ruling 2026-09-30)
+
+The plant owner may view all past weekly personal check-ins and correct an existing answer. Each correction preserves the prior four answers, note, answering actor and recorded time in private edit history. This includes changing the current week's answer. History and corrections are owner-only, church-scoped, never included in assessment or oversight payloads. Weekly plant identity remains unchanged. Alpha offers no deletion; retention and derived-assessment consequences must be decided before introducing it.

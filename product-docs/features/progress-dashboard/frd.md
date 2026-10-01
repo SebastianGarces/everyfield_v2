@@ -484,3 +484,12 @@ Network admins see a network-wide dashboard with plants by phase, aggregate heal
 4. **Historical:** How far back should trend data be available?
 
 5. **Alerts:** Should dashboard alerts trigger push notifications or just show on-screen?
+
+### Alpha follow-up metric semantics (2026-09-30, #896)
+
+Show two separately labelled readings, each Unknown when its denominator has no measurable evidence:
+
+- **Follow-up task completion (48 hours):** top-level, undeleted generated follow-up tasks whose originating meeting window has closed. Count completed only with a recorded completion within48elapsed hours of the original meeting instant. Finalizing a meeting late never restarts the clock. Manual tasks and historical tasks lacking immutable meeting provenance are unmeasured and excluded; no historical backfill by guessing. Report these exclusions. No longer needed is a separate waived outcome, excluded from the measurable-obligation denominator and never counted as success; display waived count.
+- **Contact freshness (14 days):** among open contacts with dated evidence, count the latest successful sent communication or explicitly logged contact within14elapsed days. Display measured/open cohort denominator and unknown-contact count. Drafts, failures, bounced recipients, future dates and ordinary profile edits establish no contact. Successful send is evidence of sending, not a claim that the recipient read or responded; logged contact is a user's assertion. Contacts without dated evidence remain Unknown. Historical snapshots using the former profile-updatedAt proxy cannot be presented as this metric.
+
+Persist the independent evidence counts in new snapshot fields. Preserve existing historical snapshots and their other readings; do not retroactively relabel an old proxy as task completion or actual contact.

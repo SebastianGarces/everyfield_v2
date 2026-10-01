@@ -14,6 +14,7 @@
 // — plus the checkbox that fires it, handed to the view as a slot.
 // ============================================================================
 
+import { isTaskSettled } from "@/lib/tasks/lifecycle";
 import { useCan } from "@/components/shared/viewer-capabilities";
 import { Checkbox } from "@/components/ui/checkbox";
 import type { TaskListRow } from "@/lib/tasks/service";
@@ -62,7 +63,7 @@ export function TaskCard({
 }: TaskCardProps) {
   const [isPending, startTransition] = useTransition();
 
-  const isComplete = task.status === "complete";
+  const isComplete = isTaskSettled(task.status);
 
   // THE SWEEP'S ONE SURVIVOR. `completeTaskAction` and `reopenTaskAction` are
   // `tasks.own` (SEATED) — a Member HOLDS that verb, and `assertMayActOnTask`
@@ -123,7 +124,11 @@ export function TaskCard({
                   aria-hidden="true"
                   className="size-4 text-green-600 dark:text-green-500"
                 />
-                <span className="sr-only">Complete</span>
+                <span className="sr-only">
+                  {task.status === "no_longer_needed"
+                    ? "No longer needed"
+                    : "Complete"}
+                </span>
               </>
             )}
           </span>

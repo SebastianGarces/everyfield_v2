@@ -69,7 +69,8 @@ export type TaskListParamKey =
   | "sortBy"
   | "sortDir"
   | "dueDateFrom"
-  | "dueDateTo";
+  | "dueDateTo"
+  | "teamId";
 
 /** Is this URL value one of the views? Narrowing, so no caller casts. */
 function isTaskListView(value: unknown): value is TaskListView {
@@ -103,7 +104,9 @@ export function taskListParamsWith(
   if (key === "completed" && value !== "true") {
     const statuses = params
       .getAll("status")
-      .filter((status) => status !== "complete");
+      .filter(
+        (status) => status !== "complete" && status !== "no_longer_needed"
+      );
     params.delete("status");
     for (const status of statuses) params.append("status", status);
   }
@@ -151,6 +154,7 @@ function canonicalTaskListParams(current: URLSearchParams): URLSearchParams {
   for (const key of ["status", "priority", "category"] as const) {
     for (const value of parsed[key] ?? []) result.append(key, value);
   }
+  if (parsed.teamId) result.set("teamId", parsed.teamId);
   if (parsed.dueDateFrom) result.set("dueDateFrom", parsed.dueDateFrom);
   if (parsed.dueDateTo) result.set("dueDateTo", parsed.dueDateTo);
   return result;
@@ -179,7 +183,8 @@ export function hasTaskFilters(parsed: TaskListSearchParams): boolean {
     parsed.priority?.length ||
     parsed.category?.length ||
     parsed.dueDateFrom ||
-    parsed.dueDateTo
+    parsed.dueDateTo ||
+    parsed.teamId
   );
 }
 
@@ -193,6 +198,7 @@ export interface TaskListSearchParams {
   cursor?: string;
   sortBy: TaskSortBy;
   sortDir: "asc" | "desc";
+  teamId?: string;
   dueDateFrom?: string;
   dueDateTo?: string;
   invalidDateRange: boolean;
@@ -237,9 +243,12 @@ export function parseTaskListSearchParams(params: {
   const status = parseEnumParam(params.status, taskStatusSchema);
   // The cursor reaches a UUID column; malformed bookmarks start at page one.
   const cursor = z.string().uuid().safeParse(params.cursor);
+  const teamId = z.string().uuid().safeParse(params.teamId);
   const dueDateFrom = calendarDateSchema.safeParse(params.dueDateFrom);
   const dueDateTo = calendarDateSchema.safeParse(params.dueDateTo);
   return {
+    teamId:
+      params.view !== "assignments" && teamId.success ? teamId.data : undefined,
     sortBy: taskSortSchema.catch("due_date").parse(params.sortBy),
     sortDir: z.enum(["asc", "desc"]).catch("asc").parse(params.sortDir),
     dueDateFrom: dueDateFrom.success ? dueDateFrom.data : undefined,
@@ -252,7 +261,10 @@ export function parseTaskListSearchParams(params: {
     // and unreadable — which is exactly what `all` was (#660).
     view: isTaskListView(params.view) ? params.view : "my_tasks",
     showCompleted:
-      params.completed === "true" || !!status?.includes("complete"),
+      params.completed === "true" ||
+      !!status?.some(
+        (value) => value === "complete" || value === "no_longer_needed"
+      ),
     status,
     priority: parseEnumParam(params.priority, taskPrioritySchema),
     category: parseEnumParam(params.category, taskCategorySchema),

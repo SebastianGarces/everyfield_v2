@@ -10,7 +10,15 @@ import {
   type TrainingCompletion,
   type NewTrainingCompletion,
 } from "@/db/schema";
-import { and, eq, inArray, isNull, sql, asc } from "drizzle-orm";
+import {
+  and,
+  eq,
+  inArray,
+  isNull,
+  sql,
+  asc,
+  getTableColumns,
+} from "drizzle-orm";
 import { ExpectedError } from "./expected-error";
 import { verifyTeamOwnership } from "./shared";
 
@@ -153,7 +161,17 @@ export async function markTrainingComplete(
       verifiedBy: userId,
       createdBy: userId,
     } satisfies NewTrainingCompletion)
-    .onConflictDoNothing({
+    .onConflictDoUpdate({
+      set: {
+        revokedAt: null,
+        completedAt: new Date(),
+        verifiedBy: userId,
+        updatedAt: new Date(),
+      },
+      setWhere: and(
+        eq(trainingCompletions.churchId, churchId),
+        sql`${trainingCompletions.revokedAt} IS NOT NULL`
+      ),
       target: [
         trainingCompletions.personId,
         trainingCompletions.trainingProgramId,
@@ -195,6 +213,7 @@ export async function getPersonTraining(
       .where(
         and(
           eq(trainingCompletions.churchId, churchId),
+          isNull(trainingCompletions.revokedAt),
           eq(trainingCompletions.personId, personId)
         )
       ),
@@ -317,6 +336,7 @@ export async function getTrainingMatrix(
       .where(
         and(
           eq(trainingCompletions.churchId, churchId),
+          isNull(trainingCompletions.revokedAt),
           inArray(trainingCompletions.personId, memberPersonIds)
         )
       ),
@@ -349,4 +369,120 @@ export async function getTrainingMatrix(
   });
 
   return { programs, rows };
+}
+
+/** Revoke the current completion while retaining the record and correction history. */
+export async function undoTrainingComplete(
+  churchId: string,
+  personId: string,
+  programId: string,
+  userId: string
+): Promise<void> {
+  const [person] = await db
+    .select({ id: persons.id })
+    .from(persons)
+    .where(
+      and(
+        eq(persons.churchId, churchId),
+        eq(persons.id, personId),
+        isNull(persons.deletedAt)
+      )
+    )
+    .limit(1);
+  if (!person) throw new ExpectedError("Person not found");
+  const [program] = await db
+    .select({ id: trainingPrograms.id })
+    .from(trainingPrograms)
+    .where(
+      and(
+        eq(trainingPrograms.churchId, churchId),
+        eq(trainingPrograms.id, programId)
+      )
+    )
+    .limit(1);
+  if (!program) throw new ExpectedError("Program not found");
+  const stamp = new Date().toISOString();
+  const result = await db.execute(sql`
+    WITH original AS MATERIALIZED (
+      SELECT t.*, to_jsonb(t) AS snapshot FROM training_completions t
+      WHERE t.church_id = ${churchId}::uuid AND t.person_id = ${personId}::uuid
+        AND t.training_program_id = ${programId}::uuid AND t.revoked_at IS NULL
+      FOR UPDATE
+    ), changed AS (
+      UPDATE training_completions t
+      SET revoked_at = ${stamp}::timestamptz,
+          updated_at = ${stamp}::timestamptz AT TIME ZONE 'UTC'
+      FROM original WHERE t.id = original.id
+      RETURNING t.id, to_jsonb(t) AS snapshot
+    )
+    INSERT INTO record_corrections (church_id,entity_type,entity_id,before,after,corrected_by)
+    SELECT ${churchId}::uuid, 'training_completion', changed.id,
+      original.snapshot, changed.snapshot, ${userId}::uuid
+    FROM original JOIN changed ON changed.id = original.id RETURNING id
+  `);
+  if (!result.rows.length)
+    throw new ExpectedError("Training is already incomplete");
+}
+
+export async function updateTrainingProgram(
+  churchId: string,
+  programId: string,
+  userId: string,
+  data: { name: string; description?: string; isRequired?: boolean },
+  expectedUpdatedAt: string
+): Promise<TrainingProgram> {
+  const [existing] = await db
+    .select({
+      ...getTableColumns(trainingPrograms),
+      version: sql<string>`md5(to_jsonb(training_programs)::text)`,
+    })
+    .from(trainingPrograms)
+    .where(
+      and(
+        eq(trainingPrograms.churchId, churchId),
+        eq(trainingPrograms.id, programId)
+      )
+    )
+    .limit(1);
+  if (!existing) throw new ExpectedError("Program not found");
+  if (existing.updatedAt.toISOString() !== expectedUpdatedAt)
+    throw new ExpectedError(
+      "This program changed. Reload before correcting it."
+    );
+  const stamp = new Date().toISOString();
+  const [changed, rows] = await db.batch([
+    db.execute(sql`
+      WITH original AS MATERIALIZED (
+        SELECT t.*, to_jsonb(t) AS snapshot FROM training_programs t
+        WHERE t.church_id = ${churchId}::uuid AND t.id = ${programId}::uuid
+          AND md5(to_jsonb(t)::text) = ${existing.version}
+        FOR UPDATE
+      ), changed AS (
+        UPDATE training_programs t
+        SET name = ${data.name}, description = ${data.description ?? null},
+            is_required = ${data.isRequired ?? false},
+            updated_at = ${stamp}::timestamptz AT TIME ZONE 'UTC'
+        FROM original WHERE t.id = original.id
+        RETURNING t.id, to_jsonb(t) AS snapshot
+      )
+      INSERT INTO record_corrections (church_id,entity_type,entity_id,before,after,corrected_by)
+      SELECT ${churchId}::uuid, 'training_program', changed.id,
+        original.snapshot, changed.snapshot, ${userId}::uuid
+      FROM original JOIN changed ON changed.id = original.id RETURNING id
+    `),
+    db
+      .select()
+      .from(trainingPrograms)
+      .where(
+        and(
+          eq(trainingPrograms.churchId, churchId),
+          eq(trainingPrograms.id, programId)
+        )
+      ),
+  ]);
+  if (!changed.rows.length || !rows[0])
+    throw new ExpectedError(
+      "This program changed. Reload before correcting it."
+    );
+  return rows[0];
 }

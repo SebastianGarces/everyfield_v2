@@ -305,7 +305,7 @@ test("a milestone with an open task cannot be completed", () => {
     .sql.replace(/\s+/g, " ");
 
   assert.match(sql, /and not exists \( select 1 from launch_milestone_tasks/);
-  assert.match(sql, /t\.status <> 'complete'/);
+  assert.match(sql, /t\.status in \('not_started', 'in_progress', 'blocked'\)/);
 });
 
 test("a deleted task does not keep its milestone open forever", () => {

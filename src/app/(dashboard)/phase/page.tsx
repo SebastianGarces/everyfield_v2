@@ -1,3 +1,4 @@
+import Link from "next/link";
 // ============================================================================
 // /phase — the planter's Plant Intelligence surface
 // (PE-001/005/007/011/014/015/016/022/023/025/026/027).
@@ -298,19 +299,27 @@ export default async function PhasePage() {
             />
           }
           care={
-            <PlanterCheckinCard
-              thisWeek={
-                answeredThisWeek && {
-                  spiritually: answeredThisWeek.spiritually,
-                  marriageFamily: answeredThisWeek.marriageFamily,
-                  financially: answeredThisWeek.financially,
-                  pace: answeredThisWeek.pace,
-                  note: answeredThisWeek.note,
+            <>
+              <PlanterCheckinCard
+                thisWeek={
+                  answeredThisWeek && {
+                    spiritually: answeredThisWeek.spiritually,
+                    marriageFamily: answeredThisWeek.marriageFamily,
+                    financially: answeredThisWeek.financially,
+                    pace: answeredThisWeek.pace,
+                    note: answeredThisWeek.note,
+                  }
                 }
-              }
-              weeks={checkinWeeks}
-              nudges={checkinNudges(checkins)}
-            />
+                weeks={checkinWeeks}
+                nudges={checkinNudges(checkins)}
+              />
+              <Link
+                href="/phase/checkins"
+                className="text-primary cursor-pointer text-sm underline"
+              >
+                View and correct past check-ins
+              </Link>
+            </>
           }
           health={
             <>

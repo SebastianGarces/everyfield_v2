@@ -2,7 +2,7 @@
 
 import { useCan } from "@/components/shared/viewer-capabilities";
 import { Badge } from "@/components/ui/badge";
-import { relativeDayOffset } from "@/lib/datetime";
+import { getFollowUpInfo } from "@/lib/people/follow-up-warning";
 import { PersonWithTags } from "@/lib/people/types";
 import { cn } from "@/lib/utils";
 import {
@@ -17,7 +17,7 @@ import {
 } from "@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge";
 import { setCustomNativeDragPreview } from "@atlaskit/pragmatic-drag-and-drop/element/set-custom-native-drag-preview";
 import { pointerOutsideOfPreview } from "@atlaskit/pragmatic-drag-and-drop/element/pointer-outside-of-preview";
-import { AlertTriangle, Clock, Rocket, Star } from "lucide-react";
+import { AlertTriangle, Rocket, Star } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -96,37 +96,9 @@ interface PipelineCardProps {
   timeZone: string;
 }
 
-/**
- * Compute inactivity info for a person.
- * Uses lastActivityAt from person_activities, falls back to person.createdAt.
- */
-export function getInactivityInfo(
-  person: PersonWithTags,
-  thresholds: InactivityThresholds | undefined,
-  now: Date,
-  timeZone: string
-): { level: "none" | "warning" | "alert"; daysSince: number } | null {
-  if (!thresholds) return null;
-
-  const referenceDate = person.lastActivityAt
-    ? new Date(person.lastActivityAt)
-    : person.createdAt;
-
-  const daysSince = -relativeDayOffset(referenceDate, now, timeZone);
-
-  if (daysSince >= thresholds.alertDays) {
-    return { level: "alert", daysSince };
-  }
-  if (daysSince >= thresholds.warningDays) {
-    return { level: "warning", daysSince };
-  }
-  return null;
-}
-
 export function PipelineCard({
   person,
   columnId,
-  inactivityThresholds,
   now,
   timeZone,
 }: PipelineCardProps) {
@@ -201,12 +173,7 @@ export function PipelineCard({
   }, [canWrite, person, columnId]);
 
   const isDragging = state.type === "dragging";
-  const inactivity = getInactivityInfo(
-    person,
-    inactivityThresholds,
-    now,
-    timeZone
-  );
+  const followUp = getFollowUpInfo(person.followUpTasks, now, timeZone);
 
   return (
     <>
@@ -250,20 +217,28 @@ export function PipelineCard({
                 {person.firstName} {person.lastName}
               </span>
               <div className="flex shrink-0 items-center gap-1">
-                {inactivity && inactivity.level === "alert" && (
-                  <span className="flex items-center gap-1 text-xs font-medium whitespace-nowrap text-red-600 dark:text-red-400">
-                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/40">
+                {followUp && (
+                  <span
+                    className={cn(
+                      "flex items-center gap-1 text-xs font-medium whitespace-nowrap",
+                      followUp.overdueCount > 0
+                        ? "text-red-600 dark:text-red-400"
+                        : "text-muted-foreground"
+                    )}
+                    aria-label={
+                      followUp.overdueCount > 0
+                        ? `${followUp.overdueCount} overdue follow-up tasks`
+                        : "Open follow-up task"
+                    }
+                  >
+                    {followUp.overdueCount > 0 && (
                       <AlertTriangle aria-hidden="true" className="h-3 w-3" />
-                    </span>
-                    No activity · {inactivity.daysSince}d
-                  </span>
-                )}
-                {inactivity && inactivity.level === "warning" && (
-                  <span className="flex items-center gap-1 text-xs font-medium whitespace-nowrap text-amber-700 dark:text-amber-400">
-                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/40">
-                      <Clock aria-hidden="true" className="h-3 w-3" />
-                    </span>
-                    No activity · {inactivity.daysSince}d
+                    )}
+                    {followUp.overdueCount > 0
+                      ? `Follow-up overdue · ${followUp.overdueCount}`
+                      : followUp.dueDate
+                        ? `Follow-up due ${followUp.dueDate}`
+                        : "Follow-up · no due date"}
                   </span>
                 )}
                 {person.status === "leader" && (

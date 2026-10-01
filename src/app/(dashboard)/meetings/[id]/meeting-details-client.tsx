@@ -121,6 +121,7 @@ export function MeetingDetails({ meeting, locations }: MeetingDetailsProps) {
                   locations={locations}
                   mode="edit"
                   onSuccess={() => setIsEditOpen(false)}
+                  onCancel={() => setIsEditOpen(false)}
                 />
               </DialogContent>
             </Dialog>
