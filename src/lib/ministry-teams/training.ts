@@ -401,27 +401,27 @@ export async function undoTrainingComplete(
     )
     .limit(1);
   if (!program) throw new ExpectedError("Program not found");
-  const [, , result] = await db.batch([
-    db.execute(
-      sql`SELECT id FROM training_completions WHERE church_id = ${churchId} AND person_id = ${personId} AND training_program_id = ${programId} FOR UPDATE`
-    ),
-    db.execute(
-      sql`INSERT INTO record_corrections (church_id,entity_type,entity_id,before,after,corrected_by) SELECT ${churchId}, 'training_completion', id, to_jsonb(training_completions), to_jsonb(training_completions) || jsonb_build_object('revoked_at',now()), ${userId} FROM training_completions WHERE church_id = ${churchId} AND person_id = ${personId} AND training_program_id = ${programId} AND revoked_at IS NULL`
-    ),
-    db
-      .update(trainingCompletions)
-      .set({ revokedAt: new Date(), updatedAt: new Date() })
-      .where(
-        and(
-          eq(trainingCompletions.churchId, churchId),
-          eq(trainingCompletions.personId, personId),
-          eq(trainingCompletions.trainingProgramId, programId),
-          isNull(trainingCompletions.revokedAt)
-        )
-      )
-      .returning(),
-  ]);
-  if (!result.length) throw new ExpectedError("Training is already incomplete");
+  const stamp = new Date().toISOString();
+  const result = await db.execute(sql`
+    WITH original AS MATERIALIZED (
+      SELECT t.*, to_jsonb(t) AS snapshot FROM training_completions t
+      WHERE t.church_id = ${churchId}::uuid AND t.person_id = ${personId}::uuid
+        AND t.training_program_id = ${programId}::uuid AND t.revoked_at IS NULL
+      FOR UPDATE
+    ), changed AS (
+      UPDATE training_completions t
+      SET revoked_at = ${stamp}::timestamptz,
+          updated_at = ${stamp}::timestamptz AT TIME ZONE 'UTC'
+      FROM original WHERE t.id = original.id
+      RETURNING t.id, to_jsonb(t) AS snapshot
+    )
+    INSERT INTO record_corrections (church_id,entity_type,entity_id,before,after,corrected_by)
+    SELECT ${churchId}::uuid, 'training_completion', changed.id,
+      original.snapshot, changed.snapshot, ${userId}::uuid
+    FROM original JOIN changed ON changed.id = original.id RETURNING id
+  `);
+  if (!result.rows.length)
+    throw new ExpectedError("Training is already incomplete");
 }
 
 export async function updateTrainingProgram(
@@ -449,27 +449,38 @@ export async function updateTrainingProgram(
     throw new ExpectedError(
       "This program changed. Reload before correcting it."
     );
-  const guard = and(
-    eq(trainingPrograms.churchId, churchId),
-    eq(trainingPrograms.id, programId),
-    sql`md5(to_jsonb(training_programs)::text) = ${existing.version}`
-  );
-  const update = {
-    name: data.name,
-    description: data.description ?? null,
-    isRequired: data.isRequired ?? false,
-    updatedAt: new Date(),
-  };
-  const [, , rows] = await db.batch([
-    db.execute(
-      sql`SELECT id FROM training_programs WHERE church_id = ${churchId} AND id = ${programId} FOR UPDATE`
-    ),
-    db.execute(
-      sql`INSERT INTO record_corrections (church_id,entity_type,entity_id,before,after,corrected_by) SELECT ${churchId}, 'training_program', id, to_jsonb(training_programs), to_jsonb(training_programs) || ${JSON.stringify({ name: update.name, description: update.description, is_required: update.isRequired })}::jsonb, ${userId} FROM training_programs WHERE ${guard}`
-    ),
-    db.update(trainingPrograms).set(update).where(guard).returning(),
+  const stamp = new Date().toISOString();
+  const [changed, rows] = await db.batch([
+    db.execute(sql`
+      WITH original AS MATERIALIZED (
+        SELECT t.*, to_jsonb(t) AS snapshot FROM training_programs t
+        WHERE t.church_id = ${churchId}::uuid AND t.id = ${programId}::uuid
+          AND md5(to_jsonb(t)::text) = ${existing.version}
+        FOR UPDATE
+      ), changed AS (
+        UPDATE training_programs t
+        SET name = ${data.name}, description = ${data.description ?? null},
+            is_required = ${data.isRequired ?? false},
+            updated_at = ${stamp}::timestamptz AT TIME ZONE 'UTC'
+        FROM original WHERE t.id = original.id
+        RETURNING t.id, to_jsonb(t) AS snapshot
+      )
+      INSERT INTO record_corrections (church_id,entity_type,entity_id,before,after,corrected_by)
+      SELECT ${churchId}::uuid, 'training_program', changed.id,
+        original.snapshot, changed.snapshot, ${userId}::uuid
+      FROM original JOIN changed ON changed.id = original.id RETURNING id
+    `),
+    db
+      .select()
+      .from(trainingPrograms)
+      .where(
+        and(
+          eq(trainingPrograms.churchId, churchId),
+          eq(trainingPrograms.id, programId)
+        )
+      ),
   ]);
-  if (!rows[0])
+  if (!changed.rows.length || !rows[0])
     throw new ExpectedError(
       "This program changed. Reload before correcting it."
     );

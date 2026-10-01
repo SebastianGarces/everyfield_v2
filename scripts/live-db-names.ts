@@ -63,6 +63,7 @@ export const LIVE_SUITES = [
   "src/lib/ministry-teams/responsibilities-live.test.ts",
   "src/lib/ministry-teams/role-seat-race.test.ts",
   "src/lib/ministry-teams/teams-init-race.test.ts",
+  "src/lib/ministry-teams/training-history-live.test.ts",
   "src/lib/invitations/seat-invitations-live.test.ts",
   "src/lib/launch/readiness-converge-live.test.ts",
   "src/lib/people/person-link-live.test.ts",
