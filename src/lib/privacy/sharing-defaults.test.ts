@@ -218,6 +218,30 @@ test("only a plant that is actually starting out gets the defaults", () => {
   assert.match(sql, /"churches"\."sending_network_id" is null/);
 });
 
+test("historical associations preserve choices after the last org is left", () => {
+  const { sql, params } = rendered();
+
+  assert.match(sql, /not exists/);
+  assert.match(
+    sql,
+    /from "organization_invitations" "prior_accepted_invitation"/
+  );
+  assert.match(
+    sql,
+    /"prior_accepted_invitation"\."target_church_id" = "churches"\."id"/
+  );
+  assert.match(sql, /"prior_accepted_invitation"\."status" = \$\d+/);
+  assert.match(
+    sql,
+    /"prior_accepted_invitation"\."id" <> "organization_invitations"\."id"/
+  );
+  assert.match(sql, /from "association_events"/);
+  assert.match(sql, /"association_events"\."subject_type" = \$\d+/);
+  assert.match(sql, /"association_events"\."church_id" = "churches"\."id"/);
+  assert.ok(params.includes("accepted"));
+  assert.ok(params.includes("church"));
+});
+
 test("the gate reads the plant BEFORE the association write sets its FK", () => {
   // The gate above is only meaningful while the plant's row still says who it
   // belonged to when the planter pressed Accept. Batched after the association,

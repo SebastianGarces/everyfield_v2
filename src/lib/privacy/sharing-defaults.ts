@@ -1,7 +1,17 @@
-import { and, getTableColumns, isNull, eq, sql } from "drizzle-orm";
+import {
+  and,
+  getTableColumns,
+  isNull,
+  eq,
+  ne,
+  notExists,
+  sql,
+} from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 
 import { db } from "@/db";
 import {
+  associationEvents,
   churches,
   churchPrivacySettings,
   organizationInvitations,
@@ -124,7 +134,9 @@ export function allSharingOn(): Record<PrivacyColumn, true> {
  * per-plant setting and not a per-org one — `church_privacy_settings` has a
  * single row per church and governs every org that reaches it. A plant that
  * already has an overseer has already made this decision; a second org arriving
- * is not it starting out.
+ * is not it starting out. Retained accepted invitations and church-subject
+ * association events also guard a plant that left its LAST org. Defaults are
+ * for the first association, not every period with both current FKs empty.
  *
  * `INSERT … SELECT … ON CONFLICT DO UPDATE`, the shape
  * `assignCoachOnAcceptStatement` uses, because the row is not guaranteed. It is
@@ -143,6 +155,10 @@ export function sharingDefaultsStatement(
   actorId: string,
   invitationId: string
 ) {
+  const priorAccepted = alias(
+    organizationInvitations,
+    "prior_accepted_invitation"
+  );
   const toggles = Object.fromEntries(
     SHARING_TOGGLE_COLUMNS.map((column) => [
       column,
@@ -180,7 +196,36 @@ export function sharingDefaultsStatement(
             eq(organizationInvitations.id, invitationId),
             eq(organizationInvitations.status, "accepted"),
             isNull(churches.sendingChurchId),
-            isNull(churches.sendingNetworkId)
+            isNull(churches.sendingNetworkId),
+            // The current claim is already accepted, so only OTHER accepted
+            // invitations establish a previous association. Leaving the last
+            // org clears both FKs; it does not make this plant new again.
+            notExists(
+              db
+                .select({ id: priorAccepted.id })
+                .from(priorAccepted)
+                .where(
+                  and(
+                    eq(priorAccepted.targetChurchId, churches.id),
+                    eq(priorAccepted.status, "accepted"),
+                    ne(priorAccepted.id, organizationInvitations.id)
+                  )
+                )
+            ),
+            // Legacy associations can lack an accepted invitation. Their
+            // retained church-subject audit still proves prior association.
+            // This acceptance's audit is inserted AFTER this sharing write.
+            notExists(
+              db
+                .select({ id: associationEvents.id })
+                .from(associationEvents)
+                .where(
+                  and(
+                    eq(associationEvents.subjectType, "church"),
+                    eq(associationEvents.churchId, churches.id)
+                  )
+                )
+            )
           )
         )
     )
