@@ -69,7 +69,7 @@ const MUTATIONS: Mutation[] = [
     claim: "an already-associated plant keeps the toggles it turned off",
     file: DEFAULTS,
     target:
-      "            isNull(churches.sendingChurchId),\n            isNull(churches.sendingNetworkId)\n",
+      "            isNull(churches.sendingChurchId),\n            isNull(churches.sendingNetworkId),\n",
     replacement: "",
     suite: DEFAULTS_SUITE,
   },
