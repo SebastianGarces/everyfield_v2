@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, test } from "node:test";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
   users,
@@ -409,5 +409,70 @@ test(
       { ok: true }
     );
     assert.deepEqual(await redeem(c.value), dead);
+  }
+);
+
+test(
+  "stale pre-recovery actor cannot create or supersede an email-change request",
+  { skip },
+  async () => {
+    const u = await account(),
+      c = await issue(u);
+    assert.deepEqual(await redeem(c.value), { ok: true });
+    const [fresh] = await db.select().from(users).where(eq(users.id, u.id));
+    const mail = {
+      baseUrl: "http://recovery.localhost",
+      send: async () => ({ success: true }),
+    };
+    assert.equal(
+      (
+        await requestEmailChange({
+          actor: fresh,
+          requestedEmail: `legitimate-${randomUUID()}@example.test`,
+          currentPassword: "Recovery replacement password",
+          ip: null,
+          limiter,
+          mail,
+        })
+      ).ok,
+      true
+    );
+    const [before] = await db
+      .select()
+      .from(emailChangeRequests)
+      .where(
+        and(
+          eq(emailChangeRequests.userId, u.id),
+          isNull(emailChangeRequests.consumedAt)
+        )
+      );
+    let sent = 0;
+    const result = await requestEmailChange({
+      actor: u,
+      requestedEmail: `stale-${randomUUID()}@example.test`,
+      currentPassword: password,
+      ip: null,
+      limiter,
+      mail: {
+        ...mail,
+        send: async () => {
+          sent++;
+          return { success: true };
+        },
+      },
+    });
+    assert.equal(result.ok, false);
+    assert.equal(sent, 0);
+    const rows = await db
+      .select()
+      .from(emailChangeRequests)
+      .where(
+        and(
+          eq(emailChangeRequests.userId, u.id),
+          isNull(emailChangeRequests.consumedAt)
+        )
+      );
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].id, before.id);
   }
 );

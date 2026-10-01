@@ -178,14 +178,21 @@ export type EmailChangeRequestOutcome =
  * "asking again supersedes the last ask" is enforced by the index rather than by
  * a sequence somebody has to remember.
  */
-export function supersedeLiveRequestsStatement(userId: string, at: Date) {
+export function supersedeLiveRequestsStatement(
+  userId: string,
+  at: Date,
+  actor?: EmailChangeActor
+) {
   return db
     .update(emailChangeRequests)
     .set({ consumedAt: at })
     .where(
       and(
         eq(emailChangeRequests.userId, userId),
-        isNull(emailChangeRequests.consumedAt)
+        isNull(emailChangeRequests.consumedAt),
+        actor
+          ? sql`exists (select 1 from ${users} where ${users.id} = ${actor.id} and ${users.email} = ${actor.email} and ${users.passwordHash} = ${actor.passwordHash})`
+          : undefined
       )
     );
 }
@@ -216,29 +223,29 @@ async function openRequest(
   newEmail: string,
   token: string,
   now: Date,
-  expiresAt: Date
-): Promise<void> {
+  expiresAt: Date,
+  actor: EmailChangeActor
+): Promise<boolean> {
   const write = () =>
     db.batch([
-      supersedeLiveRequestsStatement(userId, now),
-      db.insert(emailChangeRequests).values({
-        userId,
-        newEmail,
-        tokenHash: hashEmailChangeToken(token),
-        createdAt: now,
-        expiresAt,
-      }),
+      db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.id, userId))
+        .for("update"),
+      supersedeLiveRequestsStatement(userId, now, actor),
+      db.execute(sql`insert into email_change_requests (user_id,new_email,token_hash,created_at,expires_at)
+      select id,${newEmail},${hashEmailChangeToken(token)},${now.toISOString()}::timestamptz AT TIME ZONE 'UTC',${expiresAt.toISOString()}::timestamptz AT TIME ZONE 'UTC'
+      from users where id=${userId} and email=${actor.email} and password_hash=${actor.passwordHash} returning id`),
     ]);
-
   try {
-    await write();
+    const result = await write();
+    return result[2].rows.length > 0;
   } catch (error) {
-    if (
-      !isUniqueViolation(error, "email_change_requests_live_user_unique_idx")
-    ) {
+    if (!isUniqueViolation(error, "email_change_requests_live_user_unique_idx"))
       throw error;
-    }
-    await write();
+    const result = await write();
+    return result[2].rows.length > 0;
   }
 }
 
@@ -329,7 +336,13 @@ export async function requestEmailChange({
     now.getTime() + EMAIL_CHANGE_EXPIRY_HOURS * HOUR_MS
   );
 
-  await openRequest(actor.id, newEmail, token, now, expiresAt);
+  if (!(await openRequest(actor.id, newEmail, token, now, expiresAt, actor))) {
+    return {
+      ok: false,
+      field: "currentPassword",
+      message: CURRENT_PASSWORD_WRONG_MESSAGE,
+    };
+  }
 
   const sent = await sendEmailChangeVerification(
     {

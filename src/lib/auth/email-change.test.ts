@@ -400,7 +400,7 @@ test("the request supersedes BEFORE it inserts — the partial index refuses the
       "limiter.count",
       "isMailableAddress(newEmail)",
       "verifyPassword(actor.passwordHash, currentPassword)",
-      "openRequest(actor.id, newEmail, token, now, expiresAt)",
+      "openRequest(actor.id, newEmail, token, now, expiresAt, actor)",
       "sendEmailChangeVerification(",
     ],
     "email_change_requests_live_user_unique_idx is partial on consumed_at IS NULL, so a second live row cannot commit; and the mail must follow the durable row"
@@ -411,7 +411,7 @@ test("the request supersedes BEFORE it inserts — the partial index refuses the
     READER.after("const token = newEmailChangeToken()"),
     "email-change.ts",
     [
-      "openRequest(actor.id, newEmail, token, now, expiresAt)",
+      "openRequest(actor.id, newEmail, token, now, expiresAt, actor)",
       "sendEmailChangeVerification(",
       'limiter.record(identifier, ip, "email_change", false)',
     ],

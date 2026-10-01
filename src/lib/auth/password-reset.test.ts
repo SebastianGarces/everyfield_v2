@@ -83,37 +83,19 @@ test("bad token shape gives the common dead-link refusal without database work",
 });
 test("password shape and mismatch refuse without consuming a syntactically valid token", async () => {
   const token = "a".repeat(64);
-  assert.equal(
-    (
-      (await resetPassword({
-        token,
-        password: "short",
-        confirmPassword: "short",
-        ip: null,
-      })) as any
-    ).field,
-    "password"
-  );
-  assert.equal(
-    (
-      (await resetPassword({
-        token,
-        password: "x".repeat(1025),
-        confirmPassword: "x".repeat(1025),
-        ip: null,
-      })) as any
-    ).field,
-    "password"
-  );
-  assert.equal(
-    (
-      (await resetPassword({
-        token,
-        password: "long password",
-        confirmPassword: "different password",
-        ip: null,
-      })) as any
-    ).field,
-    "confirmPassword"
-  );
+  for (const [password, confirmPassword, field] of [
+    ["short", "short", "password"],
+    ["x".repeat(1025), "x".repeat(1025), "password"],
+    ["long password", "different password", "confirmPassword"],
+  ]) {
+    const result = await resetPassword({
+      token,
+      password,
+      confirmPassword,
+      ip: null,
+    });
+    assert.equal(result.ok, false);
+    if (result.ok) assert.fail("invalid password accepted");
+    assert.equal(result.field, field);
+  }
 });
