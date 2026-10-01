@@ -77,7 +77,12 @@ import { and, eq, gt, isNull, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { isUniqueViolation } from "@/db/errors";
-import { emailChangeRequests, users, type User } from "@/db/schema";
+import {
+  emailChangeRequests,
+  passwordResetRequests,
+  users,
+  type User,
+} from "@/db/schema";
 
 import {
   EMAIL_CHANGE_EXPIRY_HOURS,
@@ -360,7 +365,11 @@ export async function requestEmailChange({
  */
 // Column-aware predicates use the same UTC encoder as INSERT/UPDATE. Raw Date
 // interpolation uses the host timezone for this timestamp-without-zone column.
-export function consumeRequestStatement(requestId: string, now: Date) {
+export function consumeRequestStatement(
+  requestId: string,
+  now: Date,
+  actor?: EmailChangeActor
+) {
   return db
     .update(emailChangeRequests)
     .set({ consumedAt: now })
@@ -368,7 +377,10 @@ export function consumeRequestStatement(requestId: string, now: Date) {
       and(
         eq(emailChangeRequests.id, requestId),
         isNull(emailChangeRequests.consumedAt),
-        gt(emailChangeRequests.expiresAt, now)
+        gt(emailChangeRequests.expiresAt, now),
+        actor
+          ? sql`exists (select 1 from ${users} where ${users.id} = ${actor.id} and ${users.email} = ${actor.email} and ${users.passwordHash} = ${actor.passwordHash})`
+          : undefined
       )
     )
     .returning({ id: emailChangeRequests.id });
@@ -552,8 +564,13 @@ export async function confirmEmailChange({
   let claimed;
   let swapped;
   try {
-    [claimed, swapped] = await db.batch([
-      consumeRequestStatement(request.id, now),
+    [, claimed, swapped] = await db.batch([
+      db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.id, actor.id))
+        .for("update"),
+      consumeRequestStatement(request.id, now, actor),
       swapLoginIdentifierStatement(
         actor.id,
         request.id,
@@ -561,6 +578,16 @@ export async function confirmEmailChange({
         newEmail,
         now
       ),
+      db
+        .update(passwordResetRequests)
+        .set({ consumedAt: now })
+        .where(
+          and(
+            eq(passwordResetRequests.userId, actor.id),
+            isNull(passwordResetRequests.consumedAt),
+            sql`exists (select 1 from ${users} where ${users.id} = ${actor.id} and ${users.email} = ${newEmail} and ${users.passwordHash} = ${actor.passwordHash})`
+          )
+        ),
     ]);
   } catch (error) {
     if (isUniqueViolation(error, "users_email_unique")) {

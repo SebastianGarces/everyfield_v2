@@ -31,3 +31,5 @@ export * from "./leadership-version";
 export * from "./person-merges";
 
 export * from "./record-corrections";
+
+export * from "./password-reset-request";

@@ -35,10 +35,16 @@
 // to whoever just proved they know the current password.
 // ============================================================================
 
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 
 import { db } from "@/db";
-import { sessions, users, type User } from "@/db/schema";
+import {
+  sessions,
+  users,
+  emailChangeRequests,
+  passwordResetRequests,
+  type User,
+} from "@/db/schema";
 
 import { normalizeAccountEmail } from "./account-email";
 import {
@@ -149,18 +155,61 @@ export async function changeOwnPassword({
 
   const passwordHash = await hashPassword(newPassword);
 
-  const [, revoked] = await db.batch([
+  const effectGate = sql`exists (select 1 from ${users} where ${users.id} = ${actor.id} and ${users.passwordHash} = ${passwordHash})`;
+  const [, changed, revoked] = await db.batch([
+    db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.id, actor.id))
+      .for("update"),
     db
       .update(users)
       .set({ passwordHash, updatedAt: now })
-      .where(eq(users.id, actor.id)),
+      .where(
+        and(
+          eq(users.id, actor.id),
+          eq(users.passwordHash, actor.passwordHash),
+          eq(users.email, actor.email)
+        )
+      )
+      .returning({ id: users.id }),
     db
       .delete(sessions)
       .where(
-        and(eq(sessions.userId, actor.id), ne(sessions.id, currentSessionId))
+        and(
+          eq(sessions.userId, actor.id),
+          ne(sessions.id, currentSessionId),
+          effectGate
+        )
       )
       .returning({ id: sessions.id }),
+    db
+      .update(passwordResetRequests)
+      .set({ consumedAt: now })
+      .where(
+        and(
+          eq(passwordResetRequests.userId, actor.id),
+          sql`${passwordResetRequests.consumedAt} is null`,
+          effectGate
+        )
+      ),
+    db
+      .update(emailChangeRequests)
+      .set({ consumedAt: now })
+      .where(
+        and(
+          eq(emailChangeRequests.userId, actor.id),
+          sql`${emailChangeRequests.consumedAt} is null`,
+          effectGate
+        )
+      ),
   ]);
+  if (changed.length === 0)
+    return {
+      ok: false,
+      field: "currentPassword",
+      message: CURRENT_PASSWORD_WRONG_MESSAGE,
+    };
 
   await limiter.record(identifier, ip, "password_change", true);
 

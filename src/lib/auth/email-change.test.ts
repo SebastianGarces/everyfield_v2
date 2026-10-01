@@ -369,7 +369,7 @@ test("the confirm's order is claim first, then the dependent swap", () => {
     "email-change.ts",
     [
       "hashEmailChangeToken(token)",
-      "consumeRequestStatement(request.id, now)",
+      "consumeRequestStatement(request.id, now, actor)",
       "swapLoginIdentifierStatement(",
     ],
     "memory/invariants.md → Transactions: in a batch the compare-and-set goes FIRST and the dependent write re-asserts what the claim set"

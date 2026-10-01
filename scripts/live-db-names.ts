@@ -56,6 +56,7 @@ export const LIVE_SUITES = [
   "src/db/seat-owner-uniqueness.test.ts",
   "src/lib/auth/access.test.ts",
   "src/lib/auth/email-change-live.test.ts",
+  "src/lib/auth/password-reset-live.test.ts",
   "src/lib/communication/fork-and-token-race.test.ts",
   "src/lib/ministry-teams/leader-sync-live.test.ts",
   "src/lib/ministry-teams/leadership-fill-live.test.ts",

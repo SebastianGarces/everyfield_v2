@@ -29,6 +29,7 @@ export const authAttemptKinds = [
   "register",
   "email_change",
   "password_change",
+  "password_reset",
 ] as const;
 export type AuthAttemptKind = (typeof authAttemptKinds)[number];
 
