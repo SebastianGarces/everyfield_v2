@@ -106,6 +106,24 @@ export function OutcomeForm({ mode = "record", initial }: OutcomeFormProps) {
   const [confirming, setConfirming] = useState(false);
   const [isPending, startTransition] = useTransition();
 
+  function resetDraft() {
+    setAttendance(fromCount(initial?.attendanceCount));
+    setDecisions(fromCount(initial?.decisionsCount));
+    setNotes(initial?.outcomeNotes ?? "");
+    setCapture(initial?.captureTheDay ?? "");
+  }
+
+  function editRecord() {
+    resetDraft();
+    setOpen(true);
+  }
+
+  function cancelEdit() {
+    resetDraft();
+    setConfirming(false);
+    setOpen(false);
+  }
+
   function submit() {
     startTransition(async () => {
       const input = {
@@ -162,7 +180,7 @@ export function OutcomeForm({ mode = "record", initial }: OutcomeFormProps) {
             type="button"
             variant="outline"
             className="cursor-pointer"
-            onClick={() => setOpen(true)}
+            onClick={editRecord}
           >
             <Pencil className="mr-2 h-4 w-4" />
             Edit the record
@@ -252,7 +270,7 @@ export function OutcomeForm({ mode = "record", initial }: OutcomeFormProps) {
                   variant="ghost"
                   className="cursor-pointer"
                   disabled={isPending}
-                  onClick={() => setOpen(false)}
+                  onClick={cancelEdit}
                 >
                   Cancel
                 </Button>
