@@ -335,3 +335,9 @@ arrives asking why a removed person can still sign in.
 ## Open questions
 
 None.
+
+### Alpha addition: forgotten-password recovery
+
+The public Sign in page offers Forgot password. A valid email submission receives the same conditional acknowledgement whether an account exists, is throttled, or mail fails. Requests use account and IP limits, and provider dispatch occurs after the public response. The public action has a500ms minimum response floor; this removes the provider timing oracle but is not a constant-time guarantee for all database/load conditions.
+
+A one-hour, random256-bit, hashed single-use token is bound to the account's sign-in address and password at issuance. A new request supersedes prior links. GET displays the form only; it never consumes a link. Reset POST enforces existing password policy and matching confirmation before atomically changing credentials, revoking all sessions and consuming recovery/pending email-change links. Invalid, expired, redeemed and superseded links share a refusal with a new-link route. Changing an address/password also invalidates recovery links. Reset pages are noindex and no-referrer. The user signs in explicitly with the new password. Transactional recovery/security mail uses existing Resend configuration, independent of notification preferences; provider failure does not roll back a committed reset.
